@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "ragmem": {
+      "command": "wsl",
+      "args": [
+        "-d", "Ubuntu-24.04", "--",
+        "bash", "-c",
+        "source ~/.local/bin/env 2>/dev/null; MEM0_URL=http://localhost:18910 LIGHTRAG_URL=http://localhost:18920 uvx --from ~/ragmem/mcp-server ragmem-mcp-server"
+      ]
+    }
+  }
+}
