@@ -6,7 +6,7 @@
 
 ## 1. 目的
 
-`prepare-images.sh` 是 mem0 自定义镜像的构建脚本。它从官方 `mem0ai/mem0:latest` 镜像出发，通过一系列编号补丁注入修复和配置参数化，生成 `mem0-server:latest` 镜像。
+`prepare-images.sh` 是 mem0 自定义镜像的构建脚本。它从官方 `mem0ai/mem0:latest` 镜像出发，通过 6 个编号补丁注入修复和配置参数化，生成 `mem0-server:latest` 镜像。
 
 本技能定义了如何安全地新增、修改补丁。
 
@@ -27,7 +27,7 @@
 |------|------|
 | 发现 mem0 新 bug | 新增补丁修复 |
 | 需要新的环境变量控制 | 修改 Patch 4（main.py 参数化） |
-| 需要新的 Python 包 | 修改 Patch 7 或新增补丁 |
+| 需要新的 Python 包 | 新增补丁到 requirements.txt |
 | 上游 mem0 镜像更新 | 验证所有补丁兼容性 |
 
 ---
@@ -42,17 +42,16 @@
   M = 补丁总数（每次新增补丁时更新所有补丁的 M）
 ```
 
-**当前补丁清单**（截至 2026-04-02）：
+**当前补丁清单**（截至 2026-04-07）：
 
 | 补丁 | 目标文件 | 说明 | 类型 |
 |------|---------|------|------|
-| Patch 1/7 | Dockerfile | 添加 `psycopg[binary]` | 依赖 |
-| Patch 2/7 | Dockerfile | 移除 `graph_store` 代码 | Bug 修复 |
-| Patch 3/7 | Dockerfile | 创建 `/app/data` 目录 | 环境 |
-| Patch 4/7 | main.py | DEFAULT_CONFIG 参数化 | 配置 |
-| Patch 5/7 | openai.py | 移除 `store` 参数 | Bug 修复 |
-| Patch 6/7 | base.py | 移除 `top_p` 参数 | Bug 修复 |
-| Patch 7/7 | requirements.txt | 添加 `ollama>=0.4.0` | 依赖 |
+| Patch 1/6 | Dockerfile | 添加 `psycopg[binary]` | 依赖 |
+| Patch 2/6 | Dockerfile | 移除 `graph_store` 代码 | Bug 修复 |
+| Patch 3/6 | Dockerfile | 创建 `/app/data` 目录 | 环境 |
+| Patch 4/6 | main.py | DEFAULT_CONFIG 参数化（云端 embedding，openai provider） | 配置 |
+| Patch 5/6 | openai.py | 移除 `store` 参数 | Bug 修复 |
+| Patch 6/6 | base.py | 移除 `top_p` 参数 | Bug 修复 |
 
 ### 4.2 新增补丁流程
 
@@ -119,12 +118,14 @@ Patch 4 是最复杂的补丁，它将 mem0 的 `DEFAULT_CONFIG` 参数化：
 
 ```python
 # Patch 4 注入的环境变量读取
-LLM_MODEL        = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-EMBEDDER_PROVIDER = os.environ.get("EMBEDDER_PROVIDER", "openai")
-EMBEDDER_MODEL    = os.environ.get("EMBEDDER_MODEL", "text-embedding-3-small")
-OLLAMA_BASE_URL   = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-EMBEDDING_DIM     = int(os.environ.get("EMBEDDING_DIM", "1536"))
+LLM_MODEL       = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+EMBEDDING_HOST  = os.environ.get("EMBEDDING_HOST", "http://host.docker.internal:8001")
+EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY", "sk-any")
+EMBEDDER_MODEL  = os.environ.get("EMBEDDER_MODEL", "qwen3-embedding")
+EMBEDDING_DIM   = int(os.environ.get("EMBEDDING_DIM", "1024"))
 ```
+
+Embedding 固定使用 `openai` provider，通过 `openai_base_url` 指向云端 embedding 服务。不再支持 Ollama。
 
 如果需要新增可配置项，应修改 Patch 4 的内容（这是唯一允许修改已有补丁的例外情况，因为 Patch 4 本质上是一个配置模板）。
 

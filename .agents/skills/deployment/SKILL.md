@@ -77,7 +77,7 @@ docker-compose.yml
 **关键规则**：
 - `.env.example` 中的每个变量都必须有注释说明
 - `docker-compose.yml` 中必须为每个变量提供 `:-default` 默认值
-- 默认值应选择最通用的选项（如 `openai` 而非 `ollama`）
+- 默认值应选择最通用的选项（如 `qwen3-embedding` 作为 embedding 模型默认值）
 - 新增变量时，必须同时更新 `.env.example` 和 `docker-compose.yml`
 
 ### 4.3 docker-compose.yml 服务约定
@@ -144,16 +144,18 @@ WSL2:    /mnt/d/Works/Party Animals/LLM AI/local-ragmem/stack/
 
 ```
 Windows 宿主机
-  ├── Ollama (localhost:11434)
   ├── LiteLLM (172.16.x.x:8000)
   └── WSL2
       ├── Docker
-      │   ├── mem0 → host.docker.internal:11434 (Ollama)
-      │   ├── mem0 → host.docker.internal:8000 (LiteLLM)
-      │   ├── LightRAG → host.docker.internal:11434
+      │   ├── mem0 → LiteLLM (LLM) + 云端 embedding endpoint
+      │   ├── LightRAG → LiteLLM (LLM) + 云端 embedding endpoint
       │   └── pgvector (内部网络)
-      └── ragmem-mcp (stdio) → localhost:8080 (mem0)
-                               → localhost:9621 (LightRAG)
+      └── ragmem-mcp (stdio) → localhost:18910 (mem0)
+                               → localhost:18920 (LightRAG)
+
+云端服务（外部）
+  ├── Embedding API (172.16.x.x:8001) — OpenAI 兼容
+  └── LiteLLM (172.16.x.x:8000) — LLM 网关
 ```
 
 ### 5.3 Docker 容器访问宿主机

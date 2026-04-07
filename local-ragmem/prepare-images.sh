@@ -36,7 +36,7 @@ cd "$MEM0_BUILD_DIR/server"
 # Patch 1: Fix psycopg dependency
 # python:3.12-slim lacks libpq, so we need psycopg[binary] for pre-compiled bindings
 # Also add [pool] for connection pooling support
-echo "  [Patch 1/7] Fixing psycopg dependency in requirements.txt..."
+echo "  [Patch 1/6] Fixing psycopg dependency in requirements.txt..."
 sed -i 's/^psycopg>=.*/psycopg[binary,pool]>=3.2.8/' requirements.txt
 echo "    → psycopg[binary,pool]>=3.2.8"
 
@@ -47,7 +47,7 @@ echo "    → psycopg[binary,pool]>=3.2.8"
 # vector store (pgvector) + history DB (SQLite), which is the core functionality.
 # Users who want graph memory can uncomment Neo4j in docker-compose.yml and
 # rebuild the image with graph_store support.
-echo "  [Patch 2/7] Removing graph_store (neo4j) from DEFAULT_CONFIG in main.py..."
+echo "  [Patch 2/6] Removing graph_store (neo4j) from DEFAULT_CONFIG in main.py..."
 python3 -c "
 import re
 with open('main.py', 'r') as f:
@@ -73,7 +73,7 @@ echo "    → Removed graph_store block and neo4j/memgraph env vars"
 # Patch 3: Ensure data directory exists in Dockerfile
 # The HISTORY_DB_PATH defaults to /app/history/history.db but the directory
 # doesn't exist. We create /app/data as the canonical data directory.
-echo "  [Patch 3/7] Patching Dockerfile to create data directory..."
+echo "  [Patch 3/6] Patching Dockerfile to create data directory..."
 if ! grep -q "mkdir -p /app/data" Dockerfile; then
     sed -i '/^COPY \. \./i RUN mkdir -p /app/data' Dockerfile
     echo "    → Added 'RUN mkdir -p /app/data' to Dockerfile"
@@ -83,13 +83,12 @@ fi
 
 # Patch 4: Parameterize main.py DEFAULT_CONFIG via environment variables
 # Instead of hardcoding model names and providers, read from env vars at runtime.
-# Default values preserve original behavior (openai for both LLM and embedder).
-# Deployers switch providers by setting env vars in .env / docker-compose.yml.
+# Embedding uses a dedicated cloud endpoint (OpenAI-compatible) separate from LiteLLM.
 #
 # NOTE: Even if this patch fails on a new upstream format, the runtime mount of
 # main_override.py (via docker-compose.yml) will override main.py entirely.
 # This patch is a best-effort optimization to keep the image self-contained.
-echo "  [Patch 4/7] Parameterizing DEFAULT_CONFIG in main.py..."
+echo "  [Patch 4/6] Parameterizing DEFAULT_CONFIG in main.py..."
 python3 -c "
 import re
 
@@ -100,14 +99,14 @@ with open('main.py', 'r') as f:
 env_block = '''
 # --- RagMem: read config from environment variables ---
 LLM_MODEL = os.environ.get('LLM_MODEL', 'gpt-4o-mini')
-EMBEDDER_PROVIDER = os.environ.get('EMBEDDER_PROVIDER', 'openai')
-EMBEDDER_MODEL = os.environ.get('EMBEDDER_MODEL', 'text-embedding-3-small')
-OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://host.docker.internal:11434')
-EMBEDDING_DIM = int(os.environ.get('EMBEDDING_DIM', '1536'))
+EMBEDDER_MODEL = os.environ.get('EMBEDDER_MODEL', 'qwen3-embedding')
+EMBEDDING_HOST = os.environ.get('EMBEDDING_HOST', 'http://host.docker.internal:8001')
+EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY', 'sk-any')
+EMBEDDING_DIM = int(os.environ.get('EMBEDDING_DIM', '1024'))
 '''
 
 # Insert after HISTORY_DB_PATH line (which is the last env var in upstream main.py)
-if 'EMBEDDER_PROVIDER' not in content:
+if 'EMBEDDING_HOST' not in content:
     content = re.sub(
         r'(HISTORY_DB_PATH\s*=\s*os\.environ\.get\([^)]+\))',
         r'\1\n' + env_block,
@@ -141,16 +140,13 @@ content = '\n'.join(lines)
 if not patched_model:
     print('WARNING: Could not find model field in llm block. Runtime override will handle this.')
 
-# --- Step 3: Replace embedder section to support multiple providers ---
+# --- Step 3: Replace embedder section to use cloud endpoint ---
 new_embedder = '''\"embedder\": {
-        \"provider\": EMBEDDER_PROVIDER,
+        \"provider\": \"openai\",
         \"config\": {
             \"model\": EMBEDDER_MODEL,
-            **(
-                {\"ollama_base_url\": OLLAMA_BASE_URL}
-                if EMBEDDER_PROVIDER == \"ollama\"
-                else {}
-            ),
+            \"api_key\": EMBEDDING_API_KEY,
+            \"openai_base_url\": EMBEDDING_HOST + \"/v1\",
             \"embedding_dims\": EMBEDDING_DIM,
         },
     }'''
@@ -179,8 +175,8 @@ if '\"hnsw\"' not in content:
 log_line = '''
 import logging as _log
 _log.basicConfig(level=_log.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-_log.info('mem0 config: LLM=openai/%s, Embedder=%s/%s (dim=%d, hnsw=%s)',
-          LLM_MODEL, EMBEDDER_PROVIDER, EMBEDDER_MODEL, EMBEDDING_DIM, EMBEDDING_DIM <= 2000)
+_log.info('mem0 config: LLM=openai/%s, Embedder=openai/%s@%s (dim=%d, hnsw=%s)',
+          LLM_MODEL, EMBEDDER_MODEL, EMBEDDING_HOST, EMBEDDING_DIM, EMBEDDING_DIM <= 2000)
 '''
 if 'mem0 config: LLM=' not in content:
     content = re.sub(
@@ -193,54 +189,41 @@ if 'mem0 config: LLM=' not in content:
 with open('main.py', 'w') as f:
     f.write(content)
 "
-echo "    → DEFAULT_CONFIG now reads LLM_MODEL, EMBEDDER_PROVIDER, EMBEDDER_MODEL,"
-echo "      OLLAMA_BASE_URL, EMBEDDING_DIM from environment variables"
-echo "    → Default: openai provider for both LLM and embedder (backward compatible)"
-echo "    → Set EMBEDDER_PROVIDER=ollama in .env to use Ollama for embedding"
+echo "    → DEFAULT_CONFIG now reads LLM_MODEL, EMBEDDER_MODEL, EMBEDDING_HOST,"
+echo "      EMBEDDING_API_KEY, EMBEDDING_DIM from environment variables"
+echo "    → Embedding uses dedicated cloud endpoint (OpenAI-compatible)"
 echo "    → Runtime fallback: main_override.py mount ensures correct behavior"
 
 # Patch 5: Remove 'store' parameter from mem0 openai.py
 # The 'store' param is OpenAI-specific (stored completions). When routed through
 # LiteLLM to non-OpenAI backends (Anthropic, Qwen, etc.), it causes errors.
 # Removing it has no effect on OpenAI users (default is false).
-echo "  [Patch 5/7] Removing 'store' parameter from openai.py..."
+echo "  [Patch 5/6] Removing 'store' parameter from openai.py..."
 # We need to patch the installed package, so we do it in the Dockerfile
 # by adding a RUN step after pip install
 STORE_PATCH='RUN python3 -c "\
-f = next((p / \"mem0/llms/openai.py\" for p in __import__(\"site\").getsitepackages() \
-          if (p_path := __import__(\"pathlib\").Path(p) / \"mem0/llms/openai.py\").exists()), None); \
-assert f, \"mem0 openai.py not found\"; \
+f = next((p / "mem0/llms/openai.py" for p in __import__("site").getsitepackages() \
+          if (p_path := __import__("pathlib").Path(p) / "mem0/llms/openai.py").exists()), None); \
+assert f, "mem0 openai.py not found"; \
 t = open(f).read(); \
-t = t.replace(\"openai_specific_generation_params = [\\\"store\\\"]\", \
-              \"openai_specific_generation_params = []\"); \
-open(f, \"w\").write(t); \
-print(\"Patched: removed store param from\", f)"'
+t = t.replace("openai_specific_generation_params = [\"store\"]", \
+              "openai_specific_generation_params = []"); \
+open(f, "w").write(t); \
+print("Patched: removed store param from", f)"'
 
 # Patch 6: Remove 'top_p' from mem0 base.py
 # Anthropic rejects requests with both temperature and top_p.
 # top_p default is 1.0 (no effect), so removing it is safe for all backends.
-echo "  [Patch 6/7] Removing 'top_p' parameter from base.py..."
+echo "  [Patch 6/6] Removing 'top_p' parameter from base.py..."
 TOP_P_PATCH='RUN python3 -c "\
-f = next((p / \"mem0/llms/base.py\" for p in __import__(\"site\").getsitepackages() \
-          if (p_path := __import__(\"pathlib\").Path(p) / \"mem0/llms/base.py\").exists()), None); \
-assert f, \"mem0 base.py not found\"; \
+f = next((p / "mem0/llms/base.py" for p in __import__("site").getsitepackages() \
+          if (p_path := __import__("pathlib").Path(p) / "mem0/llms/base.py").exists()), None); \
+assert f, "mem0 base.py not found"; \
 t = open(f).read(); \
-t = t.replace(\"\\\"top_p\\\": self.config.top_p,\", \
-              \"# \\\"top_p\\\": removed for non-OpenAI backend compatibility\"); \
-open(f, \"w\").write(t); \
-print(\"Patched: removed top_p from\", f)"'
-
-# Patch 7: Add ollama Python package to requirements.txt
-# Required when EMBEDDER_PROVIDER=ollama. Pre-installing avoids:
-# 1. 5-10s delay on every container start (pip install at runtime)
-# 2. Failure in offline/sandbox environments
-echo "  [Patch 7/7] Adding ollama package to requirements.txt..."
-if ! grep -q "^ollama" requirements.txt; then
-    echo "ollama>=0.4.0" >> requirements.txt
-    echo "    → Added ollama>=0.4.0 to requirements.txt"
-else
-    echo "    → Already present"
-fi
+t = t.replace("\"top_p\": self.config.top_p,", \
+              "# \"top_p\": removed for non-OpenAI backend compatibility"); \
+open(f, "w").write(t); \
+print("Patched: removed top_p from", f)"'
 
 # --- Inject Patch 5 & 6 into Dockerfile (after pip install) ---
 echo "  Injecting runtime patches into Dockerfile..."
@@ -294,12 +277,12 @@ echo ""
 # Verify patches
 echo "  Verifying patches..."
 echo "    requirements.txt:"
-grep -E "psycopg|ollama" requirements.txt | sed 's/^/      /'
+grep -E "psycopg" requirements.txt | sed 's/^/      /'
 echo "    main.py graph_store references:"
 GRAPH_COUNT=$(grep -c "graph_store" main.py 2>/dev/null || echo "0")
 echo "      graph_store occurrences: $GRAPH_COUNT (should be 0)"
-echo "    main.py EMBEDDER_PROVIDER:"
-grep "EMBEDDER_PROVIDER" main.py | head -3 | sed 's/^/      /'
+echo "    main.py EMBEDDING_HOST:"
+grep "EMBEDDING_HOST" main.py | head -3 | sed 's/^/      /'
 echo "    Dockerfile store patch:"
 grep -c "store param" Dockerfile | xargs -I{} echo "      occurrences: {} (should be 1)"
 echo ""
@@ -372,14 +355,14 @@ echo "Applied patches to mem0-server:"
 echo "  1. psycopg[binary,pool]  - pre-compiled PostgreSQL bindings for slim image"
 echo "  2. Remove graph_store    - disable neo4j dependency (not deployed by default)"
 echo "  3. /app/data directory   - for SQLite history database persistence"
-echo "  4. Config parameterized  - LLM_MODEL, EMBEDDER_PROVIDER, EMBEDDING_DIM via env vars"
+echo "  4. Config parameterized  - LLM_MODEL, EMBEDDING_HOST, EMBEDDING_DIM via env vars"
 echo "  5. Remove 'store' param  - OpenAI-specific, breaks non-OpenAI backends"
 echo "  6. Remove 'top_p' param  - Anthropic rejects temperature + top_p together"
-echo "  7. ollama pre-installed  - no pip install at runtime, works offline"
 echo ""
 echo "Configuration (via environment variables in .env):"
-echo "  EMBEDDER_PROVIDER=openai  → use LiteLLM/OpenAI for embedding (default)"
-echo "  EMBEDDER_PROVIDER=ollama  → use local Ollama for embedding"
+echo "  EMBEDDING_HOST     → cloud embedding endpoint (OpenAI-compatible)"
+echo "  EMBEDDING_MODEL    → embedding model name (e.g. qwen3-embedding)"
+echo "  EMBEDDING_DIM      → embedding dimension (e.g. 1024)"
 echo ""
 echo "Next steps:"
 echo "  1. Copy entire ragmem/ directory into sandbox"

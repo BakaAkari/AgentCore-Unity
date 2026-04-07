@@ -46,12 +46,12 @@ POSTGRES_COLLECTION_NAME = os.environ.get("POSTGRES_COLLECTION_NAME", "memories"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 
-# --- Patched: read model names and provider from env vars ---
+# --- Patched: read model names and embedding config from env vars ---
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-EMBEDDER_PROVIDER = os.environ.get("EMBEDDER_PROVIDER", "openai")
-EMBEDDER_MODEL = os.environ.get("EMBEDDER_MODEL", "text-embedding-3-small")
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1536"))
+EMBEDDER_MODEL = os.environ.get("EMBEDDER_MODEL", "qwen3-embedding")
+EMBEDDING_HOST = os.environ.get("EMBEDDING_HOST", "http://host.docker.internal:8001")
+EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY", "sk-any")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1024"))
 
 DEFAULT_CONFIG = {
     "version": "v1.1",
@@ -77,14 +77,11 @@ DEFAULT_CONFIG = {
         },
     },
     "embedder": {
-        "provider": EMBEDDER_PROVIDER,
+        "provider": "openai",
         "config": {
             "model": EMBEDDER_MODEL,
-            **(
-                {"ollama_base_url": OLLAMA_BASE_URL}
-                if EMBEDDER_PROVIDER == "ollama"
-                else {}
-            ),
+            "api_key": EMBEDDING_API_KEY,
+            "openai_base_url": EMBEDDING_HOST + "/v1",
             "embedding_dims": EMBEDDING_DIM,
         },
     },
@@ -92,10 +89,10 @@ DEFAULT_CONFIG = {
 }
 
 logging.info(
-    "mem0 config: LLM=openai/%s, Embedder=%s/%s (dim=%d, hnsw=%s)",
+    "mem0 config: LLM=openai/%s, Embedder=openai/%s@%s (dim=%d, hnsw=%s)",
     LLM_MODEL,
-    EMBEDDER_PROVIDER,
     EMBEDDER_MODEL,
+    EMBEDDING_HOST,
     EMBEDDING_DIM,
     EMBEDDING_DIM <= 2000,
 )

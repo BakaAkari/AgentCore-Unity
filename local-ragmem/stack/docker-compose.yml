@@ -4,7 +4,8 @@
 # Architecture:
 #   mem0-server (FastAPI) → pgvector (PostgreSQL + vector extension)
 #   LightRAG (FastAPI) → local file storage (JsonKV + NanoVectorDB + NetworkX)
-#   Both services use LiteLLM as OpenAI-compatible LLM/Embedding gateway
+#   LLM: routed through LiteLLM (OpenAI-compatible gateway)
+#   Embedding: cloud endpoint (OpenAI-compatible /v1/embeddings)
 #
 # Usage:
 #   docker compose up -d          # Start all services
@@ -50,7 +51,7 @@ services:
     container_name: ragmem-mem0
     restart: unless-stopped
     # Override entrypoint to apply runtime patches (store/top_p removal)
-    # and use main_override.py which reads LLM_MODEL, EMBEDDER_PROVIDER etc.
+    # and use main_override.py which reads LLM_MODEL, EMBEDDING_HOST etc.
     # from environment variables instead of hardcoding model names.
     # This ensures correct behavior even if prepare-images.sh Patch 4 regex
     # fails to match a new upstream mem0 model name format.
@@ -66,14 +67,11 @@ services:
       OPENAI_API_KEY: ${LITELLM_API_KEY:-sk-placeholder}
       OPENAI_BASE_URL: ${LITELLM_BASE_URL:-http://host.docker.internal:4000}/v1
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      # Embedding Configuration
-      # EMBEDDER_PROVIDER controls which backend mem0 uses for embedding:
-      #   "openai" → uses OPENAI_BASE_URL (LiteLLM) for embedding
-      #   "ollama" → uses OLLAMA_BASE_URL (local Ollama) for embedding
-      EMBEDDER_PROVIDER: ${EMBEDDER_PROVIDER:-openai}
-      EMBEDDER_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
-      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # Embedding Configuration (cloud endpoint, OpenAI-compatible)
+      EMBEDDING_HOST: ${EMBEDDING_HOST:-http://host.docker.internal:8001}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-sk-any}
+      EMBEDDER_MODEL: ${EMBEDDING_MODEL:-qwen3-embedding}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
       # PostgreSQL / pgvector
       POSTGRES_HOST: pgvector
       POSTGRES_PORT: "5432"
@@ -120,14 +118,12 @@ services:
       LLM_BINDING: openai
       LLM_BINDING_HOST: ${LITELLM_BASE_URL:-http://host.docker.internal:4000}
       LLM_BINDING_API_KEY: ${LITELLM_API_KEY:-sk-placeholder}
-      # Embedding
-      # EMBEDDER_PROVIDER controls the binding (ollama or openai)
-      # EMBEDDING_HOST must match the provider (Ollama URL or LiteLLM URL)
-      # Configure both in .env — see .env.example for details
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
-      EMBEDDING_BINDING: ${EMBEDDER_PROVIDER:-openai}
-      EMBEDDING_BINDING_HOST: ${EMBEDDING_HOST:-http://host.docker.internal:11434}
-      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      # Embedding (cloud endpoint, OpenAI-compatible)
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen3-embedding}
+      EMBEDDING_BINDING: openai
+      EMBEDDING_BINDING_HOST: ${EMBEDDING_HOST:-http://host.docker.internal:8001}
+      EMBEDDING_BINDING_API_KEY: ${EMBEDDING_API_KEY:-sk-any}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
       # Storage (local file system - no external DB needed)
       LIGHTRAG_KV_STORAGE: JsonKVStorage
       LIGHTRAG_VECTOR_STORAGE: NanoVectorDBStorage

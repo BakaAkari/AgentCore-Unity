@@ -59,7 +59,7 @@ LLM 按以下顺序收集配置信息并写入 `.env`：
    ```
    - **成功**（退出码 0）：将返回的模型列表作为选项展示给用户，让用户选择
    - **失败**（退出码 1，API 不可达）：降级为手动输入，使用 `.env.example` 中的 `LLM_MODEL` 默认值
-4. **询问 Embedding 配置**：provider、模型名、维度等（默认值来自 `.env.example`）
+4. **确认 Embedding 配置**：云端 embedding 服务地址、模型名、维度（默认值来自 `.env.example`，通常无需修改）
 5. **询问 Unity 项目路径**（用于后续 B4 安装 Unity MCP）
 6. **确认并写入 `.env`**：
    ```powershell

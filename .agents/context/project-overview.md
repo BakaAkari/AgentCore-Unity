@@ -1,6 +1,6 @@
 # LLM AI Toolkit — 项目全貌
 
-> **last_updated**: 2026-04-03
+> **last_updated**: 2026-04-07
 >
 > AI Agent 在开始任何任务前**必须先读取本文件**。
 > 如果本文件的 `last_updated` 超过 30 天，或文件清单与实际不符，请先更新本文件。
@@ -24,12 +24,12 @@
 | 层级 | 技术 | 版本/说明 |
 |------|------|-----------|
 | 容器编排 | Docker Compose | 在 WSL2 Ubuntu-24.04 中运行 |
-| 记忆服务 | mem0 | 自定义镜像 `mem0-server:latest`，含 7 个补丁 |
+| 记忆服务 | mem0 | 自定义镜像 `mem0-server:latest`，含 6 个补丁 |
 | 知识库 | LightRAG | `ghcr.io/hkuds/lightrag:latest` |
 | 向量数据库 | pgvector | `ankane/pgvector:v0.5.1` |
 | MCP Server | ragmem-mcp | Python 3.10+，FastMCP，通过 uvx 安装 |
 | LLM 网关 | LiteLLM | 外部服务，通过 `LITELLM_BASE_URL` 配置 |
-| Embedding | Ollama / OpenAI | 通过 `EMBEDDER_PROVIDER` 切换 |
+| Embedding | 云端 OpenAI 兼容 API | 通过 `EMBEDDING_HOST` 配置，固定使用 openai provider |
 | 部署平台 | Windows + WSL2 | `.bat` 脚本调用 `wsl -d Ubuntu-24.04` |
 
 ---
@@ -51,7 +51,7 @@
 
 | 文件 | 用途 |
 |------|------|
-| `prepare-images.sh` | Docker 镜像构建（7 个补丁） |
+| `prepare-images.sh` | Docker 镜像构建（6 个补丁） |
 | `prepare-images.bat` | Windows 包装器，调用 WSL 执行 .sh |
 | `.gitattributes` | 确保 .sh 文件使用 LF 换行 |
 | `.gitignore` | 忽略 images/*.tar |
@@ -150,11 +150,10 @@
 关键变量：
   LITELLM_BASE_URL     → mem0 (LLM_BASE_URL), LightRAG (LLM_BINDING_HOST)
   LLM_MODEL            → mem0, LightRAG (LLM_MODEL)
-  EMBEDDER_PROVIDER    → mem0 (EMBEDDER_PROVIDER), LightRAG (EMBEDDING_BINDING)
+  EMBEDDING_HOST       → mem0 (openai_base_url), LightRAG (EMBEDDING_BINDING_HOST)
+  EMBEDDING_API_KEY    → mem0 (api_key), LightRAG (EMBEDDING_BINDING_API_KEY)
   EMBEDDING_MODEL      → mem0 (EMBEDDING_MODEL), LightRAG (EMBEDDING_MODEL)
   EMBEDDING_DIM        → mem0 (EMBEDDING_DIM), LightRAG (EMBEDDING_DIM)
-  EMBEDDING_HOST       → LightRAG (EMBEDDING_BINDING_HOST)
-  OLLAMA_BASE_URL      → mem0 (OLLAMA_BASE_URL)
   POSTGRES_*           → pgvector, mem0, LightRAG
 ```
 
@@ -164,13 +163,12 @@
 
 | 补丁 | 目标 | 说明 |
 |------|------|------|
-| Patch 1/7 | mem0 Dockerfile | 添加 psycopg[binary] 依赖 |
-| Patch 2/7 | mem0 Dockerfile | 移除 graph_store 相关代码 |
-| Patch 3/7 | mem0 Dockerfile | 创建 /app/data 目录 |
-| Patch 4/7 | mem0 main.py | DEFAULT_CONFIG 参数化（环境变量控制） |
-| Patch 5/7 | mem0 Dockerfile | 移除 openai.py 中的 store 参数 |
-| Patch 6/7 | mem0 Dockerfile | 移除 base.py 中的 top_p 参数 |
-| Patch 7/7 | mem0 requirements.txt | 添加 ollama>=0.4.0 依赖 |
+| Patch 1/6 | mem0 Dockerfile | 添加 psycopg[binary] 依赖 |
+| Patch 2/6 | mem0 Dockerfile | 移除 graph_store 相关代码 |
+| Patch 3/6 | mem0 Dockerfile | 创建 /app/data 目录 |
+| Patch 4/6 | mem0 main.py | DEFAULT_CONFIG 参数化（云端 embedding，openai provider） |
+| Patch 5/6 | mem0 Dockerfile | 移除 openai.py 中的 store 参数 |
+| Patch 6/6 | mem0 Dockerfile | 移除 base.py 中的 top_p 参数 |
 
 ---
 
@@ -194,7 +192,7 @@ prepare-images.sh ──→ 依赖补丁列表、基础镜像
 - mem0 镜像基于官方 `mem0ai/mem0:latest`，补丁通过 Dockerfile RUN 层注入
 - LightRAG 使用官方镜像，不做修改
 - pgvector HNSW 索引不支持超过 2000 维的向量（Patch 4 已处理）
-- Docker Compose 变量替换不支持条件逻辑，需要用户手动保持 `EMBEDDING_HOST` 与 `EMBEDDER_PROVIDER` 一致
+- Embedding 固定使用 openai provider（通过 `EMBEDDING_HOST` 指向任意 OpenAI 兼容 API）
 - MCP Server 通过 stdio 模式运行，需要 WSL2 中安装 Python + uv
 
 ---

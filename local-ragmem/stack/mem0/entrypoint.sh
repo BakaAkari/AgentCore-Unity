@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# Install ollama Python client
-pip install --quiet ollama
-
 # Patch mem0: remove unsupported 'store' parameter for non-OpenAI providers
 python3 -c "
 f = '/usr/local/lib/python3.12/site-packages/mem0/llms/openai.py'
