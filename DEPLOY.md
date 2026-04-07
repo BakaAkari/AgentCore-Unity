@@ -44,32 +44,28 @@ cd ..\unity-mcp-setup\tools
 
 LLM 在沙盘机器上按顺序执行：
 
-**B1. 配置 LiteLLM 环境变量**
+**B1. 初始化环境配置 + 收集 Unity 项目路径**
 
-LLM 按以下顺序收集配置信息并写入 `.env`：
+所有后端服务配置（LiteLLM、Embedding、数据库）已在 `.env.example` 中预设为团队标准值，无需用户修改。
+LLM 只需：
 
-1. **读取默认值**：读取 `local-ragmem/stack/.env.example` 获取所有配置项的默认值
-2. **询问 LiteLLM 连接信息**：
-   - LiteLLM 代理地址（默认值来自 `.env.example` 的 `LITELLM_BASE_URL`）
-   - LiteLLM API Key（默认值来自 `.env.example` 的 `LITELLM_API_KEY`）
-3. **自动发现 LLM 模型**：用上一步获取的 URL + Key 调用 LiteLLM API 获取可用模型列表
-   ```powershell
-   # LLM 执行此命令获取可用模型列表（每行一个模型名）
-   powershell -NoProfile -ExecutionPolicy Bypass -File local-ragmem\stack\select-llm-model.ps1 -BaseUrl "用户提供的URL" -ApiKey "用户提供的Key" -ListOnly
-   ```
-   - **成功**（退出码 0）：将返回的模型列表作为选项展示给用户，让用户选择
-   - **失败**（退出码 1，API 不可达）：降级为手动输入，使用 `.env.example` 中的 `LLM_MODEL` 默认值
-4. **确认 Embedding 配置**：云端 embedding 服务地址、模型名、维度（默认值来自 `.env.example`，通常无需修改）
-5. **询问 Unity 项目路径**（用于后续 B4 安装 Unity MCP）
-6. **确认并写入 `.env`**：
+1. **生成 `.env`**：直接复制模板
    ```powershell
    cd local-ragmem\stack
    copy .env.example .env
-   # LLM 将用户确认的所有配置值写入 .env
    ```
+2. **询问 Unity 项目路径**（用于后续 B3.5 和 B4）
 
-> **关键**：LLM 模型选择必须在获取 URL + Key 之后、写入 `.env` 之前完成。
-> 这样用户可以从实际可用的模型列表中选择，而不是盲猜模型名称。
+> **预设配置一览**（来自 `.env.example`，用户无需关心）：
+>
+> | 配置项 | 预设值 | 说明 |
+> |--------|--------|------|
+> | LiteLLM 地址 | `http://172.16.249.43:8000` | 团队内网 LLM 代理 |
+> | LLM 模型 | `claude-opus-4-6` | 默认最佳模型 |
+> | Embedding 地址 | `http://172.16.248.60:8001` | 团队内网 Embedding 服务 |
+> | Embedding 模型 | `qwen3-embedding` (0.6B, 1024d) | 已验证兼容 pgvector HNSW |
+>
+> 如需自定义，可在部署完成后手动编辑 `local-ragmem/stack/.env` 并执行 `update-config.bat` 重启服务。
 
 **B2. 一键部署 RagMem 后端**
 
@@ -252,17 +248,18 @@ prepare-images.bat ──┐
 package-unity-mcp.ps1 ┤
 cache-unity-mcp-bridge.ps1 ┤
                       │  LLM 停止，提示用户操作
-                      ├── 用户手动拷贝整个项目目录 ──→ 沙盘任意目录
-                      │   用户在沙盘内打开项目，调用 LLM
+                      ├── 🙋 用户拷贝项目目录到沙盘，打开项目，调用 LLM
                       │
-                      │           setup-environment.bat (配置 .env)
+                      │           copy .env.example .env (直接使用预设配置)
+                      │           🙋 用户提供 Unity 项目路径
                       │           deploy.bat (一键部署后端)
-                      │           install-unity-mcp.ps1 -Local (安装 Unity MCP 编辑器插件)
+                      │           deploy-agent-rules.ps1 (部署 Agent Rules)
+                      │           install-unity-mcp.ps1 -Local (安装 Unity MCP)
                       │           uv tool install ... --offline (安装 Python Bridge)
                       │           检测 IDE/CLI → 自动配置 MCP
-                      │           ragmem_health / manage_scene (验证)
+                      │           ragmem_health / manage_scene (端到端验证)
                       │
-                      └───────── ✅ 部署完成
+                      └───────── ✅ 部署完成（用户仅交互 2 次）
 ```
 
 ---
