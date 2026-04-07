@@ -2,14 +2,15 @@
 
 mem0 API reference (self-hosted mem0 server — NO /v1 prefix):
   POST /memories          — Add memory
-  POST /memories/search   — Search memories
+  POST /search            — Search memories
   GET  /memories          — List memories (query param: user_id)
   DELETE /memories/{id}   — Delete a memory
   GET  /docs              — Swagger UI (used as health check)
 
-Note: The self-hosted mem0 server (main.py) does NOT use /v1 prefix.
+Note: The self-hosted mem0 server (main_override.py) does NOT use /v1 prefix.
       Only the mem0 cloud API uses /v1. Since we deploy self-hosted,
       all paths here are prefix-free.
+      Search endpoint is POST /search (not /memories/search).
 """
 
 from __future__ import annotations
@@ -93,7 +94,7 @@ class Mem0Client:
             payload["agent_id"] = agent_id
 
         async with self._client() as client:
-            resp = await client.post("/memories/search", json=payload)
+            resp = await client.post("/search", json=payload)
             resp.raise_for_status()
             return resp.json()
 

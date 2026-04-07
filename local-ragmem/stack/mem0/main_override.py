@@ -82,7 +82,6 @@ DEFAULT_CONFIG = {
             "model": EMBEDDER_MODEL,
             "api_key": EMBEDDING_API_KEY,
             "openai_base_url": EMBEDDING_HOST + "/v1",
-            "embedding_dims": EMBEDDING_DIM,
         },
     },
     "history_db_path": HISTORY_DB_PATH,

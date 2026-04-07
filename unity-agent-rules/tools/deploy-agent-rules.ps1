@@ -46,7 +46,7 @@ $SourceRoot = Split-Path -Parent $ScriptDir  # unity-agent-rules/
 # ── Validate source structure ────────────────────────────────────────────────
 $requiredFiles = @(
     (Join-Path $SourceRoot "AGENTS.md"),
-    (Join-Path $SourceRoot ".agents" "skills" "README.md"),
+    (Join-Path (Join-Path (Join-Path $SourceRoot ".agents") "skills") "README.md"),
     (Join-Path $ScriptDir "generate-snapshot.ps1")
 )
 

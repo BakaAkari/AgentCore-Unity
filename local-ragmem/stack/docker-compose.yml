@@ -112,16 +112,19 @@ services:
       LIGHTRAG_PORT: "9621"
       LIGHTRAG_WORKING_DIR: /app/data
       # LLM (via LiteLLM, OpenAI-compatible)
-      # NOTE: LightRAG's openai binding expects the base URL WITHOUT /v1
-      # (it appends the path internally), so we use LITELLM_BASE_URL directly.
+      # NOTE: LightRAG's openai binding passes base_url directly to OpenAI SDK,
+      # which does NOT auto-add /v1. LiteLLM serves at both / and /v1, so no
+      # suffix needed for LLM. But vLLM embedding only serves at /v1/embeddings,
+      # so EMBEDDING_BINDING_HOST must include /v1.
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_BINDING: openai
       LLM_BINDING_HOST: ${LITELLM_BASE_URL:-http://host.docker.internal:4000}
       LLM_BINDING_API_KEY: ${LITELLM_API_KEY:-sk-placeholder}
       # Embedding (cloud endpoint, OpenAI-compatible)
+      # IMPORTANT: /v1 suffix required — vLLM only serves at /v1/embeddings
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen3-embedding}
       EMBEDDING_BINDING: openai
-      EMBEDDING_BINDING_HOST: ${EMBEDDING_HOST:-http://host.docker.internal:8001}
+      EMBEDDING_BINDING_HOST: ${EMBEDDING_HOST:-http://host.docker.internal:8001}/v1
       EMBEDDING_BINDING_API_KEY: ${EMBEDDING_API_KEY:-sk-any}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
       # Storage (local file system - no external DB needed)
