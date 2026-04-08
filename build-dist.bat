@@ -29,6 +29,7 @@ echo [1/6] Copying root documentation...
 mkdir "%DIST%" >nul 2>nul
 copy /Y "%SRC%DEPLOY.md" "%DIST%\DEPLOY.md" >nul
 copy /Y "%SRC%MCP-MANUAL-CONNECT.md" "%DIST%\MCP-MANUAL-CONNECT.md" >nul
+copy /Y "%SRC%Fully_DEPLOY.bat" "%DIST%\Fully_DEPLOY.bat" >nul
 echo       OK
 echo.
 
@@ -141,6 +142,7 @@ copy /Y "%SRC%unity-mcp-setup\tools\package-unity-mcp.ps1"       "%DIST%\unity-m
 copy /Y "%SRC%unity-mcp-setup\tools\configure-opencode-mcp.ps1"  "%DIST%\unity-mcp-setup\tools\" >nul
 copy /Y "%SRC%unity-mcp-setup\tools\cache-unity-mcp-bridge.ps1"  "%DIST%\unity-mcp-setup\tools\" >nul
 copy /Y "%SRC%unity-mcp-setup\tools\unity-mcp-config.json"       "%DIST%\unity-mcp-setup\tools\" >nul
+copy /Y "%SRC%unity-mcp-setup\tools\setup-opencode.bat"           "%DIST%\unity-mcp-setup\tools\" >nul
 
 REM --- docs ---
 mkdir "%DIST%\unity-mcp-setup\docs" >nul 2>nul
