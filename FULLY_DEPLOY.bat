@@ -1,5 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 chcp 65001 >nul 2>nul
 title OpenCode CLI - 自动安装与配置
 
@@ -235,37 +235,44 @@ if not exist "%CONFIG_DIR%" (
 )
 
 :: 检查是否已有配置文件
-if exist "%CONFIG_FILE%" (
-    echo       发现已有配置文件: %CONFIG_FILE%
-    echo       将备份为 opencode.json.bak 并更新 provider 配置...
-    copy /y "%CONFIG_FILE%" "%CONFIG_FILE%.bak" >nul 2>nul
+if exist "%CONFIG_FILE%" goto :merge_config
+goto :write_new_config
 
-    :: 使用 PowerShell 合并配置（保留已有配置，添加/更新 Recreate provider）
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$ErrorActionPreference = 'Stop'; " ^
-        "try { " ^
-        "  $configPath = '%CONFIG_FILE%'; " ^
-        "  $json = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json; " ^
-        "  if (-not $json.provider) { $json | Add-Member -NotePropertyName 'provider' -NotePropertyValue ([PSCustomObject]@{}) -Force; } " ^
-        "  $recreate = [PSCustomObject]@{ " ^
-        "    'name' = 'Recreate'; " ^
-        "    'npm' = '@ai-sdk/openai-compatible'; " ^
-        "    'options' = [PSCustomObject]@{ 'baseURL' = 'http://172.16.249.43:8000/v1' }; " ^
-        "    'models' = [PSCustomObject]@{ 'claude-opus-4-6' = [PSCustomObject]@{ 'name' = 'Claude-Opus4.6' } } " ^
-        "  }; " ^
-        "  $json.provider | Add-Member -NotePropertyName 'Recreate' -NotePropertyValue $recreate -Force; " ^
-        "  $json | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding UTF8; " ^
-        "  Write-Host '       √ 已合并 Recreate provider 到现有配置'; " ^
-        "} catch { " ^
-        "  Write-Error $_.Exception.Message; exit 1; " ^
-        "}"
+:merge_config
+echo       发现已有配置文件: %CONFIG_FILE%
+echo       将备份为 opencode.json.bak 并更新 provider 配置...
+copy /y "%CONFIG_FILE%" "%CONFIG_FILE%.bak" >nul 2>nul
 
-    if %errorlevel% neq 0 (
-        echo       × 合并配置失败，将创建新配置文件...
-        goto :write_new_config
-    )
-    goto :config_done
+:: 使用 PowerShell 合并配置（保留已有配置，添加/更新 Recreate provider + agent 权限）
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ErrorActionPreference = 'Stop'; " ^
+    "try { " ^
+    "  $configPath = '%CONFIG_FILE%'; " ^
+    "  $json = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json; " ^
+    "  if (-not $json.provider) { $json | Add-Member -NotePropertyName 'provider' -NotePropertyValue ([PSCustomObject]@{}) -Force; } " ^
+    "  $recreate = [PSCustomObject]@{ " ^
+    "    'name' = 'Recreate'; " ^
+    "    'npm' = '@ai-sdk/openai-compatible'; " ^
+    "    'options' = [PSCustomObject]@{ 'baseURL' = 'http://172.16.249.43:8000/v1' }; " ^
+    "    'models' = [PSCustomObject]@{ 'claude-opus-4-6' = [PSCustomObject]@{ 'name' = 'Claude-Opus4.6' } } " ^
+    "  }; " ^
+    "  $json.provider | Add-Member -NotePropertyName 'Recreate' -NotePropertyValue $recreate -Force; " ^
+    "  if (-not $json.agent) { $json | Add-Member -NotePropertyName 'agent' -NotePropertyValue ([PSCustomObject]@{}) -Force; } " ^
+    "  if (-not $json.agent.build) { $json.agent | Add-Member -NotePropertyName 'build' -NotePropertyValue ([PSCustomObject]@{}) -Force; } " ^
+    "  $readPerm = [PSCustomObject]@{ '*.env' = 'allow'; '*.env.*' = 'allow' }; " ^
+    "  $perm = [PSCustomObject]@{ 'read' = $readPerm }; " ^
+    "  $json.agent.build | Add-Member -NotePropertyName 'permission' -NotePropertyValue $perm -Force; " ^
+    "  $json | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding UTF8; " ^
+    "  Write-Host '       √ 已合并 Recreate provider 和 agent 权限到现有配置'; " ^
+    "} catch { " ^
+    "  Write-Error $_.Exception.Message; exit 1; " ^
+    "}"
+
+if %errorlevel% neq 0 (
+    echo       × 合并配置失败，将创建新配置文件...
+    goto :write_new_config
 )
+goto :config_done
 
 :write_new_config
 :: 写入全新配置文件
@@ -279,6 +286,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "      npm = '@ai-sdk/openai-compatible'; " ^
     "      options = @{ baseURL = 'http://172.16.249.43:8000/v1' }; " ^
     "      models = @{ 'claude-opus-4-6' = @{ name = 'Claude-Opus4.6' } } " ^
+    "    } " ^
+    "  }; " ^
+    "  agent = @{ " ^
+    "    build = @{ " ^
+    "      permission = @{ " ^
+    "        read = @{ '*.env' = 'allow'; '*.env.*' = 'allow' } " ^
+    "      } " ^
     "    } " ^
     "  } " ^
     "}; " ^
@@ -298,6 +312,16 @@ if %errorlevel% neq 0 (
     >> "%CONFIG_FILE%" echo       "models": {
     >> "%CONFIG_FILE%" echo         "claude-opus-4-6": {
     >> "%CONFIG_FILE%" echo           "name": "Claude-Opus4.6"
+    >> "%CONFIG_FILE%" echo         }
+    >> "%CONFIG_FILE%" echo       }
+    >> "%CONFIG_FILE%" echo     }
+    >> "%CONFIG_FILE%" echo   },
+    >> "%CONFIG_FILE%" echo   "agent": {
+    >> "%CONFIG_FILE%" echo     "build": {
+    >> "%CONFIG_FILE%" echo       "permission": {
+    >> "%CONFIG_FILE%" echo         "read": {
+    >> "%CONFIG_FILE%" echo           "*.env": "allow",
+    >> "%CONFIG_FILE%" echo           "*.env.*": "allow"
     >> "%CONFIG_FILE%" echo         }
     >> "%CONFIG_FILE%" echo       }
     >> "%CONFIG_FILE%" echo     }
@@ -334,9 +358,9 @@ echo     [N] 否 - 稍后手动部署
 echo.
 set /p "DEPLOY_CHOICE=  请输入选择 (Y/N): "
 
-if /i "!DEPLOY_CHOICE!"=="Y" goto :start_deploy
-if /i "!DEPLOY_CHOICE!"=="y" goto :start_deploy
-if /i "!DEPLOY_CHOICE!"=="yes" goto :start_deploy
+if /i "%DEPLOY_CHOICE%"=="Y" goto :start_deploy
+if /i "%DEPLOY_CHOICE%"=="y" goto :start_deploy
+if /i "%DEPLOY_CHOICE%"=="yes" goto :start_deploy
 
 echo.
 echo   已跳过自动部署。你可以稍后手动执行：
@@ -356,14 +380,15 @@ echo.
 
 :: 获取本脚本所在目录作为项目根目录
 :: Fully_DEPLOY.bat 位于项目根目录
+:: 使用 %~dp0 获取脚本目录（末尾带反斜杠）
 set "PROJECT_ROOT=%~dp0"
 :: 去掉末尾反斜杠
-if "!PROJECT_ROOT:~-1!"=="\" set "PROJECT_ROOT=!PROJECT_ROOT:~0,-1!"
+if "%PROJECT_ROOT:~-1%"=="\" set "PROJECT_ROOT=%PROJECT_ROOT:~0,-1%"
 
 :: 检查 DEPLOY.md 是否存在
-if not exist "!PROJECT_ROOT!\DEPLOY.md" (
+if not exist "%PROJECT_ROOT%\DEPLOY.md" (
     echo   [X] DEPLOY.md not found
-    echo       Expected: !PROJECT_ROOT!\DEPLOY.md
+    echo       Expected: %PROJECT_ROOT%\DEPLOY.md
     echo.
     echo   Please make sure this script is in the LLM AI Toolkit root directory.
     echo.
@@ -374,15 +399,11 @@ if not exist "!PROJECT_ROOT!\DEPLOY.md" (
     goto :end
 )
 
-echo   Project root: !PROJECT_ROOT!
-echo   DEPLOY.md:   !PROJECT_ROOT!\DEPLOY.md
+echo   Project root: %PROJECT_ROOT%
+echo   DEPLOY.md:   %PROJECT_ROOT%\DEPLOY.md
 echo.
 
-cd /d "!PROJECT_ROOT!"
-
-:: Restore default code page before launching TUI app
-:: chcp 65001 (UTF-8) can cause TUI apps to crash
-chcp 936 >nul 2>nul
+cd /d "%PROJECT_ROOT%"
 
 echo   ============================================================
 echo   选择部署模式:
@@ -396,8 +417,8 @@ echo.
 echo   ============================================================
 set /p "DEPLOY_MODE=  请选择 (1/2): "
 
-if "!DEPLOY_MODE!"=="1" goto :deploy_auto
-if "!DEPLOY_MODE!"=="2" goto :deploy_interactive
+if "%DEPLOY_MODE%"=="1" goto :deploy_auto
+if "%DEPLOY_MODE%"=="2" goto :deploy_interactive
 :: 默认交互模式
 goto :deploy_interactive
 
@@ -405,37 +426,41 @@ goto :deploy_interactive
 echo.
 echo   正在以自动模式启动 opencode...
 echo   opencode 将读取 DEPLOY.md 并自动执行部署步骤。
-echo   按 Ctrl+C 可随时中止。
+echo.
+echo   将在新窗口中运行，请勿关闭该窗口。
 echo.
 
-opencode run -m Recreate/claude-opus-4-6 "Please read the DEPLOY.md file in the current directory carefully, then follow ALL deployment steps from Phase A through Phase B. Execute each step and verify it succeeds before moving to the next. Report progress as you go."
-set "OC_EXIT=!errorlevel!"
+:: 写入临时启动脚本，避免 start 命令中的引号嵌套问题
+set "TEMP_SCRIPT=%TEMP%\opencode_deploy_auto.bat"
+
+> "%TEMP_SCRIPT%" echo @echo off
+>> "%TEMP_SCRIPT%" echo chcp 65001 ^>nul 2^>nul
+>> "%TEMP_SCRIPT%" echo cd /d "%PROJECT_ROOT%"
+>> "%TEMP_SCRIPT%" echo echo.
+>> "%TEMP_SCRIPT%" echo echo   Working directory: %PROJECT_ROOT%
+>> "%TEMP_SCRIPT%" echo echo   Starting opencode auto-deploy...
+>> "%TEMP_SCRIPT%" echo echo.
+>> "%TEMP_SCRIPT%" echo opencode run -m Recreate/claude-opus-4-6 "Please read the DEPLOY.md file in the current directory carefully, then follow the deployment steps for Phase B (sandbox deployment) only - Phase A (online preparation) has already been completed. Execute steps B1 through B5 in order and verify each step succeeds before moving to the next. Do NOT attempt to install Unity MCP (steps U1-U6) - those are optional and require user interaction. After B5 validation passes, report the deployment result and remind the user they can optionally install Unity MCP later by asking an LLM for help."
+>> "%TEMP_SCRIPT%" echo echo.
+>> "%TEMP_SCRIPT%" echo echo ============================================================
+>> "%TEMP_SCRIPT%" echo echo   opencode has exited. You may close this window.
+>> "%TEMP_SCRIPT%" echo echo   To resume: opencode --continue
+>> "%TEMP_SCRIPT%" echo echo ============================================================
+>> "%TEMP_SCRIPT%" echo pause
+
+:: 在新窗口中运行临时脚本，/wait 等待窗口关闭
+start "OpenCode - Auto Deploy" /wait cmd /k "%TEMP_SCRIPT%"
+
+:: 清理临时脚本
+del "%TEMP_SCRIPT%" >nul 2>nul
 
 echo.
-if !OC_EXIT! neq 0 (
-    echo   ============================================================
-    echo   opencode 自动部署退出，错误码: !OC_EXIT!
-    echo   ============================================================
-    echo.
-    echo   可能原因:
-    echo     - Provider 未正确配置（请检查 API Key）
-    echo     - 网络连接问题
-    echo     - 模型不可用
-    echo.
-    echo   你可以尝试交互模式:
-    echo     opencode
-    echo     然后输入: 请按照 DEPLOY.md 执行部署
-    echo.
-) else (
-    echo   ============================================================
-    echo   opencode 自动部署已完成！
-    echo   ============================================================
-    echo.
-    echo   如需继续或检查部署状态，运行:
-    echo     cd "!PROJECT_ROOT!"
-    echo     opencode --continue
-    echo.
-)
+echo   ============================================================
+echo   opencode 部署窗口已关闭。
+echo   如需继续或检查部署状态，运行:
+echo     cd "%PROJECT_ROOT%"
+echo     opencode --continue
+echo   ============================================================
 
 goto :end
 
@@ -452,12 +477,27 @@ echo   按 Ctrl+C 可随时退出 opencode。
 echo   ============================================================
 echo.
 
-opencode
-set "OC_EXIT=!errorlevel!"
+:: 写入临时启动脚本，避免 start 命令中的引号嵌套问题
+set "TEMP_SCRIPT=%TEMP%\opencode_deploy_tui.bat"
+
+> "%TEMP_SCRIPT%" echo @echo off
+>> "%TEMP_SCRIPT%" echo chcp 65001 ^>nul 2^>nul
+>> "%TEMP_SCRIPT%" echo cd /d "%PROJECT_ROOT%"
+>> "%TEMP_SCRIPT%" echo opencode
+>> "%TEMP_SCRIPT%" echo echo.
+>> "%TEMP_SCRIPT%" echo echo   opencode has exited. You may close this window.
+>> "%TEMP_SCRIPT%" echo echo   To resume: opencode --continue
+>> "%TEMP_SCRIPT%" echo pause
+
+:: 在新窗口中运行临时脚本，/wait 等待窗口关闭
+start "OpenCode" /wait cmd /k "%TEMP_SCRIPT%"
+
+:: 清理临时脚本
+del "%TEMP_SCRIPT%" >nul 2>nul
 
 echo.
 echo   ============================================================
-echo   opencode 已退出 (code: !OC_EXIT!)
+echo   opencode 已退出。
 echo   如需恢复部署，运行: opencode --continue
 echo   ============================================================
 
@@ -481,8 +521,11 @@ echo     重命名为 opencode.exe 并放入 PATH 目录
 echo.
 echo   安装后重新运行本脚本即可自动配置
 echo ============================================================
+echo.
+pause
 exit /b 1
 
 :end
-endlocal
+echo.
 pause
+endlocal

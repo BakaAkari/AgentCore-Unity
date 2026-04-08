@@ -1,14 +1,16 @@
 # configure-opencode-mcp.ps1
-# Automatically registers Unity MCP and RagMem MCP servers into OpenCode's global config.
+# Automatically registers Unity MCP and/or RagMem MCP servers into OpenCode's global config.
 # This script safely merges with existing opencode.json without overwriting other settings.
 #
 # Usage:
-#   .\tools\configure-opencode-mcp.ps1
-#   .\tools\configure-opencode-mcp.ps1 -Remove  # Remove the two MCP entries
+#   .\tools\configure-opencode-mcp.ps1              # Register both unityMCP + ragmem
+#   .\tools\configure-opencode-mcp.ps1 -RagmemOnly  # Register ragmem only (no Unity MCP)
+#   .\tools\configure-opencode-mcp.ps1 -Remove       # Remove both MCP entries
 
 [CmdletBinding()]
 param(
-    [switch]$Remove
+    [switch]$Remove,
+    [switch]$RagmemOnly
 )
 
 # Force UTF-8 output
@@ -77,16 +79,18 @@ if ($Remove) {
     $cfg.mcp.Remove('ragmem') | Out-Null
     Write-Host "Removed 'unityMCP' and 'ragmem' from OpenCode MCP config." -ForegroundColor Yellow
 } else {
-    # Merge / add unityMCP (local stdio)
-    $cfg.mcp['unityMCP'] = [ordered]@{
-        type    = 'local'
-        command = @(
-            'uvx',
-            '--from', 'mcpforunityserver',
-            'mcp-for-unity',
-            '--transport', 'stdio'
-        )
-        enabled = $true
+    # Merge / add unityMCP (local stdio) — skip if -RagmemOnly
+    if (-not $RagmemOnly) {
+        $cfg.mcp['unityMCP'] = [ordered]@{
+            type    = 'local'
+            command = @(
+                'uvx',
+                '--from', 'mcpforunityserver',
+                'mcp-for-unity',
+                '--transport', 'stdio'
+            )
+            enabled = $true
+        }
     }
 
     # Merge / add ragmem (local stdio via WSL)
@@ -102,7 +106,11 @@ if ($Remove) {
         enabled     = $true
     }
 
-    Write-Host "Registered 'unityMCP' and 'ragmem' in OpenCode MCP config." -ForegroundColor Green
+    if ($RagmemOnly) {
+        Write-Host "Registered 'ragmem' in OpenCode MCP config (Unity MCP skipped)." -ForegroundColor Green
+    } else {
+        Write-Host "Registered 'unityMCP' and 'ragmem' in OpenCode MCP config." -ForegroundColor Green
+    }
 }
 
 # Write back with nice formatting (UTF-8 without BOM to avoid parser issues)
@@ -115,7 +123,13 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 Write-Host "Config written to: $configPath" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  1. Ensure Unity Editor is open with the target project (Unity MCP auto-starts, no manual action needed)." -ForegroundColor White
-Write-Host "  2. Ensure RagMem backend is up: wsl -d Ubuntu-24.04 --cd ~/ragmem -- docker compose ps" -ForegroundColor White
-Write-Host "  3. Ensure 'uvx' is available: uvx --version (install uv if missing: https://docs.astral.sh/uv/)" -ForegroundColor White
-Write-Host "  4. Restart OpenCode or start a new session to pick up the MCP servers." -ForegroundColor White
+if (-not $RagmemOnly) {
+    Write-Host "  1. Ensure Unity Editor is open with the target project (Unity MCP auto-starts, no manual action needed)." -ForegroundColor White
+}
+Write-Host "  $(if ($RagmemOnly) {'1'} else {'2'}). Ensure RagMem backend is up: wsl -d Ubuntu-24.04 --cd ~/ragmem -- docker compose ps" -ForegroundColor White
+Write-Host "  $(if ($RagmemOnly) {'2'} else {'3'}). Ensure 'uvx' is available: uvx --version (install uv if missing: https://docs.astral.sh/uv/)" -ForegroundColor White
+Write-Host "  $(if ($RagmemOnly) {'3'} else {'4'}). Restart OpenCode or start a new session to pick up the MCP servers." -ForegroundColor White
+if ($RagmemOnly) {
+    Write-Host ""
+    Write-Host "  To add Unity MCP later, run this script again without -RagmemOnly." -ForegroundColor Cyan
+}
