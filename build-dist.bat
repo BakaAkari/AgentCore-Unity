@@ -142,7 +142,6 @@ copy /Y "%SRC%unity-mcp-setup\tools\package-unity-mcp.ps1"       "%DIST%\unity-m
 copy /Y "%SRC%unity-mcp-setup\tools\configure-opencode-mcp.ps1"  "%DIST%\unity-mcp-setup\tools\" >nul
 copy /Y "%SRC%unity-mcp-setup\tools\cache-unity-mcp-bridge.ps1"  "%DIST%\unity-mcp-setup\tools\" >nul
 copy /Y "%SRC%unity-mcp-setup\tools\unity-mcp-config.json"       "%DIST%\unity-mcp-setup\tools\" >nul
-copy /Y "%SRC%unity-mcp-setup\tools\setup-opencode.bat"           "%DIST%\unity-mcp-setup\tools\" >nul
 
 REM --- docs ---
 mkdir "%DIST%\unity-mcp-setup\docs" >nul 2>nul

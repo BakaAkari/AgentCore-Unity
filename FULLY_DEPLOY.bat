@@ -354,59 +354,112 @@ echo   正在启动 opencode 自动部署...
 echo ============================================================
 echo.
 
-:: 获取本脚本所在目录，推算项目根目录
-:: setup-opencode.bat 位于 unity-mcp-setup/tools/
-set "SCRIPT_DIR=%~dp0"
+:: 获取本脚本所在目录作为项目根目录
+:: Fully_DEPLOY.bat 位于项目根目录
+set "PROJECT_ROOT=%~dp0"
 :: 去掉末尾反斜杠
-set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-:: 向上两级到项目根目录
-for %%I in ("%SCRIPT_DIR%\..\.." ) do set "PROJECT_ROOT=%%~fI"
+if "!PROJECT_ROOT:~-1!"=="\" set "PROJECT_ROOT=!PROJECT_ROOT:~0,-1!"
 
 :: 检查 DEPLOY.md 是否存在
-if not exist "%PROJECT_ROOT%\DEPLOY.md" (
-    echo   × 未找到 DEPLOY.md 文件
-    echo     预期路径: %PROJECT_ROOT%\DEPLOY.md
+if not exist "!PROJECT_ROOT!\DEPLOY.md" (
+    echo   [X] DEPLOY.md not found
+    echo       Expected: !PROJECT_ROOT!\DEPLOY.md
     echo.
-    echo   请确保本脚本位于 LLM AI Toolkit 项目的
-    echo   unity-mcp-setup\tools\ 目录下。
+    echo   Please make sure this script is in the LLM AI Toolkit root directory.
     echo.
-    echo   你也可以手动启动 opencode 并执行部署：
-    echo     cd "你的项目目录"
+    echo   You can also start opencode manually:
+    echo     cd "your project directory"
     echo     opencode
-    echo     然后输入: 请按照 DEPLOY.md 执行部署
+    echo     Then type: follow DEPLOY.md to deploy
     goto :end
 )
 
-echo   项目根目录: %PROJECT_ROOT%
-echo   DEPLOY.md:  %PROJECT_ROOT%\DEPLOY.md
+echo   Project root: !PROJECT_ROOT!
+echo   DEPLOY.md:   !PROJECT_ROOT!\DEPLOY.md
 echo.
 
-:: 切换到项目根目录并启动 opencode
-:: 尝试使用 -p 参数传递初始提示（opencode 支持 --prompt/-p 传递初始消息）
-:: 如果不支持，则回退到普通启动模式
-echo   正在切换到项目目录并启动 opencode...
+cd /d "!PROJECT_ROOT!"
+
+:: Restore default code page before launching TUI app
+:: chcp 65001 (UTF-8) can cause TUI apps to crash
+chcp 936 >nul 2>nul
+
+echo   ============================================================
+echo   选择部署模式:
 echo.
-echo   ┌─────────────────────────────────────────────────────┐
-echo   │  opencode 启动后，AI 将自动开始执行部署流程。       │
-echo   │  如果 AI 没有自动开始，请手动输入：                 │
-echo   │                                                     │
-echo   │  请按照 DEPLOY.md 执行部署                          │
-echo   │                                                     │
-echo   │  按 Ctrl+C 可随时中断。                             │
-echo   └─────────────────────────────────────────────────────┘
+echo     [1] 自动模式 - opencode 自动读取 DEPLOY.md 并执行部署
+echo                    (非交互式，执行完毕后退出)
+echo.
+echo     [2] 交互模式 - 打开 opencode TUI，手动输入指令
+echo                    (可随时干预、暂停、调整)
+echo.
+echo   ============================================================
+set /p "DEPLOY_MODE=  请选择 (1/2): "
+
+if "!DEPLOY_MODE!"=="1" goto :deploy_auto
+if "!DEPLOY_MODE!"=="2" goto :deploy_interactive
+:: 默认交互模式
+goto :deploy_interactive
+
+:deploy_auto
+echo.
+echo   正在以自动模式启动 opencode...
+echo   opencode 将读取 DEPLOY.md 并自动执行部署步骤。
+echo   按 Ctrl+C 可随时中止。
 echo.
 
-cd /d "%PROJECT_ROOT%"
+opencode run -m Recreate/claude-opus-4-6 "Please read the DEPLOY.md file in the current directory carefully, then follow ALL deployment steps from Phase A through Phase B. Execute each step and verify it succeeds before moving to the next. Report progress as you go."
+set "OC_EXIT=!errorlevel!"
 
-:: 尝试带 -p 参数启动（传递初始提示让 AI 自动开始部署）
-opencode -p "请阅读当前目录下的 DEPLOY.md 文件，然后按照其中的部署流程逐步执行。从阶段 A 开始，完成所有步骤。" 2>nul
-if %errorlevel% neq 0 (
-    :: -p 参数不支持，回退到普通启动
-    echo   注意: 无法使用自动提示模式，将以普通模式启动 opencode
-    echo   请在 opencode 中手动输入: 请按照 DEPLOY.md 执行部署
+echo.
+if !OC_EXIT! neq 0 (
+    echo   ============================================================
+    echo   opencode 自动部署退出，错误码: !OC_EXIT!
+    echo   ============================================================
     echo.
-    opencode
+    echo   可能原因:
+    echo     - Provider 未正确配置（请检查 API Key）
+    echo     - 网络连接问题
+    echo     - 模型不可用
+    echo.
+    echo   你可以尝试交互模式:
+    echo     opencode
+    echo     然后输入: 请按照 DEPLOY.md 执行部署
+    echo.
+) else (
+    echo   ============================================================
+    echo   opencode 自动部署已完成！
+    echo   ============================================================
+    echo.
+    echo   如需继续或检查部署状态，运行:
+    echo     cd "!PROJECT_ROOT!"
+    echo     opencode --continue
+    echo.
 )
+
+goto :end
+
+:deploy_interactive
+echo.
+echo   正在以交互模式启动 opencode TUI...
+echo.
+echo   ============================================================
+echo   opencode 启动后，请输入以下指令开始部署:
+echo.
+echo     请按照 DEPLOY.md 执行部署
+echo.
+echo   按 Ctrl+C 可随时退出 opencode。
+echo   ============================================================
+echo.
+
+opencode
+set "OC_EXIT=!errorlevel!"
+
+echo.
+echo   ============================================================
+echo   opencode 已退出 (code: !OC_EXIT!)
+echo   如需恢复部署，运行: opencode --continue
+echo   ============================================================
 
 goto :end
 
