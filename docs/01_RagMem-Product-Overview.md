@@ -1,10 +1,5 @@
 # RagMem
 
-> **定位**：面向团队 AI 的沙盘记忆基础设施  
-> **核心价值**：把长期记忆、项目知识库、MCP 接入和自动部署流程打包成一套可在 Windows + WSL2 中落地的系统
->
-> RagMem 不是单个服务，而是一条完整的交付链路。
-
 ---
 
 ## RagMem 产品矩阵
@@ -20,7 +15,7 @@
     'secondaryColor': '#333333',
     'tertiaryColor': '#1a1a1a',
     'fontFamily': 'system-ui',
-    'fontSize': '13px'
+    'fontSize': '16px'
   }
 } }%%
 flowchart TB
@@ -108,7 +103,7 @@ FULLY_DEPLOY.bat
     'secondaryColor': '#333333',
     'tertiaryColor': '#1a1a1a',
     'fontFamily': 'system-ui',
-    'fontSize': '13px'
+    'fontSize': '16px'
   }
 } }%%
 flowchart LR
@@ -159,7 +154,7 @@ flowchart LR
     'secondaryColor': '#333333',
     'tertiaryColor': '#1a1a1a',
     'fontFamily': 'system-ui',
-    'fontSize': '13px'
+    'fontSize': '16px'
   }
 } }%%
 sequenceDiagram
