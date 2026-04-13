@@ -29,19 +29,22 @@ flowchart TB
         end
         
         subgraph Tier2["接入层"]
-            S1["ragmem-mcp - MCP 协议"]
+            S1["ragmem-mcp<br/>- MCP 协议"]
         end
         
         subgraph Tier3["部署工具"]
-            L1["FULLY_DEPLOY.bat - 自动入口"]
-            L2["DEPLOY.md - 部署剧本"]
-            L3["deploy.bat - 执行引擎"]
+            L1["FULLY_DEPLOY.bat<br/>- 自动入口"]
+            L2["DEPLOY.md<br/>- 部署剧本"]
+            L3["deploy.bat<br/>- 执行引擎"]
         end
     end
     
     Tier1 -->|数据支撑| Tier2
     Tier2 -->|协议接入| R1["Roo / Cursor / Claude / OpenCode"]
     Tier3 -->|部署启动| Tier1
+
+    classDef wideNode min-width:300px;
+    class L1,L2,L3 wideNode
 ```
 
 ---
