@@ -1,93 +1,62 @@
 # ============================================
-# LLM AI Toolkit - Root Git Ignore
+# AgentCore Unity Plugin — .gitignore
 # ============================================
 
-# ------------------------------------------
-# OS Generated Files
-# ------------------------------------------
+# --- Unity generated ---
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# --- IDE ---
+.vs/
+.vscode/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
 .DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
-desktop.ini
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# ------------------------------------------
-# Editor/IDE
-# ------------------------------------------
-.vscode/settings.json
-.vscode/launch.json
-.vscode/tasks.json
-*.swp
-*.swo
-*~
-.idea/
+# --- Build artifacts ---
+*.apk
+*.aab
+*.unitypackage
+*.app
+*.exe
+*.dll
+!Packages/**/*.dll
 
-# ------------------------------------------
-# Python
-# ------------------------------------------
+# --- Archive (reference only, not tracked) ---
+_archive/
+
+# --- Python / Docker (if local-ragmem is re-added) ---
 __pycache__/
-*.py[cod]
+*.pyc
+.env
 *.egg-info/
 dist/
-build/
-*.egg
-.ruff_cache/
-
-# ------------------------------------------
-# Docker Images (Build Artifacts)
-# ------------------------------------------
-local-ragmem/images/*.tar
-
-# ------------------------------------------
-# Environment Configuration (Sensitive)
-# ------------------------------------------
-local-ragmem/stack/.env
-
-# ------------------------------------------
-# LightRAG Runtime Data
-# ------------------------------------------
-local-ragmem/stack/lightrag/documents/*
-!local-ragmem/stack/lightrag/documents/.gitkeep
-local-ragmem/stack/lightrag/data/inputs/*
-!local-ragmem/stack/lightrag/data/inputs/.gitkeep
-local-ragmem/stack/lightrag/data/rag_storage/*
-!local-ragmem/stack/lightrag/data/rag_storage/.gitkeep
-local-ragmem/stack/lightrag/data/tiktoken/
-local-ragmem/stack/lightrag/data/*.db
-local-ragmem/stack/lightrag/data/*.db-journal
-
-# ------------------------------------------
-# mem0 Runtime Data
-# ------------------------------------------
-local-ragmem/stack/mem0/data/
-
-# ------------------------------------------
-# Docker Volumes
-# ------------------------------------------
-volumes/
-pgvector-data/
-mem0-data/
-neo4j-data/
-
-# ------------------------------------------
-# Logs
-# ------------------------------------------
-*.log
-logs/
-
-# ------------------------------------------
-# Temporary Files
-# ------------------------------------------
-tmp/
-temp/
-*.tmp
-*.bak
-.cache/
-
-# ------------------------------------------
-# Distribution Build Output
-# ------------------------------------------
-dist/
-*.zip.tmp

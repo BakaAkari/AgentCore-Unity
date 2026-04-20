@@ -1,9 +1,0 @@
-{
-  "servers": {
-    "unityMCP": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "mcpforunityserver", "mcp-for-unity", "--transport", "stdio"]
-    }
-  }
-}
