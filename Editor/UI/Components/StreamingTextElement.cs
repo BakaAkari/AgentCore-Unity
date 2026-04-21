@@ -115,6 +115,8 @@ namespace AgentCore.Editor.UI.Components
             _textLabel.style.color = new StyleColor(new UnityEngine.Color(0.83f, 0.83f, 0.83f));
             _textLabel.style.flexShrink = 1;
             _textLabel.style.flexGrow = 1;
+            // 启用文本选择，允许用户选中和复制文本（Unity 2022.2+）
+            _textLabel.selection.isSelectable = true;
             Add(_textLabel);
 
             // 闪烁光标

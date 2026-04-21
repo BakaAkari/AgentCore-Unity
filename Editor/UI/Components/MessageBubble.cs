@@ -96,6 +96,12 @@ namespace AgentCore.Editor.UI.Components
             _contentLabel = this.Q<Label>("content-label");
             _bubbleContent = this.Q<VisualElement>("bubble-content");
 
+            // 启用内容文本选择，允许用户选中和复制文本（Unity 2022.2+）
+            if (_contentLabel != null)
+            {
+                _contentLabel.selection.isSelectable = true;
+            }
+
             // 设置角色样式类
             if (bubbleRoot != null)
             {
@@ -258,6 +264,8 @@ namespace AgentCore.Editor.UI.Components
             var contentLabel = new Label { name = "content-label" };
             contentLabel.style.whiteSpace = WhiteSpace.Normal;
             contentLabel.style.fontSize = 13;
+            // 启用文本选择，允许用户选中和复制文本（Unity 2022.2+）
+            contentLabel.selection.isSelectable = true;
             content.Add(contentLabel);
 
             bubbleRoot.Add(content);

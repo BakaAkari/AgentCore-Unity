@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,7 +8,9 @@ using AgentCore.Editor.LLM;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Bootstrap;
 using AgentCore.Editor.Tools;
+using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Utils;
+using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
@@ -30,7 +33,7 @@ namespace AgentCore.Editor.Core
     /// <list type="bullet">
     ///   <item>从单轮对话升级为 "循环直到最终回答" 的工具调用模式</item>
     ///   <item>集成 <see cref="ToolCallDispatcher"/> 分发执行工具调用</item>
-    ///   <item>集成 <see cref="UnityMcpBridge"/> 桥接 unity-mcp 工具</item>
+    ///   <item>集成 <see cref="ToolAutoDiscovery"/> 自动发现并注册原生工具</item>
     ///   <item>支持 <see cref="AgentCoreSettings.maxToolCallRounds"/> 防止无限循环</item>
     /// </list>
     /// </para>
@@ -116,7 +119,7 @@ namespace AgentCore.Editor.Core
         /// <summary>
         /// 初始化 Agent Loop。
         /// 加载 Bootstrap 上下文并设置系统提示词。
-        /// 初始化 MCP 桥接器以发现和注册 unity-mcp 工具。
+        /// 通过 ToolAutoDiscovery 自动发现并注册所有原生工具。
         /// 如果 Bootstrap 加载失败，将使用默认的最小化系统提示词。
         /// </summary>
         public void Initialize()
@@ -127,15 +130,15 @@ namespace AgentCore.Editor.Core
                 return;
             }
 
-            // Phase 2 新增：初始化 MCP 桥接器（发现并注册 unity-mcp 工具）
+            // Phase 2.5: 使用 ToolAutoDiscovery 自动发现并注册原生工具
             try
             {
-                UnityMcpBridge.Instance.Initialize();
-                Debug.Log($"[AgentCore] MCP Bridge initialized, {UnityMcpBridge.Instance.ToolCount} tools registered.");
+                ToolAutoDiscovery.DiscoverAndRegisterAll();
+                Debug.Log($"[AgentCore] ToolAutoDiscovery completed, {ToolRegistry.Instance.Count} tools registered.");
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] MCP Bridge initialization failed (non-fatal): {ex.Message}");
+                Debug.LogWarning($"[AgentCore] ToolAutoDiscovery failed (non-fatal): {ex.Message}");
             }
 
             string systemPrompt;
@@ -244,6 +247,11 @@ namespace AgentCore.Editor.Core
                 int consecutiveAllFailRounds = 0;
                 const int maxConsecutiveFailures = 3;
 
+                // 单工具连续失败追踪：当同一个工具连续失败 N 次时也触发退出
+                // 这解决了"一轮中有其他成功工具但某个工具一直失败"的卡死问题
+                var perToolFailCount = new Dictionary<string, int>();
+                const int maxPerToolFailures = 3;
+
                 while (currentRound < maxRounds)
                 {
                     currentRound++;
@@ -302,31 +310,57 @@ namespace AgentCore.Editor.Core
                         consecutiveAllFailRounds++;
                         Debug.LogWarning($"[AgentCore] All tool calls failed in round {currentRound}. " +
                                          $"Consecutive failure rounds: {consecutiveAllFailRounds}/{maxConsecutiveFailures}");
-
-                        if (consecutiveAllFailRounds >= maxConsecutiveFailures)
-                        {
-                            Debug.LogWarning($"[AgentCore] Tool calls have failed consecutively {maxConsecutiveFailures} rounds. " +
-                                             "Injecting stop-retry message and giving LLM one final chance to respond.");
-
-                            // 注入系统消息告诉 LLM 停止重试
-                            _messages.Add(ChatMessage.System(
-                                "SYSTEM: Tool calls have failed consecutively " + maxConsecutiveFailures +
-                                " times. The tools may not be working correctly or the parameters may be wrong. " +
-                                "Please STOP retrying tool calls and instead explain the issue to the user in plain text. " +
-                                "Summarize what you were trying to do and what went wrong."));
-
-                            // 给 LLM 最后一次机会回复（不带工具）
-                            assistantTurn.IsStreaming = true;
-                            SetState(AgentState.Thinking);
-                            var finalMessage = await CallLLMStreamAsync(assistantTurn, null, ct);
-                            HandleFinalResponse(finalMessage, assistantTurn);
-                            break;
-                        }
                     }
                     else
                     {
-                        // 有成功的工具调用，重置连续失败计数
+                        // 有成功的工具调用，重置连续全部失败计数
                         consecutiveAllFailRounds = 0;
+                    }
+
+                    // 7e. 单工具连续失败追踪
+                    // 即使一轮中有其他成功的工具，也追踪每个失败工具的连续失败次数
+                    UpdatePerToolFailCounts(assistantTurn, assistantMessage.ToolCalls, perToolFailCount);
+                    string repeatedFailTool = null;
+                    foreach (var kvp in perToolFailCount)
+                    {
+                        if (kvp.Value >= maxPerToolFailures)
+                        {
+                            repeatedFailTool = kvp.Key;
+                            break;
+                        }
+                    }
+
+                    // 判断是否需要强制退出
+                    bool shouldForceExit = consecutiveAllFailRounds >= maxConsecutiveFailures || repeatedFailTool != null;
+                    if (shouldForceExit)
+                    {
+                        string reason;
+                        if (repeatedFailTool != null)
+                        {
+                            reason = $"Tool '{repeatedFailTool}' has failed {maxPerToolFailures} consecutive times";
+                            Debug.LogWarning($"[AgentCore] {reason}. " +
+                                             "Injecting stop-retry message and giving LLM one final chance to respond.");
+                        }
+                        else
+                        {
+                            reason = $"All tool calls have failed consecutively {maxConsecutiveFailures} rounds";
+                            Debug.LogWarning($"[AgentCore] {reason}. " +
+                                             "Injecting stop-retry message and giving LLM one final chance to respond.");
+                        }
+
+                        // 注入系统消息告诉 LLM 停止重试
+                        _messages.Add(ChatMessage.System(
+                            "SYSTEM: " + reason + ". " +
+                            "The tools may not be working correctly or the parameters may be wrong. " +
+                            "Please STOP retrying tool calls and instead explain the issue to the user in plain text. " +
+                            "Summarize what you were trying to do and what went wrong."));
+
+                        // 给 LLM 最后一次机会回复（不带工具）
+                        assistantTurn.IsStreaming = true;
+                        SetState(AgentState.Thinking);
+                        var finalMessage = await CallLLMStreamAsync(assistantTurn, null, ct);
+                        HandleFinalResponse(finalMessage, assistantTurn);
+                        break;
                     }
 
                     // 重置助手轮次的流式状态，准备下一轮 LLM 调用
@@ -545,12 +579,24 @@ namespace AgentCore.Editor.Core
             // Phase 2 Step 11: 停止 Console 错误捕获
             var consoleErrors = _consoleCapture.StopCapture();
 
-            // 检查是否有编译相关的工具调用，如果有则等待编译完成
+            // Phase 2.5: 检查是否有编译相关的工具调用
+            // 优先使用 ToolResult.IsCompileRelated（工具自行标记），
+            // 同时通过 [AgentTool] 属性的 MayModifyScripts 进行补充判断
             bool hasCompileRelated = false;
             foreach (var result in results)
             {
                 if (result.Result.IsCompileRelated)
                 {
+                    hasCompileRelated = true;
+                    break;
+                }
+
+                // 通过 [AgentTool] 属性判断是否可能修改脚本
+                var tc = result.ToolCall;
+                var parameters = ParseToolArguments(tc.Function?.Arguments);
+                if (IsScriptModifyingCommand(result.ToolName, parameters))
+                {
+                    result.Result.IsCompileRelated = true;
                     hasCompileRelated = true;
                     break;
                 }
@@ -735,6 +781,62 @@ namespace AgentCore.Editor.Core
             return messages;
         }
 
+        /// <summary>
+        /// 判断工具调用是否可能修改脚本文件（触发编译）。
+        /// <para>
+        /// Phase 2.5: 基于 <see cref="AgentToolAttribute.MayModifyScripts"/> 属性判断，
+        /// 替代旧的硬编码命令名列表。对于标记了 MayModifyScripts 的工具，
+        /// 进一步检查 action 参数排除只读操作（如 read、list、get_info）。
+        /// </para>
+        /// </summary>
+        /// <param name="toolName">工具名称</param>
+        /// <param name="parameters">工具参数</param>
+        /// <returns>如果工具调用可能修改脚本则返回 true</returns>
+        private bool IsScriptModifyingCommand(string toolName, JObject parameters)
+        {
+            var tool = ToolRegistry.Instance.GetTool(toolName);
+            if (tool == null) return false;
+
+            // 检查 [AgentTool] 属性的 MayModifyScripts
+            var attr = tool.GetType().GetCustomAttribute<AgentToolAttribute>();
+            if (attr == null || !attr.MayModifyScripts) return false;
+
+            // 对于标记了 MayModifyScripts 的工具，进一步检查 action 参数
+            // 排除只读操作（不会触发编译的操作）
+            var action = parameters?["action"]?.ToString()?.ToLower();
+            if (!string.IsNullOrEmpty(action))
+            {
+                // 这些 action 是只读操作，不会修改脚本
+                if (action == "read" || action == "list" || action == "get_info" ||
+                    action == "get" || action == "search" || action == "validate")
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 安全解析工具调用参数（JSON string → JObject）。
+        /// </summary>
+        /// <param name="arguments">JSON 格式的参数字符串</param>
+        /// <returns>解析后的 JObject，解析失败时返回空 JObject</returns>
+        private static JObject ParseToolArguments(string arguments)
+        {
+            if (string.IsNullOrWhiteSpace(arguments))
+                return new JObject();
+
+            try
+            {
+                return JObject.Parse(arguments);
+            }
+            catch
+            {
+                return new JObject();
+            }
+        }
+
         #endregion
 
         #region 响应处理
@@ -802,6 +904,53 @@ namespace AgentCore.Editor.Core
             }
 
             return true; // 全部失败
+        }
+
+        /// <summary>
+        /// 更新每个工具的连续失败计数。
+        /// <para>
+        /// 遍历本轮的工具调用结果，对于失败的工具增加其连续失败计数，
+        /// 对于成功的工具重置其计数为 0。这样即使一轮中有其他成功的工具，
+        /// 也能追踪到某个特定工具的连续失败情况。
+        /// </para>
+        /// </summary>
+        /// <param name="assistantTurn">当前助手对话轮次</param>
+        /// <param name="toolCalls">本轮 LLM 返回的工具调用列表</param>
+        /// <param name="perToolFailCount">每个工具的连续失败计数字典</param>
+        private static void UpdatePerToolFailCounts(
+            ConversationTurn assistantTurn,
+            List<ToolCall> toolCalls,
+            Dictionary<string, int> perToolFailCount)
+        {
+            if (assistantTurn.ToolCalls == null || toolCalls == null || toolCalls.Count == 0)
+                return;
+
+            // 从列表末尾取本轮的工具调用记录
+            int startIndex = Math.Max(0, assistantTurn.ToolCalls.Count - toolCalls.Count);
+            for (int i = startIndex; i < assistantTurn.ToolCalls.Count; i++)
+            {
+                var callInfo = assistantTurn.ToolCalls[i];
+                var toolName = callInfo.ToolName;
+                if (string.IsNullOrEmpty(toolName)) continue;
+
+                if (!callInfo.Success)
+                {
+                    // 失败：增加该工具的连续失败计数
+                    if (perToolFailCount.ContainsKey(toolName))
+                        perToolFailCount[toolName]++;
+                    else
+                        perToolFailCount[toolName] = 1;
+
+                    Debug.LogWarning($"[AgentCore] Tool '{toolName}' failed. " +
+                                     $"Consecutive failures for this tool: {perToolFailCount[toolName]}");
+                }
+                else
+                {
+                    // 成功：重置该工具的连续失败计数
+                    if (perToolFailCount.ContainsKey(toolName))
+                        perToolFailCount[toolName] = 0;
+                }
+            }
         }
 
         #endregion
@@ -929,3 +1078,4 @@ namespace AgentCore.Editor.Core
         #endregion
     }
 }
+

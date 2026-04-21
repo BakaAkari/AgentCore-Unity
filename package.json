@@ -9,7 +9,6 @@
   "changelogUrl": "",
   "licensesUrl": "",
   "dependencies": {
-    "com.coplaydev.unity-mcp": "9.5.3",
     "com.unity.nuget.newtonsoft-json": "3.0.2"
   },
   "keywords": [

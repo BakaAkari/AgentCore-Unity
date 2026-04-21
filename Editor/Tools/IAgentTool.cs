@@ -23,7 +23,7 @@ namespace AgentCore.Editor.Tools
         /// <summary>工具描述，供 LLM 理解工具用途</summary>
         public string Description { get; }
 
-        /// <summary>工具分类，如 "unity-mcp"、"filesystem"、"cloud"</summary>
+        /// <summary>工具分类，如 "Core"、"Meta"、"Scripting"、"Specialized"、"Utility"</summary>
         public string Category { get; }
 
         /// <summary>JSON Schema 格式的参数描述</summary>

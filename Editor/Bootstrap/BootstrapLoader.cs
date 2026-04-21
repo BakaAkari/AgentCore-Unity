@@ -218,7 +218,29 @@ namespace AgentCore.Editor.Bootstrap
         {
             return category switch
             {
-                "unity-mcp" => "Unity Editor 操作（unity-mcp）",
+                // 原生工具分类（Phase 2.5）
+                "Scene" => "场景管理",
+                "GameObject" => "游戏对象操作",
+                "Script" => "脚本管理",
+                "Asset" => "资源管理",
+                "Editor" => "编辑器操作",
+                "Physics" => "物理系统",
+                "Graphics" => "图形与渲染",
+                "UI" => "用户界面",
+                "Audio" => "音频系统",
+                "Animation" => "动画系统",
+                "Lighting" => "光照系统",
+                "Build" => "构建管理",
+                "Profiler" => "性能分析",
+                "Navigation" => "导航系统",
+                "Input" => "输入系统",
+                "Material" => "材质管理",
+                "Shader" => "着色器管理",
+                "Prefab" => "预制体管理",
+                "Meta" => "元操作",
+                "Utility" => "实用工具",
+                "General" => "通用工具",
+                // 扩展分类（向后兼容）
                 "filesystem" => "文件操作",
                 "cloud" => "云端服务",
                 "custom" => "自定义工具",
@@ -237,10 +259,32 @@ namespace AgentCore.Editor.Bootstrap
         {
             return category switch
             {
-                "unity-mcp" => 0,
-                "filesystem" => 1,
-                "cloud" => 2,
-                "custom" => 3,
+                // 原生工具分类排序（Phase 2.5）
+                "Scene" => 0,
+                "GameObject" => 1,
+                "Script" => 2,
+                "Prefab" => 3,
+                "Asset" => 4,
+                "Material" => 5,
+                "Shader" => 6,
+                "Editor" => 7,
+                "Meta" => 8,
+                "Physics" => 10,
+                "Graphics" => 11,
+                "Lighting" => 12,
+                "UI" => 13,
+                "Audio" => 14,
+                "Animation" => 15,
+                "Navigation" => 16,
+                "Input" => 17,
+                "Build" => 18,
+                "Profiler" => 19,
+                "Utility" => 20,
+                "General" => 21,
+                // 扩展分类（向后兼容）
+                "filesystem" => 31,
+                "cloud" => 32,
+                "custom" => 33,
                 "default" => 99,
                 _ => 50
             };

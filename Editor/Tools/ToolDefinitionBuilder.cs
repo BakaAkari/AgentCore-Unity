@@ -118,7 +118,7 @@ namespace AgentCore.Editor.Tools
         /// <summary>
         /// 按分类构建工具定义列表（过滤模式）。
         /// </summary>
-        /// <param name="category">分类名称（大小写敏感），如 "unity-mcp"、"filesystem"</param>
+        /// <param name="category">分类名称（大小写敏感），如 "Core"、"Meta"、"Scripting"</param>
         /// <returns>属于指定分类的工具定义列表</returns>
         /// <exception cref="ArgumentNullException">category 为 null 或空时抛出</exception>
         public static List<ToolDefinition> BuildByCategory(string category)

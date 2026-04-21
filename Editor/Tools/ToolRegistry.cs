@@ -11,7 +11,7 @@ namespace AgentCore.Editor.Tools
     /// <para>
     /// 作为工具系统的中心注册表，负责：
     /// <list type="bullet">
-    ///   <item>注册/注销自建工具（<see cref="IAgentTool"/> 实现）</item>
+    ///   <item>注册/注销工具（<see cref="IAgentTool"/> 实现）</item>
     ///   <item>按名称、分类查询工具</item>
     ///   <item>工具变更事件通知（供 UI 层响应）</item>
     /// </list>
@@ -20,8 +20,8 @@ namespace AgentCore.Editor.Tools
     /// 线程安全：所有公开方法均通过 lock 保证线程安全。
     /// </para>
     /// <para>
-    /// 注意：unity-mcp 工具不通过此注册表管理，而是通过 Step 2 的
-    /// <c>UnityMcpBridge</c> 桥接层直接访问。此注册表仅管理自建工具。
+    /// Phase 2.5: 所有原生工具通过 <see cref="Infrastructure.ToolAutoDiscovery"/> 自动发现并注册到此注册表。
+    /// <see cref="ToolCallDispatcher"/> 和 <see cref="ToolDefinitionBuilder"/> 均从此注册表获取工具。
     /// </para>
     /// </summary>
     public class ToolRegistry

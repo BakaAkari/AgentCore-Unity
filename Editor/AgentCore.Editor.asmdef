@@ -1,9 +1,7 @@
 {
     "name": "AgentCore.Editor",
     "rootNamespace": "AgentCore.Editor",
-    "references": [
-        "MCPForUnity.Editor"
-    ],
+    "references": [],
     "includePlatforms": [
         "Editor"
     ],
