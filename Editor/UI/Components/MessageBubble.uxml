@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="bubble-root" class="message-bubble">
+    <ui:VisualElement name="bubble-header">
+      <ui:Label name="role-label" />
+      <ui:VisualElement name="header-spacer" />
+      <ui:Label name="time-label" />
+    </ui:VisualElement>
+    <ui:VisualElement name="bubble-content">
+      <ui:Label name="content-label" />
+    </ui:VisualElement>
+  </ui:VisualElement>
+</ui:UXML>

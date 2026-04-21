@@ -1539,79 +1539,289 @@ public class BootstrapLoader
 
 ---
 
-## 7. 开发阶段规划
+## 7. 打包、安装与分发
 
-### Phase 1: 核心骨架 + Bootstrap Files
+### 7.1 打包流程
 
-**目标**：最小可用的对话窗口 + LLM 调用 + Bootstrap Files 系统
+AgentCore Unity 以标准 UPM 包格式分发。打包使用 `npm pack` 命令生成 `.tgz` 文件：
 
-- [ ] UPM 包结构搭建（package.json, asmdef, 引用 unity-mcp asmdef）
-- [ ] 配置系统（Settings Provider + EditorPrefs，含纠错配置项）
-- [ ] LLM 客户端（OpenAI 兼容 API + 流式解析）
-- [ ] **B3: Bootstrap Files 系统**（SOUL.md + TOOLS.md + PROJECT.md 自动加载）
-- [ ] **B3: BootstrapLoader** — 编译多文件为 System Prompt
-- [ ] **B5: MEMORY.md + USER.md** — 用户可编辑的本地知识文件支持
-- [ ] Agent Loop 基础版（单轮对话，无工具调用）
-- [ ] Chat Window 基础 UI（单会话，消息显示，输入框）
-- [ ] 流式文本显示
+```bash
+# 在 UPM 包根目录执行
+cd com.agentcore.unity
+npm pack
+# 输出: com.agentcore.unity-0.1.0.tgz
+```
 
-### Phase 2: 工具系统 + 自主纠错
+**打包前检查清单**：
+- [ ] `package.json` 中 `version` 字段已更新
+- [ ] `CHANGELOG.md` 已记录本版本变更
+- [ ] 所有 `Tests/` 通过
+- [ ] `Documentation~/` 文档已同步更新
+- [ ] 无多余的临时文件或 `.meta` 文件遗漏
 
-**目标**：Agent 能调用工具完成实际任务，并具备自主纠错能力
+### 7.2 安装方式
 
-- [ ] IAgentTool 接口与 ToolRegistry 统一注册表
-- [ ] UnityMcpBridge 桥接层（CommandRegistry 适配）
-- [ ] ToolCallDispatcher 统一调度器（自研 + unity-mcp 路由）
-- [ ] ToolDefinitionBuilder（生成 OpenAI function schema）
-- [ ] 文件系统工具（read/write/search/list + 安全沙箱）
-- [ ] **B1: ErrorInfoCollector** — 工具失败时收集完整错误信息（堆栈/编译错误）
-- [ ] **B1: ExecuteToolSafely** — 异常捕获包装，错误作为 tool result 返回 LLM
-- [ ] **B4: AutoCapturePolicy** — 脚本修改后自动 refresh_unity + read_console
-- [ ] **B7: ConsoleErrorCapture** — 每轮工具执行后自动捕获 Unity Console 新错误
-- [ ] **B6: FallbackRouter** — 配置驱动的工具失败恢复策略表
-- [ ] **B6: 默认 Fallback 策略表** — 内置常见错误的恢复建议
-- [ ] Agent Loop 完整版（多轮工具调用循环 + 纠错闭环）
-- [ ] 工具调用 UI 展示（ToolCallCard，区分成功/失败/纠错状态）
-- [ ] 验证 unity-mcp 36+ 工具通过桥接层正常工作
-- [ ] **B2: 验证 execute_code 工具** — 确认 Agent 可在 Unity Editor 中执行 C# 代码
-- [ ] **B4: 端到端纠错测试** — 故意写错代码 → Agent 自动编译检查 → 修复 → 通过
+支持三种安装方式，按推荐优先级排列：
 
-### Phase 3: 云端服务集成
+#### 方式 A：Git URL 安装（推荐）
 
-**目标**：接入 mem0 和 LightRAG
+适用于有内部 Git 仓库访问权限的团队：
 
-- [ ] mem0 HTTP 客户端
-- [ ] mem0 工具（add/search/list）
-- [ ] LightRAG HTTP 客户端
-- [ ] LightRAG 工具（query/index）
-- [ ] 连接测试功能
-- [ ] 自动记忆策略（会话结束时自动摘要存储）
+```
+Unity Editor → Window → Package Manager → + → Add package from git URL...
+```
 
-### Phase 4: 多会话与 UX 完善
+输入格式：
+```
+https://your-git-server.com/agentcore-unity.git?path=com.agentcore.unity
+```
 
-**目标**：完整的多会话管理和优质用户体验
+指定版本标签：
+```
+https://your-git-server.com/agentcore-unity.git?path=com.agentcore.unity#v0.1.0
+```
 
-- [ ] 多会话标签页
-- [ ] 会话持久化（JSON 存储/加载）
-- [ ] 会话重命名/删除/归档
-- [ ] Markdown 渲染（代码块、列表、表格）
-- [ ] 上下文窗口管理（token 计数、滑动窗口）
-- [ ] 错误处理与重试 UI（含纠错过程可视化）
-- [ ] 键盘快捷键
+> **注意**：Git URL 安装要求目标机器能访问 Git 仓库。对于无外网的环境，使用方式 B 或 C。
 
-### Phase 5: 高级功能
+#### 方式 B：.tgz 文件安装（离线环境推荐）
 
-**目标**：提升专业度和可扩展性
+适用于无法访问 Git 仓库的环境：
 
-- [ ] 工具启用/禁用管理（按组控制 unity-mcp 工具可见性）
-- [ ] Fallback 策略表 UI 编辑器（可视化配置恢复策略）
-- [ ] MEMORY.md / USER.md 编辑器集成（在 Settings 面板中直接编辑）
-- [ ] 导出对话记录
-- [ ] 完善文档和示例
+1. 将 `.tgz` 文件放到共享目录或随项目分发
+2. Unity Editor → Window → Package Manager → + → Add package from tarball...
+3. 选择 `.tgz` 文件
+
+或手动编辑 `Packages/manifest.json`：
+```json
+{
+  "dependencies": {
+    "com.agentcore.unity": "file:../path/to/com.agentcore.unity-0.1.0.tgz"
+  }
+}
+```
+
+#### 方式 C：本地目录安装（开发调试用）
+
+适用于开发者本地调试：
+
+```
+Unity Editor → Window → Package Manager → + → Add package from disk...
+```
+
+选择 `com.agentcore.unity/package.json` 文件。
+
+或手动编辑 `Packages/manifest.json`：
+```json
+{
+  "dependencies": {
+    "com.agentcore.unity": "file:../../agentcore-unity/com.agentcore.unity"
+  }
+}
+```
+
+### 7.3 前置依赖安装
+
+AgentCore Unity 依赖 `com.coplaydev.unity-mcp`，需要先安装：
+
+```mermaid
+graph TD
+    A[安装 unity-mcp] --> B[安装 AgentCore Unity]
+    B --> C[配置 LLM 端点]
+    C --> D[配置云端服务端点 - 可选]
+    D --> E[开始使用]
+```
+
+**unity-mcp 安装**：
+```
+Unity Editor → Window → Package Manager → + → Add package from tarball...
+→ 选择 com.coplaydev.unity-mcp-9.5.3.tgz
+```
+
+> **自动依赖解析**：`package.json` 中声明了对 unity-mcp 的依赖，如果使用 Git URL 安装且 unity-mcp 已在项目中，UPM 会自动解析。但由于 unity-mcp 不在公共 registry 中，首次安装需要手动安装 unity-mcp。
+
+### 7.4 首次配置
+
+安装完成后的配置步骤：
+
+1. **打开设置面板**：Edit → Project Settings → AgentCore
+2. **配置 LLM 端点**：
+   - API Endpoint: `http://your-litellm-server:4000/v1`
+   - API Key: 由管理员提供
+   - Model: 选择可用模型
+3. **配置云端服务**（可选）：
+   - mem0 Endpoint: `http://your-mem0-server:8080`
+   - LightRAG Endpoint: `http://your-lightrag-server:9621`
+4. **测试连接**：点击 "Test Connection" 按钮验证连通性
+5. **打开对话窗口**：Window → AgentCore → Chat
+
+### 7.5 版本管理策略
+
+| 项目 | 策略 |
+|------|------|
+| 版本号格式 | [SemVer 2.0](https://semver.org/)：`MAJOR.MINOR.PATCH` |
+| 初始版本 | `0.1.0`（Phase 1 完成时） |
+| MINOR 递增 | 每个 Phase 完成时（0.1.0 → 0.2.0 → 0.3.0 → 0.4.0） |
+| PATCH 递增 | Bug 修复和小改进 |
+| MAJOR 递增 | 破坏性 API 变更（1.0.0 = 正式发布） |
+| Git 标签 | 每次发版打 `v{version}` 标签 |
+| CHANGELOG | 每次发版更新，记录 Added/Changed/Fixed/Removed |
+
+### 7.6 升级流程
+
+用户升级到新版本的步骤：
+
+| 安装方式 | 升级方法 |
+|----------|----------|
+| Git URL | 修改 URL 中的版本标签，或 Package Manager 点击 "Update" |
+| .tgz | 替换新的 .tgz 文件，重新 Add package from tarball |
+| 本地目录 | 拉取最新代码，Unity 自动检测变更 |
+
+**升级注意事项**：
+- 升级前备份 `AgentCore/MEMORY.md` 和 `AgentCore/USER.md`（用户数据）
+- 检查 CHANGELOG 中的 Breaking Changes
+- 确认 unity-mcp 版本兼容性
+
+### 7.7 分发渠道
+
+| 渠道 | 适用场景 | 说明 |
+|------|----------|------|
+| 内部 Git 仓库 | 团队日常开发 | 推荐，支持版本追踪和自动更新 |
+| 共享目录 .tgz | 离线/受限网络 | 将 .tgz 放到团队共享目录 |
+| 项目内嵌入 | 锁定版本 | 将包放入项目的 `Packages/` 目录 |
+
+> **暂不考虑**：私有 npm registry（如 Verdaccio）。当团队规模扩大或需要管理多个内部包时再引入。
 
 ---
 
-## 8. 风险与缓解
+## 8. 开发阶段规划
+
+> 每个 Phase 都有明确的**验收演示场景**，确保交付物可被验证。
+
+```mermaid
+graph LR
+    P1[Phase 1: 能对话] --> P2[Phase 2: 能做事]
+    P2 --> P3[Phase 3: 能记忆]
+    P3 --> P4[Phase 4: 更好用]
+```
+
+### Phase 1: 能对话
+
+**目标**：最小可用的对话窗口 + LLM 调用 + Bootstrap Files 系统
+
+**✅ 验收演示**：打开 Unity Editor → 菜单打开 AgentCore Chat Window → 输入"你好，介绍一下你自己" → 看到 LLM 流式回复 → 回复内容体现 SOUL.md 中定义的角色人设 → Bootstrap 系统提示词生效
+
+| # | 任务 | 说明 |
+|---|------|------|
+| 1.1 | UPM 包结构搭建 | package.json, asmdef, 引用 unity-mcp asmdef |
+| 1.2 | 配置系统 | Settings Provider + ScriptableObject，含所有配置项 |
+| 1.3 | LLM 客户端 | OpenAI 兼容 API + SSE 流式解析 + 取消支持 |
+| 1.4 | B3: Bootstrap Files 系统 | SOUL.md + TOOLS.md + PROJECT.md 自动加载 |
+| 1.5 | B3: BootstrapLoader | 编译多文件为 System Prompt |
+| 1.6 | Agent Loop 基础版 | 单轮对话，无工具调用，支持流式输出 |
+| 1.7 | Chat Window 基础 UI | 单会话，消息气泡显示，输入框，发送/取消按钮 |
+| 1.8 | 流式文本显示 | SSE token 逐字显示，打字机效果 |
+
+**验收检查清单**：
+- [ ] 插件通过 UPM 安装后无编译错误
+- [ ] Settings 面板可配置 LLM endpoint 和 API key
+- [ ] Chat Window 可通过菜单打开
+- [ ] 输入消息后 LLM 流式回复正常显示
+- [ ] SOUL.md 角色人设在回复中体现
+- [ ] 取消按钮可中断流式回复
+
+### Phase 2: 能做事
+
+**目标**：Agent 能调用工具完成实际 Unity 任务，并具备自主纠错能力
+
+**✅ 验收演示**：在对话中说"在场景中创建一个红色立方体，位置在 0,1,0" → Agent 调用 manage_gameobject 创建立方体 → 调用 manage_material 设置红色 → 场景中出现红色立方体 → 再说"把这个立方体的脚本改成会旋转的" → Agent 写代码 → 编译出错 → 自动检测错误 → 修复代码 → 编译通过 → 立方体开始旋转
+
+| # | 任务 | 说明 |
+|---|------|------|
+| 2.1 | IAgentTool 接口与 ToolRegistry | 统一工具注册表，自动发现 |
+| 2.2 | UnityMcpBridge 桥接层 | CommandRegistry.InvokeCommandAsync 适配 |
+| 2.3 | ToolCallDispatcher 统一调度器 | 自研工具 + unity-mcp 工具路由 |
+| 2.4 | ToolDefinitionBuilder | 生成 OpenAI function schema |
+| 2.5 | 文件系统工具 | read/write/search/list + 安全沙箱 |
+| 2.6 | B1: ErrorInfoCollector | 工具失败时收集完整错误信息 |
+| 2.7 | B1: ExecuteToolSafely | 异常捕获包装，错误作为 tool result 返回 LLM |
+| 2.8 | B4: AutoCapturePolicy | 脚本修改后自动 refresh_unity + read_console |
+| 2.9 | B7: ConsoleErrorCapture | 每轮工具执行后自动捕获 Unity Console 新错误 |
+| 2.10 | B6: FallbackRouter | 配置驱动的工具失败恢复策略表 |
+| 2.11 | B6: 默认 Fallback 策略表 | 内置常见错误的恢复建议 |
+| 2.12 | Agent Loop 完整版 | 多轮工具调用循环 + 纠错闭环 |
+| 2.13 | 工具调用 UI 展示 | ToolCallCard，区分成功/失败/纠错状态 |
+| 2.14 | 验证 unity-mcp 工具 | 36+ 工具通过桥接层正常工作 |
+| 2.15 | B2: 验证 execute_code | 确认 Agent 可在 Unity Editor 中执行 C# 代码 |
+| 2.16 | B4: 端到端纠错测试 | 故意写错代码 → 自动编译检查 → 修复 → 通过 |
+
+**验收检查清单**：
+- [ ] Agent 能通过自然语言创建/修改 GameObject
+- [ ] Agent 能通过自然语言编写和修改 C# 脚本
+- [ ] 工具调用过程在 UI 中清晰展示（工具名、参数、结果）
+- [ ] 工具失败时错误信息完整返回给 LLM，LLM 能理解并重试
+- [ ] 脚本修改后自动触发编译检查，编译错误自动反馈给 Agent
+- [ ] Agent 能在 3 轮内自主修复常见编译错误
+- [ ] unity-mcp 核心工具（manage_gameobject, manage_scene, execute_code, manage_script）正常工作
+
+### Phase 3: 能记忆
+
+**目标**：Agent 具备跨会话记忆能力，支持多会话管理和持久化
+
+**✅ 验收演示**：在会话 A 中告诉 Agent"我们的项目用 URP 渲染管线" → 关闭 Unity → 重新打开 → 新建会话 B → 问"我们项目用什么渲染管线？" → Agent 通过 mem0 检索到答案 → 切换回会话 A → 历史消息完整恢复 → 会话列表显示所有会话
+
+| # | 任务 | 说明 |
+|---|------|------|
+| 3.1 | mem0 HTTP 客户端 | 异步 HTTP 调用 mem0 API |
+| 3.2 | mem0 工具 | memory_add / memory_search / memory_list |
+| 3.3 | LightRAG HTTP 客户端 | 异步 HTTP 调用 LightRAG API |
+| 3.4 | LightRAG 工具 | rag_query / rag_index_text |
+| 3.5 | 连接测试功能 | Settings 面板中一键测试 mem0/LightRAG 连通性 |
+| 3.6 | 自动记忆策略 | 会话结束时自动摘要存储到 mem0 |
+| 3.7 | B5: MEMORY.md + USER.md | 用户可编辑的本地知识文件支持 |
+| 3.8 | 多会话标签页 | 标签页式多会话切换 |
+| 3.9 | 会话持久化 | JSON 存储/加载会话历史 |
+| 3.10 | 会话管理 | 重命名/删除/归档会话 |
+| 3.11 | 上下文窗口管理 | token 计数、滑动窗口截断策略 |
+
+**验收检查清单**：
+- [ ] mem0 连接测试通过，能存储和检索记忆
+- [ ] LightRAG 连接测试通过，能索引和查询知识
+- [ ] Agent 在对话中自动调用 memory_search 获取相关记忆
+- [ ] 会话结束时自动生成摘要并存储
+- [ ] MEMORY.md 中的内容出现在 System Prompt 中
+- [ ] 多会话标签页可切换，历史消息完整恢复
+- [ ] 会话可重命名、删除、归档
+- [ ] 长对话自动截断，不超过 token 上限
+
+### Phase 4: 更好用
+
+**目标**：打磨用户体验，提升专业度和可扩展性
+
+**✅ 验收演示**：Agent 回复的代码块有语法高亮 → 表格正确渲染 → Ctrl+Enter 快速发送 → 工具管理面板可按组启用/禁用工具 → Fallback 策略表可视化编辑 → 对话可导出为 Markdown 文件
+
+| # | 任务 | 说明 |
+|---|------|------|
+| 4.1 | Markdown 渲染 | 代码块语法高亮、列表、表格、链接 |
+| 4.2 | 错误处理与重试 UI | 纠错过程可视化，重试按钮 |
+| 4.3 | 键盘快捷键 | Ctrl+Enter 发送、Esc 取消、Ctrl+N 新会话 |
+| 4.4 | 工具启用/禁用管理 | 按组控制 unity-mcp 工具可见性 |
+| 4.5 | Fallback 策略表 UI 编辑器 | 可视化配置恢复策略 |
+| 4.6 | MEMORY.md / USER.md 编辑器集成 | 在 Settings 面板中直接编辑 |
+| 4.7 | 导出对话记录 | 导出为 Markdown / JSON 格式 |
+| 4.8 | 完善文档和示例 | 用户指南、API 文档、示例对话 |
+
+**验收检查清单**：
+- [ ] 代码块有语法高亮，表格正确渲染
+- [ ] 纠错过程在 UI 中有清晰的视觉反馈
+- [ ] 键盘快捷键正常工作
+- [ ] 工具管理面板可按组启用/禁用
+- [ ] Fallback 策略表可在 UI 中编辑
+- [ ] 对话可导出为 Markdown 文件
+- [ ] 用户文档完整，新用户可独立上手
+
+---
+
+## 9. 风险与缓解
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
@@ -1633,9 +1843,9 @@ public class BootstrapLoader
 
 ---
 
-## 9. 与原项目的关系
+## 10. 与原项目的关系
 
-### 9.1 保留的资产
+### 10.1 保留的资产
 
 | 原模块 | 新用途 | 变化 |
 |--------|--------|------|
@@ -1645,7 +1855,7 @@ public class BootstrapLoader
 | `unity-agent-rules/.agents/skills/` | 工具设计参考 | 转化为工具实现 |
 | `unity-mcp-setup/docs/` | 架构参考文档 | 归档 |
 
-### 9.2 废弃的部分
+### 10.2 废弃的部分
 
 | 原模块 | 原因 |
 |--------|------|
@@ -1657,7 +1867,7 @@ public class BootstrapLoader
 | `unity-mcp-setup/packages/` | 不再需要离线安装包 |
 | `unity-mcp-setup/tools/` | 不再需要安装脚本 |
 
-### 9.3 新项目仓库结构
+### 10.3 新项目仓库结构
 
 ```text
 agentcore-unity/                    # 重构后的仓库
@@ -1687,7 +1897,7 @@ agentcore-unity/                    # 重构后的仓库
 
 ---
 
-## 10. 开放问题
+## 11. 开放问题
 
 以下问题需要在实现过程中进一步确认：
 

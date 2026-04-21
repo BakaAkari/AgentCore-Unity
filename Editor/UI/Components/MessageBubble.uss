@@ -1,0 +1,113 @@
+/* ============================================================
+ * MessageBubble.uss — 消息气泡组件样式
+ * 用户消息右对齐蓝色，助手消息左对齐灰色
+ * ============================================================ */
+
+/* --- 气泡通用样式 --- */
+.message-bubble {
+    border-radius: 8px;
+    padding: 10px;
+    margin: 4px 12px;
+    max-width: 82%;
+    flex-shrink: 0;
+}
+
+/* --- 用户消息 --- */
+.message-bubble--user {
+    background-color: #3a5f8a;
+    align-self: flex-end;
+}
+
+.message-bubble--user #role-label {
+    color: #a0c4e8;
+}
+
+.message-bubble--user #content-label {
+    color: #ffffff;
+}
+
+.message-bubble--user #time-label {
+    color: #8ab0d4;
+}
+
+/* --- 助手消息 --- */
+.message-bubble--assistant {
+    background-color: #404040;
+    align-self: flex-start;
+}
+
+.message-bubble--assistant #role-label {
+    color: #88bb88;
+}
+
+.message-bubble--assistant #content-label {
+    color: #d4d4d4;
+}
+
+.message-bubble--assistant #time-label {
+    color: #888888;
+}
+
+/* --- 错误消息 --- */
+.message-bubble--error {
+    background-color: #5a2a2a;
+    align-self: stretch;
+    max-width: 100%;
+}
+
+.message-bubble--error #role-label {
+    color: #e88888;
+}
+
+.message-bubble--error #content-label {
+    color: #f0a0a0;
+}
+
+.message-bubble--error #time-label {
+    color: #c07070;
+}
+
+/* --- 气泡头部 --- */
+#bubble-header {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+#role-label {
+    font-size: 10px;
+    -unity-font-style: bold;
+}
+
+#header-spacer {
+    flex-grow: 1;
+}
+
+#time-label {
+    font-size: 9px;
+}
+
+/* --- 气泡内容 --- */
+#bubble-content {
+    flex-direction: column;
+}
+
+#content-label {
+    font-size: 13px;
+    white-space: normal;
+    -unity-text-align: upper-left;
+    overflow: hidden;
+}
+
+/* --- 流式光标 --- */
+.streaming-cursor {
+    width: 8px;
+    height: 14px;
+    background-color: #d4d4d4;
+    margin-left: 2px;
+    display: none;
+}
+
+.streaming-cursor--visible {
+    display: flex;
+}

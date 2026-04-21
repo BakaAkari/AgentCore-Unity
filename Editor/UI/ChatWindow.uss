@@ -1,0 +1,190 @@
+/* ============================================================
+ * ChatWindow.uss — AgentCore 主聊天窗口样式
+ * 深色主题，与 Unity Editor 风格一致
+ * ============================================================ */
+
+/* --- 根容器 --- */
+#root-container {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: column;
+    background-color: #2b2b2b;
+    height: 100%;
+    -unity-font-style: bold;
+}
+
+/* --- 顶部工具栏 --- */
+#toolbar {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    flex-grow: 0;
+    padding: 4px 8px;
+    background-color: #3c3c3c;
+    border-bottom-width: 1px;
+    border-bottom-color: #222222;
+    min-height: 30px;
+}
+
+#title-label {
+    font-size: 13px;
+    -unity-font-style: bold;
+    color: #d4d4d4;
+    margin-right: 8px;
+}
+
+#toolbar-spacer {
+    flex-grow: 1;
+}
+
+#status-label {
+    font-size: 11px;
+    color: #888888;
+    margin-right: 8px;
+}
+
+#reset-button {
+    min-width: 48px;
+    height: 24px;
+    font-size: 12px;
+    padding: 0 6px;
+    margin: 0;
+    border-radius: 4px;
+    background-color: #505050;
+    border-width: 1px;
+    border-color: #3a3a3a;
+    color: #cccccc;
+}
+
+#reset-button:hover {
+    background-color: #606060;
+    border-color: #4a86c8;
+}
+
+#reset-button:active {
+    background-color: #3a3a3a;
+}
+
+/* --- 消息滚动区域 --- */
+#message-scroll-view {
+    flex-grow: 1;
+    flex-shrink: 1;
+    background-color: #2b2b2b;
+}
+
+#message-scroll-view > #unity-content-container {
+    padding: 8px 0;
+}
+
+#message-container {
+    flex-direction: column;
+    padding: 4px 0;
+}
+
+/* --- 底部输入区域 --- */
+#input-area {
+    flex-direction: row;
+    align-items: flex-end;
+    flex-shrink: 0;
+    flex-grow: 0;
+    padding: 8px;
+    background-color: #383838;
+    border-top-width: 1px;
+    border-top-color: #555555;
+    min-height: 44px;
+    max-height: 140px;
+}
+
+#input-field {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-height: 28px;
+    max-height: 100px;
+    margin-right: 8px;
+    font-size: 13px;
+    color: #d4d4d4;
+    background-color: #2b2b2b;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #555555;
+    padding: 4px 8px;
+    white-space: normal;
+    overflow: hidden;
+}
+
+#input-field:focus {
+    border-color: #4a86c8;
+}
+
+/* Unity TextField 内部文本元素 */
+#input-field > .unity-text-element {
+    white-space: normal;
+    color: #d4d4d4;
+    padding: 2px 0;
+}
+
+/* Unity TextField multiline 内部 TextInput 容器 */
+#input-field > #unity-text-input {
+    background-color: #2b2b2b;
+    border-width: 0;
+    padding: 4px 8px;
+    min-height: 20px;
+    max-height: 92px;
+    white-space: normal;
+    overflow: hidden;
+}
+
+#input-buttons {
+    flex-direction: row;
+    flex-shrink: 0;
+    align-items: flex-end;
+    margin-bottom: 0;
+}
+
+#send-button {
+    width: 60px;
+    height: 28px;
+    font-size: 13px;
+    -unity-font-style: bold;
+    background-color: #4a86c8;
+    border-radius: 6px;
+    border-width: 0;
+    color: #ffffff;
+    margin: 0;
+    padding: 0;
+}
+
+#send-button:hover {
+    background-color: #5a96d8;
+}
+
+#send-button:active {
+    background-color: #3a76b8;
+}
+
+#send-button:disabled {
+    background-color: #3a5570;
+    color: #888888;
+}
+
+#cancel-button {
+    width: 60px;
+    height: 28px;
+    font-size: 13px;
+    -unity-font-style: bold;
+    background-color: #c84a4a;
+    border-radius: 6px;
+    border-width: 0;
+    color: #ffffff;
+    margin: 0 0 0 4px;
+    padding: 0;
+    display: none;
+}
+
+#cancel-button:hover {
+    background-color: #d85a5a;
+}
+
+#cancel-button:active {
+    background-color: #b83a3a;
+}

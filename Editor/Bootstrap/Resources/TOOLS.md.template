@@ -1,0 +1,11 @@
+## 可用工具概览
+
+{{ACTIVE_TOOLS_LIST}}
+
+## 工具使用最佳实践
+
+1. **修改脚本后始终验证**：`manage_script` 或 `script_apply_edits` 后，调用 `refresh_unity` + `read_console` 检查编译错误
+2. **操作前先确认目标**：操作 GameObject 前用 `find_gameobjects` 确认存在
+3. **批量操作用 batch_execute**：多个独立操作可合并执行，提高效率
+4. **读取文件前确认路径**：用 `list_directory` 确认文件存在
+5. **代码执行要谨慎**：`execute_code` 在 Editor 进程中运行，避免死循环或阻塞操作
