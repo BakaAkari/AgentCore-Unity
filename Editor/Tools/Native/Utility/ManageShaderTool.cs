@@ -223,7 +223,6 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
                     // Check if hidden
                     prop["isHidden"] = ShaderUtil.IsShaderPropertyHidden(shader, i);
-                    prop["isNonModifiable"] = ShaderUtil.IsShaderPropertyNonModifiable(shader, i);
 
                     properties.Add(prop);
                 }

@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
+using AgentCore.Editor.Session;
 using AgentCore.Editor.UI.Components;
 using AgentCore.Editor.Utils;
 using UnityEditor;
@@ -14,7 +16,7 @@ namespace AgentCore.Editor.UI
     /// AgentCore 主聊天窗口。
     /// <para>
     /// 提供与 AI 助手对话的 Editor 窗口界面，基于 UI Toolkit 实现。
-    /// 支持流式文本显示、消息历史、取消操作和对话重置。
+    /// 支持流式文本显示、消息历史、取消操作、对话重置和多会话管理。
     /// </para>
     /// <para>
     /// 通过菜单 Window -> AgentCore -> Chat（快捷键 Ctrl+Shift+A）打开。
@@ -32,6 +34,12 @@ namespace AgentCore.Editor.UI
 
         /// <summary>窗口最小尺寸</summary>
         private static readonly Vector2 MinWindowSize = new(360, 480);
+
+        /// <summary>EditorPrefs key：侧边栏展开状态</summary>
+        private const string SidebarExpandedKey = "AgentCore_SidebarExpanded";
+
+        /// <summary>会话标题最大显示字符数</summary>
+        private const int MaxTitleDisplayLength = 20;
 
         #endregion
 
@@ -70,6 +78,31 @@ namespace AgentCore.Editor.UI
 
         /// <summary>状态标签</summary>
         private Label _statusLabel;
+
+        #endregion
+
+        #region 侧边栏 UI 元素引用
+
+        /// <summary>侧边栏切换按钮</summary>
+        private Button _sidebarToggleButton;
+
+        /// <summary>会话侧边栏面板</summary>
+        private VisualElement _sessionSidebar;
+
+        /// <summary>新建会话按钮</summary>
+        private Button _newSessionButton;
+
+        /// <summary>会话列表滚动视图</summary>
+        private ScrollView _sessionListScrollView;
+
+        /// <summary>会话列表容器</summary>
+        private VisualElement _sessionListContainer;
+
+        /// <summary>侧边栏是否展开</summary>
+        private bool _sidebarExpanded;
+
+        /// <summary>当前正在重命名的会话项（用于内联编辑）</summary>
+        private string _renamingSessionId;
 
         #endregion
 
@@ -135,10 +168,21 @@ namespace AgentCore.Editor.UI
             _resetButton = rootVisualElement.Q<Button>("reset-button");
             _statusLabel = rootVisualElement.Q<Label>("status-label");
 
+            // 3.5 查询侧边栏 UI 元素引用
+            _sidebarToggleButton = rootVisualElement.Q<Button>("sidebar-toggle-button");
+            _sessionSidebar = rootVisualElement.Q<VisualElement>("session-sidebar");
+            _newSessionButton = rootVisualElement.Q<Button>("new-session-button");
+            _sessionListScrollView = rootVisualElement.Q<ScrollView>("session-list-scroll");
+            _sessionListContainer = rootVisualElement.Q<VisualElement>("session-list-container");
+
             // 4. 绑定按钮事件
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());
             _cancelButton?.RegisterCallback<ClickEvent>(_ => OnCancelClicked());
             _resetButton?.RegisterCallback<ClickEvent>(_ => OnResetClicked());
+
+            // 4.5 绑定侧边栏按钮事件
+            _sidebarToggleButton?.RegisterCallback<ClickEvent>(_ => ToggleSidebar());
+            _newSessionButton?.RegisterCallback<ClickEvent>(_ => OnNewSessionClicked());
 
             // 5. 绑定输入框键盘事件（Enter 发送，Shift+Enter 换行，Escape 取消）
             _inputField?.RegisterCallback<KeyDownEvent>(OnInputFieldKeyDown);
@@ -149,18 +193,40 @@ namespace AgentCore.Editor.UI
                 _cancelButton.style.display = DisplayStyle.None;
             }
 
+            // 6.5 恢复侧边栏展开状态
+            _sidebarExpanded = EditorPrefs.GetBool(SidebarExpandedKey, false);
+            UpdateSidebarVisibility();
+
             // 7. 创建并初始化 AgentLoop
             InitializeAgentLoop();
+
+            // 8. Phase 3: 尝试恢复上一次的会话
+            TryRestoreSession();
+
+            // 8.5 刷新会话列表
+            RefreshSessionList();
         }
 
         /// <summary>
         /// 窗口销毁时清理资源。
-        /// 取消订阅事件，取消进行中的操作。
+        /// 取消订阅事件，取消进行中的操作，保存当前会话。
         /// </summary>
         private void OnDestroy()
         {
+            // Phase 3: 窗口关闭时强制保存当前会话
             if (_agentLoop != null)
             {
+                try
+                {
+                    SessionManager.Instance.ForceSave(
+                        new List<ChatMessage>(_agentLoop.Messages),
+                        new List<ConversationTurn>(_agentLoop.ConversationTurns));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] Failed to save session on window close: {ex.Message}");
+                }
+
                 _agentLoop.OnAgentEvent -= HandleAgentEvent;
                 _agentLoop.Cancel();
                 _agentLoop = null;
@@ -193,7 +259,7 @@ namespace AgentCore.Editor.UI
 
                 Debug.Log("[AgentCore] ChatWindow initialized successfully.");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Debug.LogError($"[AgentCore] Failed to initialize ChatWindow: {ex.Message}");
                 UpdateStatusLabel("初始化失败", true);
@@ -257,6 +323,7 @@ namespace AgentCore.Editor.UI
         {
             ClearMessages();
             _agentLoop?.ResetConversation();
+            RefreshSessionList();
             Debug.Log("[AgentCore] Conversation reset by user.");
         }
 
@@ -310,6 +377,8 @@ namespace AgentCore.Editor.UI
 
                 case AgentEventType.AssistantMessage:
                     FinalizeAssistantMessage(evt.Content, evt.MessageId);
+                    // 消息完成后精准更新当前会话标题（避免重建整个列表导致排序跳动）
+                    UpdateCurrentSessionTitle();
                     break;
 
                 case AgentEventType.Error:
@@ -393,7 +462,7 @@ namespace AgentCore.Editor.UI
         /// <param name="content">用户消息内容</param>
         private void AddUserMessage(string content)
         {
-            var messageId = System.Guid.NewGuid().ToString();
+            var messageId = Guid.NewGuid().ToString();
             var bubble = new MessageBubble(messageId, "user", content);
             _messageBubbles[messageId] = bubble;
             _messageContainer?.Add(bubble);
@@ -479,7 +548,7 @@ namespace AgentCore.Editor.UI
         /// <param name="errorMessage">错误信息</param>
         private void ShowError(string errorMessage)
         {
-            var messageId = System.Guid.NewGuid().ToString();
+            var messageId = Guid.NewGuid().ToString();
             var bubble = new MessageBubble(messageId, "error", errorMessage ?? "未知错误");
             _messageBubbles[messageId] = bubble;
             _messageContainer?.Add(bubble);
@@ -497,6 +566,343 @@ namespace AgentCore.Editor.UI
         }
 
         /// <summary>
+        /// 在聊天区域添加 Domain Reload 恢复通知卡片。
+        /// 显示中断原因、阶段、编译结果和恢复状态等详细信息。
+        /// </summary>
+        /// <param name="phase">中断阶段</param>
+        /// <param name="toolName">中断时正在执行的工具名（可为 null）</param>
+        /// <param name="compilationSucceeded">编译是否成功</param>
+        /// <param name="compilationErrors">编译错误信息（可为 null）</param>
+        /// <returns>通知卡片 VisualElement 引用，用于后续状态更新</returns>
+        private VisualElement AddDomainReloadNotification(
+            InterruptPhase phase,
+            string toolName,
+            bool compilationSucceeded,
+            string compilationErrors)
+        {
+            if (_messageContainer == null) return null;
+
+            // === 通知卡片容器 ===
+            var card = new VisualElement();
+            card.AddToClassList("domain-reload-notification");
+
+            // === 标题行 ===
+            var header = new VisualElement();
+            header.AddToClassList("domain-reload-notification__header");
+
+            var headerIcon = new Label("⚡");
+            headerIcon.AddToClassList("domain-reload-notification__header-icon");
+            header.Add(headerIcon);
+
+            var headerText = new Label("检测到 Domain Reload 中断");
+            headerText.AddToClassList("domain-reload-notification__header-text");
+            header.Add(headerText);
+
+            card.Add(header);
+
+            // === 详情行：中断原因 ===
+            var reasonRow = CreateDetailRow("中断原因：", "编译触发 Domain Reload");
+            card.Add(reasonRow);
+
+            // === 详情行：中断阶段 ===
+            string phaseText = phase switch
+            {
+                InterruptPhase.Streaming => "流式响应中 (Streaming)",
+                InterruptPhase.ExecutingTool => "工具执行中 (ExecutingTool)",
+                InterruptPhase.WaitingCompilation => "等待编译 (WaitingCompilation)",
+                _ => "未知阶段"
+            };
+            if (!string.IsNullOrEmpty(toolName))
+            {
+                phaseText += $" — {toolName}";
+            }
+            var phaseRow = CreateDetailRow("中断阶段：", phaseText);
+            card.Add(phaseRow);
+
+            // === 详情行：编译结果 ===
+            string compileIcon = compilationSucceeded ? "✅" : "❌";
+            string compileText = compilationSucceeded ? "编译成功" : "编译失败";
+            if (!compilationSucceeded && !string.IsNullOrEmpty(compilationErrors))
+            {
+                // 截断过长的错误信息
+                var errMsg = compilationErrors.Length > 100
+                    ? compilationErrors.Substring(0, 100) + "..."
+                    : compilationErrors;
+                compileText += $" — {errMsg}";
+            }
+            var compileRow = CreateDetailRow("编译结果：", $"{compileIcon} {compileText}");
+            // 为编译结果值添加颜色修饰
+            var compileValue = compileRow.Q<Label>(className: "domain-reload-notification__detail-value");
+            if (compileValue != null)
+            {
+                compileValue.AddToClassList(compilationSucceeded
+                    ? "domain-reload-notification__compile-success"
+                    : "domain-reload-notification__compile-error");
+            }
+            card.Add(compileRow);
+
+            // === 状态行（初始为"恢复中..."） ===
+            var statusRow = new VisualElement();
+            statusRow.AddToClassList("domain-reload-notification__status");
+            statusRow.name = "reload-notification-status";
+
+            var statusIcon = new Label("⏳");
+            statusIcon.AddToClassList("domain-reload-notification__status-icon");
+            statusIcon.name = "reload-status-icon";
+            statusRow.Add(statusIcon);
+
+            var statusText = new Label("正在恢复会话...");
+            statusText.AddToClassList("domain-reload-notification__status-text");
+            statusText.name = "reload-status-text";
+            statusRow.Add(statusText);
+
+            card.Add(statusRow);
+
+            _messageContainer.Add(card);
+            ScrollToBottom();
+
+            Debug.Log($"[AgentCore] Domain Reload notification added: phase={phase}, tool={toolName}, " +
+                      $"compilationOk={compilationSucceeded}");
+
+            return card;
+        }
+
+        /// <summary>
+        /// 创建通知卡片的详情行（标签 + 值）。
+        /// </summary>
+        /// <param name="label">标签文本</param>
+        /// <param name="value">值文本</param>
+        /// <returns>详情行 VisualElement</returns>
+        private static VisualElement CreateDetailRow(string label, string value)
+        {
+            var row = new VisualElement();
+            row.AddToClassList("domain-reload-notification__detail");
+
+            var labelElem = new Label(label);
+            labelElem.AddToClassList("domain-reload-notification__detail-label");
+            row.Add(labelElem);
+
+            var valueElem = new Label(value);
+            valueElem.AddToClassList("domain-reload-notification__detail-value");
+            row.Add(valueElem);
+
+            return row;
+        }
+
+        /// <summary>
+        /// 更新 Domain Reload 通知卡片的恢复状态。
+        /// </summary>
+        /// <param name="card">通知卡片 VisualElement（由 AddDomainReloadNotification 返回）</param>
+        /// <param name="success">恢复是否成功</param>
+        /// <param name="errorMessage">失败时的错误信息（可为 null）</param>
+        private static void UpdateDomainReloadNotificationStatus(
+            VisualElement card,
+            bool success,
+            string errorMessage = null)
+        {
+            if (card == null) return;
+
+            // 查找状态行元素
+            var statusIcon = card.Q<Label>("reload-status-icon");
+            var statusText = card.Q<Label>("reload-status-text");
+
+            if (success)
+            {
+                // 恢复成功
+                card.AddToClassList("domain-reload-notification--success");
+                if (statusIcon != null) statusIcon.text = "✅";
+                if (statusText != null) statusText.text = "会话已恢复，继续执行中";
+            }
+            else
+            {
+                // 恢复失败
+                card.AddToClassList("domain-reload-notification--error");
+                if (statusIcon != null) statusIcon.text = "❌";
+
+                var failText = "恢复失败";
+                if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    failText += $"：{errorMessage}";
+                }
+                failText += "\n💡 建议：请手动重新发送消息继续操作";
+
+                if (statusText != null) statusText.text = failText;
+            }
+
+            Debug.Log($"[AgentCore] Domain Reload notification status updated: success={success}" +
+                      (string.IsNullOrEmpty(errorMessage) ? "" : $", error={errorMessage}"));
+        }
+
+        #endregion
+
+        #region 会话恢复
+
+        /// <summary>
+        /// 尝试恢复上一次的会话。
+        /// 在窗口创建时调用，从 SessionManager 加载上一次的会话并重建 UI。
+        /// </summary>
+        private void TryRestoreSession()
+        {
+            if (_agentLoop == null) return;
+
+            try
+            {
+                var session = SessionManager.Instance.TryRestoreLastSession();
+                if (session == null || session.Turns == null || session.Turns.Count == 0)
+                {
+                    Debug.Log("[AgentCore] No previous session to restore, starting fresh.");
+                    // 即使没有会话可恢复，也要清除可能残留的中断标记
+                    DomainReloadState.instance.ClearInterruption();
+                    // 修复 #5: Domain Reload 路径中延迟了会话创建，如果恢复失败则在此补创建
+                    EnsureSessionExists();
+                    return;
+                }
+
+                // 通过 AgentLoop.LoadSession 恢复对话状态
+                if (!_agentLoop.LoadSession(session.Id))
+                {
+                    Debug.LogWarning("[AgentCore] Failed to restore session via AgentLoop.");
+                    DomainReloadState.instance.ClearInterruption();
+                    // 修复 #5: 恢复失败时也需要确保有活动会话
+                    EnsureSessionExists();
+                    return;
+                }
+
+                // 重建 UI 消息气泡
+                RebuildMessageBubbles();
+
+                Debug.Log($"[AgentCore] Session restored: {session.Id} ({session.Title}, {session.Turns.Count} turns)");
+
+                // Domain Reload Resilience Phase 2 & 3: 检查是否有中断标记并自动恢复
+                var reloadState = DomainReloadState.instance;
+                if (reloadState.WasInterrupted)
+                {
+                    Debug.Log($"[AgentCore] Domain Reload detected: session {reloadState.InterruptedSessionId} " +
+                              $"was interrupted during {reloadState.InterruptPhase}" +
+                              (string.IsNullOrEmpty(reloadState.LastToolName) ? "" : $" (tool: {reloadState.LastToolName})") +
+                              (reloadState.HadPendingToolCalls ? " [had pending tool calls]" : "") +
+                              $" at {reloadState.InterruptTimestamp}");
+
+                    // Phase 2: 设置编译结果（Domain Reload 完成意味着编译已结束）
+                    // 如果 Domain Reload 成功完成且我们的代码正在运行，说明编译通过。
+                    // Unity 在编译失败时不会完成 Domain Reload（会停留在错误状态）。
+                    bool compilationSucceeded = !EditorUtility.scriptCompilationFailed;
+                    string compilationErrors = compilationSucceeded
+                        ? null
+                        : "编译失败，请检查 Unity Console 中的错误信息";
+                    Debug.Log($"[AgentCore] Post-reload compilation check: succeeded={compilationSucceeded}");
+
+                    reloadState.SetCompilationResult(compilationSucceeded, compilationErrors);
+
+                    // Phase 3: 在聊天区域显示恢复通知卡片（带"恢复中..."状态）
+                    var notificationCard = AddDomainReloadNotification(
+                        reloadState.InterruptPhase,
+                        reloadState.LastToolName,
+                        compilationSucceeded,
+                        compilationErrors);
+
+                    // 调用 AgentLoop.TryResumeAfterReload() 触发自动恢复
+                    bool resumed = _agentLoop.TryResumeAfterReload();
+
+                    // Phase 3: 根据恢复结果更新通知卡片状态
+                    if (resumed)
+                    {
+                        Debug.Log("[AgentCore] Domain Reload recovery initiated successfully.");
+                        UpdateDomainReloadNotificationStatus(notificationCard, success: true);
+                    }
+                    else
+                    {
+                        Debug.Log("[AgentCore] Domain Reload recovery skipped or failed, continuing normally.");
+                        UpdateDomainReloadNotificationStatus(notificationCard, success: false,
+                            errorMessage: "恢复未执行，可能是中断阶段不支持自动恢复");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to restore session: {ex.Message}");
+                // 修复 #5: 异常时也需要确保有活动会话
+                EnsureSessionExists();
+            }
+        }
+
+        /// <summary>
+        /// 确保 SessionManager 有活动会话。
+        /// 修复 #5: Domain Reload 路径中 Initialize() 延迟了会话创建，
+        /// 如果 TryRestoreSession() 未能恢复会话，则在此补创建新会话。
+        /// </summary>
+        private static void EnsureSessionExists()
+        {
+            if (string.IsNullOrEmpty(SessionManager.Instance.CurrentSessionId))
+            {
+                Debug.Log("[AgentCore] No active session after restore attempt, creating new session.");
+                SessionManager.Instance.CreateNewSession();
+            }
+        }
+
+        /// <summary>
+        /// 从 AgentLoop 的 ConversationHistory 重建所有消息气泡。
+        /// 用于会话恢复时重建 UI。
+        /// </summary>
+        private void RebuildMessageBubbles()
+        {
+            if (_agentLoop == null || _messageContainer == null) return;
+
+            // 清空现有 UI
+            _messageContainer.Clear();
+            _messageBubbles.Clear();
+            _activeToolCards.Clear();
+
+            var history = _agentLoop.ConversationHistory;
+            for (int i = 0; i < history.Count; i++)
+            {
+                var turn = history[i];
+
+                if (turn.Role == "user")
+                {
+                    // 用户消息气泡
+                    var bubble = new MessageBubble(turn.Id, "user", turn.Content);
+                    _messageBubbles[turn.Id] = bubble;
+                    _messageContainer.Add(bubble);
+                }
+                else if (turn.Role == "assistant")
+                {
+                    // 助手消息气泡（已完成状态，非流式）
+                    var bubble = new MessageBubble(turn.Id, "assistant", turn.Content);
+                    _messageBubbles[turn.Id] = bubble;
+                    _messageContainer.Add(bubble);
+
+                    // 恢复工具调用卡片
+                    if (turn.ToolCalls != null)
+                    {
+                        foreach (var tc in turn.ToolCalls)
+                        {
+                            var card = new ToolCallCard(tc.ToolName, tc.Arguments);
+                            var status = tc.Success ? ToolCallStatus.Completed : ToolCallStatus.Failed;
+                            var statusText = tc.Success
+                                ? $"完成 ({tc.ExecutionTimeMs:F0}ms)"
+                                : "失败";
+                            card.SetStatus(status, statusText);
+
+                            if (!string.IsNullOrEmpty(tc.Result))
+                            {
+                                var result = tc.Result.Length > 200
+                                    ? tc.Result.Substring(0, 200) + "..."
+                                    : tc.Result;
+                                card.SetDetails(result);
+                            }
+
+                            _messageContainer.Add(card);
+                        }
+                    }
+                }
+            }
+
+            // 滚动到底部
+            ScrollToBottom();
+        }
+
+        /// <summary>
         /// 滚动消息列表到底部。
         /// 延迟一帧执行，确保布局已更新。
         /// </summary>
@@ -509,6 +915,477 @@ namespace AgentCore.Editor.UI
                     _messageScrollView.scrollOffset = new Vector2(0, float.MaxValue);
                 }
             });
+        }
+
+        #endregion
+
+        #region 会话侧边栏
+
+        /// <summary>
+        /// 切换侧边栏的展开/折叠状态。
+        /// </summary>
+        private void ToggleSidebar()
+        {
+            _sidebarExpanded = !_sidebarExpanded;
+            EditorPrefs.SetBool(SidebarExpandedKey, _sidebarExpanded);
+            UpdateSidebarVisibility();
+
+            if (_sidebarExpanded)
+            {
+                RefreshSessionList();
+            }
+        }
+
+        /// <summary>
+        /// 根据当前状态更新侧边栏的显示/隐藏。
+        /// </summary>
+        private void UpdateSidebarVisibility()
+        {
+            if (_sessionSidebar == null) return;
+
+            if (_sidebarExpanded)
+            {
+                _sessionSidebar.AddToClassList("sidebar-visible");
+                _sidebarToggleButton?.AddToClassList("sidebar-active");
+            }
+            else
+            {
+                _sessionSidebar.RemoveFromClassList("sidebar-visible");
+                _sidebarToggleButton?.RemoveFromClassList("sidebar-active");
+            }
+        }
+
+        /// <summary>
+        /// 仅更新当前活动会话在侧边栏列表中的标题文本，避免重建整个列表。
+        /// 如果找不到对应元素（例如会话刚创建还没在列表中），则 fallback 到 RefreshSessionList()。
+        /// </summary>
+        private void UpdateCurrentSessionTitle()
+        {
+            if (_sessionListContainer == null)
+            {
+                return;
+            }
+
+            var currentId = SessionManager.Instance.CurrentSessionId;
+            if (string.IsNullOrEmpty(currentId))
+            {
+                RefreshSessionList();
+                return;
+            }
+
+            // 尝试通过 name 属性找到当前会话的标题 Label
+            var titleLabel = _sessionListContainer.Q<Label>($"session-title-{currentId}");
+            if (titleLabel == null)
+            {
+                // 找不到对应元素，fallback 到完整刷新
+                RefreshSessionList();
+                return;
+            }
+
+            // 从 SessionManager 获取最新标题
+            var newTitle = SessionManager.Instance.CurrentSessionTitle;
+            if (string.IsNullOrEmpty(newTitle))
+            {
+                newTitle = "新会话";
+            }
+            if (newTitle.Length > MaxTitleDisplayLength)
+            {
+                newTitle = newTitle.Substring(0, MaxTitleDisplayLength) + "...";
+            }
+
+            // 如果标题没有变化，跳过更新
+            if (titleLabel.text == newTitle)
+            {
+                return;
+            }
+
+            titleLabel.text = newTitle;
+        }
+
+        /// <summary>
+        /// 刷新会话列表 UI。
+        /// 从 SessionManager 获取所有会话摘要并重建列表项。
+        /// </summary>
+        private void RefreshSessionList()
+        {
+            if (_sessionListContainer == null) return;
+
+            // 重建列表时清理重命名状态，防止旧的 TextField 被销毁后
+            // _renamingSessionId 残留导致所有点击被拦截
+            _renamingSessionId = null;
+
+            // 保存滚动位置，重建后恢复（避免列表跳回顶部）
+            var savedScrollOffset = _sessionListScrollView?.scrollOffset ?? Vector2.zero;
+
+            _sessionListContainer.Clear();
+
+            var sessions = SessionManager.Instance.GetSessionList();
+            var currentId = SessionManager.Instance.CurrentSessionId;
+
+            if (sessions == null || sessions.Count == 0)
+            {
+                var emptyLabel = new Label("暂无会话");
+                emptyLabel.style.color = new StyleColor(new Color(0.5f, 0.5f, 0.5f));
+                emptyLabel.style.fontSize = 12;
+                emptyLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+                emptyLabel.style.paddingTop = 20;
+                _sessionListContainer.Add(emptyLabel);
+                // 列表为空时不需要恢复滚动位置
+                return;
+            }
+
+            foreach (var session in sessions)
+            {
+                var item = CreateSessionItem(session, session.Id == currentId);
+                _sessionListContainer.Add(item);
+            }
+
+            // 恢复滚动位置（延迟一帧，确保布局已更新）
+            if (_sessionListScrollView != null)
+            {
+                _sessionListScrollView.schedule.Execute(() =>
+                {
+                    if (_sessionListScrollView != null)
+                    {
+                        _sessionListScrollView.scrollOffset = savedScrollOffset;
+                    }
+                });
+            }
+        }
+
+        /// <summary>
+        /// 创建单个会话列表项 VisualElement。
+        /// </summary>
+        /// <param name="session">会话摘要数据</param>
+        /// <param name="isActive">是否为当前活动会话</param>
+        /// <returns>会话列表项 VisualElement</returns>
+        private VisualElement CreateSessionItem(SessionSummary session, bool isActive)
+        {
+            var item = new VisualElement();
+            item.name = $"session-item-{session.Id}";
+            item.AddToClassList("session-item");
+            item.userData = session.Id;
+
+            if (isActive)
+            {
+                item.AddToClassList("session-active");
+            }
+
+            // 会话标题
+            var title = session.Title;
+            if (string.IsNullOrEmpty(title))
+            {
+                title = "新会话";
+            }
+            if (title.Length > MaxTitleDisplayLength)
+            {
+                title = title.Substring(0, MaxTitleDisplayLength) + "...";
+            }
+
+            var titleLabel = new Label(title);
+            titleLabel.name = $"session-title-{session.Id}";
+            titleLabel.AddToClassList("session-item-title");
+            item.Add(titleLabel);
+
+            // 最后更新时间（相对时间）
+            var timeLabel = new Label(FormatRelativeTime(session.UpdatedAt));
+            timeLabel.AddToClassList("session-item-time");
+            item.Add(timeLabel);
+
+            // 点击切换会话
+            item.RegisterCallback<ClickEvent>(evt =>
+            {
+                // 如果正在重命名，不处理点击
+                if (!string.IsNullOrEmpty(_renamingSessionId))
+                {
+                    return;
+                }
+
+                var sessionId = item.userData as string;
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    SwitchToSession(sessionId);
+                }
+            });
+
+            // 右键上下文菜单
+            item.RegisterCallback<ContextClickEvent>(evt =>
+            {
+                evt.StopPropagation();
+                var sessionId = item.userData as string;
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    ShowSessionContextMenu(sessionId, session.Title, item);
+                }
+            });
+
+            return item;
+        }
+
+        /// <summary>
+        /// 切换到指定会话。
+        /// </summary>
+        /// <param name="sessionId">目标会话 ID</param>
+        private void SwitchToSession(string sessionId)
+        {
+            if (_agentLoop == null) return;
+
+            // 如果已经是当前会话，不做任何操作
+            if (SessionManager.Instance.CurrentSessionId == sessionId)
+            {
+                return;
+            }
+
+            // 如果 Agent 正忙，不允许切换
+            if (_agentLoop.CurrentState != AgentState.Idle)
+            {
+                Debug.LogWarning("[AgentCore] Cannot switch session while agent is busy.");
+                return;
+            }
+
+            try
+            {
+                // 1. 保存当前会话（ForceSave 内部会跳过无用户消息的空会话）
+                SessionManager.Instance.ForceSave(
+                    new List<ChatMessage>(_agentLoop.Messages),
+                    new List<ConversationTurn>(_agentLoop.ConversationTurns));
+
+                // 1.5 触发自动记忆（fire-and-forget，仅在有实际对话内容时生效）
+                try
+                {
+                    SessionManager.Instance.TriggerAutoMemory(_agentLoop.LLMClient);
+                }
+                catch (Exception amEx)
+                {
+                    Debug.LogWarning($"[AgentCore] Auto-memory trigger on session switch failed (non-fatal): {amEx.Message}");
+                }
+
+                // 2. 加载目标会话（AgentLoop.LoadSession 不再重复保存）
+                if (!_agentLoop.LoadSession(sessionId))
+                {
+                    Debug.LogWarning($"[AgentCore] Failed to switch to session: {sessionId}");
+                    return;
+                }
+
+                // 3. 重建消息气泡
+                RebuildMessageBubbles();
+
+                // 4. 刷新会话列表（更新高亮）
+                RefreshSessionList();
+
+                Debug.Log($"[AgentCore] Switched to session: {sessionId}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore] Error switching session: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 新建会话按钮点击处理。
+        /// </summary>
+        private void OnNewSessionClicked()
+        {
+            if (_agentLoop == null) return;
+
+            if (_agentLoop.CurrentState != AgentState.Idle)
+            {
+                Debug.LogWarning("[AgentCore] Cannot create new session while agent is busy.");
+                return;
+            }
+
+            try
+            {
+                // 1. 重置对话（ResetConversation 内部已包含 ForceSave + TriggerAutoMemory + 创建新会话）
+                ClearMessages();
+                _agentLoop.ResetConversation();
+
+                // 2. 刷新会话列表
+                RefreshSessionList();
+
+                Debug.Log("[AgentCore] New session created.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore] Error creating new session: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 显示会话右键上下文菜单。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="currentTitle">当前标题</param>
+        /// <param name="itemElement">会话列表项 VisualElement</param>
+        private void ShowSessionContextMenu(string sessionId, string currentTitle, VisualElement itemElement)
+        {
+            var menu = new GenericMenu();
+
+            menu.AddItem(new GUIContent("重命名"), false, () =>
+            {
+                BeginRenameSession(sessionId, currentTitle, itemElement);
+            });
+
+            menu.AddSeparator("");
+
+            menu.AddItem(new GUIContent("删除"), false, () =>
+            {
+                DeleteSessionWithConfirm(sessionId);
+            });
+
+            menu.ShowAsContext();
+        }
+
+        /// <summary>
+        /// 开始内联重命名会话。
+        /// 将标题 Label 替换为可编辑的 TextField。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="currentTitle">当前标题</param>
+        /// <param name="itemElement">会话列表项 VisualElement</param>
+        private void BeginRenameSession(string sessionId, string currentTitle, VisualElement itemElement)
+        {
+            if (!string.IsNullOrEmpty(_renamingSessionId)) return;
+            _renamingSessionId = sessionId;
+
+            // 查找标题 Label 并隐藏
+            var titleLabel = itemElement.Q<Label>(className: "session-item-title");
+            if (titleLabel != null)
+            {
+                titleLabel.style.display = DisplayStyle.None;
+            }
+
+            // 创建内联编辑 TextField
+            var renameField = new TextField();
+            renameField.AddToClassList("session-rename-field");
+            renameField.value = currentTitle ?? "";
+            renameField.selectAllOnFocus = true;
+
+            // 插入到标题 Label 的位置
+            int insertIndex = titleLabel != null ? itemElement.IndexOf(titleLabel) : 0;
+            itemElement.Insert(insertIndex + 1, renameField);
+
+            // 延迟聚焦（确保元素已布局）
+            renameField.schedule.Execute(() => renameField.Focus());
+
+            // 确认重命名（Enter 或失去焦点）
+            Action commitRename = () =>
+            {
+                if (_renamingSessionId != sessionId) return;
+
+                var newTitle = renameField.value?.Trim();
+                if (!string.IsNullOrEmpty(newTitle) && newTitle != currentTitle)
+                {
+                    SessionManager.Instance.RenameSession(sessionId, newTitle);
+                }
+
+                // 清理：移除 TextField，恢复 Label
+                _renamingSessionId = null;
+                renameField.RemoveFromHierarchy();
+                if (titleLabel != null)
+                {
+                    titleLabel.style.display = DisplayStyle.Flex;
+                }
+
+                RefreshSessionList();
+            };
+
+            renameField.RegisterCallback<KeyDownEvent>(evt =>
+            {
+                if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter)
+                {
+                    evt.PreventDefault();
+                    evt.StopPropagation();
+                    commitRename();
+                }
+                else if (evt.keyCode == KeyCode.Escape)
+                {
+                    evt.PreventDefault();
+                    evt.StopPropagation();
+                    // 取消重命名
+                    _renamingSessionId = null;
+                    renameField.RemoveFromHierarchy();
+                    if (titleLabel != null)
+                    {
+                        titleLabel.style.display = DisplayStyle.Flex;
+                    }
+                }
+            });
+
+            renameField.RegisterCallback<FocusOutEvent>(_ =>
+            {
+                // 失去焦点时提交
+                if (_renamingSessionId == sessionId)
+                {
+                    commitRename();
+                }
+            });
+        }
+
+        /// <summary>
+        /// 删除会话（带确认对话框）。
+        /// </summary>
+        /// <param name="sessionId">要删除的会话 ID</param>
+        private void DeleteSessionWithConfirm(string sessionId)
+        {
+            var confirmed = EditorUtility.DisplayDialog(
+                "删除会话",
+                "确定要删除此会话吗？此操作不可撤销。",
+                "删除",
+                "取消");
+
+            if (!confirmed) return;
+
+            var isCurrentSession = SessionManager.Instance.CurrentSessionId == sessionId;
+
+            // 执行删除
+            SessionManager.Instance.DeleteSession(sessionId);
+
+            if (isCurrentSession)
+            {
+                // 删除的是当前活动会话，需要切换到其他会话或创建新会话
+                var sessions = SessionManager.Instance.GetSessionList();
+                if (sessions != null && sessions.Count > 0)
+                {
+                    // 切换到最近的会话
+                    SwitchToSession(sessions[0].Id);
+                }
+                else
+                {
+                    // 没有其他会话，创建新会话
+                    ClearMessages();
+                    _agentLoop?.ResetConversation();
+                }
+            }
+
+            RefreshSessionList();
+            Debug.Log($"[AgentCore] Session deleted: {sessionId}");
+        }
+
+        /// <summary>
+        /// 将 UTC 时间格式化为相对时间字符串。
+        /// </summary>
+        /// <param name="utcTime">UTC 时间</param>
+        /// <returns>相对时间字符串（如"刚刚"、"5分钟前"、"昨天"）</returns>
+        private static string FormatRelativeTime(DateTime utcTime)
+        {
+            var now = DateTime.UtcNow;
+            var diff = now - utcTime;
+
+            if (diff.TotalSeconds < 60)
+                return "刚刚";
+            if (diff.TotalMinutes < 60)
+                return $"{(int)diff.TotalMinutes}分钟前";
+            if (diff.TotalHours < 24)
+                return $"{(int)diff.TotalHours}小时前";
+            if (diff.TotalDays < 2)
+                return "昨天";
+            if (diff.TotalDays < 7)
+                return $"{(int)diff.TotalDays}天前";
+            if (diff.TotalDays < 30)
+                return $"{(int)(diff.TotalDays / 7)}周前";
+
+            return utcTime.ToLocalTime().ToString("MM/dd");
         }
 
         #endregion

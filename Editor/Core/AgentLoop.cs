@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Bootstrap;
+using AgentCore.Editor.Session;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Utils;
@@ -62,6 +63,21 @@ namespace AgentCore.Editor.Core
         /// 对话轮次历史（只读视图），供 UI 层显示。
         /// </summary>
         public IReadOnlyList<ConversationTurn> ConversationHistory => _conversationTurns;
+
+        /// <summary>
+        /// LLM 消息历史（只读视图），供 SessionManager 访问。
+        /// </summary>
+        public IReadOnlyList<ChatMessage> Messages => _messages;
+
+        /// <summary>
+        /// 对话轮次列表（只读视图），供 SessionManager 访问。
+        /// </summary>
+        public IReadOnlyList<ConversationTurn> ConversationTurns => _conversationTurns;
+
+        /// <summary>
+        /// LLM 客户端（只读），供 UI 层在会话切换时触发 AutoMemory 使用。
+        /// </summary>
+        public ILLMClient LLMClient => _llmClient;
 
         #endregion
 
@@ -174,6 +190,23 @@ namespace AgentCore.Editor.Core
             _fallbackRouter = new FallbackRouter(AgentCoreSettings.instance);
 
             _isInitialized = true;
+
+            // Phase 3: 创建新会话（如果 SessionManager 还没有活动会话）
+            // 修复 #5: Domain Reload 后跳过立即创建会话，让 TryRestoreSession() 先尝试恢复
+            if (string.IsNullOrEmpty(SessionManager.Instance.CurrentSessionId))
+            {
+                if (DomainReloadState.instance.WasInterrupted)
+                {
+                    Debug.Log("[AgentCore] Domain Reload detected, deferring session creation to TryRestoreSession().");
+                }
+                else
+                {
+                    SessionManager.Instance.CreateNewSession();
+                }
+            }
+
+            // Domain Reload Resilience: 注册 beforeAssemblyReload 事件
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
         }
 
         /// <summary>
@@ -224,6 +257,9 @@ namespace AgentCore.Editor.Core
             _messages.Add(ChatMessage.User(userMessage));
             var userTurn = new ConversationTurn("user", userMessage);
             _conversationTurns.Add(userTurn);
+
+            // 标记会话内容已变更，确保保存时更新 UpdatedAt
+            SessionManager.Instance.MarkDirty();
 
             // 4. 创建助手轮次（流式输出占位）
             var assistantTurn = new ConversationTurn("assistant")
@@ -350,15 +386,22 @@ namespace AgentCore.Editor.Core
 
                         // 注入系统消息告诉 LLM 停止重试
                         _messages.Add(ChatMessage.System(
-                            "SYSTEM: " + reason + ". " +
-                            "The tools may not be working correctly or the parameters may be wrong. " +
-                            "Please STOP retrying tool calls and instead explain the issue to the user in plain text. " +
-                            "Summarize what you were trying to do and what went wrong."));
+                            "[SYSTEM] " + reason + "。" +
+                            "你现在必须立即停止调用任何工具，直接用纯文本向用户解释问题。" +
+                            "总结你之前尝试做什么以及哪里出了问题。不要再发起任何 tool_call。"));
 
-                        // 给 LLM 最后一次机会回复（不带工具）
+                        // 给 LLM 最后一次机会回复（保留工具定义以兼容 Anthropic API，但通过系统消息要求不调用工具）
                         assistantTurn.IsStreaming = true;
                         SetState(AgentState.Thinking);
-                        var finalMessage = await CallLLMStreamAsync(assistantTurn, null, ct);
+                        var finalMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
+
+                        // 如果 LLM 仍然返回了 tool_calls，忽略它们，只取文本内容
+                        if (finalMessage != null && finalMessage.ToolCalls != null && finalMessage.ToolCalls.Count > 0)
+                        {
+                            Debug.LogWarning($"[AgentCore] LLM returned {finalMessage.ToolCalls.Count} tool call(s) in final round despite stop instruction. Ignoring tool calls.");
+                            finalMessage.ToolCalls.Clear();
+                        }
+
                         HandleFinalResponse(finalMessage, assistantTurn);
                         break;
                     }
@@ -373,22 +416,45 @@ namespace AgentCore.Editor.Core
                 // 8. 检查是否因达到最大轮次而退出
                 if (currentRound >= maxRounds && CurrentState != AgentState.Idle)
                 {
-                    Debug.LogWarning($"[AgentCore] Reached max tool call rounds ({maxRounds}). Forcing completion.");
+                    Debug.LogWarning($"[AgentCore] Reached max tool call rounds ({maxRounds}). Requesting LLM to summarize.");
 
-                    // 标记流式结束
-                    assistantTurn.IsStreaming = false;
+                    // 注入系统消息，要求 LLM 总结当前进度并输出最终回复
+                    _messages.Add(ChatMessage.System(
+                        "[SYSTEM] 你已达到工具调用上限（" + maxRounds + "轮）。" +
+                        "你现在必须立即停止调用任何工具，直接用纯文本总结当前已完成的工作进度和结果。" +
+                        "不要再发起任何 tool_call。"));
 
-                    // 如果助手轮次有内容，发送最终消息事件
-                    if (!string.IsNullOrEmpty(assistantTurn.Content))
+                    // 给 LLM 最后一次机会生成总结（保留工具定义以兼容 Anthropic API，但通过系统消息要求不调用工具）
+                    assistantTurn.IsStreaming = true;
+                    SetState(AgentState.Thinking);
+                    var summaryMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
+
+                    // 如果 LLM 仍然返回了 tool_calls，忽略它们，只取文本内容
+                    if (summaryMessage != null && summaryMessage.ToolCalls != null && summaryMessage.ToolCalls.Count > 0)
                     {
-                        EmitEvent(AgentEvent.AssistantMessage(assistantTurn.Content, assistantTurn.Id));
+                        Debug.LogWarning($"[AgentCore] LLM returned {summaryMessage.ToolCalls.Count} tool call(s) in summary round despite stop instruction. Ignoring tool calls.");
+                        summaryMessage.ToolCalls.Clear();
                     }
+
+                    HandleFinalResponse(summaryMessage, assistantTurn);
                 }
 
                 // 9. 发送循环结束事件
                 EmitEvent(AgentEvent.LoopCompleted(currentRound));
 
-                // 10. 回到 Idle 状态
+                // 10. Phase 3: 自动保存会话
+                try
+                {
+                    SessionManager.Instance.AutoSave(
+                        new List<ChatMessage>(_messages),
+                        new List<ConversationTurn>(_conversationTurns));
+                }
+                catch (Exception saveEx)
+                {
+                    Debug.LogWarning($"[AgentCore] Auto-save failed: {saveEx.Message}");
+                }
+
+                // 11. 回到 Idle 状态
                 SetState(AgentState.Idle);
             }
             catch (OperationCanceledException)
@@ -448,16 +514,101 @@ namespace AgentCore.Editor.Core
             // 1. 取消当前操作
             Cancel();
 
-            // 2. 清除历史
+            // 2. Phase 3: 保存当前会话后创建新会话
+            try
+            {
+                SessionManager.Instance.ForceSave(
+                    new List<ChatMessage>(_messages),
+                    new List<ConversationTurn>(_conversationTurns));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to save session before reset: {ex.Message}");
+            }
+
+            // 2.5. Phase 3: 触发自动记忆（fire-and-forget，不阻塞重置流程）
+            try
+            {
+                SessionManager.Instance.TriggerAutoMemory(_llmClient);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Auto-memory trigger failed (non-fatal): {ex.Message}");
+            }
+
+            // 3. 清除历史
             _messages.Clear();
             _conversationTurns.Clear();
             _isInitialized = false;
 
-            // 3. 发送重置事件
-            EmitEvent(AgentEvent.ConversationReset());
+            // 4. 不再通过 EmitEvent 发送 ConversationReset 事件。
+            // EmitEvent 使用 EditorApplication.delayCall 延迟执行，会导致 ClearMessages()
+            // 在调用方的 RefreshSessionList() 之后才执行，造成 UI 状态混乱。
+            // UI 清空的职责由调用方（OnNewSessionClicked / OnResetClicked）直接调用 ClearMessages() 承担。
 
-            // 4. 重新初始化
+            // 5. Phase 3: 创建新会话
+            SessionManager.Instance.CreateNewSession();
+
+            // 6. 重新初始化
             Initialize();
+        }
+
+        /// <summary>
+        /// 加载指定会话并恢复对话状态。
+        /// 供 UI 层调用，用于切换会话。
+        /// </summary>
+        /// <param name="sessionId">要加载的会话 ID</param>
+        /// <returns>是否加载成功</returns>
+        public bool LoadSession(string sessionId)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                Debug.LogWarning("[AgentCore] Cannot load session with empty Id.");
+                return false;
+            }
+
+            if (CurrentState != AgentState.Idle)
+            {
+                Debug.LogWarning("[AgentCore] Cannot load session while agent is busy.");
+                return false;
+            }
+
+            // 注意：不在此处调用 ForceSave / TriggerAutoMemory。
+            // 保存当前会话的职责由调用方（ChatWindow.SwitchToSession 等）承担，
+            // 避免重复保存导致空会话被写入磁盘。
+
+            var session = SessionManager.Instance.LoadSession(sessionId);
+            if (session == null)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to load session: {sessionId}");
+                return false;
+            }
+
+            // 恢复对话状态
+            _messages.Clear();
+            _conversationTurns.Clear();
+
+            var restoredMessages = session.ToMessages();
+            var restoredTurns = session.ToConversationTurns();
+
+            _messages.AddRange(restoredMessages);
+            _conversationTurns.AddRange(restoredTurns);
+
+            // 确保已初始化（如果消息列表中有 system 消息，则认为已初始化）
+            if (_messages.Count > 0 && _messages[0].Role == "system")
+            {
+                _isInitialized = true;
+            }
+
+            Debug.Log($"[AgentCore] Session loaded: {sessionId} ({restoredMessages.Count} messages, {restoredTurns.Count} turns)");
+
+            // 注意：不在此处发送 ConversationReset 事件。
+            // LoadSession 仅负责数据恢复，UI 重建由调用方（如 TryRestoreSession）处理。
+            // 如果在此处通过 EmitEvent 发送 ConversationReset，由于 AsyncHelper.RunOnMainThread
+            // 使用 EditorApplication.delayCall（延迟执行），ClearMessages 会在调用方的
+            // RebuildMessageBubbles 之后才执行，导致重建的 UI 被清除。
+
+            return true;
         }
 
         #endregion
@@ -480,8 +631,16 @@ namespace AgentCore.Editor.Core
             List<ToolDefinition> tools,
             CancellationToken ct)
         {
-            // 构建消息副本发送给 LLM
-            var messagesSnapshot = new List<ChatMessage>(_messages);
+            // Phase 3: 上下文窗口截断
+            // 创建 _messages 的浅拷贝，对拷贝进行截断，不修改原始列表（保留完整历史用于 UI 显示）
+            var settings = AgentCoreSettings.instance;
+            int maxTokens = settings.maxContextTokens > 0
+                ? settings.maxContextTokens
+                : ContextWindowManager.GetModelMaxTokens(settings.llmModel);
+            int reserveTokens = settings.reserveResponseTokens;
+
+            var messagesSnapshot = ContextWindowManager.TrimToFit(
+                _messages, maxTokens, reserveTokens);
 
             // 切换到 Streaming 状态
             SetState(AgentState.Streaming);
@@ -1037,6 +1196,587 @@ namespace AgentCore.Editor.Core
 
         #endregion
 
+        #region Domain Reload 保护
+
+        /// <summary>
+        /// AssemblyReloadEvents.beforeAssemblyReload 回调。
+        /// 在 Domain Reload 前保存中断状态和对话历史。
+        /// Phase 2 增强：额外保存用户消息、assistant 部分内容、tool_call ID。
+        /// </summary>
+        private void OnBeforeAssemblyReload()
+        {
+            // 1. 检查当前是否正在执行操作
+            if (CurrentState == AgentState.Idle)
+            {
+                // Agent 空闲，无需保存中断状态
+                Debug.Log("[AgentCore] beforeAssemblyReload: Agent is idle, no interruption to save.");
+                return;
+            }
+
+            // 2. 映射当前 AgentState 到 InterruptPhase
+            InterruptPhase phase;
+            switch (CurrentState)
+            {
+                case AgentState.Streaming:
+                case AgentState.Thinking:
+                    phase = InterruptPhase.Streaming;
+                    break;
+                case AgentState.ExecutingTool:
+                    phase = InterruptPhase.ExecutingTool;
+                    break;
+                default:
+                    phase = InterruptPhase.None;
+                    break;
+            }
+
+            // 3. 获取最后执行的工具名和 pending tool call 信息
+            string lastToolName = null;
+            string interruptedToolCallId = null;
+            bool hadPendingToolCalls = false;
+            for (int i = _messages.Count - 1; i >= 0; i--)
+            {
+                var msg = _messages[i];
+                if (msg.Role == "assistant" && msg.ToolCalls != null && msg.ToolCalls.Count > 0)
+                {
+                    var lastToolCall = msg.ToolCalls[msg.ToolCalls.Count - 1];
+                    lastToolName = lastToolCall.Function?.Name;
+                    // 检查是否有未完成的 tool calls（assistant 发了 tool_calls 但还没有对应的 tool 结果）
+                    int toolCallCount = msg.ToolCalls.Count;
+                    int toolResultCount = 0;
+                    for (int j = i + 1; j < _messages.Count; j++)
+                    {
+                        if (_messages[j].Role == "tool") toolResultCount++;
+                        else break;
+                    }
+                    hadPendingToolCalls = toolResultCount < toolCallCount;
+                    if (hadPendingToolCalls)
+                    {
+                        // 保存第一个未完成的 tool_call ID
+                        int pendingIndex = toolResultCount;
+                        if (pendingIndex < msg.ToolCalls.Count)
+                        {
+                            interruptedToolCallId = msg.ToolCalls[pendingIndex].Id;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            // 4. Phase 2: 提取最后一条用户消息
+            string pendingUserMessage = null;
+            for (int i = _messages.Count - 1; i >= 0; i--)
+            {
+                if (_messages[i].Role == "user")
+                {
+                    pendingUserMessage = _messages[i].Content;
+                    break;
+                }
+            }
+
+            // 5. Phase 2: 提取最后一条 assistant 部分内容（从 ConversationTurns 中获取流式累积内容）
+            string lastAssistantContent = null;
+            for (int i = _conversationTurns.Count - 1; i >= 0; i--)
+            {
+                if (_conversationTurns[i].Role == "assistant" && !string.IsNullOrEmpty(_conversationTurns[i].Content))
+                {
+                    lastAssistantContent = _conversationTurns[i].Content;
+                    break;
+                }
+            }
+
+            // 6. 保存中断标记到 DomainReloadState（Phase 2 增强版）
+            var sessionId = SessionManager.Instance.CurrentSessionId;
+            DomainReloadState.instance.MarkInterrupted(
+                sessionId,
+                phase,
+                lastToolName,
+                hadPendingToolCalls,
+                pendingUserMessage,
+                lastAssistantContent,
+                interruptedToolCallId
+            );
+
+            // 7. 强制保存当前对话历史到磁盘
+            try
+            {
+                SessionManager.Instance.ForceSave(
+                    new List<ChatMessage>(_messages),
+                    new List<ConversationTurn>(_conversationTurns));
+                Debug.Log("[AgentCore] beforeAssemblyReload: Session saved successfully.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save session: {ex.Message}");
+            }
+
+            // 8. 取消当前操作的 CancellationToken
+            if (_currentCts != null && !_currentCts.IsCancellationRequested)
+            {
+                _currentCts.Cancel();
+                Debug.Log("[AgentCore] beforeAssemblyReload: Cancelled current operation.");
+            }
+
+            Debug.Log($"[AgentCore] beforeAssemblyReload: Interruption saved — state={CurrentState}, phase={phase}, " +
+                      $"tool={lastToolName}, toolCallId={interruptedToolCallId}, " +
+                      $"hasUserMsg={!string.IsNullOrEmpty(pendingUserMessage)}, " +
+                      $"hasAssistantContent={!string.IsNullOrEmpty(lastAssistantContent)}");
+        }
+
+        /// <summary>
+        /// 尝试在 Domain Reload 后恢复 Agent 工作流。
+        /// <para>
+        /// 根据 <see cref="DomainReloadState"/> 中记录的中断信息，决定恢复策略：
+        /// <list type="bullet">
+        ///   <item><b>Streaming 中断</b>：注入系统消息说明中断原因，重新发送请求让 LLM 继续</item>
+        ///   <item><b>ExecutingTool 中断</b>：注入系统消息说明 tool 执行被中断，让 LLM 重新调用该 tool</item>
+        ///   <item><b>WaitingCompilation 中断</b>：注入编译结果消息，让 AgentLoop 继续处理</item>
+        /// </list>
+        /// </para>
+        /// </summary>
+        /// <returns>是否成功触发了恢复流程</returns>
+        public bool TryResumeAfterReload()
+        {
+            var reloadState = DomainReloadState.instance;
+
+            // 1. 检查是否有中断标记
+            if (!reloadState.WasInterrupted)
+            {
+                Debug.Log("[AgentCore] TryResumeAfterReload: No interruption detected, skipping.");
+                return false;
+            }
+
+            // 2. 确保 AgentLoop 已完全初始化
+            if (!_isInitialized)
+            {
+                Debug.LogWarning("[AgentCore] TryResumeAfterReload: AgentLoop not initialized, cannot resume.");
+                reloadState.ClearInterruption();
+                return false;
+            }
+
+            // 3. 确保当前处于 Idle 状态
+            if (CurrentState != AgentState.Idle)
+            {
+                Debug.LogWarning($"[AgentCore] TryResumeAfterReload: Agent is in {CurrentState} state, cannot resume.");
+                reloadState.ClearInterruption();
+                return false;
+            }
+
+            // 4. 确保消息历史不为空（至少有 system prompt）
+            if (_messages.Count == 0)
+            {
+                Debug.LogWarning("[AgentCore] TryResumeAfterReload: Message history is empty, cannot resume.");
+                reloadState.ClearInterruption();
+                return false;
+            }
+
+            var phase = reloadState.InterruptPhase;
+            var lastToolName = reloadState.LastToolName;
+            var interruptedToolCallId = reloadState.InterruptedToolCallId;
+            var lastAssistantContent = reloadState.LastAssistantContent;
+            var compilationSucceeded = reloadState.CompilationSucceeded;
+            var compilationErrors = reloadState.CompilationErrors;
+
+            Debug.Log($"[AgentCore] TryResumeAfterReload: Resuming from {phase} interruption " +
+                      $"(tool={lastToolName}, compilationOK={compilationSucceeded})");
+
+            // 5. 根据中断阶段构建恢复消息
+            string recoveryMessage = BuildRecoveryMessage(phase, lastToolName, interruptedToolCallId,
+                compilationSucceeded, compilationErrors);
+
+            // 6. 根据中断阶段执行恢复策略
+            switch (phase)
+            {
+                case InterruptPhase.Streaming:
+                    ResumeFromStreaming(recoveryMessage, lastAssistantContent);
+                    break;
+
+                case InterruptPhase.ExecutingTool:
+                    ResumeFromExecutingTool(recoveryMessage, interruptedToolCallId, lastToolName);
+                    break;
+
+                case InterruptPhase.WaitingCompilation:
+                    ResumeFromWaitingCompilation(recoveryMessage, interruptedToolCallId,
+                        compilationSucceeded, compilationErrors);
+                    break;
+
+                default:
+                    Debug.LogWarning($"[AgentCore] TryResumeAfterReload: Unknown phase {phase}, clearing state.");
+                    reloadState.ClearInterruption();
+                    return false;
+            }
+
+            // 7. 清除中断标记
+            reloadState.ClearInterruption();
+
+            Debug.Log("[AgentCore] TryResumeAfterReload: Recovery initiated successfully.");
+            return true;
+        }
+
+        /// <summary>
+        /// 构建 Domain Reload 恢复系统消息。
+        /// </summary>
+        /// <param name="phase">中断阶段</param>
+        /// <param name="lastToolName">最后执行的工具名</param>
+        /// <param name="toolCallId">被中断的 tool_call ID</param>
+        /// <param name="compilationSucceeded">编译是否成功</param>
+        /// <param name="compilationErrors">编译错误信息</param>
+        /// <returns>恢复系统消息文本</returns>
+        private static string BuildRecoveryMessage(
+            InterruptPhase phase,
+            string lastToolName,
+            string toolCallId,
+            bool compilationSucceeded,
+            string compilationErrors)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("[Domain Reload Recovery] Unity code compilation triggered a Domain Reload, which interrupted the Agent workflow.");
+            sb.AppendLine($"- Interruption phase: {phase}");
+
+            if (!string.IsNullOrEmpty(lastToolName))
+            {
+                sb.AppendLine($"- Last tool being used: {lastToolName}");
+            }
+
+            if (!string.IsNullOrEmpty(toolCallId))
+            {
+                sb.AppendLine($"- Interrupted tool_call ID: {toolCallId}");
+            }
+
+            // 编译结果
+            if (compilationSucceeded)
+            {
+                sb.AppendLine("- Compilation result: Success");
+            }
+            else if (!string.IsNullOrEmpty(compilationErrors))
+            {
+                sb.AppendLine($"- Compilation result: Failed");
+                sb.AppendLine($"- Compilation errors:\n{compilationErrors}");
+            }
+            else
+            {
+                sb.AppendLine("- Compilation result: Unknown (compilation status not captured)");
+            }
+
+            sb.AppendLine("Please continue from where you left off. If you were in the middle of executing a tool, please retry the operation.");
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 从 Streaming 中断恢复：注入 assistant 部分内容和系统消息，重新调用 LLM。
+        /// </summary>
+        /// <param name="recoveryMessage">恢复系统消息</param>
+        /// <param name="lastAssistantContent">中断前的 assistant 部分内容</param>
+        private void ResumeFromStreaming(string recoveryMessage, string lastAssistantContent)
+        {
+            Debug.Log("[AgentCore] ResumeFromStreaming: Injecting recovery message and re-calling LLM.");
+
+            // 如果有 assistant 部分内容，添加到消息历史中
+            if (!string.IsNullOrEmpty(lastAssistantContent))
+            {
+                // 检查消息历史末尾是否已经有这条 assistant 消息（避免重复）
+                bool alreadyHasAssistant = _messages.Count > 0 &&
+                    _messages[_messages.Count - 1].Role == "assistant" &&
+                    _messages[_messages.Count - 1].Content == lastAssistantContent;
+
+                if (!alreadyHasAssistant)
+                {
+                    _messages.Add(ChatMessage.Assistant(lastAssistantContent));
+                    Debug.Log($"[AgentCore] ResumeFromStreaming: Added partial assistant content ({lastAssistantContent.Length} chars).");
+                }
+            }
+
+            // 注入恢复系统消息
+            _messages.Add(ChatMessage.System(recoveryMessage));
+
+            // 触发新的 LLM 调用（通过 SendMessageAsync 的内部机制）
+            TriggerResumeLLMCall();
+        }
+
+        /// <summary>
+        /// 从 ExecutingTool 中断恢复：注入系统消息说明 tool 执行被中断，让 LLM 重新调用。
+        /// </summary>
+        /// <param name="recoveryMessage">恢复系统消息</param>
+        /// <param name="interruptedToolCallId">被中断的 tool_call ID</param>
+        /// <param name="lastToolName">最后执行的工具名</param>
+        private void ResumeFromExecutingTool(string recoveryMessage, string interruptedToolCallId, string lastToolName)
+        {
+            Debug.Log($"[AgentCore] ResumeFromExecutingTool: Tool '{lastToolName}' was interrupted (callId={interruptedToolCallId}).");
+
+            // 如果有未完成的 tool_call，需要补充一个 tool response 以保持消息格式合法
+            if (!string.IsNullOrEmpty(interruptedToolCallId))
+            {
+                // 检查是否已经有对应的 tool response
+                bool hasResponse = false;
+                for (int i = _messages.Count - 1; i >= 0; i--)
+                {
+                    if (_messages[i].Role == "tool" && _messages[i].ToolCallId == interruptedToolCallId)
+                    {
+                        hasResponse = true;
+                        break;
+                    }
+                    // 如果遇到了 assistant 消息，说明还没有对应的 tool response
+                    if (_messages[i].Role == "assistant") break;
+                }
+
+                if (!hasResponse)
+                {
+                    // 补充一个表示中断的 tool response
+                    _messages.Add(ChatMessage.Tool(interruptedToolCallId,
+                        $"[Tool execution interrupted by Domain Reload] The tool '{lastToolName}' was interrupted " +
+                        "because Unity triggered a code compilation and Domain Reload. " +
+                        "The tool result is unknown. Please retry the operation if needed."));
+                    Debug.Log($"[AgentCore] ResumeFromExecutingTool: Added placeholder tool response for {interruptedToolCallId}.");
+                }
+            }
+
+            // 注入恢复系统消息
+            _messages.Add(ChatMessage.System(recoveryMessage));
+
+            // 触发新的 LLM 调用
+            TriggerResumeLLMCall();
+        }
+
+        /// <summary>
+        /// 从 WaitingCompilation 中断恢复：注入编译结果作为 tool response，继续 AgentLoop。
+        /// </summary>
+        /// <param name="recoveryMessage">恢复系统消息</param>
+        /// <param name="interruptedToolCallId">被中断的 tool_call ID</param>
+        /// <param name="compilationSucceeded">编译是否成功</param>
+        /// <param name="compilationErrors">编译错误信息</param>
+        private void ResumeFromWaitingCompilation(
+            string recoveryMessage,
+            string interruptedToolCallId,
+            bool compilationSucceeded,
+            string compilationErrors)
+        {
+            Debug.Log($"[AgentCore] ResumeFromWaitingCompilation: Compilation {(compilationSucceeded ? "succeeded" : "failed")}.");
+
+            // 如果有未完成的 tool_call，补充编译结果作为 tool response
+            if (!string.IsNullOrEmpty(interruptedToolCallId))
+            {
+                bool hasResponse = false;
+                for (int i = _messages.Count - 1; i >= 0; i--)
+                {
+                    if (_messages[i].Role == "tool" && _messages[i].ToolCallId == interruptedToolCallId)
+                    {
+                        hasResponse = true;
+                        break;
+                    }
+                    if (_messages[i].Role == "assistant") break;
+                }
+
+                if (!hasResponse)
+                {
+                    string compilationResult;
+                    if (compilationSucceeded)
+                    {
+                        compilationResult = "Compilation completed successfully. The script changes have been applied.";
+                    }
+                    else if (!string.IsNullOrEmpty(compilationErrors))
+                    {
+                        compilationResult = $"Compilation failed with errors:\n{compilationErrors}\nPlease fix the compilation errors.";
+                    }
+                    else
+                    {
+                        compilationResult = "Compilation completed (result unknown). Please verify the script changes.";
+                    }
+
+                    _messages.Add(ChatMessage.Tool(interruptedToolCallId, compilationResult));
+                    Debug.Log($"[AgentCore] ResumeFromWaitingCompilation: Added compilation result as tool response.");
+                }
+            }
+
+            // 注入恢复系统消息
+            _messages.Add(ChatMessage.System(recoveryMessage));
+
+            // 触发新的 LLM 调用
+            TriggerResumeLLMCall();
+        }
+
+        /// <summary>
+        /// 触发恢复后的 LLM 调用。
+        /// 创建新的 assistant 轮次并启动异步 SendMessage 流程。
+        /// </summary>
+        private void TriggerResumeLLMCall()
+        {
+            Debug.Log("[AgentCore] TriggerResumeLLMCall: Starting resumed LLM call...");
+
+            // 恢复调用会产生新的 LLM 回复，标记会话内容已变更
+            SessionManager.Instance.MarkDirty();
+
+            // 使用 AsyncHelper 在主线程上异步执行恢复调用
+            AsyncHelper.RunAsync(
+                async () =>
+                {
+                    // 创建取消令牌
+                    _currentCts?.Dispose();
+                    _currentCts = new CancellationTokenSource();
+                    var ct = _currentCts.Token;
+
+                    // 创建助手轮次（流式输出占位）
+                    var assistantTurn = new ConversationTurn("assistant")
+                    {
+                        IsStreaming = true
+                    };
+                    _conversationTurns.Add(assistantTurn);
+
+                    try
+                    {
+                        // 获取配置
+                        var settings = AgentCoreSettings.instance;
+                        int maxRounds = settings.maxToolCallRounds;
+                        int currentRound = 0;
+
+                        // 构建工具定义列表
+                        var toolDefinitions = BuildToolDefinitions();
+
+                        // 工具调用循环（与 SendMessageAsync 相同的逻辑）
+                        int consecutiveAllFailRounds = 0;
+                        const int maxConsecutiveFailures = 3;
+                        var perToolFailCount = new Dictionary<string, int>();
+                        const int maxPerToolFailures = 3;
+
+                        while (currentRound < maxRounds)
+                        {
+                            currentRound++;
+                            EmitEvent(AgentEvent.LoopRoundStarted(currentRound, maxRounds));
+
+                            if (ct.IsCancellationRequested) break;
+
+                            // 调用 LLM（流式）
+                            SetState(AgentState.Thinking);
+                            var assistantMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
+
+                            if (ct.IsCancellationRequested) break;
+
+                            // 检查是否有 tool_calls
+                            if (assistantMessage == null ||
+                                assistantMessage.ToolCalls == null ||
+                                assistantMessage.ToolCalls.Count == 0)
+                            {
+                                HandleFinalResponse(assistantMessage, assistantTurn);
+                                break;
+                            }
+
+                            // 有 tool_calls — 执行工具
+                            Debug.Log($"[AgentCore] Resume Round {currentRound}: LLM returned {assistantMessage.ToolCalls.Count} tool call(s).");
+                            _messages.Add(assistantMessage);
+
+                            SetState(AgentState.ExecutingTool);
+                            await ExecuteToolCallsAsync(assistantMessage.ToolCalls, assistantTurn, ct);
+
+                            if (ct.IsCancellationRequested) break;
+
+                            // 连续失败检测
+                            bool allToolCallsFailed = CheckAllToolCallsFailed(assistantTurn, assistantMessage.ToolCalls.Count);
+                            if (allToolCallsFailed)
+                            {
+                                consecutiveAllFailRounds++;
+                            }
+                            else
+                            {
+                                consecutiveAllFailRounds = 0;
+                            }
+
+                            UpdatePerToolFailCounts(assistantTurn, assistantMessage.ToolCalls, perToolFailCount);
+                            string repeatedFailTool = null;
+                            foreach (var kvp in perToolFailCount)
+                            {
+                                if (kvp.Value >= maxPerToolFailures)
+                                {
+                                    repeatedFailTool = kvp.Key;
+                                    break;
+                                }
+                            }
+
+                            bool shouldForceExit = consecutiveAllFailRounds >= maxConsecutiveFailures || repeatedFailTool != null;
+                            if (shouldForceExit)
+                            {
+                                string reason = repeatedFailTool != null
+                                    ? $"Tool '{repeatedFailTool}' has failed {maxPerToolFailures} consecutive times"
+                                    : $"All tool calls have failed consecutively {maxConsecutiveFailures} rounds";
+
+                                Debug.LogWarning($"[AgentCore] Resume: {reason}. Forcing final response.");
+
+                                _messages.Add(ChatMessage.System(
+                                    "[SYSTEM] " + reason + "。" +
+                                    "你现在必须立即停止调用任何工具，直接用纯文本向用户解释问题。" +
+                                    "总结你之前尝试做什么以及哪里出了问题。不要再发起任何 tool_call。"));
+
+                                assistantTurn.IsStreaming = true;
+                                SetState(AgentState.Thinking);
+                                var finalMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
+
+                                if (finalMessage != null && finalMessage.ToolCalls != null && finalMessage.ToolCalls.Count > 0)
+                                {
+                                    finalMessage.ToolCalls.Clear();
+                                }
+
+                                HandleFinalResponse(finalMessage, assistantTurn);
+                                break;
+                            }
+
+                            assistantTurn.IsStreaming = true;
+                        }
+
+                        // 检查是否因达到最大轮次而退出
+                        if (currentRound >= maxRounds && CurrentState != AgentState.Idle)
+                        {
+                            _messages.Add(ChatMessage.System(
+                                "[SYSTEM] 你已达到工具调用上限（" + maxRounds + "轮）。" +
+                                "你现在必须立即停止调用任何工具，直接用纯文本总结当前已完成的工作进度和结果。" +
+                                "不要再发起任何 tool_call。"));
+
+                            assistantTurn.IsStreaming = true;
+                            SetState(AgentState.Thinking);
+                            var summaryMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
+
+                            if (summaryMessage != null && summaryMessage.ToolCalls != null && summaryMessage.ToolCalls.Count > 0)
+                            {
+                                summaryMessage.ToolCalls.Clear();
+                            }
+
+                            HandleFinalResponse(summaryMessage, assistantTurn);
+                        }
+
+                        EmitEvent(AgentEvent.LoopCompleted(currentRound));
+
+                        // 自动保存会话
+                        try
+                        {
+                            SessionManager.Instance.AutoSave(
+                                new List<ChatMessage>(_messages),
+                                new List<ConversationTurn>(_conversationTurns));
+                        }
+                        catch (Exception saveEx)
+                        {
+                            Debug.LogWarning($"[AgentCore] Resume auto-save failed: {saveEx.Message}");
+                        }
+
+                        SetState(AgentState.Idle);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Debug.Log("[AgentCore] Resume LLM call was cancelled.");
+                        assistantTurn.IsStreaming = false;
+                        SetState(AgentState.Idle);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"[AgentCore] Error during resume LLM call: {ex}");
+                        assistantTurn.IsStreaming = false;
+                        EmitEvent(AgentEvent.ErrorEvent($"Domain Reload recovery failed: {ex.Message}"));
+                        SetState(AgentState.Error);
+                        SetState(AgentState.Idle);
+                    }
+                },
+                onError: ex => Debug.LogError($"[AgentCore] TriggerResumeLLMCall error: {ex.Message}")
+            );
+        }
+
+        #endregion
+
         #region 资源清理
 
         /// <summary>
@@ -1045,6 +1785,9 @@ namespace AgentCore.Editor.Core
         /// </summary>
         public void Dispose()
         {
+            // Domain Reload Resilience: 取消注册 beforeAssemblyReload 事件
+            AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
+
             // 取消当前操作
             Cancel();
 

@@ -26,6 +26,36 @@
     min-height: 30px;
 }
 
+#sidebar-toggle-button {
+    width: 28px;
+    height: 24px;
+    font-size: 14px;
+    -unity-font-style: bold;
+    padding: 0;
+    margin: 0 6px 0 0;
+    border-radius: 4px;
+    background-color: #505050;
+    border-width: 1px;
+    border-color: #3a3a3a;
+    color: #cccccc;
+    -unity-text-align: middle-center;
+}
+
+#sidebar-toggle-button:hover {
+    background-color: #606060;
+    border-color: #4a86c8;
+}
+
+#sidebar-toggle-button:active {
+    background-color: #3a3a3a;
+}
+
+#sidebar-toggle-button.sidebar-active {
+    background-color: #4a86c8;
+    border-color: #5a96d8;
+    color: #ffffff;
+}
+
 #title-label {
     font-size: 13px;
     -unity-font-style: bold;
@@ -63,6 +93,153 @@
 
 #reset-button:active {
     background-color: #3a3a3a;
+}
+
+/* --- 主体区域（侧边栏 + 聊天区域） --- */
+#main-body {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: row;
+    overflow: hidden;
+}
+
+/* --- 会话侧边栏 --- */
+#session-sidebar {
+    width: 200px;
+    min-width: 200px;
+    max-width: 200px;
+    flex-shrink: 0;
+    flex-direction: column;
+    background-color: #252525;
+    border-right-width: 1px;
+    border-right-color: #1a1a1a;
+    display: none;
+}
+
+#session-sidebar.sidebar-visible {
+    display: flex;
+}
+
+/* 侧边栏头部 */
+#sidebar-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    background-color: #2a2a2a;
+    border-bottom-width: 1px;
+    border-bottom-color: #1a1a1a;
+    min-height: 32px;
+    flex-shrink: 0;
+}
+
+#sidebar-title {
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: #aaaaaa;
+}
+
+#new-session-button {
+    height: 22px;
+    font-size: 11px;
+    padding: 0 8px;
+    margin: 0;
+    border-radius: 4px;
+    background-color: #4a86c8;
+    border-width: 0;
+    color: #ffffff;
+    -unity-font-style: bold;
+}
+
+#new-session-button:hover {
+    background-color: #5a96d8;
+}
+
+#new-session-button:active {
+    background-color: #3a76b8;
+}
+
+/* 会话列表滚动区域 */
+#session-list-scroll {
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+#session-list-container {
+    flex-direction: column;
+    padding: 2px 0;
+}
+
+/* 会话列表项 */
+.session-item {
+    flex-direction: column;
+    padding: 8px 10px;
+    margin: 1px 4px;
+    border-radius: 4px;
+    background-color: transparent;
+    border-left-width: 3px;
+    border-left-color: transparent;
+}
+
+.session-item:hover {
+    background-color: #333333;
+}
+
+.session-item.session-active {
+    background-color: #2d3a4a;
+    border-left-color: #4a86c8;
+}
+
+.session-item-title {
+    font-size: 13px;
+    color: #d4d4d4;
+    -unity-font-style: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 2px;
+}
+
+.session-item.session-active .session-item-title {
+    color: #e8e8e8;
+}
+
+.session-item-time {
+    font-size: 11px;
+    color: #777777;
+}
+
+.session-item.session-active .session-item-time {
+    color: #8899aa;
+}
+
+/* 会话项内联重命名输入框 */
+.session-rename-field {
+    font-size: 13px;
+    color: #d4d4d4;
+    background-color: #1e1e1e;
+    border-width: 1px;
+    border-color: #4a86c8;
+    border-radius: 3px;
+    padding: 2px 4px;
+    margin: 0;
+    height: 20px;
+}
+
+.session-rename-field > #unity-text-input {
+    background-color: #1e1e1e;
+    border-width: 0;
+    padding: 1px 4px;
+    color: #d4d4d4;
+    font-size: 13px;
+}
+
+/* --- 聊天内容区域 --- */
+#chat-area {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* --- 消息滚动区域 --- */
@@ -187,4 +364,125 @@
 
 #cancel-button:active {
     background-color: #b83a3a;
+}
+
+/* ============================================================
+ * Domain Reload 恢复通知卡片样式
+ * 琥珀色/橙色主题，深色背景，与现有 UI 风格协调
+ * ============================================================ */
+
+/* --- 通知卡片容器 --- */
+.domain-reload-notification {
+    flex-direction: column;
+    margin: 8px 12px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    background-color: #2a2520;
+    border-width: 1px;
+    border-color: #8b6914;
+    border-left-width: 3px;
+    border-left-color: #d4a017;
+}
+
+/* --- 标题行（图标 + 文字） --- */
+.domain-reload-notification__header {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.domain-reload-notification__header-icon {
+    font-size: 14px;
+    color: #d4a017;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+.domain-reload-notification__header-text {
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: #d4a017;
+    flex-grow: 1;
+}
+
+/* --- 详情行 --- */
+.domain-reload-notification__detail {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 2px;
+    margin-bottom: 1px;
+    margin-left: 20px;
+}
+
+.domain-reload-notification__detail-label {
+    font-size: 11px;
+    color: #999080;
+    min-width: 72px;
+    flex-shrink: 0;
+}
+
+.domain-reload-notification__detail-value {
+    font-size: 11px;
+    color: #c8b890;
+    flex-grow: 1;
+}
+
+/* --- 状态行 --- */
+.domain-reload-notification__status {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top-width: 1px;
+    border-top-color: #3a3530;
+}
+
+.domain-reload-notification__status-icon {
+    font-size: 12px;
+    margin-right: 6px;
+    flex-shrink: 0;
+    color: #d4a017;
+}
+
+.domain-reload-notification__status-text {
+    font-size: 11px;
+    color: #b8a878;
+}
+
+/* --- 成功状态修饰 --- */
+.domain-reload-notification--success .domain-reload-notification__status-icon {
+    color: #5cb85c;
+}
+
+.domain-reload-notification--success .domain-reload-notification__status-text {
+    color: #7dce7d;
+}
+
+.domain-reload-notification--success {
+    border-left-color: #5cb85c;
+    border-color: #3a6b3a;
+}
+
+/* --- 失败状态修饰 --- */
+.domain-reload-notification--error .domain-reload-notification__status-icon {
+    color: #d9534f;
+}
+
+.domain-reload-notification--error .domain-reload-notification__status-text {
+    color: #e8706c;
+}
+
+.domain-reload-notification--error {
+    border-left-color: #d9534f;
+    border-color: #6b3a3a;
+}
+
+/* --- 编译成功标记 --- */
+.domain-reload-notification__compile-success {
+    color: #5cb85c;
+}
+
+/* --- 编译失败标记 --- */
+.domain-reload-notification__compile-error {
+    color: #d9534f;
 }

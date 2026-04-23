@@ -2,23 +2,43 @@
   <ui:VisualElement name="root-container">
     <!-- 顶部工具栏 -->
     <ui:VisualElement name="toolbar">
+      <ui:Button name="sidebar-toggle-button" text="=" tooltip="切换会话列表" />
       <ui:Label name="title-label" text="AgentCore Chat" />
       <ui:VisualElement name="toolbar-spacer" />
       <ui:Label name="status-label" text="就绪" />
       <ui:Button name="reset-button" text="重置" tooltip="重置对话" />
     </ui:VisualElement>
 
-    <!-- 消息列表区域（可滚动） -->
-    <ui:ScrollView name="message-scroll-view">
-      <ui:VisualElement name="message-container" />
-    </ui:ScrollView>
+    <!-- 主体区域（侧边栏 + 聊天区域） -->
+    <ui:VisualElement name="main-body">
+      <!-- 会话侧边栏（默认隐藏） -->
+      <ui:VisualElement name="session-sidebar">
+        <!-- 侧边栏头部 -->
+        <ui:VisualElement name="sidebar-header">
+          <ui:Label name="sidebar-title" text="会话列表" />
+          <ui:Button name="new-session-button" text="+ 新建" tooltip="新建会话" />
+        </ui:VisualElement>
+        <!-- 会话列表滚动区域 -->
+        <ui:ScrollView name="session-list-scroll">
+          <ui:VisualElement name="session-list-container" />
+        </ui:ScrollView>
+      </ui:VisualElement>
 
-    <!-- 底部输入区域 -->
-    <ui:VisualElement name="input-area">
-      <ui:TextField name="input-field" multiline="true" />
-      <ui:VisualElement name="input-buttons">
-        <ui:Button name="send-button" text="发送" />
-        <ui:Button name="cancel-button" text="取消" />
+      <!-- 聊天内容区域 -->
+      <ui:VisualElement name="chat-area">
+        <!-- 消息列表区域（可滚动） -->
+        <ui:ScrollView name="message-scroll-view">
+          <ui:VisualElement name="message-container" />
+        </ui:ScrollView>
+
+        <!-- 底部输入区域 -->
+        <ui:VisualElement name="input-area">
+          <ui:TextField name="input-field" multiline="true" />
+          <ui:VisualElement name="input-buttons">
+            <ui:Button name="send-button" text="发送" />
+            <ui:Button name="cancel-button" text="取消" />
+          </ui:VisualElement>
+        </ui:VisualElement>
       </ui:VisualElement>
     </ui:VisualElement>
   </ui:VisualElement>

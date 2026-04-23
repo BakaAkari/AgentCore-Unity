@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine.UIElements;
 
@@ -21,6 +22,29 @@ namespace AgentCore.Editor.UI.Components
         private static readonly Regex ExcessiveNewlinesRegex = new(@"(\s*\n){3,}", RegexOptions.Compiled);
 
         /// <summary>
+        /// 已知 emoji → SDF 字体安全替代字符的映射表。
+        /// 仅收录在 LLM 响应中高频出现且 Inter-Regular SDF 不支持的 emoji。
+        /// </summary>
+        private static readonly (string Emoji, string Replacement)[] EmojiReplacements =
+        {
+            ("\U0001F4F7", "[Cam]"),   // 📷 Camera
+            ("\U0001F50D", "[Find]"),  // 🔍 Magnifying Glass
+            ("\U0001F4D0", "[Tool]"),  // 📐 Triangular Ruler
+            ("\U0001F4A1", "[Idea]"),  // 💡 Light Bulb
+            ("\U0001F680", "[Go]"),    // 🚀 Rocket
+            ("\U0001F4E6", "[Pkg]"),   // 📦 Package
+            ("\U0001F527", "[Fix]"),   // 🔧 Wrench
+            ("\U0001F6E0", "[Build]"), // 🛠 Hammer and Wrench
+            ("\U0001F4DD", "[Note]"),  // 📝 Memo
+            ("\U0001F4C1", "[Dir]"),   // 📁 Folder
+            ("\U0001F4C4", "[File]"),  // 📄 Page Facing Up
+            ("\U0001F3AF", "[Hit]"),   // 🎯 Bullseye
+            ("\U0001F4CA", "[Chart]"), // 📊 Bar Chart
+            ("\U0001F512", "[Lock]"),  // 🔒 Lock
+            ("\U0001F513", "[Open]"),  // 🔓 Unlock
+        };
+
+        /// <summary>
         /// 过滤完整的 tool_call 和 tool_result 标签及其内容。
         /// 用于最终化消息时的完整过滤。
         /// </summary>
@@ -34,6 +58,8 @@ namespace AgentCore.Editor.UI.Components
             filtered = ToolResultRegex.Replace(filtered, "");
             // 压缩过滤后产生的连续空行（3个以上换行 → 2个换行）
             filtered = ExcessiveNewlinesRegex.Replace(filtered, "\n\n");
+            // 替换 SDF 字体不支持的 emoji 字符
+            filtered = SanitizeUnsupportedEmoji(filtered);
             return filtered.Trim();
         }
 
@@ -56,10 +82,69 @@ namespace AgentCore.Editor.UI.Components
 
             // 压缩过滤后产生的连续空行（3个以上换行 → 2个换行）
             filtered = ExcessiveNewlinesRegex.Replace(filtered, "\n\n");
+            // 替换 SDF 字体不支持的 emoji 字符
+            filtered = SanitizeUnsupportedEmoji(filtered);
             // 去除开头的空行，保留末尾的自然截断
             filtered = filtered.TrimStart('\n', '\r');
 
             return filtered.TrimEnd();
+        }
+
+        /// <summary>
+        /// 替换 SDF 字体不支持的 emoji 字符。
+        /// <para>
+        /// Unity 的 Inter-Regular SDF 字体不包含 Supplementary Multilingual Plane (U+10000+) 中的
+        /// emoji 字符（如 📷🔍📐 等），渲染时会显示为方块 (□)。
+        /// 此方法将已知的高频 emoji 替换为可读的 ASCII 标签，
+        /// 并将其余未映射的 SMP 字符（surrogate pairs）静默移除。
+        /// </para>
+        /// </summary>
+        /// <param name="text">可能包含 emoji 的文本</param>
+        /// <returns>替换后的 SDF 字体安全文本</returns>
+        internal static string SanitizeUnsupportedEmoji(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            // 快速路径：如果没有 surrogate pairs，直接返回
+            bool hasSurrogates = false;
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (char.IsHighSurrogate(text[i]))
+                {
+                    hasSurrogates = true;
+                    break;
+                }
+            }
+            if (!hasSurrogates) return text;
+
+            // 先替换已知的 emoji 映射
+            var result = text;
+            foreach (var (emoji, replacement) in EmojiReplacements)
+            {
+                if (result.Contains(emoji))
+                {
+                    result = result.Replace(emoji, replacement);
+                }
+            }
+
+            // 移除剩余的未映射 surrogate pairs（SMP 字符）
+            // 这些字符在 SDF 字体中几乎都不支持
+            var sb = new StringBuilder(result.Length);
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (char.IsHighSurrogate(result[i]))
+                {
+                    // 跳过 surrogate pair（高代理 + 低代理）
+                    if (i + 1 < result.Length && char.IsLowSurrogate(result[i + 1]))
+                    {
+                        i++; // 跳过低代理
+                    }
+                    continue;
+                }
+                sb.Append(result[i]);
+            }
+
+            return sb.ToString();
         }
     }
 

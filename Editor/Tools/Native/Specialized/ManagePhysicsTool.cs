@@ -232,10 +232,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             rb.mass = ToolHelpers.GetOptionalFloat(parameters, "mass", 1f);
 
             if (parameters["drag"] != null)
-                rb.linearDamping = ToolHelpers.GetOptionalFloat(parameters, "drag", 0f);
+                rb.drag = ToolHelpers.GetOptionalFloat(parameters, "drag", 0f);
 
             if (parameters["angular_drag"] != null)
-                rb.angularDamping = ToolHelpers.GetOptionalFloat(parameters, "angular_drag", 0.05f);
+                rb.angularDrag = ToolHelpers.GetOptionalFloat(parameters, "angular_drag", 0.05f);
 
             rb.useGravity = ToolHelpers.GetOptionalBool(parameters, "use_gravity", true);
             rb.isKinematic = ToolHelpers.GetOptionalBool(parameters, "is_kinematic", false);
@@ -253,8 +253,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             {
                 ["target"] = go.name,
                 ["mass"] = rb.mass,
-                ["drag"] = rb.linearDamping,
-                ["angularDrag"] = rb.angularDamping,
+                ["drag"] = rb.drag,
+                ["angularDrag"] = rb.angularDrag,
                 ["useGravity"] = rb.useGravity,
                 ["isKinematic"] = rb.isKinematic,
                 ["constraints"] = rb.constraints.ToString()

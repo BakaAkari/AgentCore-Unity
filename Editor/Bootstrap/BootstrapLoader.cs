@@ -12,13 +12,13 @@ namespace AgentCore.Editor.Bootstrap
     /// <summary>
     /// Bootstrap Files 加载器。
     /// 负责加载所有 Bootstrap 文件并编译为完整的 System Prompt。
-    /// 
+    ///
     /// 加载顺序：
     /// 1. SOUL.md — 内置角色定义（包内资源）
     /// 2. TOOLS.md — 工具使用指南（从模板生成）
     /// 3. PROJECT.md — 项目上下文（自动收集）
-    /// 4. MEMORY.md — 本地知识文件（用户可编辑，项目根目录/AgentCore/MEMORY.md）
-    /// 5. USER.md — 用户偏好（用户可编辑，项目根目录/AgentCore/USER.md）
+    /// 4. MEMORY.md — 本地知识文件（用户可编辑，优先项目根目录，其次 AgentCore/ 子目录）
+    /// 5. USER.md — 用户偏好（用户可编辑，优先项目根目录，其次 AgentCore/ 子目录）
     /// </summary>
     public class BootstrapLoader
     {
@@ -70,9 +70,17 @@ namespace AgentCore.Editor.Bootstrap
 
             // 4. MEMORY.md — 用户本地知识文件
             context.Memory = LoadUserFile("MEMORY.md");
+            if (!string.IsNullOrEmpty(context.Memory))
+            {
+                Debug.Log($"[AgentCore] Loaded MEMORY.md ({context.Memory.Length} chars)");
+            }
 
             // 5. USER.md — 用户偏好
             context.User = LoadUserFile("USER.md");
+            if (!string.IsNullOrEmpty(context.User))
+            {
+                Debug.Log($"[AgentCore] Loaded USER.md ({context.User.Length} chars)");
+            }
 
             var tokenEstimate = context.EstimateTokenCount();
             Debug.Log($"[AgentCore] Bootstrap loaded: ~{tokenEstimate} tokens " +
@@ -327,15 +335,31 @@ namespace AgentCore.Editor.Bootstrap
 
         /// <summary>
         /// 加载用户可编辑的文件（MEMORY.md 或 USER.md）。
-        /// 文件位于 Unity 项目根目录的 AgentCore/ 子目录下。
+        /// 按优先级查找：
+        /// 1. 项目根目录（Application.dataPath 的父目录）
+        /// 2. 项目根目录下的 AgentCore/ 子目录
         /// </summary>
         private string LoadUserFile(string fileName)
         {
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (projectRoot == null) return null;
 
-            var filePath = Path.Combine(projectRoot, "AgentCore", fileName);
-            if (!File.Exists(filePath))
+            // 优先查找项目根目录
+            var rootPath = Path.Combine(projectRoot, fileName);
+            // 其次查找 AgentCore/ 子目录
+            var agentCorePath = Path.Combine(projectRoot, "AgentCore", fileName);
+
+            string filePath = null;
+            if (File.Exists(rootPath))
+            {
+                filePath = rootPath;
+            }
+            else if (File.Exists(agentCorePath))
+            {
+                filePath = agentCorePath;
+            }
+
+            if (filePath == null)
             {
                 return null;
             }

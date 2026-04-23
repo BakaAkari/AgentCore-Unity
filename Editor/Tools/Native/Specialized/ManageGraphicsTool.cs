@@ -167,7 +167,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
         private ToolResponse HandleSetRenderSettings(JObject parameters)
         {
-            Undo.RecordObject(RenderSettings.GetRenderSettings(), "AgentCore: Set Render Settings");
+            // Note: RenderSettings is a static class in Unity 2022.3, Undo not directly supported
 
             var ambientModeStr = ToolHelpers.GetOptionalString(parameters, "ambient_mode");
             if (!string.IsNullOrEmpty(ambientModeStr))
@@ -232,7 +232,9 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 RenderSettings.skybox = mat;
             }
 
-            EditorUtility.SetDirty(RenderSettings.GetRenderSettings());
+            // RenderSettings is static in Unity 2022.3; mark scene dirty instead
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
+                UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene());
             return ToolResponse.Ok("Render settings updated.");
         }
 

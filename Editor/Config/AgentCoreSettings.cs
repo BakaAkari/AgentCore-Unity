@@ -11,6 +11,10 @@ namespace AgentCore.Editor.Config
     [FilePath("AgentCore/Settings.asset", FilePathAttribute.Location.PreferencesFolder)]
     public class AgentCoreSettings : ScriptableSingleton<AgentCoreSettings>
     {
+        // --- 版本迁移 ---
+        [SerializeField] private int settingsVersion = 0;
+        private const int CurrentVersion = 1;
+
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
         [Tooltip("LLM API 端点地址（OpenAI 兼容）")]
@@ -29,10 +33,13 @@ namespace AgentCore.Editor.Config
         // --- Agent 行为 ---
         [Header("Agent Behavior")]
         [Tooltip("最大工具调用轮次（防止无限循环）")]
-        public int maxToolCallRounds = 25;
+        public int maxToolCallRounds = 50;
 
-        [Tooltip("上下文窗口 token 上限")]
-        public int contextWindowTokens = 8000;
+        [Tooltip("上下文窗口 token 上限（0 = 自动根据模型名称推断）")]
+        public int maxContextTokens = 0;
+
+        [Tooltip("为 AI 回复预留的 token 数")]
+        public int reserveResponseTokens = 2000;
 
         // --- 自主纠错配置 ---
         [Header("Self-Correction")]
@@ -62,7 +69,13 @@ namespace AgentCore.Editor.Config
         public bool mem0Enabled = false;
 
         [Tooltip("mem0 服务端点")]
-        public string mem0Endpoint = "http://localhost:18910";
+        public string mem0Endpoint = "http://localhost:8765";
+
+        [Tooltip("启用自动记忆策略（会话结束时自动提取关键信息存入 mem0）")]
+        public bool autoMemoryEnabled = true;
+
+        [Tooltip("触发自动记忆的最小用户对话轮次")]
+        public int autoMemoryMinTurns = 3;
 
         // --- LightRAG 配置（Phase 3 使用，Phase 1 预留）---
         [Header("Knowledge Base - LightRAG")]
@@ -75,7 +88,7 @@ namespace AgentCore.Editor.Config
         // --- 用户标识 ---
         [Header("User")]
         [Tooltip("用户 ID（用于 mem0 记忆隔离）")]
-        public string userId = "";
+        public string userId = "unity-agent";
 
         // --- UI 偏好 ---
         [Header("UI Preferences")]
@@ -84,6 +97,37 @@ namespace AgentCore.Editor.Config
 
         [Tooltip("显示工具调用详情")]
         public bool showToolCallDetails = true;
+
+        /// <summary>
+        /// ScriptableSingleton 加载后自动调用。
+        /// 执行版本迁移逻辑，确保旧配置自动更新。
+        /// </summary>
+        private void OnEnable()
+        {
+            if (settingsVersion < CurrentVersion)
+            {
+                MigrateSettings();
+            }
+        }
+
+        /// <summary>
+        /// 执行设置版本迁移。
+        /// </summary>
+        private void MigrateSettings()
+        {
+            // v0 -> v1: 修正 mem0 默认端点（旧值 18910 → 新值 8765）
+            if (settingsVersion < 1)
+            {
+                if (mem0Endpoint == "http://localhost:18910")
+                {
+                    mem0Endpoint = "http://localhost:8765";
+                    Debug.Log("[AgentCore] Settings migrated v0→v1: mem0Endpoint updated to http://localhost:8765");
+                }
+            }
+
+            settingsVersion = CurrentVersion;
+            Save(true);
+        }
 
         /// <summary>
         /// 保存设置到磁盘。
