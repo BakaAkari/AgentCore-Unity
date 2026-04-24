@@ -6,7 +6,6 @@
       <ui:Label name="title-label" text="AgentCore Chat" />
       <ui:VisualElement name="toolbar-spacer" />
       <ui:Label name="status-label" text="就绪" />
-      <ui:Button name="reset-button" text="重置" tooltip="重置对话" />
     </ui:VisualElement>
 
     <!-- 主体区域（侧边栏 + 聊天区域） -->

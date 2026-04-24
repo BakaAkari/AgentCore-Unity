@@ -103,6 +103,9 @@ namespace AgentCore.Editor.Core
         /// <summary>工具名称（工具调用事件时有值）</summary>
         public string ToolName { get; }
 
+        /// <summary>工具调用唯一标识（LLM 返回的 tool_call id，用于区分同名工具的多次调用）</summary>
+        public string ToolCallId { get; }
+
         /// <summary>工具参数（JSON string，<see cref="AgentEventType.ToolCallStarted"/> 时有值）</summary>
         public string ToolArguments { get; }
 
@@ -127,6 +130,7 @@ namespace AgentCore.Editor.Core
             string content = null,
             string messageId = null,
             string toolName = null,
+            string toolCallId = null,
             string toolArguments = null,
             string toolResult = null,
             int currentRound = 0,
@@ -138,6 +142,7 @@ namespace AgentCore.Editor.Core
             Content = content;
             MessageId = messageId;
             ToolName = toolName;
+            ToolCallId = toolCallId;
             ToolArguments = toolArguments;
             ToolResult = toolResult;
             CurrentRound = currentRound;
@@ -209,11 +214,12 @@ namespace AgentCore.Editor.Core
         /// <param name="arguments">工具参数（JSON string）</param>
         /// <param name="messageId">关联的消息 ID</param>
         /// <returns>工具调用开始事件</returns>
-        public static AgentEvent ToolCallStarted(string toolName, string arguments, string messageId = null)
+        public static AgentEvent ToolCallStarted(string toolName, string arguments, string messageId = null, string toolCallId = null)
         {
             return new AgentEvent(
                 AgentEventType.ToolCallStarted,
                 toolName: toolName,
+                toolCallId: toolCallId,
                 toolArguments: arguments,
                 messageId: messageId
             );
@@ -227,11 +233,12 @@ namespace AgentCore.Editor.Core
         /// <param name="executionTimeMs">执行耗时（毫秒）</param>
         /// <param name="messageId">关联的消息 ID</param>
         /// <returns>工具调用完成事件</returns>
-        public static AgentEvent ToolCallCompleted(string toolName, string result, double executionTimeMs, string messageId = null)
+        public static AgentEvent ToolCallCompleted(string toolName, string result, double executionTimeMs, string messageId = null, string toolCallId = null)
         {
             return new AgentEvent(
                 AgentEventType.ToolCallCompleted,
                 toolName: toolName,
+                toolCallId: toolCallId,
                 toolResult: result,
                 executionTimeMs: executionTimeMs,
                 messageId: messageId
@@ -246,11 +253,12 @@ namespace AgentCore.Editor.Core
         /// <param name="executionTimeMs">执行耗时（毫秒）</param>
         /// <param name="messageId">关联的消息 ID</param>
         /// <returns>工具调用失败事件</returns>
-        public static AgentEvent ToolCallFailed(string toolName, string error, double executionTimeMs, string messageId = null)
+        public static AgentEvent ToolCallFailed(string toolName, string error, double executionTimeMs, string messageId = null, string toolCallId = null)
         {
             return new AgentEvent(
                 AgentEventType.ToolCallFailed,
                 toolName: toolName,
+                toolCallId: toolCallId,
                 toolResult: error,
                 executionTimeMs: executionTimeMs,
                 messageId: messageId

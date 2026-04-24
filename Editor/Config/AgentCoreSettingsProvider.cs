@@ -431,17 +431,18 @@ namespace AgentCore.Editor.Config
             EditorGUILayout.Space(5);
             EditorGUILayout.LabelField("用户管理", EditorStyles.miniBoldLabel);
 
-            // User ID
-            _settings.userId = EditorGUILayout.TextField(
-                new GUIContent("User ID", "用户 ID（用于 mem0 记忆隔离）"),
-                _settings.userId);
+            // User ID — 只读显示系统自动生成的 ID
+            GUI.enabled = false;
+            EditorGUILayout.TextField(
+                new GUIContent("User ID", "系统自动生成的唯一用户标识（用于 mem0 记忆隔离）"),
+                _settings.EffectiveUserId);
+            GUI.enabled = true;
 
             // User ID 检测/创建按钮
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(EditorGUI.indentLevel * 15 + EditorGUIUtility.labelWidth + 2);
 
             GUI.enabled = !_isCheckingUserId && !_isCreatingUserId
-                          && !string.IsNullOrEmpty(_settings.userId)
                           && !string.IsNullOrWhiteSpace(_settings.mem0Endpoint);
             if (GUILayout.Button(_isCheckingUserId ? "检测中..." : "检测 ID", GUILayout.Width(80)))
             {
@@ -621,7 +622,7 @@ namespace AgentCore.Editor.Config
                     var client = new Mem0Client(
                         _settings.mem0Endpoint,
                         SecureKeyStorage.GetMem0ApiKey(),
-                        _settings.userId
+                        _settings.EffectiveUserId
                     );
 
                     var (success, message) = await client.TestConnectionAsync();
@@ -696,7 +697,7 @@ namespace AgentCore.Editor.Config
                     var client = new Mem0Client(
                         _settings.mem0Endpoint,
                         SecureKeyStorage.GetMem0ApiKey(),
-                        _settings.userId
+                        _settings.EffectiveUserId
                     );
 
                     // A3: 前置连通性检查
@@ -757,7 +758,7 @@ namespace AgentCore.Editor.Config
                     var client = new Mem0Client(
                         _settings.mem0Endpoint,
                         SecureKeyStorage.GetMem0ApiKey(),
-                        _settings.userId
+                        _settings.EffectiveUserId
                     );
 
                     // A3: 前置连通性检查

@@ -73,28 +73,6 @@
     margin-right: 8px;
 }
 
-#reset-button {
-    min-width: 48px;
-    height: 24px;
-    font-size: 12px;
-    padding: 0 6px;
-    margin: 0;
-    border-radius: 4px;
-    background-color: #505050;
-    border-width: 1px;
-    border-color: #3a3a3a;
-    color: #cccccc;
-}
-
-#reset-button:hover {
-    background-color: #606060;
-    border-color: #4a86c8;
-}
-
-#reset-button:active {
-    background-color: #3a3a3a;
-}
-
 /* --- 主体区域（侧边栏 + 聊天区域） --- */
 #main-body {
     flex-grow: 1;
@@ -485,4 +463,69 @@
 /* --- 编译失败标记 --- */
 .domain-reload-notification__compile-error {
     color: #d9534f;
+}
+
+/* ============================================================
+ * 工具调用分组容器样式
+ * 将所有工具调用统一在一个可折叠的容器中
+ * ============================================================ */
+
+/* --- 分组容器根 --- */
+.tool-call-group {
+    flex-direction: column;
+    margin: 4px 8px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #383838;
+    border-left-width: 3px;
+    border-left-color: #4A90D9;
+    overflow: hidden;
+}
+
+/* --- 分组头部（可点击） --- */
+.tool-call-group__header {
+    flex-direction: row;
+    align-items: center;
+    background-color: #333333;
+    padding: 6px 10px;
+    min-height: 28px;
+}
+
+.tool-call-group__header:hover {
+    background-color: #3D3D3D;
+}
+
+/* --- 折叠箭头 --- */
+.tool-call-group__arrow {
+    font-size: 10px;
+    color: #888888;
+    margin-right: 6px;
+    min-width: 14px;
+    -unity-text-align: middle-center;
+    flex-shrink: 0;
+}
+
+/* --- 标题文本 --- */
+.tool-call-group__title {
+    font-size: 12px;
+    color: #D4D4D4;
+    -unity-font-style: bold;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+/* --- 摘要标签 --- */
+.tool-call-group__summary {
+    font-size: 11px;
+    color: #888888;
+    flex-grow: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- 内容区域 --- */
+.tool-call-group__content {
+    flex-direction: column;
+    background-color: #292929;
+    padding: 2px 0;
 }

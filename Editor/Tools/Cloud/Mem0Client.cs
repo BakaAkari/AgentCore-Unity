@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
@@ -175,7 +175,22 @@ namespace AgentCore.Editor.Cloud
 
             _baseUrl = baseUrl.TrimEnd('/');
             _apiKey = apiKey;
-            _userId = !string.IsNullOrEmpty(userId) ? userId : "unity-agent";
+
+            // 防御性检查：始终使用系统生成的 ID（基于 MachineName + UserName + ProductName 哈希，实现项目级记忆隔离），
+            // 忽略任何非 "unity-" 前缀的旧值
+            var systemId = AgentCoreSettings.GenerateSystemUserId();
+            if (!string.IsNullOrEmpty(userId) && userId.StartsWith("unity-"))
+            {
+                _userId = userId;
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(userId))
+                {
+                    Debug.LogWarning($"[AgentCore] Mem0Client: 忽略非系统格式的 userId '{userId}'，使用系统生成 ID '{systemId}'");
+                }
+                _userId = systemId;
+            }
         }
 
         /// <summary>
@@ -195,7 +210,7 @@ namespace AgentCore.Editor.Cloud
             return new Mem0Client(
                 settings.mem0Endpoint,
                 SecureKeyStorage.GetMem0ApiKey(),
-                settings.userId
+                settings.EffectiveUserId
             );
         }
 

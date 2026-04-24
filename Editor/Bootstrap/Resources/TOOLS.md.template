@@ -1,11 +1,46 @@
-## 可用工具概览
+# Available Tools
 
 {{ACTIVE_TOOLS_LIST}}
 
-## 工具使用最佳实践
+## Tool Usage Best Practices
 
-1. **修改脚本后始终验证**：`manage_script` 或 `script_apply_edits` 后，调用 `refresh_unity` + `read_console` 检查编译错误
-2. **操作前先确认目标**：操作 GameObject 前用 `find_gameobjects` 确认存在
-3. **批量操作用 batch_execute**：多个独立操作可合并执行，提高效率
-4. **读取文件前确认路径**：用 `list_directory` 确认文件存在
-5. **代码执行要谨慎**：`execute_code` 在 Editor 进程中运行，避免死循环或阻塞操作
+### Script Operations
+- Use `manage_script` (actions: `read`, `write`, `create`, `delete`, `list`, `get_info`) for all C# file operations.
+- After `write` or `create`, call `manage_editor` (action: `refresh`) then check console for compile errors.
+- Script changes trigger Domain Reload — wait for compilation before calling other tools.
+- To create from template: action `create` with `template` (monobehaviour, scriptableobject, editor, editorwindow, custom_editor, plain).
+
+### GameObject & Component Operations
+- **Search first**: Always use `find_gameobjects` (by `searchTerm`, `tag`, `layer`, or `componentType`) to confirm a target exists and get its `instanceId` before modifying.
+- Use `manage_gameobject` (actions: `create`, `delete`, `get_info`, `modify`, `set_transform`, `set_parent`, `duplicate`) for GameObject CRUD.
+- Use `manage_component` (actions: `add`, `remove`, `get`, `list`, `modify`, `set_enabled`) for component operations — NOT `manage_gameobject`.
+- Prefer `instanceId` over name for targeting — names can be duplicated.
+
+### Scene Operations
+- Use `manage_scene` (actions: `list`, `get_hierarchy`, `get_active`, `create`, `open`, `save`, `set_active`).
+- Call `get_hierarchy` to understand scene structure before bulk operations.
+- Save the scene (`save`) after significant modifications.
+
+### Asset Operations
+- Use `manage_asset` (actions: `search`, `get_info`, `create_folder`, `delete`, `move`, `copy`, `import`, `get_dependencies`).
+- To find assets: action `search` with path scope — NOT `manage_script` action `list` (which is for scripts only).
+- Check `get_dependencies` before deleting assets to avoid breaking references.
+
+### Prefab Operations
+- Use `manage_prefab` (actions: `create`, `instantiate`, `get_info`, `unpack`, `apply`, `revert`).
+- After modifying a prefab instance, use `apply` to save changes back to the prefab asset.
+
+### Batch & Code Execution
+- Use `batch_execute` to combine 2+ independent tool calls into one request — pass an `operations` array of `{tool, args}`.
+- Enable `transaction: true` in `batch_execute` for atomic operations that should rollback on failure.
+- Use `execute_code` (action: `evaluate`) for one-off C# expressions (e.g., checking API availability, reading runtime values).
+- `execute_code` runs in the Editor process — avoid infinite loops, heavy allocations, or blocking calls.
+
+### Tool Selection Guide
+- **Want to modify a script file?** → `manage_script` (action: `write`)
+- **Want to check if a GameObject exists?** → `find_gameobjects`
+- **Want to add a Rigidbody?** → `manage_component` (action: `add`), NOT `manage_gameobject`
+- **Want to find an asset by type?** → `manage_asset` (action: `search`)
+- **Want to verify a Unity API exists?** → `execute_code` (action: `evaluate`)
+- **Want to do 3+ operations at once?** → `batch_execute`
+- **Want to control Play Mode?** → `manage_editor` (action: `play_mode`)

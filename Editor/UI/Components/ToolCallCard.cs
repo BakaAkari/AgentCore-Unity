@@ -28,6 +28,14 @@ namespace AgentCore.Editor.UI.Components
     /// 支持 Pending/Running/Completed/Failed 四种状态，可展开/折叠查看详情。
     /// </para>
     /// <para>
+    /// 折叠策略：
+    /// - 已完成（成功）的工具调用：默认折叠，只显示工具名 + 状态 + 耗时
+    /// - 失败的工具调用：默认展开，显示错误信息
+    /// - 正在执行的工具调用：展开显示
+    /// - 等待中的工具调用：折叠显示
+    /// - 用户可以点击切换折叠/展开状态
+    /// </para>
+    /// <para>
     /// 纯代码构建 UI，不依赖外部 UXML/USS 文件。
     /// </para>
     /// </summary>
@@ -43,12 +51,17 @@ namespace AgentCore.Editor.UI.Components
         private static readonly Color TextPrimary = new Color(0.831f, 0.831f, 0.831f);     // #D4D4D4
         private static readonly Color TextSecondary = new Color(0.533f, 0.533f, 0.533f);   // #888888
         private static readonly Color DetailsBg = new Color(0.153f, 0.153f, 0.153f);       // #272727
+        private static readonly Color ToggleArrowColor = new Color(0.45f, 0.45f, 0.45f);   // #737373
 
         // 状态图标（纯文本字符，不使用 emoji）
         private const string IconPending = "[.]";
         private const string IconRunning = "[>]";
         private const string IconCompleted = "[v]";
         private const string IconFailed = "[x]";
+
+        // 折叠/展开箭头指示器
+        private const string ArrowCollapsed = "\u25B6"; // ▶
+        private const string ArrowExpanded = "\u25BC";  // ▼
 
         #endregion
 
@@ -57,9 +70,13 @@ namespace AgentCore.Editor.UI.Components
         private readonly Label _statusIcon;
         private readonly Label _toolNameLabel;
         private readonly Label _statusLabel;
+        private readonly Label _toggleArrow;
         private readonly VisualElement _detailsContainer;
         private readonly Label _detailsLabel;
         private bool _isExpanded;
+
+        /// <summary>是否由用户手动切换过折叠状态（手动切换后不再自动改变）</summary>
+        private bool _userToggled;
 
         #endregion
 
@@ -85,6 +102,7 @@ namespace AgentCore.Editor.UI.Components
             ToolName = toolName ?? "unknown";
             Status = ToolCallStatus.Pending;
             _isExpanded = false;
+            _userToggled = false;
 
             // === 卡片根容器样式 ===
             style.flexDirection = FlexDirection.Column;
@@ -107,7 +125,7 @@ namespace AgentCore.Editor.UI.Components
             style.borderTopRightRadius = 3;
             style.borderBottomRightRadius = 3;
 
-            // === 头部行（图标 + 工具名 + 状态文本）===
+            // === 头部行（图标 + 工具名 + 状态文本 + 折叠箭头）===
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
             headerRow.style.alignItems = Align.Center;
@@ -139,6 +157,16 @@ namespace AgentCore.Editor.UI.Components
             _statusLabel.style.marginLeft = 8;
             _statusLabel.style.flexShrink = 0;
             headerRow.Add(_statusLabel);
+
+            // 折叠/展开箭头指示器
+            _toggleArrow = new Label(ArrowCollapsed);
+            _toggleArrow.style.fontSize = 9;
+            _toggleArrow.style.color = ToggleArrowColor;
+            _toggleArrow.style.marginLeft = 6;
+            _toggleArrow.style.minWidth = 14;
+            _toggleArrow.style.unityTextAlign = TextAnchor.MiddleCenter;
+            _toggleArrow.style.flexShrink = 0;
+            headerRow.Add(_toggleArrow);
 
             Add(headerRow);
 
@@ -199,6 +227,12 @@ namespace AgentCore.Editor.UI.Components
             }
 
             UpdateStatusVisuals();
+
+            // 自动折叠/展开逻辑（仅在用户未手动切换时生效）
+            if (!_userToggled)
+            {
+                ApplyAutoExpandCollapse();
+            }
         }
 
         /// <summary>
@@ -211,16 +245,51 @@ namespace AgentCore.Editor.UI.Components
 
             _detailsLabel.text = details;
 
-            // 失败状态自动展开详情
-            if (Status == ToolCallStatus.Failed && !_isExpanded)
+            // 失败状态自动展开详情（仅在用户未手动切换时）
+            if (Status == ToolCallStatus.Failed && !_isExpanded && !_userToggled)
             {
-                ToggleDetails();
+                SetExpanded(true);
             }
         }
 
         #endregion
 
         #region 私有方法
+
+        /// <summary>
+        /// 根据状态自动决定展开/折叠。
+        /// - Running: 展开（让用户看到执行中的状态）
+        /// - Completed: 折叠（减少空间占用）
+        /// - Failed: 展开（显示错误信息）
+        /// - Pending: 折叠
+        /// </summary>
+        private void ApplyAutoExpandCollapse()
+        {
+            switch (Status)
+            {
+                case ToolCallStatus.Pending:
+                    SetExpanded(false);
+                    break;
+
+                case ToolCallStatus.Running:
+                    // Running 状态不自动展开详情区域（详情通常还没有内容）
+                    // 但保持当前状态不变
+                    break;
+
+                case ToolCallStatus.Completed:
+                    // 完成后自动折叠，减少空间占用
+                    SetExpanded(false);
+                    break;
+
+                case ToolCallStatus.Failed:
+                    // 失败时自动展开，显示错误信息
+                    if (!string.IsNullOrEmpty(_detailsLabel.text))
+                    {
+                        SetExpanded(true);
+                    }
+                    break;
+            }
+        }
 
         /// <summary>
         /// 根据当前状态更新视觉样式（图标、颜色、边框）。
@@ -272,12 +341,22 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
+        /// 设置展开/折叠状态并更新 UI。
+        /// </summary>
+        /// <param name="expanded">是否展开</param>
+        private void SetExpanded(bool expanded)
+        {
+            _isExpanded = expanded;
+            _detailsContainer.style.display = _isExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            _toggleArrow.text = _isExpanded ? ArrowExpanded : ArrowCollapsed;
+        }
+
+        /// <summary>
         /// 切换详情区域的展开/折叠状态。
         /// </summary>
         private void ToggleDetails()
         {
-            _isExpanded = !_isExpanded;
-            _detailsContainer.style.display = _isExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            SetExpanded(!_isExpanded);
         }
 
         /// <summary>
@@ -288,6 +367,7 @@ namespace AgentCore.Editor.UI.Components
             // 仅在有详情内容时才允许展开
             if (!string.IsNullOrEmpty(_detailsLabel.text))
             {
+                _userToggled = true; // 标记用户已手动切换
                 ToggleDetails();
             }
             evt.StopPropagation();

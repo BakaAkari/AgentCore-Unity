@@ -544,7 +544,7 @@ namespace AgentCore.Editor.Core
             // 4. 不再通过 EmitEvent 发送 ConversationReset 事件。
             // EmitEvent 使用 EditorApplication.delayCall 延迟执行，会导致 ClearMessages()
             // 在调用方的 RefreshSessionList() 之后才执行，造成 UI 状态混乱。
-            // UI 清空的职责由调用方（OnNewSessionClicked / OnResetClicked）直接调用 ClearMessages() 承担。
+            // UI 清空的职责由调用方（OnNewSessionClicked）直接调用 ClearMessages() 承担。
 
             // 5. Phase 3: 创建新会话
             SessionManager.Instance.CreateNewSession();
@@ -726,7 +726,7 @@ namespace AgentCore.Editor.Core
             {
                 var toolName = tc.Function?.Name ?? "(unknown)";
                 var arguments = tc.Function?.Arguments ?? "{}";
-                EmitEvent(AgentEvent.ToolCallStarted(toolName, arguments, assistantTurn.Id));
+                EmitEvent(AgentEvent.ToolCallStarted(toolName, arguments, assistantTurn.Id, tc.Id));
             }
 
             // Phase 2 Step 11: 在工具执行前启动 Console 错误捕获
@@ -836,7 +836,8 @@ namespace AgentCore.Editor.Core
                         result.ToolName,
                         contentForLLM,
                         result.ExecutionTimeMs,
-                        assistantTurn.Id
+                        assistantTurn.Id,
+                        result.ToolCall.Id
                     ));
                 }
                 else
@@ -845,7 +846,8 @@ namespace AgentCore.Editor.Core
                         result.ToolName,
                         contentForLLM,
                         result.ExecutionTimeMs,
-                        assistantTurn.Id
+                        assistantTurn.Id,
+                        result.ToolCall.Id
                     ));
                 }
             }

@@ -16,7 +16,7 @@ namespace AgentCore.Editor.UI
     /// AgentCore 主聊天窗口。
     /// <para>
     /// 提供与 AI 助手对话的 Editor 窗口界面，基于 UI Toolkit 实现。
-    /// 支持流式文本显示、消息历史、取消操作、对话重置和多会话管理。
+    /// 支持流式文本显示、消息历史、取消操作和多会话管理。
     /// </para>
     /// <para>
     /// 通过菜单 Window -> AgentCore -> Chat（快捷键 Ctrl+Shift+A）打开。
@@ -51,8 +51,14 @@ namespace AgentCore.Editor.UI
         /// <summary>消息气泡字典，按 MessageId 索引</summary>
         private readonly Dictionary<string, MessageBubble> _messageBubbles = new();
 
-        /// <summary>活跃的工具调用卡片字典，按工具名索引</summary>
+        /// <summary>活跃的工具调用卡片字典，按 ToolCallId 索引（支持同名工具多次调用）</summary>
         private readonly Dictionary<string, ToolCallCard> _activeToolCards = new();
+
+        /// <summary>工具调用计数器，用于在 ToolCallId 缺失时生成唯一 key</summary>
+        private int _toolCallCounter;
+
+        /// <summary>当前工具调用分组容器（一次 Agent 交互中的所有工具调用共享一个分组）</summary>
+        private ToolCallGroup _currentToolCallGroup;
 
         #endregion
 
@@ -72,9 +78,6 @@ namespace AgentCore.Editor.UI
 
         /// <summary>取消按钮</summary>
         private Button _cancelButton;
-
-        /// <summary>重置按钮</summary>
-        private Button _resetButton;
 
         /// <summary>状态标签</summary>
         private Label _statusLabel;
@@ -165,7 +168,6 @@ namespace AgentCore.Editor.UI
             _inputField = rootVisualElement.Q<TextField>("input-field");
             _sendButton = rootVisualElement.Q<Button>("send-button");
             _cancelButton = rootVisualElement.Q<Button>("cancel-button");
-            _resetButton = rootVisualElement.Q<Button>("reset-button");
             _statusLabel = rootVisualElement.Q<Label>("status-label");
 
             // 3.5 查询侧边栏 UI 元素引用
@@ -178,7 +180,6 @@ namespace AgentCore.Editor.UI
             // 4. 绑定按钮事件
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());
             _cancelButton?.RegisterCallback<ClickEvent>(_ => OnCancelClicked());
-            _resetButton?.RegisterCallback<ClickEvent>(_ => OnResetClicked());
 
             // 4.5 绑定侧边栏按钮事件
             _sidebarToggleButton?.RegisterCallback<ClickEvent>(_ => ToggleSidebar());
@@ -234,6 +235,7 @@ namespace AgentCore.Editor.UI
 
             _messageBubbles.Clear();
             _activeToolCards.Clear();
+            _currentToolCallGroup = null;
         }
 
         #endregion
@@ -316,18 +318,6 @@ namespace AgentCore.Editor.UI
         }
 
         /// <summary>
-        /// 重置按钮点击处理。
-        /// 清空 UI 消息容器并重置 AgentLoop 对话历史。
-        /// </summary>
-        private void OnResetClicked()
-        {
-            ClearMessages();
-            _agentLoop?.ResetConversation();
-            RefreshSessionList();
-            Debug.Log("[AgentCore] Conversation reset by user.");
-        }
-
-        /// <summary>
         /// 输入框键盘事件处理。
         /// Enter 发送消息，Shift+Enter 换行，Escape 取消操作。
         /// </summary>
@@ -365,6 +355,16 @@ namespace AgentCore.Editor.UI
         /// <param name="evt">Agent 事件</param>
         private void HandleAgentEvent(AgentEvent evt)
         {
+            // 诊断日志：追踪工具调用相关事件
+            if (evt.Type == AgentEventType.ToolCallStarted ||
+                evt.Type == AgentEventType.ToolCallCompleted ||
+                evt.Type == AgentEventType.ToolCallFailed ||
+                evt.Type == AgentEventType.LoopRoundStarted ||
+                evt.Type == AgentEventType.LoopCompleted)
+            {
+                Debug.Log($"[AgentCore.UI] HandleAgentEvent 收到事件: {evt.Type}, tool={evt.ToolName ?? "(none)"}, toolCallId={evt.ToolCallId ?? "(none)"}");
+            }
+
             switch (evt.Type)
             {
                 case AgentEventType.StateChanged:
@@ -377,16 +377,14 @@ namespace AgentCore.Editor.UI
 
                 case AgentEventType.AssistantMessage:
                     FinalizeAssistantMessage(evt.Content, evt.MessageId);
+                    // 助手消息完成后，结束当前工具调用分组（下次工具调用创建新分组）
+                    _currentToolCallGroup = null;
                     // 消息完成后精准更新当前会话标题（避免重建整个列表导致排序跳动）
                     UpdateCurrentSessionTitle();
                     break;
 
                 case AgentEventType.Error:
                     ShowError(evt.Content);
-                    break;
-
-                case AgentEventType.ConversationReset:
-                    ClearMessages();
                     break;
 
                 // Phase 2: 工具调用事件
@@ -563,6 +561,8 @@ namespace AgentCore.Editor.UI
             _messageContainer?.Clear();
             _messageBubbles.Clear();
             _activeToolCards.Clear();
+            _currentToolCallGroup = null;
+            _toolCallCounter = 0;
         }
 
         /// <summary>
@@ -846,7 +846,11 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private void RebuildMessageBubbles()
         {
-            if (_agentLoop == null || _messageContainer == null) return;
+            if (_agentLoop == null || _messageContainer == null)
+            {
+                Debug.LogWarning($"[AgentCore.UI] RebuildMessageBubbles 中止: _agentLoop={(_agentLoop != null ? "OK" : "null")}, _messageContainer={(_messageContainer != null ? "OK" : "null")}");
+                return;
+            }
 
             // 清空现有 UI
             _messageContainer.Clear();
@@ -854,12 +858,18 @@ namespace AgentCore.Editor.UI
             _activeToolCards.Clear();
 
             var history = _agentLoop.ConversationHistory;
+            Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: 历史记录共 {history?.Count ?? 0} 条");
+            ToolCallGroup restoreGroup = null;
+
             for (int i = 0; i < history.Count; i++)
             {
                 var turn = history[i];
 
                 if (turn.Role == "user")
                 {
+                    // 用户消息前，结束上一个工具调用分组
+                    restoreGroup = null;
+
                     // 用户消息气泡
                     var bubble = new MessageBubble(turn.Id, "user", turn.Content);
                     _messageBubbles[turn.Id] = bubble;
@@ -872,9 +882,12 @@ namespace AgentCore.Editor.UI
                     _messageBubbles[turn.Id] = bubble;
                     _messageContainer.Add(bubble);
 
-                    // 恢复工具调用卡片
-                    if (turn.ToolCalls != null)
+                    // 恢复工具调用卡片（统一放入分组容器）
+                    if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
                     {
+                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: 恢复 {turn.ToolCalls.Count} 个工具调用 (turn={turn.Id})");
+                        restoreGroup = new ToolCallGroup();
+
                         foreach (var tc in turn.ToolCalls)
                         {
                             var card = new ToolCallCard(tc.ToolName, tc.Arguments);
@@ -892,11 +905,22 @@ namespace AgentCore.Editor.UI
                                 card.SetDetails(result);
                             }
 
-                            _messageContainer.Add(card);
+                            restoreGroup.AddToolCard(card);
                         }
+
+                        // 历史工具调用全部完成，通知分组更新统计并折叠
+                        restoreGroup.NotifyToolStatusChanged();
+                        _messageContainer.Add(restoreGroup);
+                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: ToolCallGroup 已添加到 _messageContainer (childCount={_messageContainer.childCount})");
+
+                        // 助手消息后结束分组
+                        restoreGroup = null;
                     }
                 }
             }
+
+            // 清除临时分组引用
+            _currentToolCallGroup = null;
 
             // 滚动到底部
             ScrollToBottom();
@@ -1393,17 +1417,78 @@ namespace AgentCore.Editor.UI
         #region 工具调用 UI 处理
 
         /// <summary>
-        /// 处理工具调用开始事件：创建 ToolCallCard 并添加到聊天区域。
+        /// 确保当前存在一个工具调用分组容器。
+        /// 如果不存在，创建一个新的并添加到消息容器。
+        /// </summary>
+        /// <returns>当前的工具调用分组容器</returns>
+        private ToolCallGroup EnsureToolCallGroup()
+        {
+            if (_currentToolCallGroup == null)
+            {
+                _currentToolCallGroup = new ToolCallGroup();
+                _messageContainer?.Add(_currentToolCallGroup);
+                Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 新建 ToolCallGroup, _messageContainer.childCount={_messageContainer?.childCount}");
+            }
+            return _currentToolCallGroup;
+        }
+
+        /// <summary>
+        /// 获取工具调用的唯一 key。优先使用 ToolCallId，缺失时用计数器生成。
+        /// 仅在 HandleToolCallStarted 中调用（会递增计数器）。
+        /// </summary>
+        private string GetToolCallKey(AgentEvent evt)
+        {
+            if (!string.IsNullOrEmpty(evt.ToolCallId))
+                return evt.ToolCallId;
+            // fallback: 用工具名+计数器生成唯一 key
+            return $"{evt.ToolName}_{_toolCallCounter++}";
+        }
+
+        /// <summary>
+        /// 在 _activeToolCards 中查找与事件匹配的 key。
+        /// 优先精确匹配 ToolCallId，找不到则按 ToolName 前缀匹配（兼容 toolName_{N} 格式）。
+        /// 用于 HandleToolCallCompleted / HandleToolCallFailed。
+        /// </summary>
+        private string FindToolCardKey(AgentEvent evt)
+        {
+            // 1. 优先用 ToolCallId 精确匹配
+            if (!string.IsNullOrEmpty(evt.ToolCallId) && _activeToolCards.ContainsKey(evt.ToolCallId))
+                return evt.ToolCallId;
+
+            // 2. fallback: 按 ToolName 前缀匹配（key 可能是 "toolName_0", "toolName_1" 等）
+            //    取最后一个匹配项（最近添加的）
+            string matched = null;
+            if (!string.IsNullOrEmpty(evt.ToolName))
+            {
+                var prefix = evt.ToolName + "_";
+                foreach (var key in _activeToolCards.Keys)
+                {
+                    if (key == evt.ToolName || key.StartsWith(prefix))
+                        matched = key;
+                }
+            }
+
+            return matched;
+        }
+
+        /// <summary>
+        /// 处理工具调用开始事件：创建 ToolCallCard 并添加到分组容器。
         /// </summary>
         /// <param name="evt">工具调用开始事件</param>
         private void HandleToolCallStarted(AgentEvent evt)
         {
+            Debug.Log($"[AgentCore.UI] HandleToolCallStarted: tool={evt.ToolName}, toolCallId={evt.ToolCallId ?? "(null)"}, messageId={evt.MessageId ?? "(null)"}");
+
+            var group = EnsureToolCallGroup();
+
             var card = new ToolCallCard(evt.ToolName, evt.ToolArguments);
             card.SetStatus(ToolCallStatus.Running, "执行中...");
-            _messageContainer?.Add(card);
+            group.AddToolCard(card);
 
-            // 用工具名作为 key（同一工具名的后续调用会覆盖前一个引用）
-            _activeToolCards[evt.ToolName] = card;
+            // 用 ToolCallId 作为 key（支持同名工具多次调用）
+            var key = GetToolCallKey(evt);
+            _activeToolCards[key] = card;
+            Debug.Log($"[AgentCore.UI] HandleToolCallStarted: card 已添加, key={key}, _activeToolCards.Count={_activeToolCards.Count}");
             ScrollToBottom();
         }
 
@@ -1413,7 +1498,10 @@ namespace AgentCore.Editor.UI
         /// <param name="evt">工具调用完成事件</param>
         private void HandleToolCallCompleted(AgentEvent evt)
         {
-            if (_activeToolCards.TryGetValue(evt.ToolName, out var card))
+            var key = FindToolCardKey(evt);
+            Debug.Log($"[AgentCore.UI] HandleToolCallCompleted: tool={evt.ToolName}, key={key ?? "(no match)"}, found={key != null}");
+
+            if (key != null && _activeToolCards.TryGetValue(key, out var card))
             {
                 var timeText = evt.ExecutionTimeMs > 0
                     ? $" ({evt.ExecutionTimeMs:F0}ms)"
@@ -1429,7 +1517,14 @@ namespace AgentCore.Editor.UI
                     card.SetDetails(result);
                 }
 
-                _activeToolCards.Remove(evt.ToolName);
+                _activeToolCards.Remove(key);
+
+                // 通知分组容器更新统计和折叠状态
+                _currentToolCallGroup?.NotifyToolStatusChanged();
+            }
+            else
+            {
+                Debug.LogWarning($"[AgentCore.UI] HandleToolCallCompleted: 未找到 key={key} 的卡片, 当前 keys=[{string.Join(", ", _activeToolCards.Keys)}]");
             }
         }
 
@@ -1439,7 +1534,10 @@ namespace AgentCore.Editor.UI
         /// <param name="evt">工具调用失败事件</param>
         private void HandleToolCallFailed(AgentEvent evt)
         {
-            if (_activeToolCards.TryGetValue(evt.ToolName, out var card))
+            var key = FindToolCardKey(evt);
+            Debug.Log($"[AgentCore.UI] HandleToolCallFailed: tool={evt.ToolName}, key={key ?? "(no match)"}, found={key != null}");
+
+            if (key != null && _activeToolCards.TryGetValue(key, out var card))
             {
                 card.SetStatus(ToolCallStatus.Failed, "失败");
 
@@ -1448,16 +1546,28 @@ namespace AgentCore.Editor.UI
                     card.SetDetails(evt.ToolResult);
                 }
 
-                _activeToolCards.Remove(evt.ToolName);
+                _activeToolCards.Remove(key);
+
+                // 通知分组容器更新统计和折叠状态
+                _currentToolCallGroup?.NotifyToolStatusChanged();
+            }
+            else
+            {
+                Debug.LogWarning($"[AgentCore.UI] HandleToolCallFailed: 未找到 key={key} 的卡片, 当前 keys=[{string.Join(", ", _activeToolCards.Keys)}]");
             }
         }
 
         /// <summary>
-        /// 处理循环轮次开始事件：在聊天区域添加轮次分隔线。
+        /// 处理循环轮次开始事件：更新分组容器的轮次信息，并在容器内添加轮次分隔线。
         /// </summary>
         /// <param name="evt">循环轮次开始事件</param>
         private void HandleLoopRoundStarted(AgentEvent evt)
         {
+            var group = EnsureToolCallGroup();
+
+            // 更新分组容器的轮次信息
+            group.UpdateRoundInfo(evt.CurrentRound, evt.MaxRounds);
+
             // 第 1 轮不显示分隔线（避免冗余）
             if (evt.CurrentRound <= 1) return;
 
@@ -1466,8 +1576,8 @@ namespace AgentCore.Editor.UI
             separator.style.alignItems = Align.Center;
             separator.style.marginTop = 6;
             separator.style.marginBottom = 6;
-            separator.style.marginLeft = 12;
-            separator.style.marginRight = 12;
+            separator.style.marginLeft = 4;
+            separator.style.marginRight = 4;
 
             // 左侧线条
             var leftLine = new VisualElement();
@@ -1490,7 +1600,8 @@ namespace AgentCore.Editor.UI
             rightLine.style.backgroundColor = new Color(0.3f, 0.3f, 0.3f);
             separator.Add(rightLine);
 
-            _messageContainer?.Add(separator);
+            // 分隔线添加到分组容器内部
+            group.AddSeparator(separator);
             ScrollToBottom();
         }
 

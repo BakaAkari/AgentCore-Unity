@@ -1,3 +1,6 @@
+using System;
+using System.Security.Cryptography;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 
@@ -13,7 +16,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 1;
+        private const int CurrentVersion = 3;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -87,8 +90,42 @@ namespace AgentCore.Editor.Config
 
         // --- 用户标识 ---
         [Header("User")]
-        [Tooltip("用户 ID（用于 mem0 记忆隔离）")]
-        public string userId = "unity-agent";
+        [Tooltip("用户 ID（用于 mem0 记忆隔离，留空则自动使用系统唯一标识）")]
+        public string userId = "";
+
+        /// <summary>
+        /// 获取有效的用户 ID。
+        /// 始终使用系统自动生成的唯一标识符，忽略手动配置的 userId 字段。
+        /// </summary>
+        public string EffectiveUserId => GenerateSystemUserId();
+
+        /// <summary>
+        /// 基于系统信息生成唯一用户 ID。
+        /// 使用 MachineName + UserName + ProductName 的 SHA256 哈希前 16 位，
+        /// 格式为 "unity-{hash}"，确保跨会话稳定且隐私安全。
+        /// 加入 ProductName 实现项目级记忆隔离：同一用户的不同项目拥有不同 ID。
+        /// </summary>
+        public static string GenerateSystemUserId()
+        {
+            try
+            {
+                var raw = $"{Environment.MachineName}:{Environment.UserName}:{Application.productName}";
+                using (var sha256 = SHA256.Create())
+                {
+                    var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(raw));
+                    var sb = new StringBuilder();
+                    // 取前 8 字节（16 个十六进制字符），足够唯一且简短
+                    for (int i = 0; i < 8; i++)
+                        sb.Append(bytes[i].ToString("x2"));
+                    return $"unity-{sb}";
+                }
+            }
+            catch
+            {
+                // 极端情况下的回退
+                return "unity-agent";
+            }
+        }
 
         // --- UI 偏好 ---
         [Header("UI Preferences")]
@@ -108,6 +145,15 @@ namespace AgentCore.Editor.Config
             {
                 MigrateSettings();
             }
+
+            // 防御性清除：无论版本号如何，始终确保 userId 字段为空。
+            // 这防止了旧序列化值（如 "akari"）在迁移已完成后仍然残留的情况。
+            if (!string.IsNullOrEmpty(userId))
+            {
+                Debug.Log($"[AgentCore] OnEnable: clearing stale userId '{userId}', EffectiveUserId will use system-generated ID");
+                userId = "";
+                Save(true);
+            }
         }
 
         /// <summary>
@@ -122,6 +168,26 @@ namespace AgentCore.Editor.Config
                 {
                     mem0Endpoint = "http://localhost:8765";
                     Debug.Log("[AgentCore] Settings migrated v0→v1: mem0Endpoint updated to http://localhost:8765");
+                }
+            }
+
+            // v1 -> v2: userId 默认值从 "unity-agent" 改为空（自动生成系统 ID）
+            if (settingsVersion < 2)
+            {
+                if (userId == "unity-agent")
+                {
+                    userId = "";
+                    Debug.Log("[AgentCore] Settings migrated v1→v2: userId cleared, will auto-generate from system ID");
+                }
+            }
+
+            // v2 -> v3: 强制覆盖 userId 为系统生成 ID，不再允许自定义
+            if (settingsVersion < 3)
+            {
+                if (!string.IsNullOrEmpty(userId))
+                {
+                    Debug.Log($"[AgentCore] Settings migrated v2→v3: userId '{userId}' cleared, EffectiveUserId now always uses system-generated ID");
+                    userId = "";
                 }
             }
 
