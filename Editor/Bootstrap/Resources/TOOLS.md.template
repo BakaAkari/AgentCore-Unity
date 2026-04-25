@@ -44,3 +44,11 @@
 - **Want to verify a Unity API exists?** → `execute_code` (action: `evaluate`)
 - **Want to do 3+ operations at once?** → `batch_execute`
 - **Want to control Play Mode?** → `manage_editor` (action: `play_mode`)
+
+### 8. 记忆管理
+- `manage_memory` — 长期记忆的增删查
+  - `add`: 存储重要的用户偏好、项目约定、技术决策
+  - `search`: 搜索与当前话题相关的历史记忆
+  - `list`: 列出所有已存储的记忆
+  - `delete`: 删除过时或错误的记忆
+  - 记忆会跨会话持久保存，同一项目的不同分支共享
