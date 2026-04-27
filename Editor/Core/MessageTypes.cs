@@ -368,7 +368,8 @@ namespace AgentCore.Editor.Core
     public class ConversationTurn
     {
         /// <summary>轮次唯一标识（GUID）</summary>
-        public string Id { get; }
+        // P3-1 fix: 使用 internal set 代替反射设置 backing field
+        public string Id { get; internal set; }
 
         /// <summary>角色标识：&quot;user&quot; / &quot;assistant&quot; / &quot;system&quot;</summary>
         public string Role { get; }
@@ -377,7 +378,8 @@ namespace AgentCore.Editor.Core
         public string Content { get; set; }
 
         /// <summary>消息创建时间戳</summary>
-        public DateTime Timestamp { get; }
+        // P3-1 fix: 使用 internal set 代替反射设置 backing field
+        public DateTime Timestamp { get; internal set; }
 
         /// <summary>是否正在流式输出中</summary>
         public bool IsStreaming { get; set; }

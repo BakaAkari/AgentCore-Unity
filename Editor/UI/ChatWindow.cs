@@ -154,8 +154,22 @@ namespace AgentCore.Editor.UI
                 rootVisualElement.styleSheets.Add(styleSheet);
             }
 
-            // 2.5 设置系统字体（黑体加粗）
-            var font = Font.CreateDynamicFontFromOSFont("Microsoft YaHei", 14);
+            // 2.5 设置系统字体（跨平台回退链）
+            // P2-1 fix: 使用平台感知的字体回退链，避免硬编码 "Microsoft YaHei"
+            string[] fontCandidates;
+#if UNITY_EDITOR_WIN
+            fontCandidates = new[] { "Microsoft YaHei", "SimHei", "Arial" };
+#elif UNITY_EDITOR_OSX
+            fontCandidates = new[] { "PingFang SC", "Hiragino Sans GB", "Arial" };
+#else
+            fontCandidates = new[] { "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Arial" };
+#endif
+            Font font = null;
+            foreach (var fontName in fontCandidates)
+            {
+                font = Font.CreateDynamicFontFromOSFont(fontName, 14);
+                if (font != null) break;
+            }
             if (font != null)
             {
                 rootVisualElement.style.unityFont = font;
@@ -229,7 +243,7 @@ namespace AgentCore.Editor.UI
                 }
 
                 _agentLoop.OnAgentEvent -= HandleAgentEvent;
-                _agentLoop.Cancel();
+                _agentLoop.Dispose(); // P1-1 fix: 调用 Dispose() 释放 ConsoleErrorCapture、CompilationWatcher 等资源
                 _agentLoop = null;
             }
 

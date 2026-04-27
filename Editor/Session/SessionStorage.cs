@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace AgentCore.Editor.Session
@@ -142,21 +143,23 @@ namespace AgentCore.Editor.Session
 
                 var files = Directory.GetFiles(directory, "*.json");
 
+                // P2-2 fix: 使用 JObject 轻量级解析，只读取摘要字段，避免反序列化完整消息列表
                 foreach (var file in files)
                 {
                     try
                     {
                         var json = File.ReadAllText(file);
-                        var session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
+                        var obj = JObject.Parse(json);
 
-                        if (session != null && !string.IsNullOrEmpty(session.Id))
+                        var id = obj.Value<string>("id");
+                        if (!string.IsNullOrEmpty(id))
                         {
                             summaries.Add(new SessionSummary
                             {
-                                Id = session.Id,
-                                Title = session.Title ?? "未命名会话",
-                                UpdatedAt = session.UpdatedAt,
-                                MessageCount = session.MessageCount
+                                Id = id,
+                                Title = obj.Value<string>("title") ?? "未命名会话",
+                                UpdatedAt = obj.Value<DateTime?>("updated_at") ?? DateTime.MinValue,
+                                MessageCount = obj.Value<int?>("message_count") ?? 0
                             });
                         }
                     }

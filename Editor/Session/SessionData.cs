@@ -350,18 +350,16 @@ namespace AgentCore.Editor.Session
 
         /// <summary>
         /// 转换回运行时 ConversationTurn。
-        /// 注意：ConversationTurn 的 Id 和 Timestamp 在构造时自动生成，
-        /// 这里需要通过反射或特殊处理来恢复原始值。
+        /// Id 和 Timestamp 通过 internal set 直接赋值恢复原始值。
         /// </summary>
         public ConversationTurn ToConversationTurn()
         {
             var turn = new ConversationTurn(Role, Content);
 
-            // ConversationTurn 的 Id 是只读属性（构造时生成），
-            // 但为了恢复会话，我们需要使用反射设置原始 Id
+            // 通过 internal set 直接恢复原始 Id 和 Timestamp，
             // 这样 UI 层的 MessageBubble 字典可以正确关联
-            SetPrivateField(turn, "<Id>k__BackingField", Id);
-            SetPrivateField(turn, "<Timestamp>k__BackingField", Timestamp);
+            turn.Id = Id;
+            turn.Timestamp = Timestamp;
 
             // 恢复工具调用信息
             if (ToolCalls != null && ToolCalls.Count > 0)
@@ -381,16 +379,6 @@ namespace AgentCore.Editor.Session
             }
 
             return turn;
-        }
-
-        /// <summary>
-        /// 通过反射设置只读属性的后备字段。
-        /// </summary>
-        private static void SetPrivateField(object obj, string fieldName, object value)
-        {
-            var field = obj.GetType().GetField(fieldName,
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            field?.SetValue(obj, value);
         }
     }
 

@@ -64,11 +64,7 @@ namespace AgentCore.Editor.LLM
                 // 解析 JSON chunk
                 try
                 {
-                    var chunk = ParseChunkJson(data);
-                    if (chunk != null)
-                    {
-                        onChunk?.Invoke(chunk);
-                    }
+                    ParseChunkJson(data, onChunk);
                 }
                 catch (Exception ex)
                 {
@@ -85,38 +81,45 @@ namespace AgentCore.Editor.LLM
         }
 
         /// <summary>
-        /// 解析单个 SSE data 行的 JSON 内容。
+        /// 解析单个 SSE data 行的 JSON 内容，通过回调推送解析结果。
+        /// 支持单个 chunk 中包含多个 tool_call delta 的场景。
         /// </summary>
-        private StreamChunk ParseChunkJson(string json)
+        private void ParseChunkJson(string json, Action<StreamChunk> onChunk)
         {
             var chunk = JsonHelper.Deserialize<ChatCompletionChunk>(json);
-            if (chunk?.Choices == null || chunk.Choices.Count == 0) return null;
+            if (chunk?.Choices == null || chunk.Choices.Count == 0) return;
 
             var choice = chunk.Choices[0];
             var delta = choice.Delta;
 
-            if (delta == null) return null;
+            if (delta == null) return;
 
             // 文本内容 token
             if (!string.IsNullOrEmpty(delta.Content))
             {
-                return StreamChunk.Token(delta.Content);
+                onChunk?.Invoke(StreamChunk.Token(delta.Content));
+                return;
             }
 
-            // 工具调用增量（Phase 2 使用）
+            // 工具调用增量 — 遍历所有 tool_call delta，不再只取 [0]
+            // P0-1 fix: 支持并行工具调用场景，单个 SSE chunk 可能包含多个不同 index 的 tool_call delta
             if (delta.ToolCalls != null && delta.ToolCalls.Count > 0)
             {
-                return StreamChunk.ToolDelta(delta.ToolCalls[0]);
+                foreach (var toolCallDelta in delta.ToolCalls)
+                {
+                    onChunk?.Invoke(StreamChunk.ToolDelta(toolCallDelta));
+                }
+                return;
             }
 
             // finish_reason
             if (!string.IsNullOrEmpty(choice.FinishReason))
             {
-                return StreamChunk.Finished(choice.FinishReason);
+                onChunk?.Invoke(StreamChunk.Finished(choice.FinishReason));
+                return;
             }
 
             // 角色标记等其他 delta，忽略
-            return null;
         }
     }
 }

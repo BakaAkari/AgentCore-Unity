@@ -21,21 +21,33 @@ namespace AgentCore.Editor.Core
     {
         #region 模型 Token 上限映射
 
-        /// <summary>已知模型的最大 token 数映射表</summary>
-        private static readonly Dictionary<string, int> ModelMaxTokensMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        /// <summary>
+        /// 基于前缀的模型 token 上限映射表。
+        /// 按前缀从长到短排列（更具体的前缀优先匹配）。
+        /// 新增模型系列只需添加一行前缀即可，无需逐个版本枚举。
+        /// </summary>
+        private static readonly (string prefix, int maxTokens)[] ModelPrefixMap =
         {
-            { "claude-opus-4-6", 200000 },
-            { "claude-sonnet-4-5-20250929", 200000 },
-            { "claude-3-5-sonnet-20241022", 200000 },
-            { "claude-3-opus-20240229", 200000 },
-            { "claude-3-haiku-20240307", 200000 },
-            { "gpt-4o", 128000 },
-            { "gpt-4o-mini", 128000 },
-            { "gpt-4-turbo", 128000 },
-            { "gpt-4", 8192 },
-            { "gpt-3.5-turbo", 16385 },
-            { "deepseek-chat", 64000 },
-            { "deepseek-coder", 64000 },
+            // Claude 系列 — 所有版本均为 200k
+            ("claude-", 200000),
+
+            // GPT-4o 系列 — 128k（必须在 gpt-4 之前匹配）
+            ("gpt-4o", 128000),
+            // GPT-4 Turbo — 128k
+            ("gpt-4-turbo", 128000),
+            // GPT-4 基础版 — 8k
+            ("gpt-4", 8192),
+            // GPT-3.5 系列 — 16k
+            ("gpt-3.5", 16385),
+
+            // DeepSeek 系列 — 64k
+            ("deepseek-", 64000),
+
+            // Qwen 系列 — 128k
+            ("qwen-", 128000),
+
+            // Gemini 系列 — 1M（Google 最新模型）
+            ("gemini-", 1000000),
         };
 
         /// <summary>未知模型的默认最大 token 数</summary>
@@ -48,7 +60,9 @@ namespace AgentCore.Editor.Core
         /// <summary>
         /// 根据模型名称返回最大 token 数。
         /// <para>
-        /// 支持精确匹配和前缀匹配（如 "gpt-4o-2024-05-13" 会匹配 "gpt-4o"）。
+        /// 使用前缀匹配，按优先级从高到低扫描。
+        /// 例如 "gpt-4o-2024-05-13" 匹配 "gpt-4o" 前缀返回 128000，
+        /// 而 "gpt-4-0613" 匹配 "gpt-4" 前缀返回 8192。
         /// 未知模型默认返回 128000。
         /// </para>
         /// </summary>
@@ -59,15 +73,11 @@ namespace AgentCore.Editor.Core
             if (string.IsNullOrEmpty(modelName))
                 return DefaultMaxTokens;
 
-            // 精确匹配
-            if (ModelMaxTokensMap.TryGetValue(modelName, out int exactMatch))
-                return exactMatch;
-
-            // 前缀匹配（处理带日期后缀的模型名，如 "gpt-4o-2024-05-13"）
-            foreach (var kvp in ModelMaxTokensMap)
+            // 前缀匹配（按优先级顺序，更具体的前缀排在前面）
+            foreach (var (prefix, maxTokens) in ModelPrefixMap)
             {
-                if (modelName.StartsWith(kvp.Key, StringComparison.OrdinalIgnoreCase))
-                    return kvp.Value;
+                if (modelName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return maxTokens;
             }
 
             return DefaultMaxTokens;
@@ -188,20 +198,27 @@ namespace AgentCore.Editor.Core
             // 确保不会在 tool_calls 对中间截断
             keepFromIndex = AdjustForToolCallPairs(messages, keepFromIndex);
 
-            // 如果调整后超出预算，继续向后移动直到在预算内
-            // （跳过整个 tool_call 组）
-            while (keepFromIndex < messages.Count)
+            // P2-3 fix: 使用增量计算代替 O(n²) 的重复遍历
+            // 先计算从 keepFromIndex 开始的总 token 数
+            int estimatedTokens = 0;
+            for (int i = keepFromIndex; i < messages.Count; i++)
             {
-                int estimatedTokens = 0;
-                for (int i = keepFromIndex; i < messages.Count; i++)
-                {
-                    estimatedTokens += TokenCounter.EstimateMessageTokens(messages[i]);
-                }
-                if (estimatedTokens <= tokenBudget)
-                    break;
+                estimatedTokens += TokenCounter.EstimateMessageTokens(messages[i]);
+            }
 
-                // 跳过当前消息组（如果是 assistant+tool_calls，跳过整组）
-                keepFromIndex = SkipMessageGroup(messages, keepFromIndex);
+            // 如果调整后超出预算，继续向后移动直到在预算内
+            // （跳过整个 tool_call 组，增量减去被跳过消息的 token）
+            while (keepFromIndex < messages.Count && estimatedTokens > tokenBudget)
+            {
+                int nextIndex = SkipMessageGroup(messages, keepFromIndex);
+
+                // 增量减去被跳过的消息 token
+                for (int i = keepFromIndex; i < nextIndex; i++)
+                {
+                    estimatedTokens -= TokenCounter.EstimateMessageTokens(messages[i]);
+                }
+
+                keepFromIndex = nextIndex;
             }
 
             // 构建结果

@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -162,10 +163,24 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
-        /// 判断错误是否可重试
+        /// 判断错误是否可重试。
+        /// 优先通过异常类型判断，再回退到消息字符串匹配。
         /// </summary>
         private bool IsRetryableError(Exception ex)
         {
+            // 1. 异常类型判断（优先，更可靠）
+            switch (ex)
+            {
+                // TaskCanceledException 由 HttpClient 超时引发 -> 可重试
+                case TaskCanceledException _:
+                    return true;
+
+                // HttpRequestException 需要进一步检查内容
+                case HttpRequestException httpEx:
+                    return IsRetryableHttpError(httpEx);
+            }
+
+            // 2. 回退到消息字符串匹配（处理非标准异常包装）
             var message = ex.Message.ToLowerInvariant();
 
             // 网络超时、连接错误 -> 可重试
@@ -173,6 +188,8 @@ namespace AgentCore.Editor.Core
                 return true;
             if (message.Contains("connection") && (message.Contains("refused") || message.Contains("reset")))
                 return true;
+
+            // 服务端错误 -> 可重试
             if (message.Contains("502") || message.Contains("503") || message.Contains("504"))
                 return true;
             if (message.Contains("rate limit") || message.Contains("429"))
@@ -187,6 +204,29 @@ namespace AgentCore.Editor.Core
                 return false;
 
             // 默认可重试
+            return true;
+        }
+
+        /// <summary>
+        /// 判断 HttpRequestException 是否可重试。
+        /// </summary>
+        private static bool IsRetryableHttpError(HttpRequestException ex)
+        {
+            var message = ex.Message.ToLowerInvariant();
+
+            // 连接被拒绝 / 重置 -> 可重试（服务暂时不可用）
+            if (message.Contains("connection") && (message.Contains("refused") || message.Contains("reset")))
+                return true;
+
+            // 服务端错误 (5xx) 和限流 (429) -> 可重试
+            if (message.Contains("502") || message.Contains("503") || message.Contains("504") || message.Contains("429"))
+                return true;
+
+            // 客户端错误 (4xx 非 429) -> 不可重试
+            if (message.Contains("401") || message.Contains("403") || message.Contains("400") || message.Contains("404"))
+                return false;
+
+            // 其他 HTTP 错误默认可重试
             return true;
         }
     }
