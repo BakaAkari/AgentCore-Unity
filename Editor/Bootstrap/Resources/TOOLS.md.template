@@ -30,6 +30,17 @@
 - Use `manage_prefab` (actions: `create`, `instantiate`, `get_info`, `unpack`, `apply`, `revert`).
 - After modifying a prefab instance, use `apply` to save changes back to the prefab asset.
 
+### Console & Diagnostics
+- Use `read_console` to read Unity Editor Console logs — **essential for diagnosing compilation errors and runtime issues**.
+  - `get_errors`: Get only errors (compiler errors + runtime errors) — use this FIRST when something goes wrong.
+  - `get_warnings`: Get only warnings.
+  - `get_all`: Get all log entries (errors, warnings, and info logs).
+  - `get_count`: Get a summary count of errors/warnings/logs without full details.
+  - `clear`: Clear the console.
+  - Use `search` parameter to filter entries by text (e.g., search for a specific file name or error code).
+  - Use `max_entries` to control how many entries are returned (default: 50, max: 200).
+- When a script modification causes compilation failure, ALWAYS call `read_console` (action: `get_errors`) to identify the exact error and file location.
+
 ### Batch & Code Execution
 - Use `batch_execute` to combine 2+ independent tool calls into one request — pass an `operations` array of `{tool, args}`.
 - Enable `transaction: true` in `batch_execute` for atomic operations that should rollback on failure.
@@ -44,6 +55,8 @@
 - **Want to verify a Unity API exists?** → `execute_code` (action: `evaluate`)
 - **Want to do 3+ operations at once?** → `batch_execute`
 - **Want to control Play Mode?** → `manage_editor` (action: `play_mode`)
+- **Want to see compilation errors?** → `read_console` (action: `get_errors`)
+- **Want to diagnose why Play Mode fails?** → `read_console` (action: `get_errors`) first, then check the file/line info
 
 ### 8. 记忆管理
 - `manage_memory` — 长期记忆的增删查

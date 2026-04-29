@@ -1,0 +1,593 @@
+# AgentCore Package Development Rules
+
+> 本文件定义了 `com.agentcore.unity` 包的 LLM 开发规范。
+> 面向使用 AI 辅助开发此项目的开发者，确保代码修改的一致性、稳定性和健壮性。
+>
+> **优先级**: 本文件 > 上级 `AGENTS.md` (Unity workspace rules)。冲突时以本文件为准。
+>
+> **关键原则**: 本文件描述的是**架构模式和规则**，不是文件清单。
+> 项目在持续开发中，具体文件列表和代码细节以实际代码为准。
+
+---
+
+## 1. 项目概览
+
+| 属性 | 值 |
+|------|-----|
+| 包名 | `com.agentcore.unity` |
+| Unity 最低版本 | 2021.3+ |
+| 依赖 | `com.unity.nuget.newtonsoft-json` (通过 UPM) |
+| asmdef | `AgentCore.Editor` (Editor-only, 零外部引用) |
+| 语言 | C# 9.0 (Unity 2022.3 支持范围) |
+
+> 版本号和具体依赖版本请查阅 `package.json`。
+
+### 1.1 核心定位
+
+AgentCore 是一个 **Unity Editor 内嵌的 AI Agent 插件**，通过 Chat 窗口与 LLM 交互，使用工具系统操作 Unity Editor。
+
+### 1.2 架构隔离原则
+
+```
+AgentCore.Editor.asmdef
+├── includePlatforms: ["Editor"]    ← 仅 Editor 平台
+├── references: []                  ← 零外部程序集引用
+└── autoReferenced: true            ← 自动被 Editor 代码引用
+```
+
+**关键约束**:
+- 所有代码必须在 `Editor/` 目录下
+- 不得引用任何外部 asmdef（包括用户项目的程序集）
+- 不得使用 Runtime-only API（如 `Application.isPlaying` 在 Editor 中可用，但 `SceneManager.LoadScene` 的行为不同）
+- 唯一的外部依赖是 `Newtonsoft.Json`（通过 UPM 包引用）
+
+---
+
+## 2. 目录结构与命名规范
+
+### 2.1 目录布局模式
+
+> 以下是目录的**功能分区**，不是完整文件列表。实际文件请通过 `list_files` 工具查看。
+
+```
+com.agentcore.unity/
+├── package.json                    # UPM 包清单
+├── AGENTS.md                       # 本文件 — LLM 开发规范
+├── CHANGELOG.md                    # 版本变更日志
+├── Editor/                         # 所有源代码（Editor-only）
+│   ├── AgentCore.Editor.asmdef     # 程序集定义
+│   ├── Bootstrap/                  # 启动引导系统
+│   │   └── Resources/              #   内嵌资源 (SOUL.md, TOOLS.md.template 等)
+│   ├── Config/                     # 配置系统 (Settings, SecureKeyStorage 等)
+│   ├── Core/                       # 核心运行时 (AgentLoop, 状态机, 编译监控等)
+│   ├── LLM/                        # LLM 客户端 (接口, OpenAI兼容, 流解析等)
+│   ├── Session/                    # 会话管理 (存储, 序列化, 自动记忆等)
+│   ├── Tools/                      # 工具系统（核心扩展点）
+│   │   ├── Infrastructure/         #   工具基础设施 (特性, 自动发现, 辅助方法等)
+│   │   ├── Native/                 #   原生工具（Unity API）— 按功能分子目录
+│   │   ├── Cloud/                  #   云端工具（HTTP API）
+│   │   └── FileSystem/             #   文件系统工具（预留）
+│   ├── UI/                         # 用户界面
+│   │   └── Components/             #   UI 组件
+│   └── Utils/                      # 通用工具
+└── plans/                          # 设计文档（仅参考）
+```
+
+### 2.2 如何了解当前文件结构
+
+修改前，先通过以下方式了解实际结构：
+
+1. `list_files("Editor/", recursive=true)` — 查看完整文件列表
+2. 阅读目标目录下的现有文件 — 学习当前模式
+3. 查看 `Editor/Tools/Native/` 的子目录 — 了解工具分类体系
+
+### 2.3 命名规范
+
+| 类型 | 规范 | 示例格式 |
+|------|------|----------|
+| 命名空间 | `AgentCore.Editor.<Module>` | `AgentCore.Editor.Tools.Native.<Category>` |
+| 工具类 | `<功能>Tool` | `Manage<X>Tool`, `Read<X>Tool` |
+| 客户端类 | `<服务>Client` | `<Service>Client` |
+| 接口 | `I<名称>` | `IAgentTool`, `ILLMClient` |
+| 设置类 | `<模块>Settings` | `AgentCoreSettings` |
+| 数据类 | `<名称>Data` / `<名称>Info` | `SessionData`, `ErrorInfo` |
+| 枚举 | PascalCase | `AgentState`, `InterruptPhase` |
+| 私有字段 | `_camelCase` | `_reflectionInitialized` |
+| 静态只读 | `_camelCase` 或 `PascalCase` | `_parametersSchema`, `ResourcesPath` |
+
+### 2.4 新文件放置规则
+
+| 文件类型 | 目录 |
+|----------|------|
+| 新的原生工具 | `Editor/Tools/Native/<Category>/` |
+| 新的云端工具 | `Editor/Tools/Cloud/` |
+| 新的云端客户端 | `Editor/Tools/Cloud/` |
+| 核心逻辑 | `Editor/Core/` |
+| LLM 相关 | `Editor/LLM/` |
+| UI 组件 | `Editor/UI/Components/` |
+| 通用工具 | `Editor/Utils/` |
+| 配置相关 | `Editor/Config/` |
+| 启动引导 | `Editor/Bootstrap/` |
+| 会话相关 | `Editor/Session/` |
+
+---
+
+## 3. 核心架构模式
+
+> 以下流程图描述的是**架构设计模式**。具体方法名和实现细节以实际代码为准。
+> 修改核心系统前，务必先完整阅读相关源文件。
+
+### 3.1 系统启动流程
+
+```
+ChatWindow.CreateGUI()
+  → InitializeAgentLoop()
+    → 创建 LLM 客户端
+    → 创建 AgentLoop
+      → agentLoop.Initialize()
+        → ToolAutoDiscovery — 自动扫描并注册所有 [AgentTool] 工具
+        → BootstrapLoader — 加载系统提示词各组件
+        → BootstrapContext — 编译最终 System Prompt
+        → 初始化 ToolCallDispatcher, CompilationWatcher, ConsoleErrorCapture, SessionManager
+  → TryRestoreSession()
+```
+
+### 3.2 消息处理循环
+
+```
+用户输入 → SendMessageAsync(userMessage)
+  → 搜索相关记忆 → 注入记忆上下文
+  → RunToolCallLoopAsync()
+    → 调用 LLM (流式) → 获取响应
+    → 如果有 tool_calls:
+      → ExecuteToolCallsAsync()
+        → ToolCallDispatcher 分发执行
+          → RequiresMainThread? → 主线程执行 : 异步执行
+        → 构建工具结果消息
+      → 继续循环（最多 maxToolRounds 轮）
+    → 如果无 tool_calls:
+      → HandleFinalResponse() → 结束
+```
+
+### 3.3 Domain Reload 恢复机制
+
+```
+脚本修改 → 触发 Domain Reload
+  → OnBeforeAssemblyReload()
+    → 保存 DomainReloadState (InterruptPhase, 待处理的 tool calls, 对话历史)
+  → Unity 重新编译 → 所有静态状态丢失
+  → ChatWindow.CreateGUI() 重新执行
+    → TryRestoreSession()
+      → AgentLoop.TryResumeAfterReload()
+        → 读取 DomainReloadState
+        → 根据 InterruptPhase 恢复到对应阶段
+        → TriggerResumeLLMCall()
+```
+
+> 要了解 `InterruptPhase` 的所有枚举值，请阅读 `Editor/Core/DomainReloadState.cs`。
+> 要了解 `AgentState` 的所有状态，请阅读 `Editor/Core/MessageTypes.cs`。
+
+---
+
+## 4. 工具开发规范（最重要的扩展点）
+
+### 4.1 工具类型分类
+
+| 类型 | 目录 | RequiresMainThread | 特征 |
+|------|------|--------------------|------|
+| **Native 工具** | `Editor/Tools/Native/` | `true` | 直接调用 Unity API |
+| **Cloud 工具** | `Editor/Tools/Cloud/` | `false` | HTTP 调用外部服务 |
+| **FileSystem 工具** | `Editor/Tools/FileSystem/` | `false` | 文件系统操作 |
+
+### 4.2 Native 工具开发模板
+
+> **重要**: 编写新工具前，先阅读 `Editor/Tools/Native/` 下同分类的现有工具，以实际代码模式为准。
+> 以下模板仅展示结构骨架，具体 using 语句和 API 用法以现有代码为准。
+
+```csharp
+namespace AgentCore.Editor.Tools.Native.<Category>
+{
+    [AgentTool("<tool_name>",
+        Description = "面向 LLM 的工具描述 — 要清晰说明能做什么",
+        Category = "<Category>",
+        RequiresMainThread = true,
+        MayModifyScripts = false)]  // 如果会修改脚本文件则设为 true
+    public class <ToolName>Tool : IAgentTool
+    {
+        // 1. 参数 Schema — JSON Schema 格式
+        private static readonly JObject _parametersSchema = JObject.Parse(@"{ ... }");
+
+        // 2. Metadata — 必须与 [AgentTool] 特性一致
+        public ToolMetadata Metadata => new ToolMetadata( ... );
+
+        // 3. 执行入口 — 统一的 action 分发模式
+        public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            ToolResponse response;
+            try
+            {
+                var action = ToolHelpers.GetRequiredString(parameters, "action").ToLowerInvariant();
+                switch (action)
+                {
+                    case "action1": response = HandleAction1(parameters); break;
+                    // ...
+                    default: response = ToolResponse.Fail($"Unknown action: {action}"); break;
+                }
+            }
+            catch (Exception ex) { response = ToolResponse.Fail($"Error: {ex.Message}"); }
+            sw.Stop();
+            return Task.FromResult(response.ToToolResult(sw.Elapsed.TotalMilliseconds));
+        }
+
+        private ToolResponse HandleAction1(JObject parameters) { ... }
+    }
+}
+```
+
+### 4.3 Cloud 工具开发模板
+
+> **重要**: 先阅读 `Editor/Tools/Cloud/` 下的现有 `*Client.cs` + `*Tool.cs` 配对，学习实际模式。
+
+```csharp
+namespace AgentCore.Editor.Tools.Cloud
+{
+    [AgentTool("<tool_name>",
+        Description = "云端工具描述",
+        Category = "<Category>",
+        RequiresMainThread = false)]  // Cloud 工具不需要主线程
+    public class <ToolName>Tool : IAgentTool
+    {
+        // Cloud 工具使用 async/await
+        public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var client = <Service>Client.FromSettings();
+                if (client == null)
+                    return ToolResponse.Fail("服务未配置").ToToolResult(0);
+
+                // action 分发 ...
+                sw.Stop();
+                return response.ToToolResult(sw.Elapsed.TotalMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                return ToolResponse.Fail($"Error: {ex.Message}").ToToolResult(sw.Elapsed.TotalMilliseconds);
+            }
+        }
+    }
+}
+```
+
+### 4.4 工具开发检查清单
+
+开发新工具时，必须逐项确认：
+
+- [ ] **[AgentTool] 特性** — Name, Description, Category, RequiresMainThread, MayModifyScripts 全部正确
+- [ ] **Metadata 属性** — 与 [AgentTool] 特性的值完全一致
+- [ ] **_parametersSchema** — JSON Schema 格式正确，required 字段完整
+- [ ] **命名空间** — `AgentCore.Editor.Tools.<Type>.<Category>` 格式
+- [ ] **文件位置** — 放在正确的 `Editor/Tools/<Type>/<Category>/` 目录
+- [ ] **ToolHelpers 使用** — 参数解析使用 `ToolHelpers` 中的方法（先阅读该文件了解可用方法）
+- [ ] **ToolResponse 返回** — 成功用 `ToolResponse.Ok/OkWithData`，失败用 `ToolResponse.Fail`
+- [ ] **Stopwatch 计时** — 每个 ExecuteAsync 都要计时并传给 `ToToolResult`
+- [ ] **异常处理** — 外层 try-catch 捕获所有异常，返回 `ToolResponse.Fail`
+- [ ] **action 分发** — switch 语句 + default 分支返回有效 action 列表
+- [ ] **Description 质量** — 面向 LLM 的描述要清晰、具体，说明能做什么和不能做什么
+- [ ] **无需手动注册** — `ToolAutoDiscovery` 会自动扫描并注册，不要手动修改任何注册代码
+- [ ] **TOOLS.md.template 更新** — 如果工具面向用户重要，在模板中添加使用指南
+
+### 4.5 工具自动发现机制
+
+```
+ToolAutoDiscovery.DiscoverAndRegisterAll()
+  → 扫描所有已加载的程序集
+  → 查找标记了 [AgentTool] 的类
+  → 验证类实现了 IAgentTool 接口
+  → 通过 Activator.CreateInstance() 创建实例
+  → 注册到 ToolRegistry.Instance
+```
+
+**关键规则**:
+- 工具类必须有**无参构造函数**（或使用默认构造函数）
+- 工具类不能是 abstract 或 generic
+- 一个类只能有一个 `[AgentTool]` 特性
+- 工具名称（Name）必须全局唯一
+
+> 详细实现请阅读 `Editor/Tools/Infrastructure/ToolAutoDiscovery.cs`。
+
+### 4.6 参数解析规范
+
+使用 `ToolHelpers` 中的方法（具体可用方法请阅读 `Editor/Tools/Infrastructure/ToolHelpers.cs`）：
+
+```csharp
+// 必需参数 — 缺失时抛出异常
+string action = ToolHelpers.GetRequiredString(parameters, "action");
+
+// 可选参数 — 缺失时返回默认值
+string search = ToolHelpers.GetOptionalString(parameters, "search");
+int maxEntries = ToolHelpers.GetOptionalInt(parameters, "max_entries", 50);
+bool verbose = ToolHelpers.GetOptionalBool(parameters, "verbose", false);
+
+// 枚举参数
+MyEnum mode = ToolHelpers.GetRequiredEnum<MyEnum>(parameters, "mode");
+
+// Unity 类型 — 具体支持的类型请查阅 ToolHelpers.cs
+Vector3 pos = ToolHelpers.ParseVector3(parameters["position"]);
+GameObject go = ToolHelpers.FindGameObject(nameOrPath);
+```
+
+---
+
+## 5. 关键基础设施规范
+
+> 以下展示的是 API 使用**模式**，不是完整 API 列表。
+> 具体可用的属性和方法，请阅读对应源文件。
+
+### 5.1 ToolResponse 使用规范
+
+```csharp
+// 成功 — 无数据
+ToolResponse.Ok("操作完成")
+
+// 成功 — 带数据（自动序列化为 JSON）
+ToolResponse.OkWithData(new { count = 5, items = list }, "找到 5 个结果")
+
+// 失败
+ToolResponse.Fail("找不到 GameObject: Player")
+
+// 转换为 ToolResult（传入执行时间）
+response.ToToolResult(sw.Elapsed.TotalMilliseconds)
+```
+
+> 完整 API 请阅读 `Editor/Tools/Infrastructure/ToolResponse.cs`。
+
+### 5.2 AgentCoreSettings 访问模式
+
+```csharp
+// 获取设置实例（ScriptableSingleton，全局唯一）
+var settings = AgentCoreSettings.instance;
+
+// 访问属性 — 具体有哪些属性请阅读 AgentCoreSettings.cs
+// 常见模式: settings.<propertyName>
+
+// 保存设置
+settings.SaveSettings();
+```
+
+> **重要**: 不要假设 Settings 有哪些字段。修改前先阅读 `Editor/Config/AgentCoreSettings.cs` 了解当前所有字段。
+
+### 5.3 HttpClientFactory 使用规范
+
+```csharp
+// 获取共享 HttpClient（带连接池）
+var client = HttpClientFactory.GetClient();
+
+// 创建带认证的请求
+var request = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
+request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+var response = await client.SendAsync(request, ct);
+```
+
+> 完整 API 请阅读 `Editor/Utils/HttpClientFactory.cs`。
+
+### 5.4 JsonHelper 使用规范
+
+```csharp
+// 序列化 / 反序列化
+string json = JsonHelper.Serialize(obj, pretty: true);
+MyType obj = JsonHelper.Deserialize<MyType>(json);
+
+// 安全解析（失败返回 null）
+JObject jobj = JsonHelper.ParseObject(json);
+JArray jarr = JsonHelper.ParseArray(json);
+
+// 安全取值
+string val = JsonHelper.GetString(jobj, "key", "default");
+int num = JsonHelper.GetInt(jobj, "key", 0);
+bool flag = JsonHelper.GetBool(jobj, "key", false);
+```
+
+> 完整 API 请阅读 `Editor/Utils/JsonHelper.cs`。
+
+---
+
+## 6. 修改核心系统的规则
+
+### 6.1 AgentLoop.cs 修改规则
+
+`AgentLoop.cs` 是系统核心（文件较大），修改时必须遵守：
+
+> **修改前必须先完整阅读 `Editor/Core/AgentLoop.cs`**，理解当前实现。
+
+1. **理解状态机** — 阅读 `Editor/Core/MessageTypes.cs` 中的 `AgentState` 枚举了解所有状态
+2. **事件驱动** — 通过 `EmitEvent(AgentEvent)` 通知 UI，不要直接操作 UI
+3. **Domain Reload 安全** — 任何新增的状态或数据，如果需要跨 Domain Reload 保留，必须：
+   - 在 `OnBeforeAssemblyReload()` 中保存到 `DomainReloadState`
+   - 在 `TryResumeAfterReload()` 中恢复
+4. **CancellationToken 传递** — 所有 async 方法必须接受并传递 `CancellationToken`
+5. **错误不吞没** — 捕获异常后必须通过 `EmitEvent(AgentEvent.ErrorEvent(...))` 通知
+
+### 6.2 Bootstrap 系统修改规则
+
+Bootstrap 加载顺序是固定的：`SOUL → TOOLS → PROJECT → MEMORY → USER`
+
+> 修改前先阅读 `Editor/Bootstrap/BootstrapLoader.cs` 了解完整加载逻辑。
+
+- **SOUL.md** — AI 角色定义，修改需谨慎，影响所有对话行为
+- **TOOLS.md.template** — 工具使用指南，新增工具后应更新此文件
+- **ProjectContextCollector** — 自动收集项目信息，不要收集敏感信息
+- **MEMORY.md / USER.md** — 用户文件，代码不应修改其内容
+
+### 6.3 UI 修改规则
+
+- 使用 **UI Toolkit** (VisualElement)，不使用 IMGUI（除了 Settings Provider）
+- 主窗口通过事件处理方法响应 `AgentEvent`
+- UI 组件在 `Editor/UI/Components/` 目录
+- 样式在 `.uss` 文件中，布局在 `.uxml` 文件中
+- Settings Provider 使用 IMGUI（因为 `SettingsProvider` 的 `OnGUI` 是 IMGUI 接口）
+
+> 修改 UI 前，先阅读 `Editor/UI/` 下的现有文件了解组件结构和样式模式。
+
+### 6.4 Session 系统修改规则
+
+- `SessionData` 是可序列化的，所有字段必须标记 `[Serializable]`
+- `SessionStorage` 使用 JSON 文件存储
+- `AutoMemoryStrategy` 在会话结束时自动提取记忆，依赖 LLM 调用
+- 修改 `SessionData` 结构时注意向后兼容（旧会话文件仍需可加载）
+
+> 修改前先阅读 `Editor/Session/` 下的所有文件了解当前数据模型。
+
+---
+
+## 7. 编码硬规则
+
+### 7.1 禁止事项
+
+- **禁止** 引用 `UnityEngine.dll` 中的 Runtime-only 类型到工具逻辑中
+- **禁止** 在工具的 `ExecuteAsync` 中使用 `Thread.Sleep` 或同步阻塞
+- **禁止** 在 `RequiresMainThread = true` 的工具中启动新线程
+- **禁止** 硬编码 API Key、URL 或用户特定路径
+- **禁止** 使用 `Debug.Log` 进行正常流程日志（仅用于错误和警告）
+- **禁止** 修改 `ToolAutoDiscovery` 的扫描逻辑来手动注册工具
+- **禁止** 在工具中直接访问 `ChatWindow` 或其他 UI 组件
+
+### 7.2 必须事项
+
+- **必须** 所有公共方法都有 XML 文档注释
+- **必须** 所有工具都有完整的异常处理
+- **必须** 使用 `ToolHelpers` 解析参数（不要手动解析 JObject）
+- **必须** 使用 `ToolResponse` 构建返回值（不要手动构建 JSON）
+- **必须** 新工具通过 `[AgentTool]` + `IAgentTool` 自动注册
+- **必须** Cloud 工具的客户端支持 `FromSettings()` 工厂方法
+- **必须** 修改 `AgentLoop` 后验证 Domain Reload 恢复仍然正常
+
+### 7.3 C# 语言限制
+
+Unity 2022.3 支持 C# 9.0，但以下特性应**谨慎使用或避免**：
+
+```
+✅ 可用: record types, pattern matching, nullable reference types, 
+         target-typed new, init-only setters
+⚠️ 谨慎: global using (可能影响 asmdef 隔离)
+❌ 不可用: C# 10+ 特性 (file-scoped namespaces 在某些 Unity 版本不稳定)
+```
+
+### 7.4 异步编程规范
+
+```csharp
+// ✅ 正确 — async 方法传递 CancellationToken
+public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
+{
+    var result = await client.QueryAsync(query, ct);
+    return ToolResponse.OkWithData(result).ToToolResult(0);
+}
+
+// ✅ 正确 — Native 工具同步执行，包装为 Task
+public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
+{
+    var response = HandleSync(parameters);
+    return Task.FromResult(response.ToToolResult(0));
+}
+
+// ❌ 错误 — 不要用 .Result 或 .Wait() 阻塞
+public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
+{
+    var result = client.QueryAsync(query, ct).Result;  // 死锁风险！
+    ...
+}
+
+// ❌ 错误 — 不要忽略 CancellationToken
+public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
+{
+    var result = await client.QueryAsync(query);  // 缺少 ct！
+    ...
+}
+```
+
+---
+
+## 8. 测试与验证
+
+### 8.1 编译验证
+
+每次修改后必须确认：
+
+1. `AgentCore.Editor` 程序集编译通过（零错误零警告）
+2. 不影响用户项目的编译（因为 asmdef 隔离，通常不会）
+3. Unity Console 无新增错误
+
+### 8.2 工具验证
+
+新增工具后验证：
+
+1. 工具出现在 `ToolRegistry` 中（可通过 `execute_code` 检查 `ToolRegistry.Instance.Count`）
+2. 工具的 `Metadata` 正确（name, description, category, parametersSchema）
+3. 各 action 正常工作（手动测试或通过 Chat 窗口测试）
+4. 错误参数返回清晰的错误信息（不是异常堆栈）
+5. `TOOLS.md.template` 已更新（如果工具面向用户重要）
+
+### 8.3 Domain Reload 验证
+
+修改核心系统后验证：
+
+1. 在 Chat 中发送消息触发工具调用
+2. 工具调用过程中修改一个脚本文件（触发 Domain Reload）
+3. Domain Reload 完成后，对话应自动恢复
+4. 恢复后的对话上下文完整，工具调用结果正确
+
+---
+
+## 9. SOUL.md 修改规范
+
+`SOUL.md` 是 AI Agent 的角色定义（位于 `Editor/Bootstrap/Resources/SOUL.md`）。
+
+> **修改前必须先完整阅读 SOUL.md**，了解当前所有 section 和规则。
+> 不要假设 section 编号或内容 — 以实际文件为准。
+
+修改原则：
+- 每个 section 独立，不要交叉引用
+- 规则要具体可执行，不要抽象描述
+- 新增规则放在最相关的 section 中
+- 不要删除现有规则，除非确认已过时
+- 修改需谨慎，影响所有对话行为
+
+---
+
+## 10. 版本迁移规范
+
+`AgentCoreSettings` 有版本迁移系统。
+
+> **修改前先阅读 `Editor/Config/AgentCoreSettings.cs`**，找到 `CurrentVersion` 常量和 `MigrateSettings()` 方法，了解当前版本号和已有迁移逻辑。
+
+添加新设置字段时：
+1. 在 `AgentCoreSettings` 中添加字段（带合理默认值）
+2. 递增 `CurrentVersion`（基于实际代码中的当前值）
+3. 在 `MigrateSettings()` 中添加迁移逻辑
+4. 在 `AgentCoreSettingsProvider` 中添加 UI
+
+---
+
+## 11. Skills 路由表
+
+> 开发 AgentCore 时，根据任务类型加载对应的 Skill 文件。
+> 每个 Skill 都遵循"先发现现有模式，再编写新代码"的原则。
+
+| 任务场景 | Skill | 路径 |
+|----------|-------|------|
+| 新增 Native 工具 | `add-native-tool` | `.agents/skills/add-native-tool.md` |
+| 新增 Cloud 工具 | `add-cloud-tool` | `.agents/skills/add-cloud-tool.md` |
+| 修改 AgentLoop 核心 | `modify-agent-loop` | `.agents/skills/modify-agent-loop.md` |
+| 修改 Bootstrap/SOUL | `modify-bootstrap` | `.agents/skills/modify-bootstrap.md` |
+| 新增设置项 | `add-settings` | `.agents/skills/add-settings.md` |
+| UI 开发 | `modify-ui` | `.agents/skills/modify-ui.md` |
+
+---
+
+> 维护原则：本文件描述的是**架构模式和规则**，不是文件清单。
+> 项目演进时，更新规则和模式描述，但不要维护具体的文件列表。
+> 让 LLM 通过工具动态发现实际代码结构。
