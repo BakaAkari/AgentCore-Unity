@@ -235,11 +235,13 @@ namespace AgentCore.Editor.Tools.Native.Utility
             if (importer == null) return ToolResponse.Fail(error);
 
             importer.textureType = TextureImporterType.Sprite;
+            var textureSettings = ReadTextureSettings(importer);
             if (parameters["pixels_per_unit"] != null) importer.spritePixelsPerUnit = ToolHelpers.GetOptionalFloat(parameters, "pixels_per_unit", importer.spritePixelsPerUnit);
             if (parameters["sprite_mode"] != null) importer.spriteImportMode = ParseEnum<SpriteImportMode>(ToolHelpers.GetRequiredString(parameters, "sprite_mode"));
-            if (parameters["mesh_type"] != null) importer.spriteMeshType = ParseEnum<SpriteMeshType>(ToolHelpers.GetRequiredString(parameters, "mesh_type"));
-            if (parameters["extrude_edges"] != null) importer.spriteExtrude = (uint)Math.Max(0, ToolHelpers.GetOptionalInt(parameters, "extrude_edges", (int)importer.spriteExtrude));
+            if (parameters["mesh_type"] != null) SetTextureSettingsEnum(textureSettings, "spriteMeshType", ToolHelpers.GetRequiredString(parameters, "mesh_type"));
+            if (parameters["extrude_edges"] != null) SetTextureSettingsValue(textureSettings, "spriteExtrude", Math.Max(0, ToolHelpers.GetOptionalInt(parameters, "extrude_edges", GetTextureSettingsInt(textureSettings, "spriteExtrude", 0))));
             if (parameters["pivot"] != null) importer.spritePivot = ParseVector2(parameters["pivot"], importer.spritePivot);
+            importer.SetTextureSettings(textureSettings);
             importer.SaveAndReimport();
 
             return ToolResponse.OkWithData(SerializeImporter(importer, path), $"Updated sprite import settings for '{path}'.");
@@ -294,6 +296,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
         private static JObject SerializeImporter(TextureImporter importer, string path)
         {
+            var textureSettings = ReadTextureSettings(importer);
             return new JObject
             {
                 ["asset_path"] = path,
@@ -309,9 +312,75 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 ["wrap_mode"] = importer.wrapMode.ToString(),
                 ["sprite_mode"] = importer.spriteImportMode.ToString(),
                 ["sprite_pixels_per_unit"] = importer.spritePixelsPerUnit,
-                ["sprite_mesh_type"] = importer.spriteMeshType.ToString(),
+                ["sprite_mesh_type"] = GetTextureSettingsString(textureSettings, "spriteMeshType", null),
+                ["sprite_extrude"] = GetTextureSettingsInt(textureSettings, "spriteExtrude", -1),
                 ["importer_type"] = importer.GetType().Name
             };
+        }
+
+        private static TextureImporterSettings ReadTextureSettings(TextureImporter importer)
+        {
+            var settings = new TextureImporterSettings();
+            importer.ReadTextureSettings(settings);
+            return settings;
+        }
+
+        private static void SetTextureSettingsEnum(TextureImporterSettings settings, string memberName, string value)
+        {
+            var memberType = GetTextureSettingsMemberType(memberName);
+            if (memberType == null || !memberType.IsEnum) return;
+            SetTextureSettingsValue(settings, memberName, Enum.Parse(memberType, value, true));
+        }
+
+        private static void SetTextureSettingsValue(TextureImporterSettings settings, string memberName, object value)
+        {
+            var property = typeof(TextureImporterSettings).GetProperty(memberName);
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(settings, ConvertTextureSettingsValue(value, property.PropertyType), null);
+                return;
+            }
+
+            var field = typeof(TextureImporterSettings).GetField(memberName);
+            if (field != null)
+            {
+                field.SetValue(settings, ConvertTextureSettingsValue(value, field.FieldType));
+            }
+        }
+
+        private static string GetTextureSettingsString(TextureImporterSettings settings, string memberName, string defaultValue)
+        {
+            var value = GetTextureSettingsValue(settings, memberName);
+            return value != null ? value.ToString() : defaultValue;
+        }
+
+        private static int GetTextureSettingsInt(TextureImporterSettings settings, string memberName, int defaultValue)
+        {
+            var value = GetTextureSettingsValue(settings, memberName);
+            return value != null ? Convert.ToInt32(value) : defaultValue;
+        }
+
+        private static object GetTextureSettingsValue(TextureImporterSettings settings, string memberName)
+        {
+            var property = typeof(TextureImporterSettings).GetProperty(memberName);
+            if (property != null && property.CanRead) return property.GetValue(settings, null);
+            var field = typeof(TextureImporterSettings).GetField(memberName);
+            return field != null ? field.GetValue(settings) : null;
+        }
+
+        private static Type GetTextureSettingsMemberType(string memberName)
+        {
+            var property = typeof(TextureImporterSettings).GetProperty(memberName);
+            if (property != null) return property.PropertyType;
+            var field = typeof(TextureImporterSettings).GetField(memberName);
+            return field != null ? field.FieldType : null;
+        }
+
+        private static object ConvertTextureSettingsValue(object value, Type targetType)
+        {
+            if (value == null || targetType.IsInstanceOfType(value)) return value;
+            if (targetType.IsEnum) return Enum.Parse(targetType, value.ToString(), true);
+            return Convert.ChangeType(value, targetType);
         }
 
         private static JObject SerializePlatformSettings(TextureImporterPlatformSettings settings)

@@ -510,15 +510,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     ["propertyCount"] = ShaderUtil.GetPropertyCount(shader)
                 };
 
-                // Get subshader count via ShaderUtil (if available)
-                try
-                {
-                    info["subshaderCount"] = ShaderUtil.GetSubshaderCount(shader);
-                }
-                catch
-                {
-                    info["subshaderCount"] = -1;
-                }
+                info["subshaderCount"] = TryGetSubshaderCount(shader) ?? -1;
 
                 // Get shader LOD
                 try
@@ -591,6 +583,33 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 default:
                     return true;
             }
+        }
+
+        /// <summary>
+        /// Gets the subshader count through reflection because ShaderUtil method names differ between Unity versions.
+        /// </summary>
+        private static int? TryGetSubshaderCount(Shader shader)
+        {
+            var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+            var methodNames = new[] { "GetShaderSubshaderCount", "GetSubshaderCount" };
+
+            foreach (var methodName in methodNames)
+            {
+                var method = typeof(ShaderUtil).GetMethod(methodName, flags, null, new[] { typeof(Shader) }, null);
+                if (method == null) continue;
+
+                try
+                {
+                    var result = method.Invoke(null, new object[] { shader });
+                    if (result != null) return Convert.ToInt32(result);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            return null;
         }
 
         #endregion

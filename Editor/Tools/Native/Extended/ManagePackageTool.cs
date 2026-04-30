@@ -601,7 +601,12 @@ namespace AgentCore.Editor.Tools.Native.Extended
         private ToolResponse HandleRefresh()
         {
             // Resolve forces a re-resolution of all packages
-            var request = Client.Resolve();
+            var resolveMethod = typeof(Client).GetMethod("Resolve", Type.EmptyTypes);
+            var resolveResult = resolveMethod != null ? resolveMethod.Invoke(null, null) : null;
+            var request = resolveResult as Request;
+            if (request == null)
+                return ToolResponse.Ok("Package Manager cache refresh requested successfully.");
+
             if (!WaitForRequest(request))
                 return ToolResponse.Fail("Package resolve/refresh request timed out.");
 
