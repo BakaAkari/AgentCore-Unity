@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
+using UnityEditorInternal;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
@@ -25,7 +26,7 @@ namespace AgentCore.Editor.Tools.Native.Core
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""add"", ""remove"", ""get"", ""list"", ""modify"", ""set_enabled""],
+                    ""enum"": [""add"", ""remove"", ""get"", ""list"", ""modify"", ""set_enabled"", ""add_batch"", ""remove_batch"", ""set_property_batch"", ""get_components_batch"", ""copy_component""],
                     ""description"": ""Action to perform""
                 },
                 ""target"": {
@@ -36,6 +37,33 @@ namespace AgentCore.Editor.Tools.Native.Core
                     ""type"": ""string"",
                     ""description"": ""Component type name (e.g., 'Rigidbody', 'BoxCollider')""
                 },
+                ""component_type"": {
+                    ""type"": ""string"",
+                    ""description"": ""Component type name alias for batch actions""
+                },
+                ""targets"": {
+                    ""type"": ""string"",
+                    ""description"": ""Comma-separated GameObject names or paths for batch actions""
+                },
+                ""items"": {
+                    ""type"": ""array"",
+                    ""description"": ""Batch operation items""
+                },
+                ""property"": {
+                    ""type"": ""string"",
+                    ""description"": ""Property name for set_property_batch items""
+                },
+                ""value"": {
+                    ""description"": ""Property value for set_property_batch items""
+                },
+                ""include_properties"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Include serialized properties in get_components_batch""
+                },
+                ""source"": {
+                    ""type"": ""string"",
+                    ""description"": ""Source GameObject name or path for copy_component""
+                },
                 ""properties"": {
                     ""type"": ""object"",
                     ""description"": ""Properties to modify (key-value pairs)""
@@ -45,7 +73,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     ""description"": ""Enable/disable state for set_enabled""
                 }
             },
-            ""required"": [""action"", ""target""]
+            ""required"": [""action""]
         }");
 
         public ToolMetadata Metadata => new ToolMetadata(
@@ -64,40 +92,53 @@ namespace AgentCore.Editor.Tools.Native.Core
             try
             {
                 var action = ToolHelpers.GetRequiredString(parameters, "action").ToLowerInvariant();
-                var target = ToolHelpers.GetRequiredString(parameters, "target");
-                var go = ToolHelpers.FindGameObject(target);
 
-                if (go == null)
+                switch (action)
                 {
-                    response = ToolResponse.Fail($"GameObject '{target}' not found.");
-                }
-                else
-                {
-                    switch (action)
-                    {
-                        case "add":
+                    case "add_batch":
+                        response = HandleAddBatch(parameters);
+                        break;
+                    case "remove_batch":
+                        response = HandleRemoveBatch(parameters);
+                        break;
+                    case "set_property_batch":
+                        response = HandleSetPropertyBatch(parameters);
+                        break;
+                    case "get_components_batch":
+                        response = HandleGetComponentsBatch(parameters);
+                        break;
+                    case "copy_component":
+                        response = HandleCopyComponent(parameters);
+                        break;
+                    case "add":
+                    case "remove":
+                    case "get":
+                    case "list":
+                    case "modify":
+                    case "set_enabled":
+                        var target = ToolHelpers.GetRequiredString(parameters, "target");
+                        var go = ToolHelpers.FindGameObject(target);
+                        if (go == null)
+                        {
+                            response = ToolResponse.Fail($"GameObject '{target}' not found.");
+                        }
+                        else if (action == "add")
                             response = HandleAdd(go, parameters);
-                            break;
-                        case "remove":
+                        else if (action == "remove")
                             response = HandleRemove(go, parameters);
-                            break;
-                        case "get":
+                        else if (action == "get")
                             response = HandleGet(go, parameters);
-                            break;
-                        case "list":
+                        else if (action == "list")
                             response = HandleList(go);
-                            break;
-                        case "modify":
+                        else if (action == "modify")
                             response = HandleModify(go, parameters);
-                            break;
-                        case "set_enabled":
+                        else
                             response = HandleSetEnabled(go, parameters);
-                            break;
-                        default:
-                            response = ToolResponse.Fail(
-                                $"Unknown action: '{action}'. Valid actions: add, remove, get, list, modify, set_enabled");
-                            break;
-                    }
+                        break;
+                    default:
+                        response = ToolResponse.Fail(
+                            $"Unknown action: '{action}'. Valid actions: add, remove, get, list, modify, set_enabled, add_batch, remove_batch, set_property_batch, get_components_batch, copy_component");
+                        break;
                 }
             }
             catch (ArgumentException ex)
@@ -393,6 +434,275 @@ namespace AgentCore.Editor.Tools.Native.Core
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"Error setting enabled state: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleAddBatch(JObject parameters)
+        {
+            try
+            {
+                var targets = GetTargetNames(parameters);
+                if (targets.Count == 0)
+                    return ToolResponse.Fail("'targets' is required for 'add_batch' action.");
+
+                var componentTypeName = GetComponentTypeName(parameters);
+                var type = ToolHelpers.ResolveComponentType(componentTypeName);
+                if (type == null)
+                    return ToolResponse.Fail($"Component type '{componentTypeName}' not found. Use a fully-qualified name if needed.");
+                if (!typeof(Component).IsAssignableFrom(type))
+                    return ToolResponse.Fail($"Type '{componentTypeName}' is not a Component.");
+
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Add Components Batch");
+
+                foreach (var target in targets)
+                {
+                    var go = ToolHelpers.FindGameObject(target);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"GameObject '{target}' not found." });
+                        continue;
+                    }
+
+                    var existing = go.GetComponent(type);
+                    if (existing != null && !IsMultipleAllowed(type))
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"Component '{componentTypeName}' already exists on '{go.name}' and does not allow multiples." });
+                        continue;
+                    }
+
+                    var component = Undo.AddComponent(go, type);
+                    if (component == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"Failed to add component '{componentTypeName}' to '{go.name}'." });
+                        continue;
+                    }
+
+                    EditorUtility.SetDirty(go);
+                    MarkSceneDirty(go);
+                    successes.Add(new JObject { ["gameObject"] = go.name, ["instanceId"] = go.GetInstanceID(), ["componentType"] = type.FullName, ["componentInstanceId"] = component.GetInstanceID() });
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Added component to {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error adding components batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleRemoveBatch(JObject parameters)
+        {
+            try
+            {
+                var targets = GetTargetNames(parameters);
+                if (targets.Count == 0)
+                    return ToolResponse.Fail("'targets' is required for 'remove_batch' action.");
+
+                var componentTypeName = GetComponentTypeName(parameters);
+                var type = ToolHelpers.ResolveComponentType(componentTypeName);
+                if (type == null)
+                    return ToolResponse.Fail($"Component type '{componentTypeName}' not found.");
+
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Remove Components Batch");
+
+                foreach (var target in targets)
+                {
+                    var go = ToolHelpers.FindGameObject(target);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"GameObject '{target}' not found." });
+                        continue;
+                    }
+
+                    var component = go.GetComponent(type);
+                    if (component == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"Component '{componentTypeName}' not found on '{go.name}'." });
+                        continue;
+                    }
+                    if (component is Transform)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = "Cannot remove the Transform component." });
+                        continue;
+                    }
+
+                    Undo.DestroyObjectImmediate(component);
+                    EditorUtility.SetDirty(go);
+                    MarkSceneDirty(go);
+                    successes.Add(new JObject { ["gameObject"] = go.name, ["instanceId"] = go.GetInstanceID(), ["removedType"] = componentTypeName });
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Removed component from {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error removing components batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleSetPropertyBatch(JObject parameters)
+        {
+            try
+            {
+                var items = parameters["items"] as JArray;
+                if (items == null || items.Count == 0)
+                    return ToolResponse.Fail("'items' array is required for 'set_property_batch' action.");
+
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Set Component Properties Batch");
+
+                foreach (var token in items)
+                {
+                    if (!(token is JObject item))
+                    {
+                        failures.Add(new JObject { ["error"] = "Item must be an object." });
+                        continue;
+                    }
+
+                    var target = ToolHelpers.GetOptionalString(item, "target");
+                    if (string.IsNullOrEmpty(target))
+                    {
+                        failures.Add(new JObject { ["error"] = "Item 'target' is required." });
+                        continue;
+                    }
+
+                    var go = ToolHelpers.FindGameObject(target);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"GameObject '{target}' not found." });
+                        continue;
+                    }
+
+                    var componentTypeName = GetComponentTypeName(item);
+                    var type = ToolHelpers.ResolveComponentType(componentTypeName);
+                    if (type == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"Component type '{componentTypeName}' not found." });
+                        continue;
+                    }
+
+                    var component = go.GetComponent(type);
+                    if (component == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"Component '{componentTypeName}' not found on '{go.name}'." });
+                        continue;
+                    }
+
+                    var property = ToolHelpers.GetRequiredString(item, "property");
+                    if (item["value"] == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["property"] = property, ["error"] = "Item 'value' is required." });
+                        continue;
+                    }
+
+                    ToolHelpers.RecordUndo(component, $"Set {componentTypeName}.{property}");
+                    var errors = SetPropertiesViaSerializedObject(component, new JObject { [property] = item["value"] });
+                    EditorUtility.SetDirty(component);
+                    MarkSceneDirty(go);
+                    if (errors.Count > 0)
+                        failures.Add(new JObject { ["target"] = target, ["componentType"] = componentTypeName, ["property"] = property, ["errors"] = new JArray(errors.ToArray()) });
+                    else
+                        successes.Add(new JObject { ["target"] = go.name, ["componentType"] = componentTypeName, ["property"] = property });
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Set {successes.Count} component propertie(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error setting component properties batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleGetComponentsBatch(JObject parameters)
+        {
+            try
+            {
+                var targets = GetTargetNames(parameters);
+                if (targets.Count == 0)
+                    return ToolResponse.Fail("'targets' is required for 'get_components_batch' action.");
+
+                bool includeProperties = ToolHelpers.GetOptionalBool(parameters, "include_properties", false);
+                var successes = new JArray();
+                var failures = new JArray();
+                foreach (var target in targets)
+                {
+                    var go = ToolHelpers.FindGameObject(target);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["target"] = target, ["error"] = $"GameObject '{target}' not found." });
+                        continue;
+                    }
+
+                    var components = new JArray();
+                    foreach (var component in go.GetComponents<Component>())
+                    {
+                        if (component == null)
+                        {
+                            components.Add(new JObject { ["type"] = "(Missing Script)", ["isMissing"] = true });
+                            continue;
+                        }
+                        components.Add(includeProperties ? SerializeComponentDetailed(component) : ToolHelpers.SerializeComponent(component));
+                    }
+
+                    successes.Add(new JObject { ["gameObject"] = go.name, ["instanceId"] = go.GetInstanceID(), ["componentCount"] = components.Count, ["components"] = components });
+                }
+
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Read components from {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error getting components batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleCopyComponent(JObject parameters)
+        {
+            try
+            {
+                var sourceName = ToolHelpers.GetRequiredString(parameters, "source");
+                var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+                var componentTypeName = GetComponentTypeName(parameters);
+                var source = ToolHelpers.FindGameObject(sourceName);
+                var target = ToolHelpers.FindGameObject(targetName);
+                if (source == null)
+                    return ToolResponse.Fail($"GameObject '{sourceName}' not found.");
+                if (target == null)
+                    return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+                var type = ToolHelpers.ResolveComponentType(componentTypeName);
+                if (type == null)
+                    return ToolResponse.Fail($"Component type '{componentTypeName}' not found.");
+                var component = source.GetComponent(type);
+                if (component == null)
+                    return ToolResponse.Fail($"Component '{componentTypeName}' not found on '{source.name}'.");
+                if (component is Transform)
+                    return ToolResponse.Fail("Cannot copy the Transform component.");
+
+                Undo.RegisterCompleteObjectUndo(target, "Copy Component");
+                if (!ComponentUtility.CopyComponent(component) || !ComponentUtility.PasteComponentAsNew(target))
+                    return ToolResponse.Fail($"Failed to copy component '{componentTypeName}' from '{source.name}' to '{target.name}'.");
+
+                EditorUtility.SetDirty(target);
+                MarkSceneDirty(target);
+                return ToolResponse.OkWithData(new JObject { ["source"] = source.name, ["target"] = target.name, ["componentType"] = componentTypeName }, $"Component '{componentTypeName}' copied from '{source.name}' to '{target.name}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error copying component: {ex.Message}");
             }
         }
 
@@ -778,6 +1088,26 @@ namespace AgentCore.Editor.Tools.Native.Core
         {
             // Check for DisallowMultipleComponent attribute
             return !componentType.GetCustomAttributes(typeof(DisallowMultipleComponent), true).Any();
+        }
+
+        private string GetComponentTypeName(JObject parameters)
+        {
+            var componentTypeName = ToolHelpers.GetOptionalString(parameters, "componentType");
+            if (string.IsNullOrEmpty(componentTypeName))
+                componentTypeName = ToolHelpers.GetOptionalString(parameters, "component_type");
+            if (string.IsNullOrEmpty(componentTypeName))
+                throw new ArgumentException("'componentType' or 'component_type' parameter is required.");
+            return componentTypeName;
+        }
+
+        private List<string> GetTargetNames(JObject parameters)
+        {
+            var targets = ToolHelpers.GetOptionalString(parameters, "targets");
+            if (string.IsNullOrEmpty(targets))
+                targets = ToolHelpers.GetOptionalString(parameters, "target");
+            if (string.IsNullOrEmpty(targets))
+                return new List<string>();
+            return targets.Split(',').Select(t => t.Trim()).Where(t => !string.IsNullOrEmpty(t)).Distinct().ToList();
         }
 
         private void MarkSceneDirty(GameObject go)

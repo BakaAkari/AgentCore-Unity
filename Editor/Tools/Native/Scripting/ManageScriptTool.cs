@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
@@ -12,11 +14,11 @@ using UnityEngine;
 namespace AgentCore.Editor.Tools.Native.Scripting
 {
     /// <summary>
-    /// Manage C# scripts — read, write, create from template, delete, list, and get info.
+    /// Manage C# scripts — read, write, create from template, delete, list, get info, analyze, find references, and add methods/fields.
     /// Directly calls System.IO and AssetDatabase APIs.
     /// </summary>
     [AgentTool("manage_script",
-        Description = "Manage C# scripts — read, write, create from template, delete, list, and get info",
+        Description = "Manage C# scripts — read, write, create, delete, list, get info, analyze API, find references, add methods/fields",
         Category = "Scripting",
         RequiresMainThread = true,
         MayModifyScripts = true)]
@@ -27,7 +29,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""read"", ""write"", ""create"", ""delete"", ""list"", ""get_info""],
+                    ""enum"": [""read"", ""write"", ""create"", ""delete"", ""list"", ""get_info"", ""analyze"", ""find_references"", ""add_method"", ""add_field""],
                     ""description"": ""Action to perform""
                 },
                 ""path"": {
@@ -66,6 +68,43 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 ""pattern"": {
                     ""type"": ""string"",
                     ""description"": ""File pattern for list action (default: '*.cs')""
+                },
+                ""method_name"": {
+                    ""type"": ""string"",
+                    ""description"": ""Method name for add_method action""
+                },
+                ""return_type"": {
+                    ""type"": ""string"",
+                    ""description"": ""Return type for add_method action (default: 'void')""
+                },
+                ""parameters"": {
+                    ""type"": ""string"",
+                    ""description"": ""Parameter list for add_method action (e.g., 'int count, string name')""
+                },
+                ""body"": {
+                    ""type"": ""string"",
+                    ""description"": ""Method body for add_method action (without braces)""
+                },
+                ""access"": {
+                    ""type"": ""string"",
+                    ""enum"": [""public"", ""private"", ""protected"", ""internal""],
+                    ""description"": ""Access modifier for add_method/add_field (default: 'public')""
+                },
+                ""field_name"": {
+                    ""type"": ""string"",
+                    ""description"": ""Field name for add_field action""
+                },
+                ""field_type"": {
+                    ""type"": ""string"",
+                    ""description"": ""Field type for add_field action (e.g., 'int', 'string', 'GameObject')""
+                },
+                ""default_value"": {
+                    ""type"": ""string"",
+                    ""description"": ""Default value for add_field action (optional)""
+                },
+                ""serialized"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Whether to add [SerializeField] attribute for add_field (default: true)""
                 }
             },
             ""required"": [""action""]
@@ -73,7 +112,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_script",
-            description: "Manage C# scripts — read, write, create from template, delete, list, and get info",
+            description: "Manage C# scripts — read, write, create, delete, list, get info, analyze API, find references, add methods/fields",
             category: "Scripting",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -108,9 +147,21 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                     case "get_info":
                         response = HandleGetInfo(parameters);
                         break;
+                    case "analyze":
+                        response = HandleAnalyze(parameters);
+                        break;
+                    case "find_references":
+                        response = HandleFindReferences(parameters);
+                        break;
+                    case "add_method":
+                        response = HandleAddMethod(parameters);
+                        break;
+                    case "add_field":
+                        response = HandleAddField(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: read, write, create, delete, list, get_info");
+                            $"Unknown action: '{action}'. Valid actions: read, write, create, delete, list, get_info, analyze, find_references, add_method, add_field");
                         break;
                 }
             }
@@ -126,11 +177,12 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             sw.Stop();
             var result = response.ToToolResult(sw.Elapsed.TotalMilliseconds);
 
-            // Mark compile-related for write/create/delete actions
+            // Mark compile-related for actions that modify script files
             if (result.Success)
             {
                 var action = ToolHelpers.GetOptionalString(parameters, "action", "");
-                if (action == "write" || action == "create" || action == "delete")
+                if (action == "write" || action == "create" || action == "delete" ||
+                    action == "add_method" || action == "add_field")
                 {
                     result.IsCompileRelated = true;
                 }
@@ -341,6 +393,395 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             }
 
             return ToolResponse.OkWithData(info, $"Script info: {path}");
+        }
+
+        /// <summary>
+        /// Analyzes a script's public API — classes, base types, public methods, public fields, and attributes.
+        /// Uses regex-based parsing on the source file content.
+        /// </summary>
+        private ToolResponse HandleAnalyze(JObject parameters)
+        {
+            var path = ToolHelpers.GetRequiredString(parameters, "path");
+            path = ToolHelpers.NormalizeAssetPath(path);
+
+            var fullPath = Path.GetFullPath(path);
+            if (!File.Exists(fullPath))
+                return ToolResponse.Fail($"Script file not found: {path}");
+
+            var content = File.ReadAllText(fullPath);
+            var result = new JObject { ["path"] = path };
+
+            // Detect namespace
+            var nsMatch = Regex.Match(content, @"namespace\s+([\w.]+)");
+            if (nsMatch.Success)
+                result["namespace"] = nsMatch.Groups[1].Value;
+
+            // Detect using statements
+            var usings = new JArray();
+            foreach (Match m in Regex.Matches(content, @"^\s*using\s+([\w.]+)\s*;", RegexOptions.Multiline))
+            {
+                usings.Add(m.Groups[1].Value);
+            }
+            result["usings"] = usings;
+
+            // Detect classes/structs/interfaces
+            var typePattern = @"\b(public|internal|private|protected)?\s*(abstract|sealed|static|partial)?\s*(class|struct|interface|enum)\s+(\w+)(?:\s*<[^>]+>)?(?:\s*:\s*([^\{]+))?";
+            var types = new JArray();
+            foreach (Match m in Regex.Matches(content, typePattern))
+            {
+                var typeInfo = new JObject
+                {
+                    ["access"] = string.IsNullOrWhiteSpace(m.Groups[1].Value) ? "internal" : m.Groups[1].Value.Trim(),
+                    ["modifier"] = m.Groups[2].Value.Trim(),
+                    ["kind"] = m.Groups[3].Value.Trim(),
+                    ["name"] = m.Groups[4].Value.Trim()
+                };
+
+                if (m.Groups[5].Success && !string.IsNullOrWhiteSpace(m.Groups[5].Value))
+                {
+                    var baseTypes = m.Groups[5].Value.Trim().TrimEnd('{').Trim();
+                    typeInfo["baseTypes"] = baseTypes;
+                }
+
+                types.Add(typeInfo);
+            }
+            result["types"] = types;
+
+            // Detect public methods
+            var methodPattern = @"^\s*(public|protected)\s+(?:(static|virtual|override|abstract|async)\s+)*(?:([\w<>\[\],\s]+?)\s+)(\w+)\s*\(([^)]*)\)";
+            var methods = new JArray();
+            foreach (Match m in Regex.Matches(content, methodPattern, RegexOptions.Multiline))
+            {
+                var methodInfo = new JObject
+                {
+                    ["access"] = m.Groups[1].Value.Trim(),
+                    ["modifier"] = m.Groups[2].Value.Trim(),
+                    ["returnType"] = m.Groups[3].Value.Trim(),
+                    ["name"] = m.Groups[4].Value.Trim(),
+                    ["parameters"] = m.Groups[5].Value.Trim()
+                };
+                methods.Add(methodInfo);
+            }
+            result["publicMethods"] = methods;
+
+            // Detect public fields and properties
+            var fieldPattern = @"^\s*(?:\[([^\]]+)\]\s*)*\s*(public|protected)\s+(?:(static|readonly|const)\s+)*([\w<>\[\],\s]+?)\s+(\w+)\s*(?:=\s*([^;]+))?\s*;";
+            var fields = new JArray();
+            foreach (Match m in Regex.Matches(content, fieldPattern, RegexOptions.Multiline))
+            {
+                var fieldInfo = new JObject
+                {
+                    ["access"] = m.Groups[2].Value.Trim(),
+                    ["modifier"] = m.Groups[3].Value.Trim(),
+                    ["type"] = m.Groups[4].Value.Trim(),
+                    ["name"] = m.Groups[5].Value.Trim()
+                };
+
+                if (!string.IsNullOrWhiteSpace(m.Groups[1].Value))
+                    fieldInfo["attributes"] = m.Groups[1].Value.Trim();
+                if (m.Groups[6].Success && !string.IsNullOrWhiteSpace(m.Groups[6].Value))
+                    fieldInfo["defaultValue"] = m.Groups[6].Value.Trim();
+
+                fields.Add(fieldInfo);
+            }
+            result["publicFields"] = fields;
+
+            // Detect properties (auto-properties and with getters/setters)
+            var propPattern = @"^\s*(public|protected)\s+(?:(static|virtual|override|abstract)\s+)*([\w<>\[\],\s]+?)\s+(\w+)\s*\{";
+            var properties = new JArray();
+            foreach (Match m in Regex.Matches(content, propPattern, RegexOptions.Multiline))
+            {
+                // Skip methods (they have parentheses before braces)
+                var propName = m.Groups[4].Value.Trim();
+                if (propName == "get" || propName == "set" || propName == "value") continue;
+
+                properties.Add(new JObject
+                {
+                    ["access"] = m.Groups[1].Value.Trim(),
+                    ["modifier"] = m.Groups[2].Value.Trim(),
+                    ["type"] = m.Groups[3].Value.Trim(),
+                    ["name"] = propName
+                });
+            }
+            result["publicProperties"] = properties;
+
+            // Detect class-level attributes
+            var classAttrPattern = @"^\s*\[([^\]]+)\]\s*$";
+            var attributes = new JArray();
+            foreach (Match m in Regex.Matches(content, classAttrPattern, RegexOptions.Multiline))
+            {
+                var attr = m.Groups[1].Value.Trim();
+                // Only include if the next non-empty line is a class/struct declaration
+                attributes.Add(attr);
+            }
+            result["attributes"] = attributes;
+
+            result["lineCount"] = content.Split('\n').Length;
+
+            return ToolResponse.OkWithData(result, $"Analyzed script: {path}");
+        }
+
+        /// <summary>
+        /// Finds all GameObjects in the current scene that reference a given script.
+        /// Searches all components on all GameObjects for the script type.
+        /// </summary>
+        private ToolResponse HandleFindReferences(JObject parameters)
+        {
+            var path = ToolHelpers.GetRequiredString(parameters, "path");
+            path = ToolHelpers.NormalizeAssetPath(path);
+
+            var monoScript = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+            if (monoScript == null)
+                return ToolResponse.Fail($"Script not found at path: {path}");
+
+            var scriptType = monoScript.GetClass();
+            if (scriptType == null)
+                return ToolResponse.Fail($"Could not resolve class type for script: {path}. The script may have compilation errors.");
+
+            var references = new JArray();
+
+            // Search all root GameObjects in all loaded scenes
+            for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded) continue;
+
+                foreach (var rootGo in scene.GetRootGameObjects())
+                {
+                    SearchGameObjectForScript(rootGo, scriptType, references, scene.name);
+                }
+            }
+
+            return ToolResponse.OkWithData(new JObject
+            {
+                ["scriptPath"] = path,
+                ["scriptClass"] = scriptType.FullName,
+                ["references"] = references,
+                ["referenceCount"] = references.Count
+            }, $"Found {references.Count} reference(s) to '{scriptType.Name}' in loaded scenes.");
+        }
+
+        /// <summary>
+        /// Adds a method to an existing script file.
+        /// Inserts the method before the last closing brace of the class.
+        /// </summary>
+        private ToolResponse HandleAddMethod(JObject parameters)
+        {
+            var path = ToolHelpers.GetRequiredString(parameters, "path");
+            path = ToolHelpers.NormalizeAssetPath(path);
+
+            var fullPath = Path.GetFullPath(path);
+            if (!File.Exists(fullPath))
+                return ToolResponse.Fail($"Script file not found: {path}");
+
+            var methodName = ToolHelpers.GetRequiredString(parameters, "method_name");
+            var returnType = ToolHelpers.GetOptionalString(parameters, "return_type", "void");
+            var methodParams = ToolHelpers.GetOptionalString(parameters, "parameters", "");
+            var body = ToolHelpers.GetOptionalString(parameters, "body", "");
+            var access = ToolHelpers.GetOptionalString(parameters, "access", "public");
+
+            var content = File.ReadAllText(fullPath);
+
+            // Check if method already exists
+            var methodExistsPattern = $@"\b{Regex.Escape(methodName)}\s*\(";
+            if (Regex.IsMatch(content, methodExistsPattern))
+                return ToolResponse.Fail($"Method '{methodName}' already exists in '{path}'.");
+
+            // Build the method string
+            var sb = new StringBuilder();
+            sb.AppendLine();
+            sb.AppendLine($"        {access} {returnType} {methodName}({methodParams})");
+            sb.AppendLine("        {");
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                // Indent each line of the body
+                foreach (var line in body.Split('\n'))
+                {
+                    sb.AppendLine($"            {line.TrimEnd('\r')}");
+                }
+            }
+            else
+            {
+                sb.AppendLine("            ");
+            }
+            sb.AppendLine("        }");
+
+            // Find the last closing brace of the class (second-to-last '}' in the file)
+            var insertIndex = FindClassClosingBraceIndex(content);
+            if (insertIndex < 0)
+                return ToolResponse.Fail("Could not find class closing brace in script. Ensure the file contains a valid class definition.");
+
+            var newContent = content.Substring(0, insertIndex) + sb.ToString() + content.Substring(insertIndex);
+
+            File.WriteAllText(fullPath, newContent);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+
+            return ToolResponse.OkWithData(new JObject
+            {
+                ["path"] = path,
+                ["methodName"] = methodName,
+                ["returnType"] = returnType,
+                ["access"] = access
+            }, $"Added method '{access} {returnType} {methodName}({methodParams})' to '{path}'.");
+        }
+
+        /// <summary>
+        /// Adds a field to an existing script file.
+        /// Inserts the field at the beginning of the class body (after the opening brace).
+        /// </summary>
+        private ToolResponse HandleAddField(JObject parameters)
+        {
+            var path = ToolHelpers.GetRequiredString(parameters, "path");
+            path = ToolHelpers.NormalizeAssetPath(path);
+
+            var fullPath = Path.GetFullPath(path);
+            if (!File.Exists(fullPath))
+                return ToolResponse.Fail($"Script file not found: {path}");
+
+            var fieldName = ToolHelpers.GetRequiredString(parameters, "field_name");
+            var fieldType = ToolHelpers.GetRequiredString(parameters, "field_type");
+            var defaultValue = ToolHelpers.GetOptionalString(parameters, "default_value");
+            var serialized = ToolHelpers.GetOptionalBool(parameters, "serialized", true);
+            var access = ToolHelpers.GetOptionalString(parameters, "access", "public");
+
+            var content = File.ReadAllText(fullPath);
+
+            // Check if field already exists
+            var fieldExistsPattern = $@"\b{Regex.Escape(fieldName)}\s*[;=]";
+            if (Regex.IsMatch(content, fieldExistsPattern))
+                return ToolResponse.Fail($"Field '{fieldName}' already exists in '{path}'.");
+
+            // Build the field string
+            var sb = new StringBuilder();
+
+            // Add [SerializeField] attribute for non-public fields, or [SerializeField] if requested
+            if (serialized && access != "public")
+            {
+                sb.AppendLine("        [SerializeField]");
+            }
+            else if (serialized && access == "public")
+            {
+                // Public fields are serialized by default in Unity, no attribute needed
+            }
+
+            sb.Append($"        {access} {fieldType} {fieldName}");
+            if (!string.IsNullOrWhiteSpace(defaultValue))
+            {
+                sb.Append($" = {defaultValue}");
+            }
+            sb.AppendLine(";");
+
+            // Find the class opening brace and insert after it
+            var insertIndex = FindClassOpeningBraceIndex(content);
+            if (insertIndex < 0)
+                return ToolResponse.Fail("Could not find class opening brace in script. Ensure the file contains a valid class definition.");
+
+            // Insert after the opening brace (and newline)
+            var afterBrace = insertIndex + 1;
+            // Skip any newline after the brace
+            if (afterBrace < content.Length && content[afterBrace] == '\r') afterBrace++;
+            if (afterBrace < content.Length && content[afterBrace] == '\n') afterBrace++;
+
+            var newContent = content.Substring(0, afterBrace) + sb.ToString() + content.Substring(afterBrace);
+
+            File.WriteAllText(fullPath, newContent);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+
+            return ToolResponse.OkWithData(new JObject
+            {
+                ["path"] = path,
+                ["fieldName"] = fieldName,
+                ["fieldType"] = fieldType,
+                ["access"] = access,
+                ["serialized"] = serialized
+            }, $"Added field '{access} {fieldType} {fieldName}' to '{path}'.");
+        }
+
+        #endregion
+
+        #region Script Analysis Helpers
+
+        /// <summary>
+        /// Recursively searches a GameObject hierarchy for components of the specified type.
+        /// </summary>
+        private static void SearchGameObjectForScript(GameObject go, System.Type scriptType, JArray results, string sceneName)
+        {
+            var components = go.GetComponents<Component>();
+            foreach (var comp in components)
+            {
+                if (comp == null) continue;
+                if (comp.GetType() == scriptType || comp.GetType().IsSubclassOf(scriptType))
+                {
+                    results.Add(new JObject
+                    {
+                        ["gameObject"] = go.name,
+                        ["path"] = GetGameObjectPath(go),
+                        ["scene"] = sceneName,
+                        ["componentType"] = comp.GetType().Name,
+                        ["instanceId"] = go.GetInstanceID()
+                    });
+                }
+            }
+
+            // Recurse into children
+            for (int i = 0; i < go.transform.childCount; i++)
+            {
+                SearchGameObjectForScript(go.transform.GetChild(i).gameObject, scriptType, results, sceneName);
+            }
+        }
+
+        /// <summary>
+        /// Gets the full hierarchy path of a GameObject.
+        /// </summary>
+        private static string GetGameObjectPath(GameObject go)
+        {
+            var path = go.name;
+            var parent = go.transform.parent;
+            while (parent != null)
+            {
+                path = parent.name + "/" + path;
+                parent = parent.parent;
+            }
+            return path;
+        }
+
+        /// <summary>
+        /// Finds the index of the last class closing brace in the content.
+        /// This is the second-to-last '}' (last one is namespace closing if present, or the class itself).
+        /// </summary>
+        private static int FindClassClosingBraceIndex(string content)
+        {
+            // Find all closing braces and their positions
+            var bracePositions = new List<int>();
+            for (int i = 0; i < content.Length; i++)
+            {
+                if (content[i] == '}')
+                    bracePositions.Add(i);
+            }
+
+            if (bracePositions.Count < 1)
+                return -1;
+
+            // Check if there's a namespace — if so, the class closing brace is second-to-last
+            bool hasNamespace = Regex.IsMatch(content, @"^\s*namespace\s+", RegexOptions.Multiline);
+
+            if (hasNamespace && bracePositions.Count >= 2)
+                return bracePositions[bracePositions.Count - 2];
+            else
+                return bracePositions[bracePositions.Count - 1];
+        }
+
+        /// <summary>
+        /// Finds the index of the first class/struct/interface opening brace.
+        /// </summary>
+        private static int FindClassOpeningBraceIndex(string content)
+        {
+            // Match class/struct/interface declaration and find its opening brace
+            var classMatch = Regex.Match(content, @"\b(class|struct|interface)\s+\w+[^{]*\{");
+            if (!classMatch.Success)
+                return -1;
+
+            return classMatch.Index + classMatch.Length - 1;
         }
 
         #endregion

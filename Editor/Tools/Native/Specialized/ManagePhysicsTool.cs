@@ -26,10 +26,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""get_settings"", ""set_settings"", ""add_rigidbody"", ""add_collider"", ""add_joint"", ""raycast""],
+                    ""enum"": [""get_settings"", ""set_settings"", ""add_rigidbody"", ""add_collider"", ""add_joint"", ""raycast"", ""add_constant_force"", ""configure_collision"", ""add_trigger_zone"", ""overlap_test""],
                     ""description"": ""Action to perform""
                 },
                 ""target"": { ""type"": ""string"", ""description"": ""Target GameObject name"" },
+                ""name"": { ""type"": ""string"", ""description"": ""Name for created objects (add_trigger_zone)"" },
                 ""gravity"": {
                     ""type"": ""object"",
                     ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
@@ -52,6 +53,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     ""enum"": [""box"", ""sphere"", ""capsule"", ""mesh"", ""fixed"", ""hinge"", ""spring"", ""character"", ""configurable""],
                     ""description"": ""Collider or joint type""
                 },
+                ""shape"": {
+                    ""type"": ""string"",
+                    ""enum"": [""box"", ""sphere"", ""capsule""],
+                    ""description"": ""Shape for trigger zone or overlap test""
+                },
                 ""is_trigger"": { ""type"": ""boolean"", ""description"": ""Is trigger collider (default: false)"" },
                 ""center"": {
                     ""type"": ""object"",
@@ -61,13 +67,41 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 ""size"": {
                     ""type"": ""object"",
                     ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
-                    ""description"": ""Box collider size""
+                    ""description"": ""Box collider size or overlap box half-extents""
                 },
-                ""radius"": { ""type"": ""number"", ""description"": ""Sphere/capsule collider radius"" },
+                ""radius"": { ""type"": ""number"", ""description"": ""Sphere/capsule collider radius or overlap sphere radius"" },
                 ""height"": { ""type"": ""number"", ""description"": ""Capsule collider height"" },
+                ""position"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
+                    ""description"": ""Position for trigger zone or overlap test""
+                },
                 ""connected_body"": { ""type"": ""string"", ""description"": ""Connected body GameObject name for joints"" },
                 ""break_force"": { ""type"": ""number"", ""description"": ""Joint break force"" },
                 ""break_torque"": { ""type"": ""number"", ""description"": ""Joint break torque"" },
+                ""force"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
+                    ""description"": ""Force vector for ConstantForce""
+                },
+                ""torque"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
+                    ""description"": ""Torque vector for ConstantForce""
+                },
+                ""relative_force"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
+                    ""description"": ""Relative force vector for ConstantForce""
+                },
+                ""relative_torque"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
+                    ""description"": ""Relative torque vector for ConstantForce""
+                },
+                ""layer1"": { ""type"": ""string"", ""description"": ""First layer name or index for collision configuration"" },
+                ""layer2"": { ""type"": ""string"", ""description"": ""Second layer name or index for collision configuration"" },
+                ""ignore"": { ""type"": ""boolean"", ""description"": ""Whether to ignore collision between layers (default: true)"" },
                 ""origin"": {
                     ""type"": ""object"",
                     ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
@@ -79,7 +113,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     ""description"": ""Raycast direction""
                 },
                 ""max_distance"": { ""type"": ""number"", ""description"": ""Raycast max distance"" },
-                ""layer_mask"": { ""type"": ""string"", ""description"": ""Layer mask name for raycast"" }
+                ""layer_mask"": { ""type"": ""string"", ""description"": ""Layer mask name for raycast or overlap test"" }
             },
             ""required"": [""action""]
         }");
@@ -121,9 +155,21 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     case "raycast":
                         response = HandleRaycast(parameters);
                         break;
+                    case "add_constant_force":
+                        response = HandleAddConstantForce(parameters);
+                        break;
+                    case "configure_collision":
+                        response = HandleConfigureCollision(parameters);
+                        break;
+                    case "add_trigger_zone":
+                        response = HandleAddTriggerZone(parameters);
+                        break;
+                    case "overlap_test":
+                        response = HandleOverlapTest(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: get_settings, set_settings, add_rigidbody, add_collider, add_joint, raycast");
+                            $"Unknown action: '{action}'. Valid actions: get_settings, set_settings, add_rigidbody, add_collider, add_joint, raycast, add_constant_force, configure_collision, add_trigger_zone, overlap_test");
                         break;
                 }
             }
@@ -461,9 +507,258 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             return ToolResponse.OkWithData(data, didHit ? $"Raycast hit '{hit.collider?.gameObject.name}' at distance {hit.distance:F2}." : "Raycast did not hit anything.");
         }
 
+        /// <summary>
+        /// Add a ConstantForce component to a GameObject with specified force and torque vectors.
+        /// Requires a Rigidbody on the target (will add one if missing).
+        /// </summary>
+        private ToolResponse HandleAddConstantForce(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            // ConstantForce requires Rigidbody
+            var rb = go.GetComponent<Rigidbody>();
+            if (rb == null)
+            {
+                ToolHelpers.RecordUndo(go, "Add Rigidbody for ConstantForce");
+                rb = Undo.AddComponent<Rigidbody>(go);
+            }
+
+            // Check if already has ConstantForce
+            var existing = go.GetComponent<ConstantForce>();
+            if (existing != null)
+                return ToolResponse.Fail($"GameObject '{targetName}' already has a ConstantForce component.");
+
+            ToolHelpers.RecordUndo(go, "Add ConstantForce");
+            var cf = Undo.AddComponent<ConstantForce>(go);
+
+            var forceToken = parameters["force"];
+            if (forceToken != null)
+                cf.force = ToolHelpers.ParseVector3(forceToken);
+
+            var torqueToken = parameters["torque"];
+            if (torqueToken != null)
+                cf.torque = ToolHelpers.ParseVector3(torqueToken);
+
+            var relForceToken = parameters["relative_force"];
+            if (relForceToken != null)
+                cf.relativeForce = ToolHelpers.ParseVector3(relForceToken);
+
+            var relTorqueToken = parameters["relative_torque"];
+            if (relTorqueToken != null)
+                cf.relativeTorque = ToolHelpers.ParseVector3(relTorqueToken);
+
+            EditorUtility.SetDirty(go);
+
+            var data = new JObject
+            {
+                ["target"] = go.name,
+                ["force"] = ToolHelpers.Vector3ToJson(cf.force),
+                ["torque"] = ToolHelpers.Vector3ToJson(cf.torque),
+                ["relativeForce"] = ToolHelpers.Vector3ToJson(cf.relativeForce),
+                ["relativeTorque"] = ToolHelpers.Vector3ToJson(cf.relativeTorque)
+            };
+
+            return ToolResponse.OkWithData(data, $"ConstantForce added to '{targetName}'.");
+        }
+
+        /// <summary>
+        /// Configure the physics collision layer matrix using Physics.IgnoreLayerCollision.
+        /// </summary>
+        private ToolResponse HandleConfigureCollision(JObject parameters)
+        {
+            var layer1Str = ToolHelpers.GetRequiredString(parameters, "layer1");
+            var layer2Str = ToolHelpers.GetRequiredString(parameters, "layer2");
+            var ignore = ToolHelpers.GetOptionalBool(parameters, "ignore", true);
+
+            int layer1 = ResolveLayer(layer1Str);
+            if (layer1 < 0)
+                return ToolResponse.Fail($"Layer '{layer1Str}' not found. Provide a valid layer name or index (0-31).");
+
+            int layer2 = ResolveLayer(layer2Str);
+            if (layer2 < 0)
+                return ToolResponse.Fail($"Layer '{layer2Str}' not found. Provide a valid layer name or index (0-31).");
+
+            Physics.IgnoreLayerCollision(layer1, layer2, ignore);
+
+            var data = new JObject
+            {
+                ["layer1"] = LayerMask.LayerToName(layer1),
+                ["layer1Index"] = layer1,
+                ["layer2"] = LayerMask.LayerToName(layer2),
+                ["layer2Index"] = layer2,
+                ["ignoreCollision"] = ignore
+            };
+
+            return ToolResponse.OkWithData(data, ignore
+                ? $"Collision between layer '{LayerMask.LayerToName(layer1)}' and '{LayerMask.LayerToName(layer2)}' is now ignored."
+                : $"Collision between layer '{LayerMask.LayerToName(layer1)}' and '{LayerMask.LayerToName(layer2)}' is now enabled.");
+        }
+
+        /// <summary>
+        /// Create a trigger zone — a new GameObject with a trigger collider at the specified position.
+        /// </summary>
+        private ToolResponse HandleAddTriggerZone(JObject parameters)
+        {
+            var name = ToolHelpers.GetOptionalString(parameters, "name", "TriggerZone");
+            var shapeStr = ToolHelpers.GetOptionalString(parameters, "shape", "box").ToLowerInvariant();
+
+            var go = new GameObject(name);
+            ToolHelpers.RegisterCreatedObject(go, "Create Trigger Zone");
+
+            // Set position
+            var posToken = parameters["position"];
+            if (posToken != null)
+                go.transform.position = ToolHelpers.ParseVector3(posToken);
+
+            Collider collider;
+
+            switch (shapeStr)
+            {
+                case "box":
+                {
+                    var box = go.AddComponent<BoxCollider>();
+                    box.isTrigger = true;
+                    var sizeToken = parameters["size"];
+                    if (sizeToken != null)
+                        box.size = ToolHelpers.ParseVector3(sizeToken, Vector3.one);
+                    collider = box;
+                    break;
+                }
+                case "sphere":
+                {
+                    var sphere = go.AddComponent<SphereCollider>();
+                    sphere.isTrigger = true;
+                    if (parameters["radius"] != null)
+                        sphere.radius = ToolHelpers.GetOptionalFloat(parameters, "radius", 0.5f);
+                    collider = sphere;
+                    break;
+                }
+                case "capsule":
+                {
+                    var capsule = go.AddComponent<CapsuleCollider>();
+                    capsule.isTrigger = true;
+                    if (parameters["radius"] != null)
+                        capsule.radius = ToolHelpers.GetOptionalFloat(parameters, "radius", 0.5f);
+                    if (parameters["height"] != null)
+                        capsule.height = ToolHelpers.GetOptionalFloat(parameters, "height", 2f);
+                    collider = capsule;
+                    break;
+                }
+                default:
+                    UnityEngine.Object.DestroyImmediate(go);
+                    return ToolResponse.Fail($"Invalid shape: '{shapeStr}'. Valid: box, sphere, capsule");
+            }
+
+            EditorUtility.SetDirty(go);
+
+            var data = new JObject
+            {
+                ["name"] = go.name,
+                ["instanceId"] = go.GetInstanceID(),
+                ["shape"] = shapeStr,
+                ["isTrigger"] = true,
+                ["position"] = ToolHelpers.Vector3ToJson(go.transform.position),
+                ["colliderType"] = collider.GetType().Name
+            };
+
+            return ToolResponse.OkWithData(data, $"Trigger zone '{name}' ({shapeStr}) created.");
+        }
+
+        /// <summary>
+        /// Perform an overlap test at a position using Physics.OverlapSphere or Physics.OverlapBox.
+        /// Returns all colliders found within the overlap volume.
+        /// </summary>
+        private ToolResponse HandleOverlapTest(JObject parameters)
+        {
+            var posToken = parameters["position"];
+            if (posToken == null)
+                return ToolResponse.Fail("Parameter 'position' is required for overlap_test.");
+
+            var position = ToolHelpers.ParseVector3(posToken);
+            var shapeStr = ToolHelpers.GetOptionalString(parameters, "shape", "sphere").ToLowerInvariant();
+
+            int layerMask = -1; // Everything
+            var layerMaskStr = ToolHelpers.GetOptionalString(parameters, "layer_mask");
+            if (!string.IsNullOrEmpty(layerMaskStr))
+            {
+                int layer = LayerMask.NameToLayer(layerMaskStr);
+                if (layer == -1)
+                    return ToolResponse.Fail($"Layer '{layerMaskStr}' not found.");
+                layerMask = 1 << layer;
+            }
+
+            Collider[] results;
+
+            switch (shapeStr)
+            {
+                case "sphere":
+                {
+                    float radius = ToolHelpers.GetOptionalFloat(parameters, "radius", 1f);
+                    results = Physics.OverlapSphere(position, radius, layerMask);
+                    break;
+                }
+                case "box":
+                {
+                    var sizeToken = parameters["size"];
+                    Vector3 halfExtents = sizeToken != null
+                        ? ToolHelpers.ParseVector3(sizeToken, Vector3.one * 0.5f)
+                        : Vector3.one * 0.5f;
+                    results = Physics.OverlapBox(position, halfExtents, Quaternion.identity, layerMask);
+                    break;
+                }
+                default:
+                    return ToolResponse.Fail($"Invalid shape: '{shapeStr}'. Valid: sphere, box");
+            }
+
+            var colliderArray = new JArray();
+            foreach (var col in results)
+            {
+                if (col == null) continue;
+                colliderArray.Add(new JObject
+                {
+                    ["name"] = col.gameObject.name,
+                    ["instanceId"] = col.gameObject.GetInstanceID(),
+                    ["colliderType"] = col.GetType().Name,
+                    ["isTrigger"] = col.isTrigger,
+                    ["layer"] = LayerMask.LayerToName(col.gameObject.layer)
+                });
+            }
+
+            var data = new JObject
+            {
+                ["position"] = ToolHelpers.Vector3ToJson(position),
+                ["shape"] = shapeStr,
+                ["hitCount"] = colliderArray.Count,
+                ["colliders"] = colliderArray
+            };
+
+            return ToolResponse.OkWithData(data, $"Overlap test found {colliderArray.Count} collider(s).");
+        }
+
         #endregion
 
         #region Helpers
+
+        /// <summary>
+        /// Resolve a layer from either a name string or an integer index string.
+        /// </summary>
+        private static int ResolveLayer(string layerStr)
+        {
+            // Try parsing as integer first
+            if (int.TryParse(layerStr, out int layerIndex))
+            {
+                if (layerIndex >= 0 && layerIndex <= 31)
+                    return layerIndex;
+                return -1;
+            }
+
+            // Try as layer name
+            int layer = LayerMask.NameToLayer(layerStr);
+            return layer;
+        }
 
         private static RigidbodyConstraints ParseConstraints(string constraintsStr)
         {

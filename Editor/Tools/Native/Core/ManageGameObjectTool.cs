@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,7 +23,7 @@ namespace AgentCore.Editor.Tools.Native.Core
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""create"", ""delete"", ""get_info"", ""modify"", ""set_transform"", ""set_parent"", ""duplicate""],
+                    ""enum"": [""create"", ""delete"", ""get_info"", ""modify"", ""set_transform"", ""set_parent"", ""duplicate"", ""create_batch"", ""modify_batch"", ""delete_batch"", ""set_active_batch"", ""arrange_grid""],
                     ""description"": ""Action to perform""
                 },
                 ""target"": {
@@ -72,6 +73,37 @@ namespace AgentCore.Editor.Tools.Native.Core
                 ""parent"": {
                     ""type"": ""string"",
                     ""description"": ""Parent GameObject name or path""
+                },
+                ""primitive_type"": {
+                    ""type"": ""string"",
+                    ""enum"": [""empty"", ""cube"", ""sphere"", ""capsule"", ""cylinder"", ""plane"", ""quad""],
+                    ""description"": ""Primitive type for batch create action""
+                },
+                ""active"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Active state for batch actions""
+                },
+                ""names"": {
+                    ""type"": ""string"",
+                    ""description"": ""Comma-separated GameObject names or paths for batch actions""
+                },
+                ""items"": {
+                    ""type"": ""array"",
+                    ""description"": ""Batch operation items""
+                },
+                ""columns"": {
+                    ""type"": ""integer"",
+                    ""description"": ""Column count for arrange_grid""
+                },
+                ""spacing"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
+                    ""description"": ""Grid spacing for arrange_grid""
+                },
+                ""start_position"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
+                    ""description"": ""Start position for arrange_grid""
                 },
                 ""includeComponents"": {
                     ""type"": ""boolean"",
@@ -125,9 +157,24 @@ namespace AgentCore.Editor.Tools.Native.Core
                     case "duplicate":
                         response = HandleDuplicate(parameters);
                         break;
+                    case "create_batch":
+                        response = HandleCreateBatch(parameters);
+                        break;
+                    case "modify_batch":
+                        response = HandleModifyBatch(parameters);
+                        break;
+                    case "delete_batch":
+                        response = HandleDeleteBatch(parameters);
+                        break;
+                    case "set_active_batch":
+                        response = HandleSetActiveBatch(parameters);
+                        break;
+                    case "arrange_grid":
+                        response = HandleArrangeGrid(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: create, delete, get_info, modify, set_transform, set_parent, duplicate");
+                            $"Unknown action: '{action}'. Valid actions: create, delete, get_info, modify, set_transform, set_parent, duplicate, create_batch, modify_batch, delete_batch, set_active_batch, arrange_grid");
                         break;
                 }
             }
@@ -410,6 +457,253 @@ namespace AgentCore.Editor.Tools.Native.Core
             }
         }
 
+        private ToolResponse HandleCreateBatch(JObject parameters)
+        {
+            try
+            {
+                var items = parameters["items"] as JArray;
+                if (items == null || items.Count == 0)
+                    return ToolResponse.Fail("'items' array is required for 'create_batch' action.");
+
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Create GameObjects Batch");
+
+                foreach (var token in items)
+                {
+                    if (!(token is JObject item))
+                    {
+                        failures.Add(new JObject { ["error"] = "Item must be an object." });
+                        continue;
+                    }
+
+                    var primitiveType = ToolHelpers.GetOptionalString(item, "primitive_type", ToolHelpers.GetOptionalString(item, "primitiveType", "empty"));
+                    var name = ToolHelpers.GetOptionalString(item, "name");
+                    var parentPath = ToolHelpers.GetOptionalString(item, "parent");
+                    var go = CreateGameObjectForPrimitive(primitiveType, name, out var error);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["name"] = name ?? "(unnamed)", ["error"] = error });
+                        continue;
+                    }
+
+                    ToolHelpers.RegisterCreatedObject(go, "Create GameObject Batch");
+                    if (!string.IsNullOrEmpty(parentPath))
+                    {
+                        var parent = ToolHelpers.FindGameObject(parentPath);
+                        if (parent != null)
+                        {
+                            go.transform.SetParent(parent.transform, true);
+                        }
+                        else
+                        {
+                            failures.Add(new JObject { ["name"] = go.name, ["error"] = $"Parent GameObject '{parentPath}' not found; created at root." });
+                        }
+                    }
+
+                    ApplyTransform(go, item);
+                    ApplyProperties(go, item);
+                    EditorUtility.SetDirty(go);
+                    MarkSceneDirty(go);
+                    successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["path"] = GetGameObjectPath(go) });
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["succeeded"] = successes,
+                    ["failed"] = failures,
+                    ["successCount"] = successes.Count,
+                    ["failureCount"] = failures.Count
+                }, $"Created {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error creating GameObjects batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleModifyBatch(JObject parameters)
+        {
+            try
+            {
+                var items = parameters["items"] as JArray;
+                if (items == null || items.Count == 0)
+                    return ToolResponse.Fail("'items' array is required for 'modify_batch' action.");
+
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Modify GameObjects Batch");
+
+                foreach (var token in items)
+                {
+                    if (!(token is JObject item))
+                    {
+                        failures.Add(new JObject { ["error"] = "Item must be an object." });
+                        continue;
+                    }
+
+                    var name = ToolHelpers.GetOptionalString(item, "name");
+                    if (string.IsNullOrEmpty(name))
+                    {
+                        failures.Add(new JObject { ["error"] = "Item 'name' is required." });
+                        continue;
+                    }
+                    var go = ToolHelpers.FindGameObject(name);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["name"] = name, ["error"] = $"GameObject '{name}' not found." });
+                        continue;
+                    }
+
+                    ToolHelpers.RecordUndo(go, "Modify GameObject Batch");
+                    ToolHelpers.RecordUndo(go.transform, "Modify GameObject Transform Batch");
+                    ApplyTransform(go, item);
+                    ApplyProperties(go, item);
+                    ApplyParent(go, item);
+                    EditorUtility.SetDirty(go);
+                    MarkSceneDirty(go);
+                    successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["path"] = GetGameObjectPath(go) });
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Modified {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error modifying GameObjects batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleDeleteBatch(JObject parameters)
+        {
+            try
+            {
+                var names = GetNamesFromParameters(parameters);
+                if (names.Count == 0)
+                    return ToolResponse.Fail("'names' or 'items' is required for 'delete_batch' action.");
+
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Delete GameObjects Batch");
+
+                foreach (var name in names)
+                {
+                    var go = ToolHelpers.FindGameObject(name);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["name"] = name, ["error"] = $"GameObject '{name}' not found." });
+                        continue;
+                    }
+
+                    int instanceId = go.GetInstanceID();
+                    string deletedName = go.name;
+                    Undo.DestroyObjectImmediate(go);
+                    successes.Add(new JObject { ["name"] = deletedName, ["instanceId"] = instanceId });
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Deleted {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error deleting GameObjects batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleSetActiveBatch(JObject parameters)
+        {
+            try
+            {
+                var names = GetNamesFromParameters(parameters);
+                if (names.Count == 0)
+                    return ToolResponse.Fail("'names' is required for 'set_active_batch' action.");
+
+                bool active = ToolHelpers.GetOptionalBool(parameters, "active", true);
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Set Active GameObjects Batch");
+
+                foreach (var name in names)
+                {
+                    var go = ToolHelpers.FindGameObject(name);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["name"] = name, ["error"] = $"GameObject '{name}' not found." });
+                        continue;
+                    }
+
+                    ToolHelpers.RecordUndo(go, "Set Active GameObject Batch");
+                    go.SetActive(active);
+                    EditorUtility.SetDirty(go);
+                    MarkSceneDirty(go);
+                    successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["active"] = go.activeSelf });
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Set active={active} on {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error setting active batch: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleArrangeGrid(JObject parameters)
+        {
+            try
+            {
+                var names = GetNamesFromParameters(parameters);
+                if (names.Count == 0)
+                    return ToolResponse.Fail("'names' is required for 'arrange_grid' action.");
+
+                int columns = Math.Max(1, ToolHelpers.GetOptionalInt(parameters, "columns", 1));
+                var spacing = ToolHelpers.ParseVector3(parameters["spacing"], Vector3.one);
+                var startPosition = ToolHelpers.ParseVector3(parameters["start_position"], Vector3.zero);
+                var successes = new JArray();
+                var failures = new JArray();
+                Undo.IncrementCurrentGroup();
+                int undoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Arrange GameObjects Grid");
+
+                int placed = 0;
+                foreach (var name in names)
+                {
+                    var go = ToolHelpers.FindGameObject(name);
+                    if (go == null)
+                    {
+                        failures.Add(new JObject { ["name"] = name, ["error"] = $"GameObject '{name}' not found." });
+                        continue;
+                    }
+
+                    ToolHelpers.RecordUndo(go.transform, "Arrange GameObject Grid");
+                    int row = placed / columns;
+                    int col = placed % columns;
+                    var position = startPosition + new Vector3(col * spacing.x, 0f, row * spacing.z) + new Vector3(0f, row * spacing.y, 0f);
+                    go.transform.position = position;
+                    EditorUtility.SetDirty(go);
+                    MarkSceneDirty(go);
+                    successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["position"] = ToolHelpers.Vector3ToJson(position) });
+                    placed++;
+                }
+
+                Undo.CollapseUndoOperations(undoGroup);
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Arranged {successes.Count} GameObject(s), {failures.Count} failure(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error arranging GameObjects grid: {ex.Message}");
+            }
+        }
+
         #endregion
 
         #region Helpers
@@ -469,6 +763,8 @@ namespace AgentCore.Editor.Tools.Native.Core
 
             // Active
             var isActiveToken = parameters["isActive"];
+            if (isActiveToken == null)
+                isActiveToken = parameters["active"];
             if (isActiveToken != null)
             {
                 go.SetActive(isActiveToken.Value<bool>());
@@ -480,6 +776,79 @@ namespace AgentCore.Editor.Tools.Native.Core
             {
                 go.isStatic = isStaticToken.Value<bool>();
             }
+        }
+
+        private void ApplyParent(GameObject go, JObject parameters)
+        {
+            if (parameters["parent"] == null)
+                return;
+
+            var parentPath = ToolHelpers.GetOptionalString(parameters, "parent");
+            if (string.IsNullOrEmpty(parentPath))
+            {
+                go.transform.SetParent(null, true);
+                return;
+            }
+
+            var parent = ToolHelpers.FindGameObject(parentPath);
+            if (parent != null)
+                go.transform.SetParent(parent.transform, true);
+        }
+
+        private GameObject CreateGameObjectForPrimitive(string primitiveTypeStr, string name, out string error)
+        {
+            error = null;
+            primitiveTypeStr = string.IsNullOrEmpty(primitiveTypeStr) ? "empty" : primitiveTypeStr;
+            if (primitiveTypeStr.Equals("empty", StringComparison.OrdinalIgnoreCase))
+                return new GameObject(name ?? "GameObject");
+            if (primitiveTypeStr.Equals("quad", StringComparison.OrdinalIgnoreCase))
+            {
+                var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                if (!string.IsNullOrEmpty(name))
+                    quad.name = name;
+                return quad;
+            }
+            if (Enum.TryParse<PrimitiveType>(primitiveTypeStr, true, out var primitiveType))
+            {
+                var go = GameObject.CreatePrimitive(primitiveType);
+                if (!string.IsNullOrEmpty(name))
+                    go.name = name;
+                return go;
+            }
+
+            error = $"Invalid primitive_type: '{primitiveTypeStr}'. Valid types: empty, cube, sphere, capsule, cylinder, plane, quad";
+            return null;
+        }
+
+        private List<string> GetNamesFromParameters(JObject parameters)
+        {
+            var result = new List<string>();
+            var names = ToolHelpers.GetOptionalString(parameters, "names");
+            if (!string.IsNullOrEmpty(names))
+                result.AddRange(names.Split(',').Select(n => n.Trim()).Where(n => !string.IsNullOrEmpty(n)));
+
+            if (parameters["items"] is JArray items)
+            {
+                foreach (var item in items)
+                {
+                    if (item.Type == JTokenType.String)
+                    {
+                        var value = item.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(value))
+                            result.Add(value.Trim());
+                    }
+                    else if (item is JObject obj)
+                    {
+                        var value = ToolHelpers.GetOptionalString(obj, "name");
+                        if (string.IsNullOrEmpty(value))
+                            value = ToolHelpers.GetOptionalString(obj, "target");
+                        if (!string.IsNullOrWhiteSpace(value))
+                            result.Add(value.Trim());
+                    }
+                }
+            }
+
+            return result.Distinct().ToList();
         }
 
         private string GetGameObjectPath(GameObject go)

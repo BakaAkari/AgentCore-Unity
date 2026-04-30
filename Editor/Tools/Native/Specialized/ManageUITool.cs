@@ -27,10 +27,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""create_canvas"", ""create_element"", ""modify_element"", ""get_info"", ""list""],
+                    ""enum"": [""create_canvas"", ""create_element"", ""modify_element"", ""get_info"", ""list"", ""set_layout"", ""add_layout_group"", ""configure_canvas"", ""add_ui_component""],
                     ""description"": ""Action to perform""
                 },
-                ""name"": { ""type"": ""string"", ""description"": ""Element name"" },
+                ""name"": { ""type"": ""string"", ""description"": ""Element name or target GameObject name"" },
                 ""type"": {
                     ""type"": ""string"",
                     ""enum"": [""text"", ""image"", ""button"", ""panel"", ""scroll_view"", ""input_field"", ""dropdown"", ""slider"", ""toggle"", ""raw_image""],
@@ -38,7 +38,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 },
                 ""render_mode"": {
                     ""type"": ""string"",
-                    ""enum"": [""screen_space_overlay"", ""screen_space_camera"", ""world_space""],
+                    ""enum"": [""screen_space_overlay"", ""screen_space_camera"", ""world_space"", ""overlay"", ""camera"", ""world""],
                     ""description"": ""Canvas render mode""
                 },
                 ""sort_order"": { ""type"": ""integer"", ""description"": ""Canvas sort order"" },
@@ -65,6 +65,33 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     ""type"": ""string"",
                     ""enum"": [""top_left"", ""top_center"", ""top_right"", ""middle_left"", ""center"", ""middle_right"", ""bottom_left"", ""bottom_center"", ""bottom_right"", ""stretch""],
                     ""description"": ""Anchor preset""
+                },
+                ""preset"": {
+                    ""type"": ""string"",
+                    ""enum"": [""stretch"", ""top-left"", ""top-center"", ""top-right"", ""middle-left"", ""center"", ""middle-right"", ""bottom-left"", ""bottom-center"", ""bottom-right"", ""stretch-horizontal"", ""stretch-vertical""],
+                    ""description"": ""RectTransform anchor preset for set_layout action""
+                },
+                ""layout_type"": {
+                    ""type"": ""string"",
+                    ""enum"": [""horizontal"", ""vertical"", ""grid""],
+                    ""description"": ""Layout group type for add_layout_group action""
+                },
+                ""spacing"": { ""type"": ""number"", ""description"": ""Spacing for layout groups"" },
+                ""padding"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""left"": {""type"":""integer""}, ""right"": {""type"":""integer""}, ""top"": {""type"":""integer""}, ""bottom"": {""type"":""integer""} },
+                    ""description"": ""Padding for layout groups""
+                },
+                ""cell_size"": {
+                    ""type"": ""object"",
+                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""} },
+                    ""description"": ""Cell size for GridLayoutGroup""
+                },
+                ""camera_name"": { ""type"": ""string"", ""description"": ""Camera name for screen_space_camera render mode"" },
+                ""component_type"": {
+                    ""type"": ""string"",
+                    ""enum"": [""button"", ""toggle"", ""slider"", ""dropdown"", ""input_field"", ""scroll_view"", ""image"", ""text""],
+                    ""description"": ""UI component type for add_ui_component action""
                 },
                 ""enabled"": { ""type"": ""boolean"", ""description"": ""Enable or disable element"" },
                 ""image"": { ""type"": ""string"", ""description"": ""Sprite asset path for Image component"" },
@@ -95,6 +122,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         private static Type _scrollRectType;
         private static Type _maskType;
         private static Type _graphicType;
+        private static Type _horizontalLayoutGroupType;
+        private static Type _verticalLayoutGroupType;
+        private static Type _gridLayoutGroupType;
+        private static Type _layoutGroupType;
+        private static Type _contentSizeFitterType;
         private static bool _typesResolved;
 
         private static void ResolveUITypes()
@@ -114,6 +146,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             _scrollRectType = ToolHelpers.ResolveComponentType("UnityEngine.UI.ScrollRect");
             _maskType = ToolHelpers.ResolveComponentType("UnityEngine.UI.Mask");
             _graphicType = ToolHelpers.ResolveComponentType("UnityEngine.UI.Graphic");
+
+            _horizontalLayoutGroupType = ToolHelpers.ResolveComponentType("UnityEngine.UI.HorizontalLayoutGroup");
+            _verticalLayoutGroupType = ToolHelpers.ResolveComponentType("UnityEngine.UI.VerticalLayoutGroup");
+            _gridLayoutGroupType = ToolHelpers.ResolveComponentType("UnityEngine.UI.GridLayoutGroup");
+            _layoutGroupType = ToolHelpers.ResolveComponentType("UnityEngine.UI.LayoutGroup");
+            _contentSizeFitterType = ToolHelpers.ResolveComponentType("UnityEngine.UI.ContentSizeFitter");
 
             _typesResolved = true;
         }
@@ -146,9 +184,21 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     case "list":
                         response = HandleList(parameters);
                         break;
+                    case "set_layout":
+                        response = HandleSetLayout(parameters);
+                        break;
+                    case "add_layout_group":
+                        response = HandleAddLayoutGroup(parameters);
+                        break;
+                    case "configure_canvas":
+                        response = HandleConfigureCanvas(parameters);
+                        break;
+                    case "add_ui_component":
+                        response = HandleAddUIComponent(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: create_canvas, create_element, modify_element, get_info, list");
+                            $"Unknown action: '{action}'. Valid actions: create_canvas, create_element, modify_element, get_info, list, set_layout, add_layout_group, configure_canvas, add_ui_component");
                         break;
                 }
             }
@@ -669,6 +719,419 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             };
 
             return ToolResponse.OkWithData(data, $"Found {canvasArray.Count} Canvas(es) in scene.");
+        }
+
+        /// <summary>
+        /// Set RectTransform anchor preset (layout) on a UI element.
+        /// Supports presets: stretch, top-left, top-center, top-right, middle-left, center,
+        /// middle-right, bottom-left, bottom-center, bottom-right, stretch-horizontal, stretch-vertical.
+        /// </summary>
+        private ToolResponse HandleSetLayout(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "name");
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            var rectTransform = go.GetComponent<RectTransform>();
+            if (rectTransform == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' has no RectTransform. It must be a UI element.");
+
+            var preset = ToolHelpers.GetRequiredString(parameters, "preset").ToLowerInvariant();
+
+            ToolHelpers.RecordUndo(rectTransform, "Set UI Layout");
+
+            switch (preset)
+            {
+                case "stretch":
+                    rectTransform.anchorMin = Vector2.zero;
+                    rectTransform.anchorMax = Vector2.one;
+                    rectTransform.offsetMin = Vector2.zero;
+                    rectTransform.offsetMax = Vector2.zero;
+                    rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                    break;
+                case "top-left":
+                    rectTransform.anchorMin = new Vector2(0, 1);
+                    rectTransform.anchorMax = new Vector2(0, 1);
+                    rectTransform.pivot = new Vector2(0, 1);
+                    break;
+                case "top-center":
+                    rectTransform.anchorMin = new Vector2(0.5f, 1);
+                    rectTransform.anchorMax = new Vector2(0.5f, 1);
+                    rectTransform.pivot = new Vector2(0.5f, 1);
+                    break;
+                case "top-right":
+                    rectTransform.anchorMin = new Vector2(1, 1);
+                    rectTransform.anchorMax = new Vector2(1, 1);
+                    rectTransform.pivot = new Vector2(1, 1);
+                    break;
+                case "middle-left":
+                    rectTransform.anchorMin = new Vector2(0, 0.5f);
+                    rectTransform.anchorMax = new Vector2(0, 0.5f);
+                    rectTransform.pivot = new Vector2(0, 0.5f);
+                    break;
+                case "center":
+                    rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+                    rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+                    rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                    break;
+                case "middle-right":
+                    rectTransform.anchorMin = new Vector2(1, 0.5f);
+                    rectTransform.anchorMax = new Vector2(1, 0.5f);
+                    rectTransform.pivot = new Vector2(1, 0.5f);
+                    break;
+                case "bottom-left":
+                    rectTransform.anchorMin = new Vector2(0, 0);
+                    rectTransform.anchorMax = new Vector2(0, 0);
+                    rectTransform.pivot = new Vector2(0, 0);
+                    break;
+                case "bottom-center":
+                    rectTransform.anchorMin = new Vector2(0.5f, 0);
+                    rectTransform.anchorMax = new Vector2(0.5f, 0);
+                    rectTransform.pivot = new Vector2(0.5f, 0);
+                    break;
+                case "bottom-right":
+                    rectTransform.anchorMin = new Vector2(1, 0);
+                    rectTransform.anchorMax = new Vector2(1, 0);
+                    rectTransform.pivot = new Vector2(1, 0);
+                    break;
+                case "stretch-horizontal":
+                    rectTransform.anchorMin = new Vector2(0, 0.5f);
+                    rectTransform.anchorMax = new Vector2(1, 0.5f);
+                    rectTransform.offsetMin = new Vector2(0, rectTransform.offsetMin.y);
+                    rectTransform.offsetMax = new Vector2(0, rectTransform.offsetMax.y);
+                    rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                    break;
+                case "stretch-vertical":
+                    rectTransform.anchorMin = new Vector2(0.5f, 0);
+                    rectTransform.anchorMax = new Vector2(0.5f, 1);
+                    rectTransform.offsetMin = new Vector2(rectTransform.offsetMin.x, 0);
+                    rectTransform.offsetMax = new Vector2(rectTransform.offsetMax.x, 0);
+                    rectTransform.pivot = new Vector2(0.5f, 0.5f);
+                    break;
+                default:
+                    return ToolResponse.Fail($"Unknown preset: '{preset}'. Valid: stretch, top-left, top-center, top-right, middle-left, center, middle-right, bottom-left, bottom-center, bottom-right, stretch-horizontal, stretch-vertical");
+            }
+
+            EditorUtility.SetDirty(go);
+
+            var data = new JObject
+            {
+                ["name"] = go.name,
+                ["preset"] = preset,
+                ["anchorMin"] = new JObject { ["x"] = rectTransform.anchorMin.x, ["y"] = rectTransform.anchorMin.y },
+                ["anchorMax"] = new JObject { ["x"] = rectTransform.anchorMax.x, ["y"] = rectTransform.anchorMax.y },
+                ["pivot"] = new JObject { ["x"] = rectTransform.pivot.x, ["y"] = rectTransform.pivot.y }
+            };
+
+            return ToolResponse.OkWithData(data, $"Layout preset '{preset}' applied to '{targetName}'.");
+        }
+
+        /// <summary>
+        /// Add a layout group component (HorizontalLayoutGroup, VerticalLayoutGroup, or GridLayoutGroup) to a UI element.
+        /// </summary>
+        private ToolResponse HandleAddLayoutGroup(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "name");
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            if (go.GetComponent<RectTransform>() == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' has no RectTransform. It must be a UI element.");
+
+            var layoutTypeStr = ToolHelpers.GetRequiredString(parameters, "layout_type").ToLowerInvariant();
+            var spacing = ToolHelpers.GetOptionalFloat(parameters, "spacing", 0f);
+
+            ToolHelpers.RecordUndo(go, "Add Layout Group");
+
+            Type layoutType;
+            string layoutTypeName;
+
+            switch (layoutTypeStr)
+            {
+                case "horizontal":
+                    layoutType = _horizontalLayoutGroupType;
+                    layoutTypeName = "HorizontalLayoutGroup";
+                    break;
+                case "vertical":
+                    layoutType = _verticalLayoutGroupType;
+                    layoutTypeName = "VerticalLayoutGroup";
+                    break;
+                case "grid":
+                    layoutType = _gridLayoutGroupType;
+                    layoutTypeName = "GridLayoutGroup";
+                    break;
+                default:
+                    return ToolResponse.Fail($"Invalid layout type: '{layoutTypeStr}'. Valid: horizontal, vertical, grid");
+            }
+
+            if (layoutType == null)
+                return ToolResponse.Fail($"{layoutTypeName} type not available. Ensure com.unity.ugui package is installed.");
+
+            // Remove existing layout group if any
+            if (_layoutGroupType != null)
+            {
+                var existing = go.GetComponent(_layoutGroupType);
+                if (existing != null)
+                    UnityEngine.Object.DestroyImmediate(existing);
+            }
+
+            var comp = Undo.AddComponent(go, layoutType);
+
+            // Set spacing
+            SetPropertyViaReflection(comp, "spacing", spacing);
+
+            // Set padding
+            var paddingToken = parameters["padding"] as JObject;
+            if (paddingToken != null)
+            {
+                var paddingType = comp.GetType().GetProperty("padding")?.PropertyType;
+                if (paddingType != null)
+                {
+                    var paddingObj = comp.GetType().GetProperty("padding")?.GetValue(comp);
+                    if (paddingObj != null)
+                    {
+                        var left = paddingToken["left"]?.Value<int>() ?? 0;
+                        var right = paddingToken["right"]?.Value<int>() ?? 0;
+                        var top = paddingToken["top"]?.Value<int>() ?? 0;
+                        var bottom = paddingToken["bottom"]?.Value<int>() ?? 0;
+
+                        paddingType.GetProperty("left")?.SetValue(paddingObj, left);
+                        paddingType.GetProperty("right")?.SetValue(paddingObj, right);
+                        paddingType.GetProperty("top")?.SetValue(paddingObj, top);
+                        paddingType.GetProperty("bottom")?.SetValue(paddingObj, bottom);
+
+                        comp.GetType().GetProperty("padding")?.SetValue(comp, paddingObj);
+                    }
+                }
+            }
+
+            // Set cell size for grid layout
+            if (layoutTypeStr == "grid")
+            {
+                var cellSizeToken = parameters["cell_size"] as JObject;
+                if (cellSizeToken != null)
+                {
+                    float cx = cellSizeToken["x"]?.Value<float>() ?? 100f;
+                    float cy = cellSizeToken["y"]?.Value<float>() ?? 100f;
+                    SetPropertyViaReflection(comp, "cellSize", new Vector2(cx, cy));
+                }
+            }
+
+            EditorUtility.SetDirty(go);
+
+            var data = new JObject
+            {
+                ["name"] = go.name,
+                ["layoutType"] = layoutTypeName,
+                ["spacing"] = spacing
+            };
+
+            return ToolResponse.OkWithData(data, $"{layoutTypeName} added to '{targetName}'.");
+        }
+
+        /// <summary>
+        /// Configure an existing Canvas component's settings (render mode, sort order, camera).
+        /// </summary>
+        private ToolResponse HandleConfigureCanvas(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "name");
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            var canvas = go.GetComponent<Canvas>();
+            if (canvas == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' has no Canvas component.");
+
+            ToolHelpers.RecordUndo(canvas, "Configure Canvas");
+            bool modified = false;
+
+            var renderModeStr = ToolHelpers.GetOptionalString(parameters, "render_mode");
+            if (!string.IsNullOrEmpty(renderModeStr))
+            {
+                switch (renderModeStr.ToLowerInvariant())
+                {
+                    case "screen_space_overlay":
+                    case "overlay":
+                        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                        modified = true;
+                        break;
+                    case "screen_space_camera":
+                    case "camera":
+                        canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                        modified = true;
+                        break;
+                    case "world_space":
+                    case "world":
+                        canvas.renderMode = RenderMode.WorldSpace;
+                        modified = true;
+                        break;
+                    default:
+                        return ToolResponse.Fail($"Invalid render_mode: '{renderModeStr}'. Valid: overlay, camera, world (or screen_space_overlay, screen_space_camera, world_space)");
+                }
+            }
+
+            if (parameters["sort_order"] != null)
+            {
+                canvas.sortingOrder = ToolHelpers.GetOptionalInt(parameters, "sort_order", 0);
+                modified = true;
+            }
+
+            var cameraName = ToolHelpers.GetOptionalString(parameters, "camera_name");
+            if (!string.IsNullOrEmpty(cameraName))
+            {
+                var camGo = ToolHelpers.FindGameObject(cameraName);
+                if (camGo == null)
+                    return ToolResponse.Fail($"Camera GameObject '{cameraName}' not found.");
+                var cam = camGo.GetComponent<Camera>();
+                if (cam == null)
+                    return ToolResponse.Fail($"GameObject '{cameraName}' has no Camera component.");
+                canvas.worldCamera = cam;
+                modified = true;
+            }
+
+            if (!modified)
+                return ToolResponse.Fail("No configuration parameters provided. Use render_mode, sort_order, or camera_name.");
+
+            EditorUtility.SetDirty(go);
+
+            var data = new JObject
+            {
+                ["name"] = go.name,
+                ["renderMode"] = canvas.renderMode.ToString(),
+                ["sortingOrder"] = canvas.sortingOrder,
+                ["worldCamera"] = canvas.worldCamera != null ? canvas.worldCamera.gameObject.name : null
+            };
+
+            return ToolResponse.OkWithData(data, $"Canvas '{targetName}' configured.");
+        }
+
+        /// <summary>
+        /// Add a specific UI component (Button, Toggle, Slider, Dropdown, InputField, ScrollView, Image, Text)
+        /// to an existing GameObject.
+        /// </summary>
+        private ToolResponse HandleAddUIComponent(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "name");
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            if (go.GetComponent<RectTransform>() == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' has no RectTransform. It must be a UI element.");
+
+            var componentTypeStr = ToolHelpers.GetRequiredString(parameters, "component_type").ToLowerInvariant();
+
+            ToolHelpers.RecordUndo(go, "Add UI Component");
+
+            string addedTypeName;
+
+            switch (componentTypeStr)
+            {
+                case "button":
+                    if (_buttonType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.Button type not available.");
+                    if (FindUIComponent(go, _buttonType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has a Button component.");
+                    // Button requires Image
+                    if (_imageType != null && FindUIComponent(go, _imageType) == null)
+                        go.AddComponent(_imageType);
+                    go.AddComponent(_buttonType);
+                    addedTypeName = "Button";
+                    break;
+
+                case "toggle":
+                    if (_toggleType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.Toggle type not available.");
+                    if (FindUIComponent(go, _toggleType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has a Toggle component.");
+                    go.AddComponent(_toggleType);
+                    addedTypeName = "Toggle";
+                    break;
+
+                case "slider":
+                    if (_sliderType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.Slider type not available.");
+                    if (FindUIComponent(go, _sliderType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has a Slider component.");
+                    go.AddComponent(_sliderType);
+                    addedTypeName = "Slider";
+                    break;
+
+                case "dropdown":
+                    if (_dropdownType == null || _imageType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.Dropdown type not available.");
+                    if (FindUIComponent(go, _dropdownType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has a Dropdown component.");
+                    if (FindUIComponent(go, _imageType) == null)
+                        go.AddComponent(_imageType);
+                    go.AddComponent(_dropdownType);
+                    addedTypeName = "Dropdown";
+                    break;
+
+                case "input_field":
+                    if (_inputFieldType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.InputField type not available.");
+                    if (FindUIComponent(go, _inputFieldType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has an InputField component.");
+                    if (_imageType != null && FindUIComponent(go, _imageType) == null)
+                        go.AddComponent(_imageType);
+                    go.AddComponent(_inputFieldType);
+                    addedTypeName = "InputField";
+                    break;
+
+                case "scroll_view":
+                    if (_scrollRectType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.ScrollRect type not available.");
+                    if (FindUIComponent(go, _scrollRectType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has a ScrollRect component.");
+                    if (_imageType != null && FindUIComponent(go, _imageType) == null)
+                        go.AddComponent(_imageType);
+                    go.AddComponent(_scrollRectType);
+                    addedTypeName = "ScrollRect";
+                    break;
+
+                case "image":
+                    if (_imageType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.Image type not available.");
+                    if (FindUIComponent(go, _imageType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has an Image component.");
+                    var imgComp = go.AddComponent(_imageType);
+                    var colorToken = parameters["color"];
+                    if (colorToken != null)
+                        SetPropertyViaReflection(imgComp, "color", ToolHelpers.ParseColor(colorToken, Color.white));
+                    addedTypeName = "Image";
+                    break;
+
+                case "text":
+                    if (_textType == null)
+                        return ToolResponse.Fail("UnityEngine.UI.Text type not available.");
+                    if (FindUIComponent(go, _textType) != null)
+                        return ToolResponse.Fail($"'{targetName}' already has a Text component.");
+                    var textComp = go.AddComponent(_textType);
+                    var textStr = ToolHelpers.GetOptionalString(parameters, "text", "New Text");
+                    SetPropertyViaReflection(textComp, "text", textStr);
+                    if (parameters["font_size"] != null)
+                        SetPropertyViaReflection(textComp, "fontSize", ToolHelpers.GetOptionalInt(parameters, "font_size", 14));
+                    addedTypeName = "Text";
+                    break;
+
+                default:
+                    return ToolResponse.Fail($"Invalid component_type: '{componentTypeStr}'. Valid: button, toggle, slider, dropdown, input_field, scroll_view, image, text");
+            }
+
+            EditorUtility.SetDirty(go);
+
+            var data = new JObject
+            {
+                ["name"] = go.name,
+                ["addedComponent"] = addedTypeName,
+                ["instanceId"] = go.GetInstanceID()
+            };
+
+            return ToolResponse.OkWithData(data, $"{addedTypeName} component added to '{targetName}'.");
         }
 
         #endregion

@@ -26,7 +26,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""list_clips"", ""get_clip_info"", ""list_parameters"", ""set_parameter"", ""get_controller_info"", ""list_animator_states""],
+                    ""enum"": [""list_clips"", ""get_clip_info"", ""list_parameters"", ""set_parameter"", ""get_controller_info"", ""list_animator_states"", ""get_layers"", ""set_layer_weight"", ""create_animation_clip""],
                     ""description"": ""Action to perform""
                 },
                 ""path"": {
@@ -47,6 +47,27 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 ""layerIndex"": {
                     ""type"": ""integer"",
                     ""description"": ""Animator layer index (default: 0)""
+                },
+                ""weight"": {
+                    ""type"": ""number"",
+                    ""description"": ""Layer weight (0.0 to 1.0) for set_layer_weight""
+                },
+                ""asset_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Asset path for creating new AnimationClip (e.g. Assets/Animations/MyClip.anim)""
+                },
+                ""name"": {
+                    ""type"": ""string"",
+                    ""description"": ""Name for the new animation clip""
+                },
+                ""length"": {
+                    ""type"": ""number"",
+                    ""description"": ""Animation clip length in seconds""
+                },
+                ""wrap_mode"": {
+                    ""type"": ""string"",
+                    ""enum"": [""default"", ""once"", ""loop"", ""ping_pong"", ""clamp_forever""],
+                    ""description"": ""Animation wrap mode""
                 }
             },
             ""required"": [""action""]
@@ -89,9 +110,18 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     case "list_animator_states":
                         response = HandleListAnimatorStates(parameters);
                         break;
+                    case "get_layers":
+                        response = HandleGetLayers(parameters);
+                        break;
+                    case "set_layer_weight":
+                        response = HandleSetLayerWeight(parameters);
+                        break;
+                    case "create_animation_clip":
+                        response = HandleCreateAnimationClip(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: list_clips, get_clip_info, list_parameters, set_parameter, get_controller_info, list_animator_states");
+                            $"Unknown action: '{action}'. Valid actions: list_clips, get_clip_info, list_parameters, set_parameter, get_controller_info, list_animator_states, get_layers, set_layer_weight, create_animation_clip");
                         break;
                 }
             }
@@ -522,6 +552,206 @@ namespace AgentCore.Editor.Tools.Native.Utility
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"List animator states failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Get all layers from an AnimatorController with their settings.
+        /// </summary>
+        private ToolResponse HandleGetLayers(JObject parameters)
+        {
+            try
+            {
+                var controller = ResolveAnimatorController(parameters);
+                if (controller == null)
+                    return ToolResponse.Fail("AnimatorController not found. Provide 'path' or 'target' with Animator.");
+
+                var layers = new JArray();
+                for (int i = 0; i < controller.layers.Length; i++)
+                {
+                    var layer = controller.layers[i];
+                    var layerInfo = new JObject
+                    {
+                        ["index"] = i,
+                        ["name"] = layer.name,
+                        ["defaultWeight"] = Math.Round(layer.defaultWeight, 4),
+                        ["blendingMode"] = layer.blendingMode.ToString(),
+                        ["iKPass"] = layer.iKPass,
+                        ["syncedLayerIndex"] = layer.syncedLayerIndex
+                    };
+
+                    // State count
+                    if (layer.stateMachine != null)
+                    {
+                        layerInfo["stateCount"] = layer.stateMachine.states.Length;
+                        layerInfo["subStateMachineCount"] = layer.stateMachine.stateMachines.Length;
+                        if (layer.stateMachine.defaultState != null)
+                            layerInfo["defaultState"] = layer.stateMachine.defaultState.name;
+                    }
+
+                    // Avatar mask
+                    if (layer.avatarMask != null)
+                    {
+                        layerInfo["avatarMask"] = layer.avatarMask.name;
+                        layerInfo["avatarMaskPath"] = AssetDatabase.GetAssetPath(layer.avatarMask);
+                    }
+
+                    layers.Add(layerInfo);
+                }
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["controller"] = controller.name,
+                    ["layerCount"] = controller.layers.Length,
+                    ["layers"] = layers
+                }, $"Found {controller.layers.Length} layers in controller '{controller.name}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Get layers failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Set the weight of an Animator layer at runtime (requires target GameObject with Animator).
+        /// </summary>
+        private ToolResponse HandleSetLayerWeight(JObject parameters)
+        {
+            try
+            {
+                var target = ToolHelpers.GetRequiredString(parameters, "target");
+                var go = ToolHelpers.FindGameObject(target);
+                if (go == null)
+                    return ToolResponse.Fail($"GameObject not found: {target}");
+
+                var animator = go.GetComponent<Animator>();
+                if (animator == null)
+                    return ToolResponse.Fail($"No Animator component on '{go.name}'.");
+
+                var layerIndex = ToolHelpers.GetOptionalInt(parameters, "layerIndex", 0);
+                if (layerIndex < 0 || layerIndex >= animator.layerCount)
+                    return ToolResponse.Fail($"Layer index {layerIndex} out of range (0-{animator.layerCount - 1}).");
+
+                var weight = ToolHelpers.GetOptionalFloat(parameters, "weight", 1.0f);
+                weight = Mathf.Clamp01(weight);
+
+                animator.SetLayerWeight(layerIndex, weight);
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["target"] = go.name,
+                    ["layerIndex"] = layerIndex,
+                    ["layerName"] = animator.GetLayerName(layerIndex),
+                    ["weight"] = Math.Round(weight, 4)
+                }, $"Set layer '{animator.GetLayerName(layerIndex)}' (index {layerIndex}) weight to {weight:F2} on '{go.name}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Set layer weight failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Create a new AnimationClip asset at the specified path.
+        /// </summary>
+        private ToolResponse HandleCreateAnimationClip(JObject parameters)
+        {
+            try
+            {
+                var assetPath = ToolHelpers.GetRequiredString(parameters, "asset_path");
+                assetPath = ToolHelpers.NormalizeAssetPath(assetPath);
+
+                if (!assetPath.EndsWith(".anim", StringComparison.OrdinalIgnoreCase))
+                    assetPath += ".anim";
+
+                // Ensure directory exists
+                var directory = System.IO.Path.GetDirectoryName(assetPath);
+                if (!string.IsNullOrEmpty(directory) && !AssetDatabase.IsValidFolder(directory))
+                {
+                    // Create folders recursively
+                    var parts = directory.Replace("\\", "/").Split('/');
+                    var current = parts[0];
+                    for (int i = 1; i < parts.Length; i++)
+                    {
+                        var next = current + "/" + parts[i];
+                        if (!AssetDatabase.IsValidFolder(next))
+                            AssetDatabase.CreateFolder(current, parts[i]);
+                        current = next;
+                    }
+                }
+
+                // Check if asset already exists
+                var existing = AssetDatabase.LoadAssetAtPath<AnimationClip>(assetPath);
+                if (existing != null)
+                    return ToolResponse.Fail($"AnimationClip already exists at: {assetPath}");
+
+                var clip = new AnimationClip();
+
+                // Set name
+                var clipName = ToolHelpers.GetOptionalString(parameters, "name");
+                if (!string.IsNullOrEmpty(clipName))
+                    clip.name = clipName;
+                else
+                    clip.name = System.IO.Path.GetFileNameWithoutExtension(assetPath);
+
+                // Set frame rate (default 60)
+                clip.frameRate = 60f;
+
+                // Set wrap mode
+                var wrapModeStr = ToolHelpers.GetOptionalString(parameters, "wrap_mode");
+                if (!string.IsNullOrEmpty(wrapModeStr))
+                {
+                    switch (wrapModeStr.ToLowerInvariant())
+                    {
+                        case "once":
+                            clip.wrapMode = WrapMode.Once;
+                            break;
+                        case "loop":
+                            clip.wrapMode = WrapMode.Loop;
+                            // Also set loop time in clip settings
+                            var loopSettings = AnimationUtility.GetAnimationClipSettings(clip);
+                            loopSettings.loopTime = true;
+                            AnimationUtility.SetAnimationClipSettings(clip, loopSettings);
+                            break;
+                        case "ping_pong":
+                            clip.wrapMode = WrapMode.PingPong;
+                            break;
+                        case "clamp_forever":
+                            clip.wrapMode = WrapMode.ClampForever;
+                            break;
+                        default:
+                            clip.wrapMode = WrapMode.Default;
+                            break;
+                    }
+                }
+
+                // Set length via a dummy curve if specified
+                var length = ToolHelpers.GetOptionalFloat(parameters, "length", 0f);
+                if (length > 0f)
+                {
+                    // Add a minimal keyframe curve to define clip length
+                    var curve = AnimationCurve.Constant(0f, length, 0f);
+                    clip.SetCurve("", typeof(Animator), "DummyProperty", curve);
+                    // Remove the dummy curve — the length is now baked
+                    clip.SetCurve("", typeof(Animator), "DummyProperty", null);
+                }
+
+                AssetDatabase.CreateAsset(clip, assetPath);
+                AssetDatabase.SaveAssets();
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["name"] = clip.name,
+                    ["path"] = assetPath,
+                    ["length"] = Math.Round(clip.length, 4),
+                    ["frameRate"] = clip.frameRate,
+                    ["wrapMode"] = clip.wrapMode.ToString(),
+                    ["isLooping"] = clip.isLooping
+                }, $"Created AnimationClip '{clip.name}' at '{assetPath}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Create animation clip failed: {ex.Message}");
             }
         }
 

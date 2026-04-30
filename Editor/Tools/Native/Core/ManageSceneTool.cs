@@ -24,7 +24,7 @@ namespace AgentCore.Editor.Tools.Native.Core
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""list"", ""get_hierarchy"", ""get_active"", ""create"", ""open"", ""save"", ""set_active""],
+                    ""enum"": [""list"", ""get_hierarchy"", ""get_active"", ""create"", ""open"", ""save"", ""set_active"", ""new_scene"", ""open_scene"", ""save_scene_as"", ""list_open_scenes"", ""set_active_scene"", ""merge_scenes"", ""get_build_scenes"", ""add_to_build""],
                     ""description"": ""Action to perform""
                 },
                 ""scenePath"": {
@@ -34,6 +34,35 @@ namespace AgentCore.Editor.Tools.Native.Core
                 ""sceneName"": {
                     ""type"": ""string"",
                     ""description"": ""Scene name (for set_active)""
+                },
+                ""name"": {
+                    ""type"": ""string"",
+                    ""description"": ""Scene name for new_scene or set_active_scene""
+                },
+                ""path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Scene asset path for open_scene, save_scene_as, and add_to_build""
+                },
+                ""mode"": {
+                    ""type"": ""string"",
+                    ""enum"": [""single"", ""additive""],
+                    ""description"": ""Scene open/create mode""
+                },
+                ""save_current"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Save current open scenes before creating a new scene""
+                },
+                ""source"": {
+                    ""type"": ""string"",
+                    ""description"": ""Source loaded scene name or path for merge_scenes""
+                },
+                ""destination"": {
+                    ""type"": ""string"",
+                    ""description"": ""Destination loaded scene name or path for merge_scenes""
+                },
+                ""enabled"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Build Settings enabled flag for add_to_build""
                 },
                 ""additive"": {
                     ""type"": ""boolean"",
@@ -87,9 +116,33 @@ namespace AgentCore.Editor.Tools.Native.Core
                     case "set_active":
                         response = HandleSetActive(parameters);
                         break;
+                    case "new_scene":
+                        response = HandleNewScene(parameters);
+                        break;
+                    case "open_scene":
+                        response = HandleOpenScene(parameters);
+                        break;
+                    case "save_scene_as":
+                        response = HandleSaveSceneAs(parameters);
+                        break;
+                    case "list_open_scenes":
+                        response = HandleListOpenScenes();
+                        break;
+                    case "set_active_scene":
+                        response = HandleSetActiveScene(parameters);
+                        break;
+                    case "merge_scenes":
+                        response = HandleMergeScenes(parameters);
+                        break;
+                    case "get_build_scenes":
+                        response = HandleGetBuildScenes();
+                        break;
+                    case "add_to_build":
+                        response = HandleAddToBuild(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: list, get_hierarchy, get_active, create, open, save, set_active");
+                            $"Unknown action: '{action}'. Valid actions: list, get_hierarchy, get_active, create, open, save, set_active, new_scene, open_scene, save_scene_as, list_open_scenes, set_active_scene, merge_scenes, get_build_scenes, add_to_build");
                         break;
                 }
             }
@@ -377,6 +430,195 @@ namespace AgentCore.Editor.Tools.Native.Core
             }
         }
 
+        private ToolResponse HandleNewScene(JObject parameters)
+        {
+            try
+            {
+                bool saveCurrent = ToolHelpers.GetOptionalBool(parameters, "save_current", true);
+                if (saveCurrent && !EditorSceneManager.SaveOpenScenes())
+                    return ToolResponse.Fail("Failed to save current open scenes before creating a new scene.");
+
+                var mode = ParseNewSceneMode(ToolHelpers.GetOptionalString(parameters, "mode", "single"));
+                var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, mode);
+                var name = ToolHelpers.GetOptionalString(parameters, "name");
+                if (!string.IsNullOrEmpty(name))
+                {
+                    var savedPath = NormalizeScenePath(name.Contains("/") || name.EndsWith(".unity", StringComparison.OrdinalIgnoreCase) ? name : $"Assets/{name}.unity");
+                    ToolHelpers.EnsureDirectoryExists(savedPath);
+                    if (!EditorSceneManager.SaveScene(scene, savedPath))
+                        return ToolResponse.Fail($"Failed to save new scene to '{savedPath}'.");
+                    AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                }
+
+                return ToolResponse.OkWithData(SerializeScene(scene), $"New scene '{scene.name}' created.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error creating new scene: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleOpenScene(JObject parameters)
+        {
+            try
+            {
+                var path = NormalizeScenePath(ToolHelpers.GetRequiredString(parameters, "path"));
+                if (!File.Exists(path))
+                    return ToolResponse.Fail($"Scene file not found at '{path}'.");
+
+                var mode = ParseOpenSceneMode(ToolHelpers.GetOptionalString(parameters, "mode", "single"));
+                if (mode == OpenSceneMode.Single && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                    return ToolResponse.Fail("Current scene has unsaved changes. Save first or use additive mode.");
+
+                var scene = EditorSceneManager.OpenScene(path, mode);
+                return ToolResponse.OkWithData(SerializeScene(scene), $"Scene '{scene.name}' opened successfully.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error opening scene: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleSaveSceneAs(JObject parameters)
+        {
+            try
+            {
+                var path = NormalizeScenePath(ToolHelpers.GetRequiredString(parameters, "path"));
+                var activeScene = EditorSceneManager.GetActiveScene();
+                if (!activeScene.IsValid())
+                    return ToolResponse.Fail("No valid active scene to save.");
+
+                ToolHelpers.EnsureDirectoryExists(path);
+                if (!EditorSceneManager.SaveScene(activeScene, path))
+                    return ToolResponse.Fail($"Failed to save scene '{activeScene.name}' to '{path}'.");
+
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                return ToolResponse.OkWithData(SerializeScene(activeScene), $"Scene '{activeScene.name}' saved to '{path}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error saving scene as: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleListOpenScenes()
+        {
+            try
+            {
+                var scenes = GetLoadedScenesArray();
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["loadedSceneCount"] = SceneManager.sceneCount,
+                    ["activeScene"] = SceneManager.GetActiveScene().name,
+                    ["scenes"] = scenes
+                }, $"Found {SceneManager.sceneCount} open scene(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error listing open scenes: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleSetActiveScene(JObject parameters)
+        {
+            try
+            {
+                var sceneIdentifier = ToolHelpers.GetOptionalString(parameters, "name");
+                if (string.IsNullOrEmpty(sceneIdentifier))
+                    sceneIdentifier = ToolHelpers.GetOptionalString(parameters, "path");
+                if (string.IsNullOrEmpty(sceneIdentifier))
+                    return ToolResponse.Fail("'name' or 'path' is required for 'set_active_scene' action.");
+
+                var scene = FindLoadedScene(sceneIdentifier);
+                if (!scene.IsValid())
+                    return ToolResponse.Fail($"Scene '{sceneIdentifier}' not found among loaded scenes.");
+                if (!scene.isLoaded)
+                    return ToolResponse.Fail($"Scene '{sceneIdentifier}' is not loaded.");
+
+                SceneManager.SetActiveScene(scene);
+                return ToolResponse.OkWithData(SerializeScene(scene), $"Active scene set to '{scene.name}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error setting active scene: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleMergeScenes(JObject parameters)
+        {
+            try
+            {
+                var sourceName = ToolHelpers.GetRequiredString(parameters, "source");
+                var destinationName = ToolHelpers.GetRequiredString(parameters, "destination");
+                var source = FindLoadedScene(sourceName);
+                var destination = FindLoadedScene(destinationName);
+                if (!source.IsValid())
+                    return ToolResponse.Fail($"Source scene '{sourceName}' not found among loaded scenes.");
+                if (!destination.IsValid())
+                    return ToolResponse.Fail($"Destination scene '{destinationName}' not found among loaded scenes.");
+
+                EditorSceneManager.MergeScenes(source, destination);
+                EditorSceneManager.MarkSceneDirty(destination);
+                return ToolResponse.OkWithData(SerializeScene(destination), $"Scene '{sourceName}' merged into '{destination.name}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error merging scenes: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleGetBuildScenes()
+        {
+            try
+            {
+                var sceneList = GetBuildScenesArray();
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["buildSceneCount"] = sceneList.Count,
+                    ["scenes"] = sceneList
+                }, $"Found {sceneList.Count} scenes in Build Settings.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error getting build scenes: {ex.Message}");
+            }
+        }
+
+        private ToolResponse HandleAddToBuild(JObject parameters)
+        {
+            try
+            {
+                var path = NormalizeScenePath(ToolHelpers.GetRequiredString(parameters, "path"));
+                bool enabled = ToolHelpers.GetOptionalBool(parameters, "enabled", true);
+                if (!File.Exists(path))
+                    return ToolResponse.Fail($"Scene file not found at '{path}'.");
+
+                var scenes = EditorBuildSettings.scenes.ToList();
+                var existing = scenes.FirstOrDefault(s => string.Equals(s.path, path, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    existing.enabled = enabled;
+                }
+                else
+                {
+                    scenes.Add(new EditorBuildSettingsScene(path, enabled));
+                }
+
+                EditorBuildSettings.scenes = scenes.ToArray();
+                AssetDatabase.SaveAssets();
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["path"] = path,
+                    ["enabled"] = enabled,
+                    ["buildSceneCount"] = scenes.Count
+                }, $"Scene '{path}' added to Build Settings (enabled={enabled}).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Error adding scene to Build Settings: {ex.Message}");
+            }
+        }
+
         #endregion
 
         #region Helpers
@@ -428,6 +670,86 @@ namespace AgentCore.Editor.Tools.Native.Core
                 count += CountDescendants(go.transform.GetChild(i).gameObject);
             }
             return count;
+        }
+
+        private JArray GetBuildScenesArray()
+        {
+            var scenes = EditorBuildSettings.scenes;
+            var sceneList = new JArray();
+            for (int i = 0; i < scenes.Length; i++)
+            {
+                var scene = scenes[i];
+                sceneList.Add(new JObject
+                {
+                    ["buildIndex"] = i,
+                    ["path"] = scene.path,
+                    ["name"] = Path.GetFileNameWithoutExtension(scene.path),
+                    ["enabled"] = scene.enabled
+                });
+            }
+            return sceneList;
+        }
+
+        private JArray GetLoadedScenesArray()
+        {
+            var loadedScenes = new JArray();
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                loadedScenes.Add(SerializeScene(SceneManager.GetSceneAt(i)));
+            }
+            return loadedScenes;
+        }
+
+        private JObject SerializeScene(Scene scene)
+        {
+            return new JObject
+            {
+                ["name"] = scene.name,
+                ["path"] = scene.path,
+                ["isLoaded"] = scene.isLoaded,
+                ["isDirty"] = scene.isDirty,
+                ["buildIndex"] = scene.buildIndex,
+                ["rootCount"] = scene.IsValid() ? scene.rootCount : 0
+            };
+        }
+
+        private Scene FindLoadedScene(string nameOrPath)
+        {
+            var normalized = nameOrPath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase) || nameOrPath.Contains("/")
+                ? NormalizeScenePath(nameOrPath)
+                : nameOrPath;
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (string.Equals(scene.name, nameOrPath, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(scene.path, normalized, StringComparison.OrdinalIgnoreCase) ||
+                    scene.path.EndsWith($"/{nameOrPath}.unity", StringComparison.OrdinalIgnoreCase))
+                    return scene;
+            }
+
+            return default;
+        }
+
+        private string NormalizeScenePath(string path)
+        {
+            path = ToolHelpers.NormalizeAssetPath(path);
+            if (!path.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+                path += ".unity";
+            return path;
+        }
+
+        private NewSceneMode ParseNewSceneMode(string mode)
+        {
+            return string.Equals(mode, "additive", StringComparison.OrdinalIgnoreCase)
+                ? NewSceneMode.Additive
+                : NewSceneMode.Single;
+        }
+
+        private OpenSceneMode ParseOpenSceneMode(string mode)
+        {
+            return string.Equals(mode, "additive", StringComparison.OrdinalIgnoreCase)
+                ? OpenSceneMode.Additive
+                : OpenSceneMode.Single;
         }
 
         #endregion

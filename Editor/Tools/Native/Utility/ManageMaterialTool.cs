@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
@@ -25,12 +26,12 @@ namespace AgentCore.Editor.Tools.Native.Utility
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""create"", ""get_info"", ""set_property"", ""set_shader"", ""list_properties"", ""assign""],
+                    ""enum"": [""create"", ""get_info"", ""set_property"", ""set_shader"", ""list_properties"", ""assign"", ""copy_properties"", ""set_texture"", ""set_keyword"", ""get_keywords"", ""find_by_shader""],
                     ""description"": ""Action to perform on materials""
                 },
                 ""material_path"": {
                     ""type"": ""string"",
-                    ""description"": ""Material asset path (e.g., 'Assets/Materials/MyMaterial.mat'). Required for all actions.""
+                    ""description"": ""Material asset path (e.g., 'Assets/Materials/MyMaterial.mat'). Required for most actions.""
                 },
                 ""shader_name"": {
                     ""type"": ""string"",
@@ -55,6 +56,30 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 ""material_index"": {
                     ""type"": ""integer"",
                     ""description"": ""Material slot index for assign (default: 0)""
+                },
+                ""source_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Source material path for copy_properties action""
+                },
+                ""target_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Target material path for copy_properties action""
+                },
+                ""texture_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Texture asset path for set_texture action""
+                },
+                ""keyword"": {
+                    ""type"": ""string"",
+                    ""description"": ""Shader keyword name for set_keyword/get_keywords actions""
+                },
+                ""enabled"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Whether to enable or disable a keyword (default: true)""
+                },
+                ""asset_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Alias for material_path""
                 }
             },
             ""required"": [""action""]
@@ -97,9 +122,24 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     case "assign":
                         response = HandleAssign(parameters);
                         break;
+                    case "copy_properties":
+                        response = HandleCopyProperties(parameters);
+                        break;
+                    case "set_texture":
+                        response = HandleSetTexture(parameters);
+                        break;
+                    case "set_keyword":
+                        response = HandleSetKeyword(parameters);
+                        break;
+                    case "get_keywords":
+                        response = HandleGetKeywords(parameters);
+                        break;
+                    case "find_by_shader":
+                        response = HandleFindByShader(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: create, get_info, set_property, set_shader, list_properties, assign");
+                            $"Unknown action: '{action}'. Valid actions: create, get_info, set_property, set_shader, list_properties, assign, copy_properties, set_texture, set_keyword, get_keywords, find_by_shader");
                         break;
                 }
             }
@@ -126,6 +166,9 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             // 优先使用 schema 中定义的 snake_case 名称
             var value = parameters?["material_path"]?.ToString();
+            // 兼容 asset_path 别名
+            if (string.IsNullOrEmpty(value))
+                value = parameters?["asset_path"]?.ToString();
             // 兼容旧的短名称
             if (string.IsNullOrEmpty(value))
                 value = parameters?["path"]?.ToString();
@@ -532,6 +575,224 @@ namespace AgentCore.Editor.Tools.Native.Utility
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"Assign material failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Copies all properties from a source material to a target material.
+        /// Uses Material.CopyPropertiesFromMaterial().
+        /// </summary>
+        private ToolResponse HandleCopyProperties(JObject parameters)
+        {
+            try
+            {
+                var sourcePath = GetRequiredStringWithFallback(parameters, "source_path", "sourcePath");
+                sourcePath = ToolHelpers.NormalizeAssetPath(sourcePath);
+
+                var targetPath = GetRequiredStringWithFallback(parameters, "target_path", "targetPath");
+                targetPath = ToolHelpers.NormalizeAssetPath(targetPath);
+
+                var sourceMaterial = AssetDatabase.LoadAssetAtPath<Material>(sourcePath);
+                if (sourceMaterial == null)
+                    return ToolResponse.Fail($"Source material not found at path: {sourcePath}");
+
+                var targetMaterial = AssetDatabase.LoadAssetAtPath<Material>(targetPath);
+                if (targetMaterial == null)
+                    return ToolResponse.Fail($"Target material not found at path: {targetPath}");
+
+                ToolHelpers.RecordUndo(targetMaterial, "Copy Material Properties");
+                targetMaterial.CopyPropertiesFromMaterial(sourceMaterial);
+
+                EditorUtility.SetDirty(targetMaterial);
+                AssetDatabase.SaveAssets();
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["sourcePath"] = sourcePath,
+                    ["targetPath"] = targetPath,
+                    ["sourceShader"] = sourceMaterial.shader != null ? sourceMaterial.shader.name : "None",
+                    ["targetShader"] = targetMaterial.shader != null ? targetMaterial.shader.name : "None"
+                }, $"Copied properties from '{sourcePath}' to '{targetPath}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Copy properties failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sets a texture property on a material.
+        /// Loads the texture from the specified asset path and assigns it.
+        /// </summary>
+        private ToolResponse HandleSetTexture(JObject parameters)
+        {
+            try
+            {
+                var materialPath = GetMaterialPath(parameters);
+                materialPath = ToolHelpers.NormalizeAssetPath(materialPath);
+
+                var material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+                if (material == null)
+                    return ToolResponse.Fail($"Material not found at path: {materialPath}");
+
+                var propertyName = GetRequiredStringWithFallback(parameters, "property_name", "propertyName");
+                var texturePath = GetRequiredStringWithFallback(parameters, "texture_path", "texturePath");
+                texturePath = ToolHelpers.NormalizeAssetPath(texturePath);
+
+                var texture = AssetDatabase.LoadAssetAtPath<Texture>(texturePath);
+                if (texture == null)
+                    return ToolResponse.Fail($"Texture not found at path: {texturePath}");
+
+                // Verify the property exists on the shader
+                if (!material.HasProperty(propertyName))
+                    return ToolResponse.Fail($"Material does not have property '{propertyName}'. Use 'list_properties' to see available properties.");
+
+                ToolHelpers.RecordUndo(material, "Set Material Texture");
+                material.SetTexture(propertyName, texture);
+
+                EditorUtility.SetDirty(material);
+                AssetDatabase.SaveAssets();
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["materialPath"] = materialPath,
+                    ["propertyName"] = propertyName,
+                    ["texturePath"] = texturePath,
+                    ["textureName"] = texture.name
+                }, $"Set texture '{texture.name}' on property '{propertyName}' of material '{materialPath}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Set texture failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Enables or disables a shader keyword on a material.
+        /// </summary>
+        private ToolResponse HandleSetKeyword(JObject parameters)
+        {
+            try
+            {
+                var materialPath = GetMaterialPath(parameters);
+                materialPath = ToolHelpers.NormalizeAssetPath(materialPath);
+
+                var material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+                if (material == null)
+                    return ToolResponse.Fail($"Material not found at path: {materialPath}");
+
+                var keyword = ToolHelpers.GetRequiredString(parameters, "keyword");
+                var enabled = ToolHelpers.GetOptionalBool(parameters, "enabled", true);
+
+                ToolHelpers.RecordUndo(material, "Set Material Keyword");
+
+                if (enabled)
+                    material.EnableKeyword(keyword);
+                else
+                    material.DisableKeyword(keyword);
+
+                EditorUtility.SetDirty(material);
+                AssetDatabase.SaveAssets();
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["materialPath"] = materialPath,
+                    ["keyword"] = keyword,
+                    ["enabled"] = enabled,
+                    ["allKeywords"] = new JArray(material.shaderKeywords)
+                }, $"{(enabled ? "Enabled" : "Disabled")} keyword '{keyword}' on material '{materialPath}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Set keyword failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets all currently enabled shader keywords on a material.
+        /// </summary>
+        private ToolResponse HandleGetKeywords(JObject parameters)
+        {
+            try
+            {
+                var materialPath = GetMaterialPath(parameters);
+                materialPath = ToolHelpers.NormalizeAssetPath(materialPath);
+
+                var material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+                if (material == null)
+                    return ToolResponse.Fail($"Material not found at path: {materialPath}");
+
+                var keywords = material.shaderKeywords;
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["materialPath"] = materialPath,
+                    ["shader"] = material.shader != null ? material.shader.name : "None",
+                    ["keywords"] = new JArray(keywords),
+                    ["keywordCount"] = keywords.Length
+                }, $"Material '{materialPath}' has {keywords.Length} enabled keyword(s).");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Get keywords failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Finds all materials in the project that use a specified shader.
+        /// </summary>
+        private ToolResponse HandleFindByShader(JObject parameters)
+        {
+            try
+            {
+                var shaderName = GetRequiredStringWithFallback(parameters, "shader_name", "shaderName");
+                var targetShader = Shader.Find(shaderName);
+
+                // We'll match by name even if Shader.Find fails (for partial matches)
+                var materialGuids = AssetDatabase.FindAssets("t:Material");
+                var results = new JArray();
+
+                foreach (var guid in materialGuids)
+                {
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+                    var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+                    if (material == null || material.shader == null) continue;
+
+                    bool matches = false;
+                    if (targetShader != null)
+                    {
+                        // Exact shader match
+                        matches = material.shader == targetShader;
+                    }
+                    else
+                    {
+                        // Partial name match
+                        matches = material.shader.name.IndexOf(shaderName, StringComparison.OrdinalIgnoreCase) >= 0;
+                    }
+
+                    if (matches)
+                    {
+                        results.Add(new JObject
+                        {
+                            ["path"] = path,
+                            ["name"] = material.name,
+                            ["shader"] = material.shader.name,
+                            ["renderQueue"] = material.renderQueue
+                        });
+                    }
+                }
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["shaderName"] = shaderName,
+                    ["exactMatch"] = targetShader != null,
+                    ["materials"] = results,
+                    ["count"] = results.Count
+                }, $"Found {results.Count} material(s) using shader '{shaderName}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Find by shader failed: {ex.Message}");
             }
         }
 

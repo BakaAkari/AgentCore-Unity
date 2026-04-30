@@ -26,6 +26,13 @@
 - To find assets: action `search` with path scope — NOT `manage_script` action `list` (which is for scripts only).
 - Check `get_dependencies` before deleting assets to avoid breaking references.
 
+### Expanded Editor Tooling
+- Scene/project analysis and cleanup: `scene_analysis`, `optimization`, `cleaner`, and `smart_operations` summarize scene health, find hotspots, inspect dependencies, clean missing/unused references, and automate bulk alignment/distribution/replacement tasks.
+- Specialized authoring: `manage_terrain`, `manage_event`, `manage_camera`, `manage_scriptable_object`, `manage_texture_import`, `manage_model_import`, and `manage_asset_import` cover terrain editing, UnityEvent inspection, camera setup, ScriptableObject assets, and importer settings.
+- Package and validation workflows: `manage_package` installs/queries UPM packages, while `manage_test` lists/runs tests and creates test templates.
+- Optional package integrations: `manage_timeline`, `manage_cinemachine`, `manage_probuilder`, and `manage_test` use reflection for optional Unity packages. If Timeline, Cinemachine, ProBuilder, or Test Framework APIs are unavailable, these tools return an installation prompt instead of failing with missing assembly errors.
+- Prefer compact actions such as `get_info`, `check_available`, `list`, or `analyze_scene` before mutating assets/scenes, then follow up with the specific edit action only after targets are confirmed.
+
 ### Prefab Operations
 - Use `manage_prefab` (actions: `create`, `instantiate`, `get_info`, `unpack`, `apply`, `revert`).
 - After modifying a prefab instance, use `apply` to save changes back to the prefab asset.

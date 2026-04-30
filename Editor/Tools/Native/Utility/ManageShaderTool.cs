@@ -26,16 +26,29 @@ namespace AgentCore.Editor.Tools.Native.Utility
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""list"", ""get_info"", ""find"", ""list_keywords""],
+                    ""enum"": [""list"", ""get_info"", ""find"", ""list_keywords"", ""get_properties"", ""get_keywords"", ""find_shaders"", ""get_shader_info""],
                     ""description"": ""Action to perform""
                 },
                 ""shaderName"": {
                     ""type"": ""string"",
                     ""description"": ""Shader name (e.g., 'Standard', 'Universal Render Pipeline/Lit')""
                 },
+                ""shader_name"": {
+                    ""type"": ""string"",
+                    ""description"": ""Alias for shaderName (snake_case)""
+                },
                 ""filter"": {
                     ""type"": ""string"",
                     ""description"": ""Filter for list action (partial name match)""
+                },
+                ""search"": {
+                    ""type"": ""string"",
+                    ""description"": ""Search term for find_shaders action (partial name match)""
+                },
+                ""type"": {
+                    ""type"": ""string"",
+                    ""enum"": [""all"", ""surface"", ""unlit"", ""custom""],
+                    ""description"": ""Shader type filter for find_shaders action (default: 'all')""
                 },
                 ""maxResults"": {
                     ""type"": ""integer"",
@@ -74,11 +87,21 @@ namespace AgentCore.Editor.Tools.Native.Utility
                         response = HandleFind(parameters);
                         break;
                     case "list_keywords":
+                    case "get_keywords":
                         response = HandleListKeywords(parameters);
+                        break;
+                    case "get_properties":
+                        response = HandleGetProperties(parameters);
+                        break;
+                    case "find_shaders":
+                        response = HandleFindShaders(parameters);
+                        break;
+                    case "get_shader_info":
+                        response = HandleGetShaderInfo(parameters);
                         break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: list, get_info, find, list_keywords");
+                            $"Unknown action: '{action}'. Valid actions: list, get_info, find, list_keywords, get_properties, get_keywords, find_shaders, get_shader_info");
                         break;
                 }
             }
@@ -94,6 +117,23 @@ namespace AgentCore.Editor.Tools.Native.Utility
             sw.Stop();
             return Task.FromResult(response.ToToolResult(sw.Elapsed.TotalMilliseconds));
         }
+
+        #region Helpers
+
+        /// <summary>
+        /// Resolves shader name from parameters, supporting both 'shaderName' and 'shader_name' keys.
+        /// </summary>
+        private static string GetShaderName(JObject parameters)
+        {
+            var name = ToolHelpers.GetOptionalString(parameters, "shaderName");
+            if (string.IsNullOrEmpty(name))
+                name = ToolHelpers.GetOptionalString(parameters, "shader_name");
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException("Required parameter 'shader_name' (or 'shaderName') is missing.");
+            return name;
+        }
+
+        #endregion
 
         #region Action Handlers
 
@@ -184,7 +224,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             try
             {
-                var shaderName = ToolHelpers.GetRequiredString(parameters, "shaderName");
+                var shaderName = GetShaderName(parameters);
                 var shader = Shader.Find(shaderName);
                 if (shader == null)
                     return ToolResponse.Fail($"Shader not found: '{shaderName}'");
@@ -241,7 +281,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             try
             {
-                var shaderName = ToolHelpers.GetRequiredString(parameters, "shaderName");
+                var shaderName = GetShaderName(parameters);
                 var shader = Shader.Find(shaderName);
 
                 if (shader == null)
@@ -298,7 +338,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             try
             {
-                var shaderName = ToolHelpers.GetRequiredString(parameters, "shaderName");
+                var shaderName = GetShaderName(parameters);
                 var shader = Shader.Find(shaderName);
                 if (shader == null)
                     return ToolResponse.Fail($"Shader not found: '{shaderName}'");
@@ -326,6 +366,230 @@ namespace AgentCore.Editor.Tools.Native.Utility
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"List keywords failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets all properties of a shader by name.
+        /// Returns property list with name, type, and description.
+        /// </summary>
+        private ToolResponse HandleGetProperties(JObject parameters)
+        {
+            try
+            {
+                var shaderName = GetShaderName(parameters);
+                var shader = Shader.Find(shaderName);
+                if (shader == null)
+                    return ToolResponse.Fail($"Shader not found: '{shaderName}'");
+
+                var properties = new JArray();
+                int propCount = ShaderUtil.GetPropertyCount(shader);
+                for (int i = 0; i < propCount; i++)
+                {
+                    var propName = ShaderUtil.GetPropertyName(shader, i);
+                    var propType = ShaderUtil.GetPropertyType(shader, i);
+                    var propDesc = ShaderUtil.GetPropertyDescription(shader, i);
+
+                    var prop = new JObject
+                    {
+                        ["name"] = propName,
+                        ["type"] = propType.ToString(),
+                        ["description"] = propDesc,
+                        ["isHidden"] = ShaderUtil.IsShaderPropertyHidden(shader, i)
+                    };
+
+                    // Add range info for Range type
+                    if (propType == ShaderUtil.ShaderPropertyType.Range)
+                    {
+                        prop["rangeMin"] = ShaderUtil.GetRangeLimits(shader, i, 1);
+                        prop["rangeMax"] = ShaderUtil.GetRangeLimits(shader, i, 2);
+                        prop["rangeDefault"] = ShaderUtil.GetRangeLimits(shader, i, 0);
+                    }
+
+                    // Add texture dimension for TexEnv type
+                    if (propType == ShaderUtil.ShaderPropertyType.TexEnv)
+                    {
+                        prop["textureDimension"] = ShaderUtil.GetTexDim(shader, i).ToString();
+                    }
+
+                    properties.Add(prop);
+                }
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["shaderName"] = shader.name,
+                    ["propertyCount"] = propCount,
+                    ["properties"] = properties
+                }, $"Found {propCount} properties for shader '{shaderName}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Get properties failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Searches for shaders in the project with optional type filtering.
+        /// Supports filtering by shader type: all, surface, unlit, custom.
+        /// </summary>
+        private ToolResponse HandleFindShaders(JObject parameters)
+        {
+            try
+            {
+                var search = ToolHelpers.GetOptionalString(parameters, "search", "");
+                var typeFilter = ToolHelpers.GetOptionalString(parameters, "type", "all").ToLowerInvariant();
+                var maxResults = ToolHelpers.GetOptionalInt(parameters, "maxResults", 50);
+
+                var shaderGuids = AssetDatabase.FindAssets("t:Shader");
+                var results = new JArray();
+
+                foreach (var guid in shaderGuids)
+                {
+                    if (results.Count >= maxResults) break;
+
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+                    var shader = AssetDatabase.LoadAssetAtPath<Shader>(path);
+                    if (shader == null) continue;
+
+                    // Apply name filter
+                    if (!string.IsNullOrEmpty(search) &&
+                        shader.name.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    // Apply type filter
+                    if (!MatchesShaderType(shader, typeFilter))
+                        continue;
+
+                    results.Add(new JObject
+                    {
+                        ["name"] = shader.name,
+                        ["path"] = path,
+                        ["propertyCount"] = ShaderUtil.GetPropertyCount(shader),
+                        ["isSupported"] = shader.isSupported,
+                        ["renderQueue"] = shader.renderQueue,
+                        ["passCount"] = shader.passCount
+                    });
+                }
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["shaders"] = results,
+                    ["count"] = results.Count,
+                    ["typeFilter"] = typeFilter,
+                    ["searchTerm"] = search
+                }, $"Found {results.Count} shaders matching criteria.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Find shaders failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets detailed shader information including pass count, render queue, LOD, and subshader count.
+        /// </summary>
+        private ToolResponse HandleGetShaderInfo(JObject parameters)
+        {
+            try
+            {
+                var shaderName = GetShaderName(parameters);
+                var shader = Shader.Find(shaderName);
+                if (shader == null)
+                    return ToolResponse.Fail($"Shader not found: '{shaderName}'");
+
+                var assetPath = AssetDatabase.GetAssetPath(shader);
+
+                var info = new JObject
+                {
+                    ["name"] = shader.name,
+                    ["isSupported"] = shader.isSupported,
+                    ["renderQueue"] = shader.renderQueue,
+                    ["passCount"] = shader.passCount,
+                    ["isBuiltIn"] = string.IsNullOrEmpty(assetPath) || assetPath.StartsWith("Resources/"),
+                    ["assetPath"] = string.IsNullOrEmpty(assetPath) ? "(built-in)" : assetPath,
+                    ["propertyCount"] = ShaderUtil.GetPropertyCount(shader)
+                };
+
+                // Get subshader count via ShaderUtil (if available)
+                try
+                {
+                    info["subshaderCount"] = ShaderUtil.GetSubshaderCount(shader);
+                }
+                catch
+                {
+                    info["subshaderCount"] = -1;
+                }
+
+                // Get shader LOD
+                try
+                {
+                    info["maximumLOD"] = shader.maximumLOD;
+                }
+                catch
+                {
+                    info["maximumLOD"] = -1;
+                }
+
+                // Keywords
+                var keywords = shader.keywordSpace.keywords;
+                var keywordList = new JArray();
+                foreach (var kw in keywords)
+                {
+                    keywordList.Add(new JObject
+                    {
+                        ["name"] = kw.name,
+                        ["type"] = kw.type.ToString()
+                    });
+                }
+                info["keywords"] = keywordList;
+                info["keywordCount"] = keywordList.Count;
+
+                // Pass names
+                var passes = new JArray();
+                for (int i = 0; i < shader.passCount; i++)
+                {
+                    passes.Add(shader.FindPassTagValue(i, new ShaderTagId("LightMode")).name ?? $"Pass {i}");
+                }
+                info["passLightModes"] = passes;
+
+                return ToolResponse.OkWithData(info, $"Detailed shader info for '{shaderName}'.");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Get shader info failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Checks if a shader matches the specified type filter.
+        /// </summary>
+        private static bool MatchesShaderType(Shader shader, string typeFilter)
+        {
+            if (typeFilter == "all") return true;
+
+            var name = shader.name.ToLowerInvariant();
+
+            switch (typeFilter)
+            {
+                case "surface":
+                    return name.Contains("standard") || name.Contains("/lit") ||
+                           name.Contains("surface") || name.Contains("pbr");
+                case "unlit":
+                    return name.Contains("unlit") || name.Contains("transparent") ||
+                           name.Contains("sprite") || name.Contains("ui/");
+                case "custom":
+                    // Custom shaders are those not in standard Unity paths
+                    return !name.StartsWith("hidden/") &&
+                           !name.StartsWith("universal render pipeline/") &&
+                           !name.StartsWith("particles/") &&
+                           !name.StartsWith("skybox/") &&
+                           !name.StartsWith("ui/") &&
+                           !name.StartsWith("sprites/") &&
+                           !name.StartsWith("unlit/") &&
+                           name != "standard" &&
+                           name != "standard (specular setup)";
+                default:
+                    return true;
             }
         }
 
