@@ -207,18 +207,13 @@ namespace AgentCore.Editor.Core
 
             _isInitialized = true;
 
-            // Phase 3: 创建新会话（如果 SessionManager 还没有活动会话）
-            // 修复 #5: Domain Reload 后跳过立即创建会话，让 TryRestoreSession() 先尝试恢复
+            // Phase 3: 会话创建始终延迟到 TryRestoreSession() 中处理。
+            // 修复 #6: 之前在 WasInterrupted == false 时会立即创建新会话，
+            // 这会覆盖 EditorPrefs 中保存的上一次会话 ID，导致 TryRestoreSession()
+            // 无法恢复原会话。现在统一由 TryRestoreSession() → EnsureSessionExists() 负责。
             if (string.IsNullOrEmpty(SessionManager.Instance.CurrentSessionId))
             {
-                if (DomainReloadState.instance.WasInterrupted)
-                {
-                    Debug.Log("[AgentCore] Domain Reload detected, deferring session creation to TryRestoreSession().");
-                }
-                else
-                {
-                    SessionManager.Instance.CreateNewSession();
-                }
+                Debug.Log("[AgentCore] No active session in Initialize(), deferring to TryRestoreSession().");
             }
 
             // Domain Reload Resilience: 注册 beforeAssemblyReload 事件
@@ -466,6 +461,10 @@ namespace AgentCore.Editor.Core
 
             _messages.AddRange(restoredMessages);
             _conversationTurns.AddRange(restoredTurns);
+
+            // 修复 #7: 清理恢复的消息历史中不完整的 tool_use/tool_result 配对
+            // 防止发送到 LLM API 时因缺少 tool_result 导致 400 错误
+            SanitizeMessageHistory();
 
             // 确保已初始化（如果消息列表中有 system 消息，则认为已初始化）
             if (_messages.Count > 0 && _messages[0].Role == "system")
@@ -1385,8 +1384,20 @@ namespace AgentCore.Editor.Core
             // 1. 检查当前是否正在执行操作
             if (CurrentState == AgentState.Idle)
             {
-                // Agent 空闲，无需保存中断状态
-                Debug.Log("[AgentCore] beforeAssemblyReload: Agent is idle, no interruption to save.");
+                // 修复 #6: Agent 空闲时也需要保存当前会话到磁盘，
+                // 确保 Domain Reload 后 TryRestoreSession() 能恢复会话。
+                // 不保存中断状态（WasInterrupted 保持 false），只保存会话数据。
+                Debug.Log("[AgentCore] beforeAssemblyReload: Agent is idle, saving session before reload.");
+                try
+                {
+                    SessionManager.Instance.ForceSave(
+                        new List<ChatMessage>(_messages),
+                        new List<ConversationTurn>(_conversationTurns));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save idle session: {ex.Message}");
+                }
                 return;
             }
 
@@ -1779,6 +1790,10 @@ namespace AgentCore.Editor.Core
         {
             Debug.Log("[AgentCore] TriggerResumeLLMCall: Starting resumed LLM call...");
 
+            // 修复 #7: 在发送 LLM 请求前，清理消息历史中不完整的 tool_use/tool_result 配对
+            // Resume 方法可能只修复了单个 interruptedToolCallId，但 assistant 消息可能有多个 tool_calls
+            SanitizeMessageHistory();
+
             // 恢复调用会产生新的 LLM 回复，标记会话内容已变更
             SessionManager.Instance.MarkDirty();
 
@@ -1826,6 +1841,80 @@ namespace AgentCore.Editor.Core
                 },
                 onError: ex => Debug.LogError($"[AgentCore] TriggerResumeLLMCall error: {ex.Message}")
             );
+        }
+
+        /// <summary>
+        /// 清理消息历史中不完整的 tool_use/tool_result 配对。
+        /// <para>
+        /// Anthropic API 要求每个 assistant 消息中的 tool_call 都必须有对应的 tool result 消息紧随其后。
+        /// 在 Domain Reload 或会话恢复后，消息历史可能包含不完整的配对（例如 assistant 发了 3 个 tool_calls，
+        /// 但只有 1-2 个 tool result），这会导致 API 返回 400 错误。
+        /// </para>
+        /// <para>
+        /// 此方法扫描整个消息历史，为所有缺失 tool_result 的 tool_call 补充占位响应。
+        /// </para>
+        /// </summary>
+        /// <returns>补充的占位 tool_result 数量</returns>
+        private int SanitizeMessageHistory()
+        {
+            int fixedCount = 0;
+
+            for (int i = 0; i < _messages.Count; i++)
+            {
+                var msg = _messages[i];
+
+                // 只处理包含 tool_calls 的 assistant 消息
+                if (msg.Role != "assistant" || msg.ToolCalls == null || msg.ToolCalls.Count == 0)
+                    continue;
+
+                // 收集这条 assistant 消息之后紧跟的所有 tool result 的 ToolCallId
+                var existingToolResultIds = new HashSet<string>();
+                int insertPosition = i + 1;
+                for (int j = i + 1; j < _messages.Count; j++)
+                {
+                    if (_messages[j].Role == "tool" && !string.IsNullOrEmpty(_messages[j].ToolCallId))
+                    {
+                        existingToolResultIds.Add(_messages[j].ToolCallId);
+                        insertPosition = j + 1;
+                    }
+                    else
+                    {
+                        // 遇到非 tool 消息，停止搜索
+                        break;
+                    }
+                }
+
+                // 检查每个 tool_call 是否有对应的 tool_result
+                int insertedInThisGroup = 0;
+                foreach (var toolCall in msg.ToolCalls)
+                {
+                    if (string.IsNullOrEmpty(toolCall.Id))
+                        continue;
+
+                    if (!existingToolResultIds.Contains(toolCall.Id))
+                    {
+                        // 缺少对应的 tool_result，补充占位响应
+                        string toolName = toolCall.Function?.Name ?? "unknown";
+                        var placeholder = ChatMessage.Tool(toolCall.Id,
+                            $"[Tool result unavailable] The execution of '{toolName}' was interrupted by a Domain Reload " +
+                            "or session restoration. The result was not captured. Please retry if needed.");
+
+                        _messages.Insert(insertPosition + insertedInThisGroup, placeholder);
+                        insertedInThisGroup++;
+                        fixedCount++;
+
+                        Debug.Log($"[AgentCore] SanitizeMessageHistory: Added placeholder tool_result for " +
+                                  $"tool_call '{toolCall.Id}' (tool: {toolName}).");
+                    }
+                }
+            }
+
+            if (fixedCount > 0)
+            {
+                Debug.Log($"[AgentCore] SanitizeMessageHistory: Fixed {fixedCount} missing tool_result(s).");
+            }
+
+            return fixedCount;
         }
 
         #endregion

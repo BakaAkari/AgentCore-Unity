@@ -333,7 +333,13 @@ namespace AgentCore.Editor.UI
 
         /// <summary>
         /// 输入框键盘事件处理。
-        /// Enter 发送消息，Shift+Enter 换行，Escape 取消操作。
+        /// <list type="bullet">
+        ///   <item>Enter — 发送消息</item>
+        ///   <item>Shift+Enter — 换行</item>
+        ///   <item>Escape — 取消当前操作</item>
+        ///   <item>Ctrl+N — 新建会话</item>
+        ///   <item>Ctrl+Shift+E — 导出当前会话</item>
+        /// </list>
         /// </summary>
         /// <param name="evt">键盘事件</param>
         private void OnInputFieldKeyDown(KeyDownEvent evt)
@@ -354,6 +360,20 @@ namespace AgentCore.Editor.UI
                         evt.PreventDefault();
                         OnCancelClicked();
                     }
+                    break;
+
+                case KeyCode.N when evt.ctrlKey && !evt.shiftKey:
+                    // Ctrl+N -> 新建会话
+                    evt.PreventDefault();
+                    evt.StopPropagation();
+                    OnNewSessionClicked();
+                    break;
+
+                case KeyCode.E when evt.ctrlKey && evt.shiftKey:
+                    // Ctrl+Shift+E -> 导出当前会话
+                    evt.PreventDefault();
+                    evt.StopPropagation();
+                    ShowExportMenu();
                     break;
             }
         }
@@ -1266,6 +1286,18 @@ namespace AgentCore.Editor.UI
 
             menu.AddSeparator("");
 
+            menu.AddItem(new GUIContent("导出/Markdown (.md)"), false, () =>
+            {
+                ExportSession(sessionId, SessionExporter.ExportFormat.Markdown);
+            });
+
+            menu.AddItem(new GUIContent("导出/JSON (.json)"), false, () =>
+            {
+                ExportSession(sessionId, SessionExporter.ExportFormat.Json);
+            });
+
+            menu.AddSeparator("");
+
             menu.AddItem(new GUIContent("删除"), false, () =>
             {
                 DeleteSessionWithConfirm(sessionId);
@@ -1658,6 +1690,70 @@ namespace AgentCore.Editor.UI
             if (_cancelButton != null)
             {
                 _cancelButton.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+
+        /// <summary>
+        /// 显示导出格式选择菜单（由 Ctrl+Shift+E 快捷键触发）。
+        /// </summary>
+        private void ShowExportMenu()
+        {
+            var sessionId = SessionManager.Instance?.CurrentSessionId;
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                Debug.LogWarning("[AgentCore] No active session to export.");
+                return;
+            }
+
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent("导出为 Markdown (.md)"), false, () =>
+            {
+                ExportSession(sessionId, SessionExporter.ExportFormat.Markdown);
+            });
+            menu.AddItem(new GUIContent("导出为 JSON (.json)"), false, () =>
+            {
+                ExportSession(sessionId, SessionExporter.ExportFormat.Json);
+            });
+            menu.ShowAsContext();
+        }
+
+        /// <summary>
+        /// 导出指定会话到文件。弹出文件保存对话框让用户选择路径。
+        /// </summary>
+        /// <param name="sessionId">要导出的会话 ID</param>
+        /// <param name="format">导出格式</param>
+        private void ExportSession(string sessionId, SessionExporter.ExportFormat format)
+        {
+            try
+            {
+                var session = SessionStorage.Load(sessionId);
+                if (session == null)
+                {
+                    Debug.LogError($"[AgentCore] Failed to load session: {sessionId}");
+                    return;
+                }
+
+                var defaultName = SessionExporter.GetDefaultFileName(session, format);
+                var extension = format == SessionExporter.ExportFormat.Markdown ? "md" : "json";
+                var filterDisplay = format == SessionExporter.ExportFormat.Markdown ? "Markdown files" : "JSON files";
+
+                var path = EditorUtility.SaveFilePanel(
+                    "导出会话",
+                    "",
+                    defaultName,
+                    extension
+                );
+
+                if (string.IsNullOrEmpty(path))
+                    return; // 用户取消
+
+                SessionExporter.ExportToFile(session, path, format);
+                Debug.Log($"[AgentCore] Session exported to: {path}");
+                EditorUtility.RevealInFinder(path);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore] Export failed: {ex.Message}");
             }
         }
 

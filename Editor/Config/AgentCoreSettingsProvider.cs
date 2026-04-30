@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
+using AgentCore.Editor.Bootstrap;
 using AgentCore.Editor.Cloud;
 using AgentCore.Editor.Utils;
 using UnityEditor;
@@ -319,7 +321,202 @@ namespace AgentCore.Editor.Config
                 _settings.SaveSettings();
             }
 
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("User Files", EditorStyles.miniLabel);
+
+            DrawUserFileRow("MEMORY.md", "本地知识文件 — Agent 可参考的项目知识和上下文");
+            DrawUserFileRow("USER.md", "用户偏好文件 — 定义 Agent 的行为偏好和规则");
+
             EditorGUI.indentLevel--;
+        }
+
+        /// <summary>
+        /// 绘制单个用户文件的编辑行（状态 + 创建/编辑按钮）。
+        /// </summary>
+        /// <param name="fileName">文件名（如 MEMORY.md）</param>
+        /// <param name="description">文件描述</param>
+        private void DrawUserFileRow(string fileName, string description)
+        {
+            var filePath = BootstrapLoader.FindUserFilePath(fileName);
+            var exists = filePath != null;
+
+            EditorGUILayout.BeginHorizontal();
+
+            // 状态图标 + 文件名
+            var statusIcon = exists ? "✓" : "✗";
+            var statusColor = exists ? "green" : "grey";
+            var label = $"{statusIcon} {fileName}";
+            EditorGUILayout.LabelField(new GUIContent(label, description), GUILayout.Width(140));
+
+            if (exists)
+            {
+                // 显示相对路径
+                var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? "";
+                var relativePath = filePath.StartsWith(projectRoot)
+                    ? filePath.Substring(projectRoot.Length + 1).Replace('\\', '/')
+                    : filePath;
+                EditorGUILayout.LabelField(relativePath, EditorStyles.miniLabel);
+
+                // 编辑按钮
+                if (GUILayout.Button("Edit", GUILayout.Width(50)))
+                {
+                    // 使用系统默认编辑器打开
+                    System.Diagnostics.Process.Start(filePath);
+                }
+
+                // 在 Explorer 中显示
+                if (GUILayout.Button("Show", GUILayout.Width(50)))
+                {
+                    EditorUtility.RevealInFinder(filePath);
+                }
+            }
+            else
+            {
+                EditorGUILayout.LabelField("(未创建)", EditorStyles.miniLabel);
+
+                // 创建按钮
+                if (GUILayout.Button("Create", GUILayout.Width(60)))
+                {
+                    CreateUserFile(fileName);
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>
+        /// 创建用户文件（MEMORY.md 或 USER.md），包含模板内容。
+        /// </summary>
+        /// <param name="fileName">文件名</param>
+        private static void CreateUserFile(string fileName)
+        {
+            var filePath = BootstrapLoader.GetDefaultUserFilePath(fileName);
+            if (filePath == null)
+            {
+                Debug.LogError("[AgentCore] Cannot determine project root directory.");
+                return;
+            }
+
+            // 确保目录存在
+            var directory = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            // 生成模板内容
+            var template = GenerateUserFileTemplate(fileName);
+
+            try
+            {
+                File.WriteAllText(filePath, template, System.Text.Encoding.UTF8);
+                Debug.Log($"[AgentCore] Created {fileName} at: {filePath}");
+                AssetDatabase.Refresh();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore] Failed to create {fileName}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 生成用户文件的模板内容。
+        /// MEMORY.md 会自动填充当前项目的基础信息（通过 ProjectContextCollector）。
+        /// USER.md 生成带引导注释的空模板。
+        /// </summary>
+        /// <param name="fileName">文件名</param>
+        /// <returns>模板 Markdown 内容</returns>
+        private static string GenerateUserFileTemplate(string fileName)
+        {
+            if (fileName == "MEMORY.md")
+            {
+                return GenerateMemoryTemplate();
+            }
+
+            return @"# USER.md — 用户偏好文件
+
+<!--
+  在此文件中定义你对 Agent 的行为偏好。
+  Agent 会将这些偏好作为高优先级指令遵循。
+  
+  建议内容：
+  - 代码风格偏好
+  - 语言偏好（中文/英文）
+  - 回复风格偏好
+  - 特定工具的使用偏好
+-->
+
+## 语言偏好
+
+<!-- 例如：请始终使用中文回复 -->
+
+## 代码风格
+
+<!-- 例如：使用 4 空格缩进，优先使用 var 关键字 -->
+
+## 回复风格
+
+<!-- 例如：回复要简洁，避免冗长解释 -->
+";
+        }
+
+        /// <summary>
+        /// 生成 MEMORY.md 模板，自动填充项目基础信息。
+        /// </summary>
+        private static string GenerateMemoryTemplate()
+        {
+            var sb = new System.Text.StringBuilder();
+
+            sb.AppendLine("# MEMORY.md — 本地知识文件");
+            sb.AppendLine();
+            sb.AppendLine("<!--");
+            sb.AppendLine("  Agent 在每次对话开始时会读取此文件作为背景知识。");
+            sb.AppendLine("  以下项目信息由 AgentCore 自动收集，你可以自由编辑和补充。");
+            sb.AppendLine("  ");
+            sb.AppendLine("  建议补充：");
+            sb.AppendLine("  - 项目的业务目标和功能描述");
+            sb.AppendLine("  - 重要的架构决策和设计模式");
+            sb.AppendLine("  - 团队编码规范和约定");
+            sb.AppendLine("  - 已知的技术债务或注意事项");
+            sb.AppendLine("-->");
+            sb.AppendLine();
+
+            // 自动填充项目基础信息
+            sb.AppendLine("## 项目基础信息");
+            sb.AppendLine();
+            try
+            {
+                var projectInfo = ProjectContextCollector.CollectExtended();
+                if (!string.IsNullOrEmpty(projectInfo))
+                {
+                    sb.AppendLine(projectInfo);
+                }
+                else
+                {
+                    sb.AppendLine("<!-- 项目信息收集失败，请手动填写 -->");
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"<!-- 项目信息收集失败: {ex.Message} -->");
+                Debug.LogWarning($"[AgentCore] Failed to collect project info for MEMORY.md: {ex.Message}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("## 项目概述");
+            sb.AppendLine();
+            sb.AppendLine("<!-- 在此描述你的项目目标和核心功能 -->");
+            sb.AppendLine();
+            sb.AppendLine("## 架构说明");
+            sb.AppendLine();
+            sb.AppendLine("<!-- 在此描述项目的架构设计和关键模块 -->");
+            sb.AppendLine();
+            sb.AppendLine("## 开发规范");
+            sb.AppendLine();
+            sb.AppendLine("<!-- 在此描述团队的编码规范和约定 -->");
+            sb.AppendLine();
+
+            return sb.ToString();
         }
 
         private void DrawUIPreferencesSection()

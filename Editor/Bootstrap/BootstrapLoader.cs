@@ -382,6 +382,44 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
+        /// 查找用户文件的实际路径。
+        /// 按优先级查找：项目根目录 → AgentCore/ 子目录。
+        /// 如果文件不存在，返回 null。
+        /// </summary>
+        /// <param name="fileName">文件名（如 MEMORY.md 或 USER.md）</param>
+        /// <returns>文件的完整路径，或 null（如果不存在）</returns>
+        public static string FindUserFilePath(string fileName)
+        {
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (projectRoot == null) return null;
+
+            var rootPath = Path.Combine(projectRoot, fileName);
+            if (File.Exists(rootPath)) return rootPath;
+
+            var agentCorePath = Path.Combine(projectRoot, "AgentCore", fileName);
+            if (File.Exists(agentCorePath)) return agentCorePath;
+
+            return null;
+        }
+
+        /// <summary>
+        /// 获取用户文件的默认创建路径（项目根目录下的 AgentCore/ 子目录）。
+        /// 如果文件已存在，返回已存在的路径；否则返回默认路径。
+        /// </summary>
+        /// <param name="fileName">文件名（如 MEMORY.md 或 USER.md）</param>
+        /// <returns>文件的完整路径</returns>
+        public static string GetDefaultUserFilePath(string fileName)
+        {
+            var existing = FindUserFilePath(fileName);
+            if (existing != null) return existing;
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (projectRoot == null) return null;
+
+            return Path.Combine(projectRoot, "AgentCore", fileName);
+        }
+
+        /// <summary>
         /// 检查文件内容是否只包含模板注释（没有实际内容）。
         /// </summary>
         private bool IsTemplateOnly(string content)
