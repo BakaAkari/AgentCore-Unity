@@ -54,8 +54,30 @@
 - Use `execute_code` (action: `evaluate`) for one-off C# expressions (e.g., checking API availability, reading runtime values).
 - `execute_code` runs in the Editor process — avoid infinite loops, heavy allocations, or blocking calls.
 
+### File System Operations
+- `manage_file` — General-purpose file operations for ANY file type in the project.
+  - `read_file`: Read file content with optional line range (`offset`/`limit`) and line numbers. Supports all text file types.
+  - `write_file`: Write/create files with encoding control. Auto-creates parent directories.
+  - `list_directory`: List files and directories with glob pattern filtering (e.g., `*.json`, `*.xml`).
+  - `search_content`: Regex-based content search across files with context lines — like grep for the project.
+  - `file_info`: Get detailed file/directory metadata (size, dates, line count).
+  - `copy`: Copy files to a new location.
+  - `move`: Move/rename files or directories (also moves `.meta` files).
+  - `delete`: Delete files or empty directories (also deletes `.meta` files).
+  - `create_directory`: Create directories (including nested).
+- **When to use `manage_file` vs other tools:**
+  - Non-C# files (json, xml, yaml, shader, txt, md, etc.) → `manage_file`
+  - Files outside `Assets/` (Packages/, ProjectSettings/, etc.) → `manage_file`
+  - Content search across multiple files → `manage_file` (action: `search_content`)
+  - C# script creation with templates, analysis, add methods → `manage_script`
+  - Unity asset operations (AssetDatabase search, import, dependencies) → `manage_asset`
+- All paths are relative to the project root (parent of `Assets/`).
+- Security: paths that escape the project directory are rejected.
+
 ### Tool Selection Guide
 - **Want to modify a script file?** → `manage_script` (action: `write`)
+- **Want to read/write a non-C# file?** → `manage_file` (action: `read_file` / `write_file`)
+- **Want to search text across files?** → `manage_file` (action: `search_content`)
 - **Want to check if a GameObject exists?** → `find_gameobjects`
 - **Want to add a Rigidbody?** → `manage_component` (action: `add`), NOT `manage_gameobject`
 - **Want to find an asset by type?** → `manage_asset` (action: `search`)
@@ -64,6 +86,7 @@
 - **Want to control Play Mode?** → `manage_editor` (action: `play_mode`)
 - **Want to see compilation errors?** → `read_console` (action: `get_errors`)
 - **Want to diagnose why Play Mode fails?** → `read_console` (action: `get_errors`) first, then check the file/line info
+- **Want to list project config files?** → `manage_file` (action: `list_directory`, path: `ProjectSettings`)
 
 ### 8. 记忆管理
 - `manage_memory` — 长期记忆的增删查
@@ -72,3 +95,17 @@
   - `list`: 列出所有已存储的记忆
   - `delete`: 删除过时或错误的记忆
   - 记忆会跨会话持久保存，同一项目的不同分支共享
+
+### 9. 知识库检索
+- `manage_knowledge` — 基于 LightRAG 的项目知识库查询与索引
+  - `query`: 用自然语言检索知识库中的相关信息（支持 naive/local/global/hybrid 四种搜索模式）
+    - `naive`: 朴素搜索，直接匹配关键词
+    - `local`: 局部搜索，基于实体关系的精确检索
+    - `global`: 全局搜索，基于社区摘要的宏观检索
+    - `hybrid`: 混合搜索（默认），结合 local 和 global 的优势
+  - `index_text`: 将文本内容索引到知识库中（如项目文档、设计规范、API 说明等）
+  - 使用场景：
+    - 查询项目架构设计文档中的约定
+    - 检索之前索引过的技术规范
+    - 在回答用户问题前先搜索知识库获取上下文
+  - 注意：知识库服务需要在 Settings 面板中配置 LightRAG 端点地址

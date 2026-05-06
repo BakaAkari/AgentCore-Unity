@@ -17,6 +17,12 @@ namespace AgentCore.Editor.Config
     /// </summary>
     public class AgentCoreSettingsProvider : SettingsProvider
     {
+        /// <summary>
+        /// 从 package.json 读取的版本号缓存。
+        /// 避免每帧重复读取文件。
+        /// </summary>
+        private static string _cachedVersion;
+
         private AgentCoreSettings _settings;
         private string _apiKeyDisplay = "";
         private string _connectionTestResult = "";
@@ -433,56 +439,77 @@ namespace AgentCore.Editor.Config
                 return GenerateMemoryTemplate();
             }
 
-            return @"# USER.md — 用户偏好文件
+            return GenerateUserTemplate();
+        }
 
-<!--
-  在此文件中定义你对 Agent 的行为偏好。
-  Agent 会将这些偏好作为高优先级指令遵循。
-  
-  建议内容：
-  - 代码风格偏好
-  - 语言偏好（中文/英文）
-  - 回复风格偏好
-  - 特定工具的使用偏好
--->
+        /// <summary>
+        /// 生成 USER.md 模板 — 通用 Unity 开发者 Agent 行为预设。
+        /// 提供开箱即用的默认配置，用户可根据需要调整。
+        /// </summary>
+        private static string GenerateUserTemplate()
+        {
+            return @"# USER.md — Agent 行为预设
 
-## 语言偏好
+## 语言与沟通
 
-<!-- 例如：请始终使用中文回复 -->
+- 使用中文回复，技术术语保留英文原文（如 GameObject、Component、Prefab）
+- 回复简洁直接，先给结论再解释原因
+- 代码注释使用中文，XML 文档注释使用英文
+- 遇到歧义时主动确认，不要猜测用户意图
 
 ## 代码风格
 
-<!-- 例如：使用 4 空格缩进，优先使用 var 关键字 -->
+- 命名规范：PascalCase（类/方法/属性）、camelCase（局部变量/参数）、_camelCase（私有字段）
+- 使用 4 空格缩进，大括号换行（Allman 风格）
+- 优先使用 `var` 关键字（类型明显时）
+- 字符串拼接优先使用 `$""""` 插值，复杂拼接使用 `StringBuilder`
+- 集合优先使用 `List<T>` 和 `Dictionary<TKey, TValue>`
+- 异步方法后缀 `Async`，返回 `Task` 或 `Task<T>`
+- 每个公共成员都要有 XML 文档注释
 
-## 回复风格
+## Unity 开发偏好
 
-<!-- 例如：回复要简洁，避免冗长解释 -->
+- 新建脚本默认使用 MonoBehaviour 模板，放在 `Assets/Scripts/` 下
+- 组件通信优先级：直接引用 > 事件/委托 > SendMessage（避免使用 SendMessage）
+- 序列化字段使用 `[SerializeField]` 而非 public，配合 `[Header]` 和 `[Tooltip]` 分组
+- Inspector 友好：使用 `[Range]`、`[TextArea]`、`[Space]` 等特性提升编辑体验
+- 预制体工作流：修改后及时 Apply，保持 Override 最小化
+- 场景操作后主动保存场景
+- 资产命名：PascalCase，前缀表示类型（如 `Mat_Stone`、`Tex_Wood_Diffuse`、`Prefab_Player`）
+
+## 性能意识
+
+- 避免在 Update/FixedUpdate 中使用 Find/GetComponent，缓存引用
+- 字符串比较使用 CompareTag() 而非 == tag
+- 物理检测优先使用 NonAlloc 版本（如 Physics.RaycastNonAlloc）
+- 大量对象操作时考虑对象池模式
+- 协程中避免每帧 new WaitForSeconds，缓存 YieldInstruction
+
+## 工作流偏好
+
+- 修改脚本后自动刷新并检查编译错误
+- 创建 GameObject 后设置合理的默认 Transform（位置归零、缩放为 1）
+- 批量操作优先使用 batch_execute
+- 操作前先用 find_gameobjects 或 manage_asset(search) 确认目标存在
+- 遇到编译错误时，先用 read_console(get_errors) 获取完整错误信息
 ";
         }
 
         /// <summary>
-        /// 生成 MEMORY.md 模板，自动填充项目基础信息。
+        /// 生成 MEMORY.md 模板 — 自动收集项目信息 + 通用 Unity 开发知识预设。
+        /// 提供 Agent 理解 Unity 项目所需的基础知识框架。
         /// </summary>
         private static string GenerateMemoryTemplate()
         {
             var sb = new System.Text.StringBuilder();
 
-            sb.AppendLine("# MEMORY.md — 本地知识文件");
-            sb.AppendLine();
-            sb.AppendLine("<!--");
-            sb.AppendLine("  Agent 在每次对话开始时会读取此文件作为背景知识。");
-            sb.AppendLine("  以下项目信息由 AgentCore 自动收集，你可以自由编辑和补充。");
-            sb.AppendLine("  ");
-            sb.AppendLine("  建议补充：");
-            sb.AppendLine("  - 项目的业务目标和功能描述");
-            sb.AppendLine("  - 重要的架构决策和设计模式");
-            sb.AppendLine("  - 团队编码规范和约定");
-            sb.AppendLine("  - 已知的技术债务或注意事项");
-            sb.AppendLine("-->");
+            sb.AppendLine("# MEMORY.md — 项目知识库");
             sb.AppendLine();
 
-            // 自动填充项目基础信息
-            sb.AppendLine("## 项目基础信息");
+            // ===== 第一部分：自动收集的项目信息 =====
+            sb.AppendLine("## 1. 项目基础信息");
+            sb.AppendLine();
+            sb.AppendLine("> 以下信息由 AgentCore 自动收集，可手动补充修正。");
             sb.AppendLine();
             try
             {
@@ -503,17 +530,131 @@ namespace AgentCore.Editor.Config
             }
 
             sb.AppendLine();
-            sb.AppendLine("## 项目概述");
+
+            // ===== 第二部分：项目描述（用户填写） =====
+            sb.AppendLine("## 2. 项目概述");
             sb.AppendLine();
-            sb.AppendLine("<!-- 在此描述你的项目目标和核心功能 -->");
+            sb.AppendLine("<!-- 在此描述你的项目，Agent 会据此理解项目背景 -->");
+            sb.AppendLine("<!-- 例如：");
+            sb.AppendLine("本项目是一款 3D 第三人称动作游戏，使用 URP 渲染管线。");
+            sb.AppendLine("核心玩法包括战斗系统、技能系统和关卡探索。");
+            sb.AppendLine("目标平台为 PC 和移动端。");
+            sb.AppendLine("-->");
             sb.AppendLine();
-            sb.AppendLine("## 架构说明");
+
+            // ===== 第三部分：Unity 通用知识预设 =====
+            sb.AppendLine("## 3. Unity 核心概念速查");
             sb.AppendLine();
-            sb.AppendLine("<!-- 在此描述项目的架构设计和关键模块 -->");
+            sb.AppendLine("### 生命周期执行顺序");
+            sb.AppendLine("```");
+            sb.AppendLine("Awake → OnEnable → Start → FixedUpdate → Update → LateUpdate → OnDisable → OnDestroy");
+            sb.AppendLine("```");
+            sb.AppendLine("- `Awake`: 对象初始化，不依赖其他对象的设置放这里");
+            sb.AppendLine("- `Start`: 依赖其他对象的初始化放这里（所有 Awake 执行完后才调用）");
+            sb.AppendLine("- `FixedUpdate`: 物理相关逻辑（固定时间步长，默认 0.02s）");
+            sb.AppendLine("- `Update`: 每帧逻辑（输入处理、非物理移动等）");
+            sb.AppendLine("- `LateUpdate`: 相机跟随、动画后处理等");
             sb.AppendLine();
-            sb.AppendLine("## 开发规范");
+
+            sb.AppendLine("### 常用组件速查");
             sb.AppendLine();
-            sb.AppendLine("<!-- 在此描述团队的编码规范和约定 -->");
+            sb.AppendLine("| 需求 | 组件 | 关键属性 |");
+            sb.AppendLine("|------|------|----------|");
+            sb.AppendLine("| 物理运动 | Rigidbody | mass, useGravity, isKinematic, constraints |");
+            sb.AppendLine("| 碰撞检测 | BoxCollider / SphereCollider / CapsuleCollider | isTrigger, center, size |");
+            sb.AppendLine("| 3D 渲染 | MeshRenderer + MeshFilter | materials, shadowCastingMode |");
+            sb.AppendLine("| 2D 渲染 | SpriteRenderer | sprite, color, sortingOrder |");
+            sb.AppendLine("| 音频播放 | AudioSource | clip, volume, loop, playOnAwake, spatialBlend |");
+            sb.AppendLine("| 粒子效果 | ParticleSystem | startLifetime, startSpeed, maxParticles |");
+            sb.AppendLine("| UI 文本 | TextMeshProUGUI | text, fontSize, color, alignment |");
+            sb.AppendLine("| UI 按钮 | Button (+ Image) | onClick, interactable, transition |");
+            sb.AppendLine("| UI 布局 | VerticalLayoutGroup / HorizontalLayoutGroup / GridLayoutGroup | spacing, padding, childAlignment |");
+            sb.AppendLine("| 动画 | Animator | runtimeAnimatorController, parameters |");
+            sb.AppendLine("| 导航 | NavMeshAgent | speed, stoppingDistance, destination |");
+            sb.AppendLine("| 光照 | Light | type, intensity, color, range, shadows |");
+            sb.AppendLine();
+
+            sb.AppendLine("### 常见设计模式");
+            sb.AppendLine();
+            sb.AppendLine("- **单例模式**: 管理器类（AudioManager, GameManager）使用 `DontDestroyOnLoad` 跨场景持久化");
+            sb.AppendLine("- **观察者模式**: 使用 C# event/Action 或 UnityEvent 解耦组件通信");
+            sb.AppendLine("- **状态机**: 角色控制器、AI 行为、UI 流程管理");
+            sb.AppendLine("- **对象池**: 频繁创建/销毁的对象（子弹、特效、敌人）使用池化复用");
+            sb.AppendLine("- **ScriptableObject**: 数据驱动设计（配置表、技能数据、物品数据）");
+            sb.AppendLine("- **命令模式**: 撤销/重做系统、输入缓冲");
+            sb.AppendLine();
+
+            sb.AppendLine("### 常见陷阱与解决方案");
+            sb.AppendLine();
+            sb.AppendLine("| 陷阱 | 解决方案 |");
+            sb.AppendLine("|------|----------|");
+            sb.AppendLine("| Update 中 GetComponent 每帧调用 | 在 Awake/Start 中缓存引用 |");
+            sb.AppendLine("| string 比较 tag | 使用 CompareTag(\"tag\") |");
+            sb.AppendLine("| Find 系列方法性能差 | 用序列化引用或事件系统替代 |");
+            sb.AppendLine("| 协程中 new WaitForSeconds | 缓存 YieldInstruction 实例 |");
+            sb.AppendLine("| Destroy 后立即访问 | 使用 null 检查或延迟到下一帧 |");
+            sb.AppendLine("| 浮点数精度比较 | 使用 Mathf.Approximately() |");
+            sb.AppendLine("| 跨场景引用丢失 | 使用 DontDestroyOnLoad 或 ScriptableObject |");
+            sb.AppendLine("| Prefab 修改未保存 | 修改后调用 PrefabUtility.SavePrefabAsset |");
+            sb.AppendLine("| 物理和渲染帧率不同步 | 物理逻辑放 FixedUpdate，视觉插值放 Update |");
+            sb.AppendLine("| UI 事件穿透 | 使用 EventSystem.IsPointerOverGameObject() 检查 |");
+            sb.AppendLine();
+
+            sb.AppendLine("### 项目目录约定");
+            sb.AppendLine();
+            sb.AppendLine("```");
+            sb.AppendLine("Assets/");
+            sb.AppendLine("  Scripts/          # C# 脚本");
+            sb.AppendLine("    Editor/         # 编辑器扩展脚本");
+            sb.AppendLine("  Scenes/           # 场景文件");
+            sb.AppendLine("  Prefabs/          # 预制体");
+            sb.AppendLine("  Materials/        # 材质");
+            sb.AppendLine("  Textures/         # 纹理");
+            sb.AppendLine("  Models/           # 3D 模型");
+            sb.AppendLine("  Animations/       # 动画资产");
+            sb.AppendLine("  Audio/            # 音频文件");
+            sb.AppendLine("  UI/               # UI 资产（图集、字体等）");
+            sb.AppendLine("  Resources/        # 运行时动态加载资源（谨慎使用）");
+            sb.AppendLine("  StreamingAssets/  # 原始文件流式加载");
+            sb.AppendLine("  Plugins/          # 第三方插件");
+            sb.AppendLine("  ScriptableObjects/ # SO 数据资产");
+            sb.AppendLine("```");
+            sb.AppendLine();
+
+            // ===== 第四部分：架构说明（用户填写） =====
+            sb.AppendLine("## 4. 项目架构");
+            sb.AppendLine();
+            sb.AppendLine("<!-- 在此描述项目的架构设计，Agent 会遵循这些约定 -->");
+            sb.AppendLine("<!-- 例如：");
+            sb.AppendLine("- 使用 MVC 架构分离数据、逻辑和表现");
+            sb.AppendLine("- GameManager 单例管理全局状态");
+            sb.AppendLine("- 事件系统使用 ScriptableObject 事件通道");
+            sb.AppendLine("- UI 使用 MVVM 模式，ViewModel 继承 ScriptableObject");
+            sb.AppendLine("-->");
+            sb.AppendLine();
+
+            // ===== 第五部分：开发规范（用户填写） =====
+            sb.AppendLine("## 5. 开发规范");
+            sb.AppendLine();
+            sb.AppendLine("<!-- 在此描述团队的编码规范和约定，Agent 会严格遵循 -->");
+            sb.AppendLine("<!-- 例如：");
+            sb.AppendLine("- 所有 MonoBehaviour 必须有命名空间");
+            sb.AppendLine("- 公共方法必须有 XML 文档注释");
+            sb.AppendLine("- 禁止使用 GameObject.Find，必须通过序列化引用或依赖注入");
+            sb.AppendLine("- 所有配置数据使用 ScriptableObject，不硬编码");
+            sb.AppendLine("-->");
+            sb.AppendLine();
+
+            // ===== 第六部分：已知问题（用户填写） =====
+            sb.AppendLine("## 6. 已知问题与注意事项");
+            sb.AppendLine();
+            sb.AppendLine("<!-- 记录项目中的已知问题、技术债务或特殊注意事项 -->");
+            sb.AppendLine("<!-- Agent 在操作相关区域时会参考这些信息 -->");
+            sb.AppendLine("<!-- 例如：");
+            sb.AppendLine("- PlayerController.cs 中的移动逻辑需要重构，目前耦合了输入和物理");
+            sb.AppendLine("- 旧版 UI 系统（UGUI）正在迁移到 UI Toolkit，新 UI 请使用 UI Toolkit");
+            sb.AppendLine("- 第三方插件 XYZ 的 API 在 Unity 2022 中有兼容性问题");
+            sb.AppendLine("-->");
             sb.AppendLine();
 
             return sb.ToString();
@@ -757,9 +898,49 @@ namespace AgentCore.Editor.Config
             EditorGUILayout.LabelField("About", EditorStyles.boldLabel);
 
             EditorGUI.indentLevel++;
-            EditorGUILayout.LabelField("Version", "0.3.1 (Phase 3)");
+            EditorGUILayout.LabelField("Version", $"{GetPackageVersion()} (Phase 3)");
             EditorGUILayout.LabelField("Unity Agent Plugin", "通过自然语言对话驱动 Unity 开发工作流");
             EditorGUI.indentLevel--;
+        }
+
+        /// <summary>
+        /// 从 UPM PackageInfo 或 package.json 读取版本号。
+        /// 结果会被缓存，避免每帧重复读取。
+        /// </summary>
+        /// <returns>版本号字符串，如 "0.3.1"；读取失败时返回 "unknown"</returns>
+        private static string GetPackageVersion()
+        {
+            if (!string.IsNullOrEmpty(_cachedVersion))
+                return _cachedVersion;
+
+            try
+            {
+                // 方式 1: 通过 UPM PackageInfo API（最可靠）
+                var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(AgentCoreSettingsProvider).Assembly);
+                if (packageInfo != null)
+                {
+                    _cachedVersion = packageInfo.version;
+                    return _cachedVersion;
+                }
+
+                // 方式 2: 回退 — 直接读取 package.json 文件
+                var packagePath = "Packages/com.agentcore.unity/package.json";
+                if (File.Exists(packagePath))
+                {
+                    var json = File.ReadAllText(packagePath);
+                    var jobj = JsonHelper.ParseObject(json);
+                    _cachedVersion = JsonHelper.GetString(jobj, "version", "unknown");
+                    return _cachedVersion;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to read package version: {ex.Message}");
+            }
+
+            _cachedVersion = "unknown";
+            return _cachedVersion;
         }
 
         // ─────────────────────────────────────────────
