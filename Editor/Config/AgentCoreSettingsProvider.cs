@@ -757,7 +757,7 @@ namespace AgentCore.Editor.Config
             EditorGUILayout.LabelField("About", EditorStyles.boldLabel);
 
             EditorGUI.indentLevel++;
-            EditorGUILayout.LabelField("Version", "0.3.0 (Phase 3)");
+            EditorGUILayout.LabelField("Version", "0.3.1 (Phase 3)");
             EditorGUILayout.LabelField("Unity Agent Plugin", "通过自然语言对话驱动 Unity 开发工作流");
             EditorGUI.indentLevel--;
         }

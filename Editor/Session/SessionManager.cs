@@ -94,7 +94,7 @@ namespace AgentCore.Editor.Session
             _currentSession = new SessionData
             {
                 Id = sessionId,
-                Title = "新会话",
+                Title = SessionData.DefaultTitle,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 MessageCount = 0

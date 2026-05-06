@@ -1044,7 +1044,7 @@ namespace AgentCore.Editor.UI
             var newTitle = SessionManager.Instance.CurrentSessionTitle;
             if (string.IsNullOrEmpty(newTitle))
             {
-                newTitle = "新会话";
+                newTitle = SessionData.DefaultTitle;
             }
             if (newTitle.Length > MaxTitleDisplayLength)
             {
@@ -1133,7 +1133,7 @@ namespace AgentCore.Editor.UI
             var title = session.Title;
             if (string.IsNullOrEmpty(title))
             {
-                title = "新会话";
+                title = SessionData.DefaultTitle;
             }
             if (title.Length > MaxTitleDisplayLength)
             {

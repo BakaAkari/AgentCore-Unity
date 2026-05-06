@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [0.3.1] - 2026-05-06
+
+### Fixed
+- LightRAG 客户端兼容 LightRAG Server v1.4.15 API 变更
+  - Health API 状态值从 `"ok"` 改为同时兼容 `"ok"` 和 `"healthy"`
+  - Health API 版本字段从 `version` 改为优先使用 `core_version`（兼容旧版 `version`）
+  - Query API 来源字段从 `sources` 改为优先使用 `references`（兼容旧版 `sources`）
+  - 文件上传 API 路径从 `/documents/file` 修正为 `/documents/upload`
+  - 默认端点端口从 `18920` 修正为 `9621`
+
+## [0.3.0] - Unreleased
 
 ### Added
 - Phase 1: 核心骨架 + Bootstrap Files
@@ -58,6 +68,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `manage_navmesh` — 导航网格烘焙/代理/障碍物
     - `manage_profiler` — 性能分析/帧计时/内存
     - `manage_tags_layers` — 标签与层的增删管理
+
+- Phase 3: 云端工具集成
+  - **mem0 记忆服务**
+    - `Mem0Client` — mem0 REST API 客户端（连接测试、记忆 CRUD、用户管理）
+    - `Mem0Tool` — 记忆管理工具（search/add/delete）
+    - `AutoMemoryStrategy` — 会话结束时自动提取关键信息存入 mem0
+  - **LightRAG 知识库**
+    - `LightRAGClient` — LightRAG REST API 客户端（查询、索引、健康检查）
+    - `LightRAGTool` — 知识库管理工具（query/index_text）
+  - **会话管理**
+    - `SessionManager` / `SessionStorage` / `SessionData` — 会话持久化与恢复
+    - `SessionExporter` — 会话导出
 
 ### Removed
 - Phase 2.5: 完全移除 unity-mcp 外部依赖

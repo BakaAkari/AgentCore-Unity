@@ -14,6 +14,9 @@ namespace AgentCore.Editor.Session
     [Serializable]
     public class SessionData
     {
+        /// <summary>默认会话标题</summary>
+        public const string DefaultTitle = "新会话";
+
         /// <summary>会话唯一标识（GUID）</summary>
         [JsonProperty("id")]
         public string Id { get; set; }
@@ -88,9 +91,15 @@ namespace AgentCore.Editor.Session
             }
 
             // 自动生成标题：取用户第一条消息的前 30 个字符
-            if (string.IsNullOrEmpty(session.Title))
+            // 当标题为空或仍是默认的"新会话"时，尝试从消息内容生成标题
+            if (string.IsNullOrEmpty(session.Title) || session.Title == DefaultTitle)
             {
-                session.Title = GenerateTitle(messages);
+                var generated = GenerateTitle(messages);
+                // 只有当生成的标题不是默认值时才更新（避免覆盖用户手动设置的标题）
+                if (generated != DefaultTitle)
+                {
+                    session.Title = generated;
+                }
             }
 
             return session;
@@ -136,12 +145,12 @@ namespace AgentCore.Editor.Session
         /// </summary>
         private static string GenerateTitle(List<ChatMessage> messages)
         {
-            if (messages == null) return "新会话";
+            if (messages == null) return DefaultTitle;
 
             var firstUserMsg = messages.FirstOrDefault(m => m.Role == "user");
             if (firstUserMsg == null || string.IsNullOrEmpty(firstUserMsg.Content))
             {
-                return "新会话";
+                return DefaultTitle;
             }
 
             var content = firstUserMsg.Content.Trim();

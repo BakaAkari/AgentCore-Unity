@@ -66,8 +66,16 @@ namespace AgentCore.Editor.Cloud
         [JsonProperty("response")]
         public string Response;
 
+        /// <summary>LightRAG v1.4.x 使用 "references" 字段</summary>
+        [JsonProperty("references")]
+        public List<LightRAGSource> References;
+
+        /// <summary>兼容旧版本的 "sources" 字段</summary>
         [JsonProperty("sources")]
         public List<LightRAGSource> Sources;
+
+        /// <summary>获取来源列表（优先 references，回退 sources）</summary>
+        public List<LightRAGSource> GetSources() => References ?? Sources;
     }
 
     [Serializable]
@@ -86,8 +94,17 @@ namespace AgentCore.Editor.Cloud
         [JsonProperty("status")]
         public string Status;
 
+        /// <summary>LightRAG v1.4.x 使用 "core_version" 字段</summary>
+        [JsonProperty("core_version")]
+        public string CoreVersion;
+
+        /// <summary>兼容旧版本的 "version" 字段</summary>
         [JsonProperty("version")]
         public string Version;
+
+        /// <summary>LightRAG v1.4.x 使用 "api_version" 字段</summary>
+        [JsonProperty("api_version")]
+        public string ApiVersion;
 
         [JsonProperty("document_count")]
         public int DocumentCount;
@@ -166,7 +183,7 @@ namespace AgentCore.Editor.Cloud
                 {
                     Success = true,
                     Response = response?.Response ?? "",
-                    Sources = response?.Sources ?? new List<LightRAGSource>()
+                    Sources = response?.GetSources() ?? new List<LightRAGSource>()
                 };
             }
             catch (Exception ex)
@@ -233,7 +250,7 @@ namespace AgentCore.Editor.Cloud
                     return false;
                 }
 
-                var url = $"{_baseUrl}/documents/file";
+                var url = $"{_baseUrl}/documents/upload";
                 var client = HttpClientFactory.GetClient();
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, url);
@@ -311,8 +328,9 @@ namespace AgentCore.Editor.Cloud
                 return new LightRAGHealthInfo
                 {
                     IsHealthy = response != null &&
-                                string.Equals(response.Status, "ok", StringComparison.OrdinalIgnoreCase),
-                    Version = response?.Version ?? "unknown",
+                                (string.Equals(response.Status, "ok", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(response.Status, "healthy", StringComparison.OrdinalIgnoreCase)),
+                    Version = response?.CoreVersion ?? response?.Version ?? "unknown",
                     DocumentCount = response?.DocumentCount ?? 0
                 };
             }

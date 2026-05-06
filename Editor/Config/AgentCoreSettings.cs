@@ -86,7 +86,7 @@ namespace AgentCore.Editor.Config
         public bool lightragEnabled = false;
 
         [Tooltip("LightRAG 服务端点")]
-        public string lightragEndpoint = "http://localhost:18920";
+        public string lightragEndpoint = "http://localhost:9621";
 
         // --- 用户标识 ---
         [Header("User")]
