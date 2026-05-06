@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Net.Http;
+using System.Text;
 
 namespace AgentCore.Editor.Core
 {
@@ -122,6 +124,12 @@ namespace AgentCore.Editor.Core
         public double ExecutionTimeMs { get; }
 
         /// <summary>
+        /// 结构化错误详情（<see cref="AgentEventType.Error"/> 时有值）。
+        /// 包含异常类型、HTTP 状态码、堆栈摘要等信息，用于 UI 展示详细错误。
+        /// </summary>
+        public ErrorDetail Detail { get; }
+
+        /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
         private AgentEvent(
@@ -135,7 +143,8 @@ namespace AgentCore.Editor.Core
             string toolResult = null,
             int currentRound = 0,
             int maxRounds = 0,
-            double executionTimeMs = 0)
+            double executionTimeMs = 0,
+            ErrorDetail detail = null)
         {
             Type = type;
             State = state;
@@ -148,6 +157,7 @@ namespace AgentCore.Editor.Core
             CurrentRound = currentRound;
             MaxRounds = maxRounds;
             ExecutionTimeMs = executionTimeMs;
+            Detail = detail;
         }
 
         #region Phase 1 工厂方法
@@ -185,13 +195,26 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
-        /// 创建错误事件。
+        /// 创建错误事件（简单文本）。
         /// </summary>
         /// <param name="error">错误信息</param>
         /// <returns>错误事件</returns>
         public static AgentEvent ErrorEvent(string error)
         {
-            return new AgentEvent(AgentEventType.Error, content: error);
+            return new AgentEvent(AgentEventType.Error, content: error,
+                detail: ErrorDetail.FromMessage(error));
+        }
+
+        /// <summary>
+        /// 创建错误事件（从异常，携带完整结构化信息）。
+        /// </summary>
+        /// <param name="ex">异常对象</param>
+        /// <param name="context">错误发生的上下文描述（如 "LLM 请求"、"Domain Reload 恢复"）</param>
+        /// <returns>携带 ErrorDetail 的错误事件</returns>
+        public static AgentEvent ErrorEvent(Exception ex, string context = null)
+        {
+            var detail = ErrorDetail.FromException(ex, context);
+            return new AgentEvent(AgentEventType.Error, content: detail.Message, detail: detail);
         }
 
         /// <summary>
@@ -399,6 +422,296 @@ namespace AgentCore.Editor.Core
             Content = content ?? "";
             Timestamp = DateTime.UtcNow;
             IsStreaming = false;
+        }
+    }
+
+    #endregion
+
+    #region 错误详情
+
+    /// <summary>
+    /// 结构化错误详情。
+    /// <para>
+    /// 用于在 UI 中展示详细的错误信息，帮助用户快速定位问题原因。
+    /// 包含错误分类、异常类型、HTTP 状态码、堆栈摘要等。
+    /// </para>
+    /// </summary>
+    public class ErrorDetail
+    {
+        /// <summary>错误分类标签（如 "网络错误"、"认证失败"、"流式解析错误"）</summary>
+        public string Category { get; set; }
+
+        /// <summary>用户可读的错误消息</summary>
+        public string Message { get; set; }
+
+        /// <summary>异常类型全名（如 "System.Net.Http.HttpRequestException"）</summary>
+        public string ExceptionType { get; set; }
+
+        /// <summary>HTTP 状态码（如果是 HTTP 错误，否则为 0）</summary>
+        public int HttpStatusCode { get; set; }
+
+        /// <summary>堆栈摘要（前 5 行）</summary>
+        public string StackSummary { get; set; }
+
+        /// <summary>错误发生的上下文（如 "LLM 请求"、"工具执行"）</summary>
+        public string Context { get; set; }
+
+        /// <summary>内部异常消息（如果有）</summary>
+        public string InnerMessage { get; set; }
+
+        /// <summary>错误发生时间</summary>
+        public DateTime Timestamp { get; set; } = DateTime.Now;
+
+        /// <summary>
+        /// 从异常创建 ErrorDetail，自动提取结构化信息。
+        /// </summary>
+        /// <param name="ex">异常对象</param>
+        /// <param name="context">错误上下文描述</param>
+        /// <returns>结构化错误详情</returns>
+        public static ErrorDetail FromException(Exception ex, string context = null)
+        {
+            if (ex == null) return FromMessage("未知错误");
+
+            var detail = new ErrorDetail
+            {
+                Message = ex.Message,
+                ExceptionType = ex.GetType().FullName,
+                Context = context,
+                InnerMessage = ex.InnerException?.Message,
+                StackSummary = TruncateStack(ex.StackTrace, 5)
+            };
+
+            // 分类和 HTTP 状态码提取
+            ClassifyException(ex, detail);
+
+            // 如果是包装异常（如 FallbackRouter 的重试失败），解析内部异常
+            if (ex.InnerException != null)
+            {
+                ClassifyException(ex.InnerException, detail);
+            }
+
+            return detail;
+        }
+
+        /// <summary>
+        /// 从简单文本消息创建 ErrorDetail。
+        /// </summary>
+        /// <param name="message">错误消息</param>
+        /// <returns>结构化错误详情</returns>
+        public static ErrorDetail FromMessage(string message)
+        {
+            var detail = new ErrorDetail
+            {
+                Message = message ?? "未知错误",
+                Category = ClassifyByMessage(message)
+            };
+            return detail;
+        }
+
+        /// <summary>
+        /// 格式化为用户可读的多行文本。
+        /// </summary>
+        public string FormatForDisplay()
+        {
+            var sb = new StringBuilder();
+
+            // 错误分类标签
+            if (!string.IsNullOrEmpty(Category))
+            {
+                sb.AppendLine($"[{Category}]");
+            }
+
+            // 主要错误消息
+            sb.AppendLine(Message);
+
+            // HTTP 状态码
+            if (HttpStatusCode > 0)
+            {
+                sb.AppendLine($"HTTP {HttpStatusCode} — {GetHttpStatusDescription(HttpStatusCode)}");
+            }
+
+            // 异常类型
+            if (!string.IsNullOrEmpty(ExceptionType))
+            {
+                sb.AppendLine($"异常类型: {GetShortTypeName(ExceptionType)}");
+            }
+
+            // 内部异常
+            if (!string.IsNullOrEmpty(InnerMessage))
+            {
+                sb.AppendLine($"内部错误: {InnerMessage}");
+            }
+
+            // 上下文
+            if (!string.IsNullOrEmpty(Context))
+            {
+                sb.AppendLine($"发生位置: {Context}");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// 获取堆栈摘要（用于可展开的详情区域）。
+        /// </summary>
+        public string GetStackForDisplay()
+        {
+            if (string.IsNullOrEmpty(StackSummary)) return null;
+            return StackSummary;
+        }
+
+        /// <summary>
+        /// 根据异常类型分类并提取 HTTP 状态码。
+        /// </summary>
+        private static void ClassifyException(Exception ex, ErrorDetail detail)
+        {
+            switch (ex)
+            {
+                case HttpRequestException httpEx:
+                    detail.HttpStatusCode = ExtractHttpStatusCode(httpEx.Message);
+                    detail.Category = detail.HttpStatusCode switch
+                    {
+                        401 or 403 => "认证失败",
+                        404 => "端点不存在",
+                        429 => "请求限流",
+                        >= 500 and < 600 => "服务端错误",
+                        _ => "网络错误"
+                    };
+                    break;
+
+                case TaskCanceledException:
+                case OperationCanceledException:
+                    detail.Category = "请求超时/取消";
+                    break;
+
+                case System.IO.IOException:
+                    detail.Category = "IO 错误";
+                    break;
+
+                case InvalidOperationException:
+                    detail.Category = "操作无效";
+                    break;
+
+                case ArgumentException:
+                    detail.Category = "参数错误";
+                    break;
+
+                default:
+                    if (string.IsNullOrEmpty(detail.Category))
+                    {
+                        detail.Category = ClassifyByMessage(ex.Message);
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 通过消息文本推断错误分类。
+        /// </summary>
+        private static string ClassifyByMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return "未知错误";
+
+            var lower = message.ToLowerInvariant();
+
+            if (lower.Contains("timeout") || lower.Contains("timed out"))
+                return "请求超时";
+            if (lower.Contains("connection") && (lower.Contains("refused") || lower.Contains("reset")))
+                return "连接失败";
+            if (lower.Contains("401") || lower.Contains("unauthorized"))
+                return "认证失败";
+            if (lower.Contains("403") || lower.Contains("forbidden"))
+                return "权限不足";
+            if (lower.Contains("404") || lower.Contains("not found"))
+                return "端点不存在";
+            if (lower.Contains("429") || lower.Contains("rate limit"))
+                return "请求限流";
+            if (lower.Contains("500") || lower.Contains("internal server"))
+                return "服务端错误";
+            if (lower.Contains("502") || lower.Contains("bad gateway"))
+                return "网关错误";
+            if (lower.Contains("503") || lower.Contains("service unavailable"))
+                return "服务不可用";
+            if (lower.Contains("domain reload"))
+                return "Domain Reload";
+            if (lower.Contains("[retry]"))
+                return "自动重试";
+            if (lower.Contains("stream") || lower.Contains("parse") || lower.Contains("json"))
+                return "解析错误";
+
+            return "运行时错误";
+        }
+
+        /// <summary>
+        /// 从 HTTP 错误消息中提取状态码。
+        /// </summary>
+        private static int ExtractHttpStatusCode(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return 0;
+
+            // 匹配常见的 HTTP 状态码模式
+            var patterns = new[] { "401", "403", "404", "429", "400", "500", "502", "503", "504" };
+            foreach (var code in patterns)
+            {
+                if (message.Contains(code) && int.TryParse(code, out int statusCode))
+                    return statusCode;
+            }
+            return 0;
+        }
+
+        /// <summary>
+        /// 获取 HTTP 状态码的中文描述。
+        /// </summary>
+        private static string GetHttpStatusDescription(int code)
+        {
+            return code switch
+            {
+                400 => "请求格式错误",
+                401 => "未授权（API Key 无效或缺失）",
+                403 => "禁止访问（权限不足）",
+                404 => "端点不存在（检查 API URL）",
+                429 => "请求过于频繁（触发限流）",
+                500 => "服务器内部错误",
+                502 => "网关错误（上游服务不可用）",
+                503 => "服务暂时不可用",
+                504 => "网关超时",
+                _ => $"HTTP 错误 {code}"
+            };
+        }
+
+        /// <summary>
+        /// 获取类型的短名称（去掉命名空间前缀）。
+        /// </summary>
+        private static string GetShortTypeName(string fullName)
+        {
+            if (string.IsNullOrEmpty(fullName)) return "";
+            var lastDot = fullName.LastIndexOf('.');
+            return lastDot >= 0 ? fullName.Substring(lastDot + 1) : fullName;
+        }
+
+        /// <summary>
+        /// 截断堆栈信息到指定行数。
+        /// </summary>
+        private static string TruncateStack(string stackTrace, int maxLines)
+        {
+            if (string.IsNullOrEmpty(stackTrace)) return null;
+
+            var lines = stackTrace.Split('\n');
+            var count = Math.Min(lines.Length, maxLines);
+            var sb = new StringBuilder();
+            for (int i = 0; i < count; i++)
+            {
+                var line = lines[i].Trim();
+                if (!string.IsNullOrEmpty(line))
+                {
+                    sb.AppendLine(line);
+                }
+            }
+            if (lines.Length > maxLines)
+            {
+                sb.AppendLine($"... 还有 {lines.Length - maxLines} 行");
+            }
+            return sb.ToString().TrimEnd();
         }
     }
 

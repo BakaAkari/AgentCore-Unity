@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-05-06
+
+### Added
+- **轻量级 Markdown 格式化**（Phase 4.1）
+  - `ContentFilter.FormatMarkdown()` — 将 Markdown 语法转换为可读的格式化文本
+  - 标题格式化：`# H1` → `═══ H1 ═══`，`## H2` → `── H2 ──`，`### H3` → `【H3】`
+  - 表格格式化：解析 `| col | col |` 语法，生成对齐的纯文本表格（带 box-drawing 字符）
+  - 粗体/斜体：`**text**` → `<b>text</b>`，`*text*` → `<i>text</i>`（利用 Unity Rich Text）
+  - 列表格式化：`- item` → `  · item`，`1. item` → `  1) item`
+  - 代码块：保持内容不变，添加 `──── lang ────` 装饰分隔线
+  - 引用块：`> text` → `  │ text`
+  - 水平线：`---` → `────────────────────`
+  - 内联代码：`` `code` `` → `[code]`
+  - 链接：`[text](url)` → `text (url)`
+  - CJK 字符宽度感知的表格列对齐
+  - 集成到 `FilterStreaming()` 和 `FilterCompleted()` 双管线，流式输出和最终化时均自动格式化
+  - 修复 `MessageBubble.FinalizeContent()` 双重过滤问题
+- **工具启用/禁用管理**（Phase 4.4）
+  - `AgentCoreSettings` 新增 `disabledToolCategories` 和 `disabledTools` 列表
+  - `ToolDefinitionBuilder.BuildAllEnabled()` — 构建工具定义时自动过滤禁用工具
+  - `AgentLoop.BuildToolDefinitions()` 使用过滤后的工具列表，减少 token 消耗
+  - `BootstrapLoader.GenerateActiveToolsList()` 仅展示启用的工具
+  - Settings 面板新增 **Tool Management** 区域：
+    - 按分类折叠显示所有已注册工具
+    - 支持按分类整体启用/禁用
+    - 支持单个工具启用/禁用
+    - 全部启用/全部禁用快捷按钮
+    - 实时显示启用/禁用工具数量统计
+- **错误重试 UI**（Phase 4.2）
+  - 错误消息气泡底部显示「🔄 重试」按钮
+  - 点击重试按钮自动重新发送上一条用户消息
+  - 重试按钮点击后自动禁用防止重复操作
+  - `MessageBubble.AddRetryButton()` — 支持为错误气泡添加重试回调
+- **结构化错误展示**（Phase 4.2 增强）
+  - `ErrorDetail` 类 — 结构化错误信息，包含错误分类、异常类型、HTTP 状态码、堆栈摘要
+  - `AgentEvent.ErrorEvent(Exception, string)` — 新增携带异常对象的错误事件重载
+  - 错误气泡显示格式化的详细错误信息（错误类别、HTTP 状态码描述、异常类型、内部错误、上下文）
+  - `MessageBubble.AddExpandableDetail()` — 可展开/折叠的堆栈信息区域
+  - 错误自动分类：认证失败、网络错误、请求超时、速率限制、服务端错误、模型错误等
+  - HTTP 状态码自动提取和中文描述（401/403/429/500/502/503 等）
+
+### Changed
+- `AgentCoreSettings` 版本迁移升级至 v4（初始化工具管理列表）
+- `ToolDefinitionBuilder` 新增 `using AgentCore.Editor.Config` 依赖
+- `BootstrapLoader` 工具列表生成逻辑增加禁用工具过滤和统计
+- 错误气泡样式增强 — 左侧红色边框、更深背景色、更高对比度文字
+- `AgentLoop` 错误事件传递完整异常对象（LLM 请求、Domain Reload 恢复）
+- `ChatWindow.ShowError()` 支持 `ErrorDetail` 参数，展示结构化错误信息
+
 ## [0.3.1] - 2026-05-06
 
 ### Added

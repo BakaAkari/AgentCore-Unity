@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine.UIElements;
@@ -60,6 +62,8 @@ namespace AgentCore.Editor.UI.Components
             filtered = ExcessiveNewlinesRegex.Replace(filtered, "\n\n");
             // 替换 SDF 字体不支持的 emoji 字符
             filtered = SanitizeUnsupportedEmoji(filtered);
+            // 轻量级 Markdown 格式化（标题、表格、粗体、列表等）
+            filtered = FormatMarkdown(filtered);
             return filtered.Trim();
         }
 
@@ -84,6 +88,8 @@ namespace AgentCore.Editor.UI.Components
             filtered = ExcessiveNewlinesRegex.Replace(filtered, "\n\n");
             // 替换 SDF 字体不支持的 emoji 字符
             filtered = SanitizeUnsupportedEmoji(filtered);
+            // 轻量级 Markdown 格式化（流式输出中也需要，否则带 tool_calls 的消息不会被格式化）
+            filtered = FormatMarkdown(filtered);
             // 去除开头的空行，保留末尾的自然截断
             filtered = filtered.TrimStart('\n', '\r');
 
@@ -146,6 +152,341 @@ namespace AgentCore.Editor.UI.Components
 
             return sb.ToString();
         }
+
+        #region Markdown 格式化
+
+        /// <summary>
+        /// 轻量级 Markdown → 可读纯文本格式化。
+        /// <para>
+        /// 不做完整的 Markdown 渲染（Unity UI Toolkit Label 不支持），
+        /// 而是将 Markdown 语法转换为更易读的纯文本格式：
+        /// <list type="bullet">
+        ///   <item>标题 <c>### Title</c> → <c>【Title】</c></item>
+        ///   <item>表格 → 对齐的纯文本表格（去掉分隔线行）</item>
+        ///   <item>粗体 <c>**text**</c> → <c>&lt;b&gt;text&lt;/b&gt;</c>（Rich Text）</item>
+        ///   <item>无序列表 <c>- item</c> → <c>  · item</c></item>
+        ///   <item>有序列表 <c>1. item</c> → <c>  1) item</c></item>
+        ///   <item>代码块保持原样（加缩进标记）</item>
+        ///   <item>水平线 <c>---</c> → <c>────────</c></item>
+        /// </list>
+        /// </para>
+        /// </summary>
+        /// <param name="content">过滤后的内容</param>
+        /// <returns>格式化后的可读文本</returns>
+        internal static string FormatMarkdown(string content)
+        {
+            if (string.IsNullOrEmpty(content)) return content;
+
+            var lines = content.Split('\n');
+            var result = new List<string>(lines.Length);
+            var inCodeBlock = false;
+            var tableBuffer = new List<string>();
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                var trimmed = line.TrimStart();
+
+                // 代码块：保持原样不处理
+                if (trimmed.StartsWith("```"))
+                {
+                    // 先刷新表格缓冲区
+                    if (tableBuffer.Count > 0)
+                    {
+                        result.AddRange(FormatTable(tableBuffer));
+                        tableBuffer.Clear();
+                    }
+
+                    inCodeBlock = !inCodeBlock;
+                    if (inCodeBlock)
+                    {
+                        // 代码块开始：添加语言标记行
+                        var lang = trimmed.Length > 3 ? trimmed.Substring(3).Trim() : "";
+                        result.Add(string.IsNullOrEmpty(lang) ? "  ──── code ────" : $"  ──── {lang} ────");
+                    }
+                    else
+                    {
+                        // 代码块结束
+                        result.Add("  ────────────");
+                    }
+                    continue;
+                }
+
+                if (inCodeBlock)
+                {
+                    // 代码块内容：加缩进
+                    result.Add("    " + line);
+                    continue;
+                }
+
+                // 表格行检测：收集连续的表格行
+                if (trimmed.StartsWith("|") && trimmed.EndsWith("|"))
+                {
+                    tableBuffer.Add(trimmed);
+                    continue;
+                }
+
+                // 如果之前有表格缓冲，先刷新
+                if (tableBuffer.Count > 0)
+                {
+                    result.AddRange(FormatTable(tableBuffer));
+                    tableBuffer.Clear();
+                }
+
+                // 标题：### Title → 【Title】
+                if (trimmed.StartsWith("#"))
+                {
+                    result.Add(FormatHeading(trimmed));
+                    continue;
+                }
+
+                // 水平线：--- 或 *** 或 ___ → ────────
+                if (IsHorizontalRule(trimmed))
+                {
+                    result.Add("────────────────────");
+                    continue;
+                }
+
+                // 无序列表：- item 或 * item → · item
+                if ((trimmed.StartsWith("- ") || trimmed.StartsWith("* ")) && trimmed.Length > 2)
+                {
+                    var indent = line.Length - line.TrimStart().Length;
+                    var prefix = new string(' ', indent);
+                    var itemText = FormatInlineStyles(trimmed.Substring(2));
+                    result.Add($"{prefix}  · {itemText}");
+                    continue;
+                }
+
+                // 有序列表：1. item → 1) item
+                var orderedMatch = Regex.Match(trimmed, @"^(\d+)\.\s+(.+)$");
+                if (orderedMatch.Success)
+                {
+                    var indent = line.Length - line.TrimStart().Length;
+                    var prefix = new string(' ', indent);
+                    var num = orderedMatch.Groups[1].Value;
+                    var itemText = FormatInlineStyles(orderedMatch.Groups[2].Value);
+                    result.Add($"{prefix}  {num}) {itemText}");
+                    continue;
+                }
+
+                // 引用块：> text → │ text
+                if (trimmed.StartsWith("> "))
+                {
+                    var quoteText = FormatInlineStyles(trimmed.Substring(2));
+                    result.Add($"  │ {quoteText}");
+                    continue;
+                }
+                if (trimmed == ">")
+                {
+                    result.Add("  │");
+                    continue;
+                }
+
+                // 普通行：处理内联样式
+                result.Add(FormatInlineStyles(line));
+            }
+
+            // 刷新末尾的表格缓冲
+            if (tableBuffer.Count > 0)
+            {
+                result.AddRange(FormatTable(tableBuffer));
+            }
+
+            return string.Join("\n", result);
+        }
+
+        /// <summary>
+        /// 格式化 Markdown 标题行。
+        /// </summary>
+        private static string FormatHeading(string line)
+        {
+            // 计算标题级别
+            int level = 0;
+            while (level < line.Length && line[level] == '#') level++;
+            var title = line.Substring(level).Trim();
+            title = FormatInlineStyles(title);
+
+            return level switch
+            {
+                1 => $"<b><size=16>═══ {title} ═══</size></b>",
+                2 => $"<b><size=15>── {title} ──</size></b>",
+                3 => $"<b>【{title}】</b>",
+                4 => $"<b>{title}</b>",
+                _ => $"<b>{title}</b>"
+            };
+        }
+
+        /// <summary>
+        /// 格式化内联样式：粗体、斜体、内联代码。
+        /// </summary>
+        private static string FormatInlineStyles(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            // 粗体 **text** → <b>text</b>
+            text = Regex.Replace(text, @"\*\*(.+?)\*\*", "<b>$1</b>");
+
+            // 斜体 *text*（不匹配 **）→ <i>text</i>
+            text = Regex.Replace(text, @"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "<i>$1</i>");
+
+            // 内联代码 `code` → [code]（纯文本中用方括号标记）
+            text = Regex.Replace(text, @"`([^`]+)`", "[$1]");
+
+            // 链接 [text](url) → text (url)
+            text = Regex.Replace(text, @"\[([^\]]+)\]\(([^)]+)\)", "$1 ($2)");
+
+            return text;
+        }
+
+        /// <summary>
+        /// 格式化 Markdown 表格为对齐的纯文本。
+        /// 去掉分隔线行（|---|---|），保留数据行并对齐列宽。
+        /// </summary>
+        private static List<string> FormatTable(List<string> tableLines)
+        {
+            var result = new List<string>();
+            var dataRows = new List<string[]>();
+            var maxCols = 0;
+
+            // 解析表格行，跳过分隔线
+            foreach (var line in tableLines)
+            {
+                // 跳过分隔线行 |---|---|
+                if (Regex.IsMatch(line, @"^\s*\|[\s\-:]+\|[\s\-:|]*$"))
+                    continue;
+
+                // 解析数据行
+                var cells = ParseTableRow(line);
+                if (cells.Length > 0)
+                {
+                    dataRows.Add(cells);
+                    if (cells.Length > maxCols) maxCols = cells.Length;
+                }
+            }
+
+            if (dataRows.Count == 0) return result;
+
+            // 计算每列最大宽度
+            var colWidths = new int[maxCols];
+            foreach (var row in dataRows)
+            {
+                for (int c = 0; c < row.Length && c < maxCols; c++)
+                {
+                    var cellLen = GetDisplayLength(row[c]);
+                    if (cellLen > colWidths[c]) colWidths[c] = cellLen;
+                }
+            }
+
+            // 限制列宽，避免过宽
+            for (int c = 0; c < maxCols; c++)
+            {
+                if (colWidths[c] > 40) colWidths[c] = 40;
+                if (colWidths[c] < 2) colWidths[c] = 2;
+            }
+
+            // 输出表头分隔线
+            var headerSep = new StringBuilder("  ");
+            for (int c = 0; c < maxCols; c++)
+            {
+                if (c > 0) headerSep.Append("──┬──");
+                headerSep.Append(new string('─', colWidths[c]));
+            }
+
+            // 输出数据行
+            for (int r = 0; r < dataRows.Count; r++)
+            {
+                var row = dataRows[r];
+                var sb = new StringBuilder("  ");
+                for (int c = 0; c < maxCols; c++)
+                {
+                    if (c > 0) sb.Append("  │  ");
+                    var cell = c < row.Length ? row[c] : "";
+                    var displayLen = GetDisplayLength(cell);
+                    sb.Append(cell);
+                    // 右侧填充空格对齐
+                    if (displayLen < colWidths[c])
+                        sb.Append(new string(' ', colWidths[c] - displayLen));
+                }
+                result.Add(FormatInlineStyles(sb.ToString()));
+
+                // 在表头行后添加分隔线
+                if (r == 0 && dataRows.Count > 1)
+                {
+                    result.Add(headerSep.ToString());
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 解析表格行，提取单元格内容。
+        /// </summary>
+        private static string[] ParseTableRow(string line)
+        {
+            // 去掉首尾的 |
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("|")) trimmed = trimmed.Substring(1);
+            if (trimmed.EndsWith("|")) trimmed = trimmed.Substring(0, trimmed.Length - 1);
+
+            var cells = trimmed.Split('|');
+            for (int i = 0; i < cells.Length; i++)
+            {
+                cells[i] = cells[i].Trim();
+            }
+            return cells;
+        }
+
+        /// <summary>
+        /// 获取字符串的显示宽度（考虑中文字符占2个宽度）。
+        /// </summary>
+        private static int GetDisplayLength(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return 0;
+            int len = 0;
+            foreach (var ch in text)
+            {
+                // CJK 字符占2个宽度
+                if (ch >= 0x4E00 && ch <= 0x9FFF ||
+                    ch >= 0x3400 && ch <= 0x4DBF ||
+                    ch >= 0xF900 && ch <= 0xFAFF ||
+                    ch >= 0xFF00 && ch <= 0xFF60)
+                {
+                    len += 2;
+                }
+                else
+                {
+                    len += 1;
+                }
+            }
+            return len;
+        }
+
+        /// <summary>
+        /// 判断是否为水平线（---、***、___）。
+        /// </summary>
+        private static bool IsHorizontalRule(string trimmed)
+        {
+            if (trimmed.Length < 3) return false;
+            // 全部由 - 或 * 或 _ 和空格组成
+            var cleaned = trimmed.Replace(" ", "");
+            if (cleaned.Length < 3) return false;
+            return (AllSameChar(cleaned, '-') || AllSameChar(cleaned, '*') || AllSameChar(cleaned, '_'));
+        }
+
+        /// <summary>
+        /// 判断字符串是否全部由同一字符组成。
+        /// </summary>
+        private static bool AllSameChar(string s, char c)
+        {
+            foreach (var ch in s)
+            {
+                if (ch != c) return false;
+            }
+            return true;
+        }
+
+        #endregion
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
@@ -16,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 3;
+        private const int CurrentVersion = 4;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -127,6 +128,30 @@ namespace AgentCore.Editor.Config
             }
         }
 
+        // --- 工具管理 ---
+        [Header("Tool Management")]
+        [Tooltip("禁用的工具分类列表（整个分类下的所有工具都不会发送给 LLM）")]
+        public List<string> disabledToolCategories = new List<string>();
+
+        [Tooltip("禁用的单个工具名称列表（不会发送给 LLM）")]
+        public List<string> disabledTools = new List<string>();
+
+        /// <summary>
+        /// 检查指定工具是否被禁用。
+        /// 工具被禁用的条件：工具名称在 disabledTools 中，或工具所属分类在 disabledToolCategories 中。
+        /// </summary>
+        /// <param name="toolName">工具名称</param>
+        /// <param name="category">工具分类</param>
+        /// <returns>工具是否被禁用</returns>
+        public bool IsToolDisabled(string toolName, string category)
+        {
+            if (!string.IsNullOrEmpty(toolName) && disabledTools != null && disabledTools.Contains(toolName))
+                return true;
+            if (!string.IsNullOrEmpty(category) && disabledToolCategories != null && disabledToolCategories.Contains(category))
+                return true;
+            return false;
+        }
+
         // --- UI 偏好 ---
         [Header("UI Preferences")]
         [Tooltip("启用流式输出")]
@@ -189,6 +214,14 @@ namespace AgentCore.Editor.Config
                     Debug.Log($"[AgentCore] Settings migrated v2→v3: userId '{userId}' cleared, EffectiveUserId now always uses system-generated ID");
                     userId = "";
                 }
+            }
+
+            // v3 -> v4: 初始化工具管理列表
+            if (settingsVersion < 4)
+            {
+                if (disabledToolCategories == null) disabledToolCategories = new List<string>();
+                if (disabledTools == null) disabledTools = new List<string>();
+                Debug.Log("[AgentCore] Settings migrated v3→v4: initialized tool management lists");
             }
 
             settingsVersion = CurrentVersion;

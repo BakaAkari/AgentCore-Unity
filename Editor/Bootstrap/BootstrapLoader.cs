@@ -180,10 +180,17 @@ namespace AgentCore.Editor.Bootstrap
                 return "> 暂无已注册的可用工具。工具将在系统完全初始化后可用。";
             }
 
+            // 过滤掉被禁用的工具
+            var settings = AgentCoreSettings.instance;
+            var enabledMetadata = allMetadata
+                .Where(m => !settings.IsToolDisabled(m.Name, m.Category))
+                .ToList();
+            var disabledCount = allMetadata.Count - enabledMetadata.Count;
+
             var sb = new StringBuilder();
 
-            // 按分类分组
-            var grouped = allMetadata
+            // 按分类分组（仅启用的工具）
+            var grouped = enabledMetadata
                 .GroupBy(m => m.Category ?? "default")
                 .OrderBy(g => GetCategorySortOrder(g.Key))
                 .ThenBy(g => g.Key);
@@ -208,10 +215,18 @@ namespace AgentCore.Editor.Bootstrap
                 sb.AppendLine();
             }
 
-            var totalCount = allMetadata.Count;
-            sb.AppendLine($"*共 {totalCount} 个可用工具*");
+            var totalCount = enabledMetadata.Count;
+            if (disabledCount > 0)
+            {
+                sb.AppendLine($"*共 {totalCount} 个可用工具（{disabledCount} 个已禁用）*");
+            }
+            else
+            {
+                sb.AppendLine($"*共 {totalCount} 个可用工具*");
+            }
 
-            Debug.Log($"[AgentCore] Generated active tools list: {totalCount} tools in {grouped.Count()} categories");
+            Debug.Log($"[AgentCore] Generated active tools list: {totalCount} tools in {grouped.Count()} categories" +
+                      (disabledCount > 0 ? $" ({disabledCount} disabled)" : ""));
 
             return sb.ToString().TrimEnd();
         }

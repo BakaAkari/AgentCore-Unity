@@ -336,8 +336,8 @@ namespace AgentCore.Editor.Core
                 Debug.LogError($"[AgentCore] Error during SendMessageAsync: {ex}");
                 assistantTurn.IsStreaming = false;
 
-                // 发送错误事件
-                EmitEvent(AgentEvent.ErrorEvent(ex.Message));
+                // 发送结构化错误事件（携带异常类型、HTTP 状态码、堆栈等）
+                EmitEvent(AgentEvent.ErrorEvent(ex, "LLM 对话请求"));
 
                 // 短暂进入 Error 状态后回到 Idle，确保不会卡死
                 SetState(AgentState.Error);
@@ -549,7 +549,8 @@ namespace AgentCore.Editor.Core
         {
             try
             {
-                var definitions = ToolDefinitionBuilder.BuildAll();
+                // 使用 BuildAllEnabled() 过滤掉被禁用的工具
+                var definitions = ToolDefinitionBuilder.BuildAllEnabled();
                 if (definitions == null || definitions.Count == 0)
                 {
                     Debug.Log("[AgentCore] No tools available, LLM will run in pure chat mode.");
@@ -1834,7 +1835,7 @@ namespace AgentCore.Editor.Core
                     {
                         Debug.LogError($"[AgentCore] Error during resume LLM call: {ex}");
                         assistantTurn.IsStreaming = false;
-                        EmitEvent(AgentEvent.ErrorEvent($"Domain Reload recovery failed: {ex.Message}"));
+                        EmitEvent(AgentEvent.ErrorEvent(ex, "Domain Reload 恢复"));
                         SetState(AgentState.Error);
                         SetState(AgentState.Idle);
                     }

@@ -37,6 +37,11 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         public string Role { get; }
 
+        /// <summary>
+        /// 重试按钮点击回调。设置后会在错误消息气泡中显示重试按钮。
+        /// </summary>
+        public Action OnRetryClicked { get; set; }
+
         #endregion
 
         #region 私有字段
@@ -49,6 +54,9 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>气泡内容容器</summary>
         private VisualElement _bubbleContent;
+
+        /// <summary>气泡根元素</summary>
+        private VisualElement _bubbleRoot;
 
         /// <summary>是否处于流式输出模式</summary>
         private bool _isStreaming;
@@ -90,7 +98,7 @@ namespace AgentCore.Editor.UI.Components
             }
 
             // 查询 UI 元素引用
-            var bubbleRoot = this.Q<VisualElement>("bubble-root");
+            _bubbleRoot = this.Q<VisualElement>("bubble-root");
             var roleLabel = this.Q<Label>("role-label");
             var timeLabel = this.Q<Label>("time-label");
             _contentLabel = this.Q<Label>("content-label");
@@ -103,9 +111,9 @@ namespace AgentCore.Editor.UI.Components
             }
 
             // 设置角色样式类
-            if (bubbleRoot != null)
+            if (_bubbleRoot != null)
             {
-                bubbleRoot.AddToClassList($"message-bubble--{role}");
+                _bubbleRoot.AddToClassList($"message-bubble--{role}");
             }
 
             // 设置角色标签
@@ -153,19 +161,119 @@ namespace AgentCore.Editor.UI.Components
         /// <param name="fullContent">完整的消息内容</param>
         public void FinalizeContent(string fullContent)
         {
-            // 最终化时过滤 tool_call/tool_result 标签
-            var filtered = ContentFilter.FilterCompleted(fullContent ?? "");
+            var content = fullContent ?? "";
 
             if (_streamingText != null)
             {
-                _streamingText.SetFinalText(filtered);
+                // SetFinalText 内部会调用 FilterCompleted（含 FormatMarkdown），不要重复过滤
+                _streamingText.SetFinalText(content);
             }
             else if (_contentLabel != null)
             {
-                _contentLabel.text = filtered;
+                // 静态 Label 需要手动过滤
+                _contentLabel.text = ContentFilter.FilterCompleted(content);
             }
 
             _isStreaming = false;
+        }
+
+        /// <summary>
+        /// 添加重试按钮到错误消息气泡底部。
+        /// 仅对 role=&quot;error&quot; 的消息有效。
+        /// </summary>
+        /// <param name="onRetry">重试按钮点击回调</param>
+        public void AddRetryButton(Action onRetry)
+        {
+            if (Role != "error" || onRetry == null) return;
+
+            OnRetryClicked = onRetry;
+
+            var container = _bubbleContent ?? _bubbleRoot ?? this;
+
+            // 创建重试按钮容器
+            var retryContainer = new VisualElement();
+            retryContainer.style.flexDirection = FlexDirection.Row;
+            retryContainer.style.justifyContent = Justify.FlexEnd;
+            retryContainer.style.marginTop = 6;
+
+            // 先声明按钮引用，供闭包捕获
+            Button btn = null;
+            btn = new Button(() =>
+            {
+                // 禁用按钮防止重复点击
+                btn.SetEnabled(false);
+                btn.text = "重试中...";
+                OnRetryClicked?.Invoke();
+            });
+            btn.text = "🔄 重试";
+            btn.style.paddingLeft = 8;
+            btn.style.paddingRight = 8;
+            btn.style.paddingTop = 3;
+            btn.style.paddingBottom = 3;
+            btn.style.fontSize = 11;
+            btn.style.borderTopLeftRadius = 4;
+            btn.style.borderTopRightRadius = 4;
+            btn.style.borderBottomLeftRadius = 4;
+            btn.style.borderBottomRightRadius = 4;
+            btn.style.backgroundColor = new Color(0.3f, 0.3f, 0.3f, 0.8f);
+            btn.style.color = new Color(0.9f, 0.9f, 0.9f);
+            btn.style.borderTopWidth = 1;
+            btn.style.borderBottomWidth = 1;
+            btn.style.borderLeftWidth = 1;
+            btn.style.borderRightWidth = 1;
+            btn.style.borderTopColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            btn.style.borderBottomColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            btn.style.borderLeftColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            btn.style.borderRightColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+
+            retryContainer.Add(btn);
+            container.Add(retryContainer);
+        }
+
+        /// <summary>
+        /// 添加可展开/折叠的详情区域到消息气泡底部。
+        /// 用于显示堆栈信息等长文本，默认折叠状态。
+        /// </summary>
+        /// <param name="title">折叠标题（如"堆栈信息"）</param>
+        /// <param name="content">详情内容文本</param>
+        public void AddExpandableDetail(string title, string content)
+        {
+            if (string.IsNullOrEmpty(content)) return;
+
+            var container = _bubbleContent ?? _bubbleRoot ?? this;
+
+            // 外层容器
+            var detailContainer = new VisualElement();
+            detailContainer.AddToClassList("error-detail-container");
+
+            // 分隔线
+            var separator = new VisualElement();
+            separator.AddToClassList("error-detail-separator");
+            detailContainer.Add(separator);
+
+            // 折叠标题按钮
+            var isExpanded = false;
+            var headerBtn = new Button();
+            headerBtn.AddToClassList("error-detail-header");
+            headerBtn.text = $"▶ {title}";
+
+            // 内容区域（默认隐藏）
+            var contentLabel = new Label();
+            contentLabel.AddToClassList("error-detail-content");
+            contentLabel.text = content;
+            contentLabel.selection.isSelectable = true;
+            contentLabel.style.display = DisplayStyle.None;
+
+            headerBtn.clicked += () =>
+            {
+                isExpanded = !isExpanded;
+                headerBtn.text = isExpanded ? $"▼ {title}" : $"▶ {title}";
+                contentLabel.style.display = isExpanded ? DisplayStyle.Flex : DisplayStyle.None;
+            };
+
+            detailContainer.Add(headerBtn);
+            detailContainer.Add(contentLabel);
+            container.Add(detailContainer);
         }
 
         #endregion

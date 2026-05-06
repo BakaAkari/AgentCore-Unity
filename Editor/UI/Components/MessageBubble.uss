@@ -50,21 +50,73 @@
 
 /* --- 错误消息 --- */
 .message-bubble--error {
-    background-color: #5a2a2a;
+    background-color: #4a1c1c;
     align-self: stretch;
     max-width: 100%;
+    border-left-width: 3px;
+    border-left-color: #e05555;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-right-width: 1px;
+    border-top-color: #6a3030;
+    border-bottom-color: #6a3030;
+    border-right-color: #6a3030;
 }
 
 .message-bubble--error #role-label {
-    color: #e88888;
+    color: #ff7777;
+    font-size: 11px;
 }
 
 .message-bubble--error #content-label {
-    color: #f0a0a0;
+    color: #e8c0c0;
+    font-size: 12px;
+    white-space: normal;
+    -unity-font-style: normal;
 }
 
 .message-bubble--error #time-label {
     color: #c07070;
+}
+
+/* --- 错误详情可展开区域 --- */
+.error-detail-container {
+    margin-top: 6px;
+}
+
+.error-detail-separator {
+    height: 1px;
+    background-color: #6a3030;
+    margin-bottom: 4px;
+}
+
+.error-detail-header {
+    background-color: rgba(0, 0, 0, 0.15);
+    border-width: 0;
+    border-radius: 3px;
+    padding: 3px 6px;
+    margin: 0;
+    color: #cc9999;
+    font-size: 11px;
+    -unity-text-align: middle-left;
+    cursor: link;
+}
+
+.error-detail-header:hover {
+    background-color: rgba(0, 0, 0, 0.3);
+    color: #ddaaaa;
+}
+
+.error-detail-content {
+    background-color: rgba(0, 0, 0, 0.25);
+    border-radius: 3px;
+    padding: 6px 8px;
+    margin-top: 3px;
+    color: #bb9999;
+    font-size: 11px;
+    white-space: normal;
+    -unity-font-style: normal;
+    overflow: hidden;
 }
 
 /* --- 气泡头部 --- */

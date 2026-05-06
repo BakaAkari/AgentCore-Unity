@@ -48,6 +48,9 @@ namespace AgentCore.Editor.UI
         /// <summary>Agent Loop 实例，管理对话逻辑</summary>
         private AgentLoop _agentLoop;
 
+        /// <summary>最后一条用户消息（用于错误重试）</summary>
+        private string _lastUserMessage;
+
         /// <summary>消息气泡字典，按 MessageId 索引</summary>
         private readonly Dictionary<string, MessageBubble> _messageBubbles = new();
 
@@ -307,6 +310,9 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
+            // 记录最后一条用户消息（用于错误重试）
+            _lastUserMessage = text;
+
             // 清空输入框
             _inputField.value = "";
             _inputField.Focus();
@@ -418,7 +424,7 @@ namespace AgentCore.Editor.UI
                     break;
 
                 case AgentEventType.Error:
-                    ShowError(evt.Content);
+                    ShowError(evt.Content, evt.Detail);
                     break;
 
                 // Phase 2: 工具调用事件
@@ -576,15 +582,80 @@ namespace AgentCore.Editor.UI
 
         /// <summary>
         /// 显示错误消息气泡。
+        /// 如果有最后一条用户消息且 Agent 处于 Idle 状态，会显示重试按钮。
+        /// 当携带 <see cref="ErrorDetail"/> 时，显示结构化的详细错误信息。
         /// </summary>
         /// <param name="errorMessage">错误信息</param>
-        private void ShowError(string errorMessage)
+        /// <param name="detail">结构化错误详情（可选）</param>
+        private void ShowError(string errorMessage, ErrorDetail detail = null)
         {
             var messageId = Guid.NewGuid().ToString();
-            var bubble = new MessageBubble(messageId, "error", errorMessage ?? "未知错误");
+
+            // 使用 ErrorDetail 格式化显示内容（如果有）
+            var displayMessage = detail != null
+                ? detail.FormatForDisplay()
+                : (errorMessage ?? "未知错误");
+
+            var bubble = new MessageBubble(messageId, "error", displayMessage);
             _messageBubbles[messageId] = bubble;
             _messageContainer?.Add(bubble);
+
+            // 如果有堆栈信息，添加可展开的详情区域
+            if (detail != null)
+            {
+                var stackInfo = detail.GetStackForDisplay();
+                if (!string.IsNullOrEmpty(stackInfo))
+                {
+                    bubble.AddExpandableDetail("堆栈信息", stackInfo);
+                }
+            }
+
+            // 如果有最后一条用户消息，添加重试按钮
+            if (!string.IsNullOrEmpty(_lastUserMessage))
+            {
+                var retryMessage = _lastUserMessage;
+                bubble.AddRetryButton(() => RetryLastMessage(retryMessage));
+            }
+
             ScrollToBottom();
+        }
+
+        /// <summary>
+        /// 重试最后一条用户消息。
+        /// 从错误气泡的重试按钮触发，重新发送之前失败的消息。
+        /// </summary>
+        /// <param name="message">要重试的消息文本</param>
+        private void RetryLastMessage(string message)
+        {
+            if (_agentLoop == null)
+            {
+                Debug.LogError("[AgentCore] AgentLoop is not initialized, cannot retry.");
+                return;
+            }
+
+            if (_agentLoop.CurrentState != AgentState.Idle)
+            {
+                Debug.LogWarning("[AgentCore] Cannot retry while agent is busy.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(message))
+            {
+                Debug.LogWarning("[AgentCore] No message to retry.");
+                return;
+            }
+
+            // 更新状态标签
+            UpdateStatusLabel("重试中...");
+
+            // 添加用户消息气泡（显示重试标记）
+            AddUserMessage($"[重试] {message}");
+
+            // 异步发送消息
+            AsyncHelper.RunAsync(
+                () => _agentLoop.SendMessageAsync(message),
+                onError: ex => Debug.LogError($"[AgentCore] Retry error: {ex.Message}")
+            );
         }
 
         /// <summary>

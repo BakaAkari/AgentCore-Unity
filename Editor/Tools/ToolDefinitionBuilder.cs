@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AgentCore.Editor.Config;
 using AgentCore.Editor.LLM;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -112,6 +113,61 @@ namespace AgentCore.Editor.Tools
             }
 
             Debug.Log($"{LogPrefix}Built {definitions.Count} tool definitions from ToolRegistry");
+            return definitions;
+        }
+
+        /// <summary>
+        /// 将 <see cref="ToolRegistry"/> 中所有已注册且未被禁用的工具转换为 <see cref="ToolDefinition"/> 列表。
+        /// <para>
+        /// 根据 <see cref="AgentCoreSettings"/> 中的 <c>disabledToolCategories</c> 和 <c>disabledTools</c>
+        /// 过滤掉被禁用的工具，仅构建启用状态的工具定义。
+        /// </para>
+        /// </summary>
+        /// <returns>启用状态的工具定义列表</returns>
+        public static List<ToolDefinition> BuildAllEnabled()
+        {
+            var tools = ToolRegistry.Instance.GetAllTools();
+            if (tools == null || tools.Count == 0)
+            {
+                Debug.LogWarning($"{LogPrefix}No tools registered in ToolRegistry, returning empty list");
+                return new List<ToolDefinition>();
+            }
+
+            var settings = AgentCoreSettings.instance;
+            var definitions = new List<ToolDefinition>(tools.Count);
+            int skippedCount = 0;
+
+            foreach (var tool in tools)
+            {
+                try
+                {
+                    var meta = tool.Metadata;
+                    if (meta == null) continue;
+
+                    // 检查工具是否被禁用
+                    if (settings.IsToolDisabled(meta.Name, meta.Category))
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    definitions.Add(Build(tool));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"{LogPrefix}Failed to build definition for tool '{tool.Metadata?.Name}': {ex.Message}");
+                }
+            }
+
+            if (skippedCount > 0)
+            {
+                Debug.Log($"{LogPrefix}Built {definitions.Count} tool definitions ({skippedCount} disabled tools skipped)");
+            }
+            else
+            {
+                Debug.Log($"{LogPrefix}Built {definitions.Count} tool definitions from ToolRegistry");
+            }
+
             return definitions;
         }
 

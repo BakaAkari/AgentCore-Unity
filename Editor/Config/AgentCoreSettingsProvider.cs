@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using AgentCore.Editor.Bootstrap;
 using AgentCore.Editor.Cloud;
+using AgentCore.Editor.Tools;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -54,6 +57,10 @@ namespace AgentCore.Editor.Config
         private string _lightragTestResult = "";
         private bool _isLightRAGTesting = false;
 
+        // --- 工具管理 UI 状态 ---
+        private bool _toolManagementFoldout = false;
+        private Dictionary<string, bool> _categoryFoldouts = new Dictionary<string, bool>();
+
         private AgentCoreSettingsProvider(string path, SettingsScope scope)
             : base(path, scope) { }
 
@@ -91,6 +98,11 @@ namespace AgentCore.Editor.Config
 
             // === Agent Behavior ===
             DrawAgentBehaviorSection();
+
+            EditorGUILayout.Space(10);
+
+            // === Tool Management ===
+            DrawToolManagementSection();
 
             EditorGUILayout.Space(10);
 
@@ -658,6 +670,181 @@ namespace AgentCore.Editor.Config
             sb.AppendLine();
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 绘制工具管理区域。
+        /// 按分类显示所有已注册工具，支持按分类或单个工具启用/禁用。
+        /// 禁用的工具不会发送给 LLM，从而减少 token 消耗并聚焦 Agent 能力。
+        /// </summary>
+        private void DrawToolManagementSection()
+        {
+            _toolManagementFoldout = EditorGUILayout.Foldout(_toolManagementFoldout, "Tool Management", true, EditorStyles.foldoutHeader);
+            if (!_toolManagementFoldout) return;
+
+            EditorGUI.indentLevel++;
+
+            // 获取所有已注册工具
+            var allTools = ToolRegistry.Instance.GetAllTools();
+            if (allTools == null || allTools.Count == 0)
+            {
+                EditorGUILayout.HelpBox("暂无已注册的工具。工具将在 AgentLoop 初始化后可用。", MessageType.Info);
+                EditorGUI.indentLevel--;
+                return;
+            }
+
+            // 统计信息
+            var totalCount = allTools.Count;
+            var disabledToolCount = _settings.disabledTools?.Count ?? 0;
+            var disabledCategoryCount = _settings.disabledToolCategories?.Count ?? 0;
+
+            // 按分类分组
+            var grouped = allTools
+                .GroupBy(t => t.Metadata?.Category ?? "default")
+                .OrderBy(g => g.Key)
+                .ToList();
+
+            var enabledCount = allTools.Count(t =>
+                t.Metadata != null && !_settings.IsToolDisabled(t.Metadata.Name, t.Metadata.Category));
+
+            EditorGUILayout.LabelField(
+                $"已注册 {totalCount} 个工具，{enabledCount} 个启用，{totalCount - enabledCount} 个禁用",
+                EditorStyles.miniLabel);
+
+            EditorGUILayout.Space(3);
+
+            // 快捷操作按钮
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(EditorGUI.indentLevel * 15);
+            if (GUILayout.Button("全部启用", GUILayout.Width(80)))
+            {
+                _settings.disabledToolCategories.Clear();
+                _settings.disabledTools.Clear();
+                _settings.SaveSettings();
+            }
+            if (GUILayout.Button("全部禁用", GUILayout.Width(80)))
+            {
+                _settings.disabledToolCategories.Clear();
+                _settings.disabledTools.Clear();
+                foreach (var tool in allTools)
+                {
+                    if (tool.Metadata != null && !_settings.disabledTools.Contains(tool.Metadata.Name))
+                        _settings.disabledTools.Add(tool.Metadata.Name);
+                }
+                _settings.SaveSettings();
+            }
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(3);
+
+            // 按分类绘制工具列表
+            foreach (var group in grouped)
+            {
+                var category = group.Key;
+                var toolsInCategory = group.OrderBy(t => t.Metadata?.Name).ToList();
+
+                if (!_categoryFoldouts.ContainsKey(category))
+                    _categoryFoldouts[category] = false;
+
+                // 检查分类是否被整体禁用
+                bool categoryDisabled = _settings.disabledToolCategories != null &&
+                                        _settings.disabledToolCategories.Contains(category);
+
+                // 计算分类内启用的工具数
+                int enabledInCategory = toolsInCategory.Count(t =>
+                    t.Metadata != null && !_settings.IsToolDisabled(t.Metadata.Name, t.Metadata.Category));
+
+                // 分类标题行
+                EditorGUILayout.BeginHorizontal();
+
+                _categoryFoldouts[category] = EditorGUILayout.Foldout(
+                    _categoryFoldouts[category],
+                    $"{category} ({enabledInCategory}/{toolsInCategory.Count})",
+                    true);
+
+                // 分类级别的启用/禁用 toggle
+                EditorGUI.BeginChangeCheck();
+                bool categoryEnabled = !categoryDisabled;
+                categoryEnabled = EditorGUILayout.Toggle(categoryEnabled, GUILayout.Width(20));
+                if (EditorGUI.EndChangeCheck())
+                {
+                    if (categoryEnabled)
+                    {
+                        // 启用分类：从禁用列表移除
+                        _settings.disabledToolCategories.Remove(category);
+                    }
+                    else
+                    {
+                        // 禁用分类：添加到禁用列表
+                        if (!_settings.disabledToolCategories.Contains(category))
+                            _settings.disabledToolCategories.Add(category);
+                    }
+                    _settings.SaveSettings();
+                }
+
+                EditorGUILayout.EndHorizontal();
+
+                // 展开时显示分类内的各个工具
+                if (_categoryFoldouts[category])
+                {
+                    EditorGUI.indentLevel++;
+
+                    if (categoryDisabled)
+                    {
+                        EditorGUILayout.HelpBox("此分类已被整体禁用。启用分类后可单独管理各工具。", MessageType.Info);
+                    }
+
+                    GUI.enabled = !categoryDisabled;
+
+                    foreach (var tool in toolsInCategory)
+                    {
+                        var meta = tool.Metadata;
+                        if (meta == null) continue;
+
+                        bool toolDisabled = _settings.disabledTools != null &&
+                                            _settings.disabledTools.Contains(meta.Name);
+
+                        EditorGUI.BeginChangeCheck();
+                        bool toolEnabled = !toolDisabled;
+                        toolEnabled = EditorGUILayout.ToggleLeft(
+                            new GUIContent(meta.Name, TruncateForTooltip(meta.Description, 200)),
+                            toolEnabled);
+
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            if (toolEnabled)
+                            {
+                                _settings.disabledTools.Remove(meta.Name);
+                            }
+                            else
+                            {
+                                if (!_settings.disabledTools.Contains(meta.Name))
+                                    _settings.disabledTools.Add(meta.Name);
+                            }
+                            _settings.SaveSettings();
+                        }
+                    }
+
+                    GUI.enabled = true;
+                    EditorGUI.indentLevel--;
+                }
+            }
+
+            EditorGUI.indentLevel--;
+        }
+
+        /// <summary>
+        /// 截断文本用于 Tooltip 显示。
+        /// </summary>
+        /// <param name="text">原始文本</param>
+        /// <param name="maxLength">最大长度</param>
+        /// <returns>截断后的文本</returns>
+        private static string TruncateForTooltip(string text, int maxLength)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            if (text.Length <= maxLength) return text;
+            return text.Substring(0, maxLength) + "...";
         }
 
         private void DrawUIPreferencesSection()
