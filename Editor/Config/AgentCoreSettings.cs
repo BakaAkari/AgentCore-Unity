@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 4;
+        private const int CurrentVersion = 5;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -25,14 +25,14 @@ namespace AgentCore.Editor.Config
         public string llmEndpoint = "http://localhost:4000/v1";
 
         [Tooltip("LLM 模型名称")]
-        public string llmModel = "deepseek-chat";
+        public string llmModel = "claude-sonnet-4-5";
 
         [Tooltip("生成温度 (0.0-2.0)")]
         [Range(0f, 2f)]
         public float temperature = 0.7f;
 
         [Tooltip("最大输出 token 数")]
-        public int maxTokens = 4096;
+        public int maxTokens = 16000;
 
         // --- Agent 行为 ---
         [Header("Agent Behavior")]
@@ -43,7 +43,7 @@ namespace AgentCore.Editor.Config
         public int maxContextTokens = 0;
 
         [Tooltip("为 AI 回复预留的 token 数")]
-        public int reserveResponseTokens = 2000;
+        public int reserveResponseTokens = 8000;
 
         // --- 自主纠错配置 ---
         [Header("Self-Correction")]
@@ -222,6 +222,27 @@ namespace AgentCore.Editor.Config
                 if (disabledToolCategories == null) disabledToolCategories = new List<string>();
                 if (disabledTools == null) disabledTools = new List<string>();
                 Debug.Log("[AgentCore] Settings migrated v3→v4: initialized tool management lists");
+            }
+
+            // v4 -> v5: 更新默认值以适配 Claude 系列模型
+            if (settingsVersion < 5)
+            {
+                // 仅当用户仍使用旧默认值时才迁移，避免覆盖用户自定义配置
+                if (llmModel == "deepseek-chat")
+                {
+                    llmModel = "claude-sonnet-4-5";
+                    Debug.Log("[AgentCore] Settings migrated v4→v5: llmModel updated to claude-sonnet-4-5");
+                }
+                if (maxTokens == 4096)
+                {
+                    maxTokens = 16000;
+                    Debug.Log("[AgentCore] Settings migrated v4→v5: maxTokens updated to 16000");
+                }
+                if (reserveResponseTokens == 2000)
+                {
+                    reserveResponseTokens = 8000;
+                    Debug.Log("[AgentCore] Settings migrated v4→v5: reserveResponseTokens updated to 8000");
+                }
             }
 
             settingsVersion = CurrentVersion;

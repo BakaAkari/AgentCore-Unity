@@ -31,6 +31,12 @@ namespace AgentCore.Editor.Config
         private string _connectionTestResult = "";
         private bool _isTesting = false;
 
+        // --- 模型发现状态 ---
+        private List<string> _availableModels = new List<string>();
+        private bool _isFetchingModels = false;
+        private string _fetchModelsResult = "";
+        private bool _showModelDropdown = false;
+
         // --- 状态级别枚举（C3: 结构化状态消息） ---
         private enum StatusLevel { None, Success, Warning, Error, Loading }
 
@@ -232,9 +238,48 @@ namespace AgentCore.Editor.Config
 
             EditorGUILayout.EndHorizontal();
 
-            _settings.llmModel = EditorGUILayout.TextField(
-                new GUIContent("Model", "LLM 模型名称"),
-                _settings.llmModel);
+            // Model 字段：Label + Popup下拉菜单 + Fetch 按钮（水平对齐）
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel(new GUIContent("Model", "LLM 模型名称（点击 Fetch 从服务器获取列表，然后从下拉菜单选择）"));
+
+            if (_availableModels != null && _availableModels.Count > 0)
+            {
+                // 有模型列表时显示 Popup
+                int currentIndex = _availableModels.IndexOf(_settings.llmModel);
+                if (currentIndex < 0) currentIndex = 0;
+                var modelArray = _availableModels.ToArray();
+                int newIndex = EditorGUILayout.Popup(currentIndex, modelArray);
+                if (newIndex != currentIndex || _settings.llmModel != _availableModels[newIndex])
+                {
+                    _settings.llmModel = _availableModels[newIndex];
+                    _settings.SaveSettings();
+                }
+            }
+            else
+            {
+                // 未获取列表时显示当前模型名（只读标签）
+                EditorGUILayout.LabelField(_settings.llmModel);
+            }
+
+            GUI.enabled = !_isFetchingModels && !_isTesting;
+            if (GUILayout.Button(_isFetchingModels ? "..." : "Fetch", GUILayout.Width(50)))
+            {
+                FetchAvailableModels();
+            }
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+
+            // 显示 Fetch 结果状态
+            if (!string.IsNullOrEmpty(_fetchModelsResult))
+            {
+                var isError = _fetchModelsResult.StartsWith("[FAIL]");
+                var style = new GUIStyle(EditorStyles.miniLabel) { wordWrap = true };
+                style.normal.textColor = isError ? Color.red : new Color(0.2f, 0.8f, 0.2f);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(EditorGUIUtility.labelWidth + 2);
+                EditorGUILayout.LabelField(_fetchModelsResult, style);
+                EditorGUILayout.EndHorizontal();
+            }
 
             _settings.temperature = EditorGUILayout.Slider(
                 new GUIContent("Temperature", "生成温度 (0.0-2.0)"),
@@ -1133,6 +1178,92 @@ namespace AgentCore.Editor.Config
         // ─────────────────────────────────────────────
         //  连接测试方法
         // ─────────────────────────────────────────────
+
+        /// <summary>
+        /// 从 LLM 服务的 /v1/models 端点获取可用模型列表。
+        /// 获取成功后填充 _availableModels，供下拉菜单使用。
+        /// </summary>
+        private void FetchAvailableModels()
+        {
+            _isFetchingModels = true;
+            _fetchModelsResult = "";
+
+            AsyncHelper.RunAsync(async () =>
+            {
+                try
+                {
+                    var client = HttpClientFactory.GetClient();
+                    var url = $"{_settings.llmEndpoint.TrimEnd('/')}/models";
+                    var apiKey = SecureKeyStorage.GetLLMApiKey();
+
+                    using var request = HttpClientFactory.CreateRequest(HttpMethod.Get, url, apiKey);
+                    var response = await client.SendAsync(request);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var json = await response.Content.ReadAsStringAsync();
+                        var models = ParseModelsFromJson(json);
+
+                        AsyncHelper.RunOnMainThread(() =>
+                        {
+                            _availableModels = models;
+                            _fetchModelsResult = models.Count > 0
+                                ? $"[OK] 找到 {models.Count} 个模型"
+                                : "[OK] 无可用模型";
+                            _isFetchingModels = false;
+                        });
+                    }
+                    else
+                    {
+                        AsyncHelper.RunOnMainThread(() =>
+                        {
+                            _fetchModelsResult = $"[FAIL] HTTP {(int)response.StatusCode}: {response.ReasonPhrase}";
+                            _isFetchingModels = false;
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        _fetchModelsResult = $"[FAIL] {ex.Message}";
+                        _isFetchingModels = false;
+                    });
+                }
+            });
+        }
+
+        /// <summary>
+        /// 解析 OpenAI /v1/models 响应 JSON，提取模型 ID 列表。
+        /// 响应格式：{"object":"list","data":[{"id":"model-name",...},...]}
+        /// </summary>
+        private static List<string> ParseModelsFromJson(string json)
+        {
+            var models = new List<string>();
+            try
+            {
+                var jobj = JsonHelper.ParseObject(json);
+                if (jobj == null) return models;
+
+                var data = jobj["data"] as Newtonsoft.Json.Linq.JArray;
+                if (data == null) return models;
+
+                foreach (var item in data)
+                {
+                    var id = item["id"]?.ToString();
+                    if (!string.IsNullOrEmpty(id))
+                        models.Add(id);
+                }
+
+                // 按字母排序，方便查找
+                models.Sort(StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to parse models JSON: {ex.Message}");
+            }
+            return models;
+        }
 
         private void TestLLMConnection()
         {

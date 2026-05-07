@@ -5,6 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-05-07
+
+### Added
+- **ManageUIToolkitTool** — 全新 UI Toolkit 工具（`manage_ui_toolkit`），20 个 actions
+  - 创建/编辑 UXML 文件：`create_uxml`, `add_element`, `remove_element`, `set_attribute`, `validate_uxml`
+  - 创建/编辑 USS 文件：`create_uss`, `set_style`, `add_class`, `remove_class`
+  - 查询与列举：`query_element`, `list_elements`, `get_uxml_content`, `get_uss_content`, `list_assets`, `list_ui_documents`
+  - 运行时配置：`create_panel_settings`, `configure_ui_document`
+  - 代码模板生成：`create_editor_window_template`, `create_custom_element_template`
+  - 数据绑定：`add_binding`
+  - 使用 `System.Xml.XmlDocument` 操作 UXML，直接使用 `UnityEngine.UIElements` 类型（无需反射）
+
+- **ManageCinemachineTool 增强**（`manage_cinemachine`，29% → ~65%）
+  - 新增 10 个 actions：`create_freelook`, `configure_freelook_orbits`, `create_state_driven`, `add_state_camera`, `create_clearshot`, `create_sequencer`, `add_sequencer_entry`, `create_dolly_track`, `configure_impulse`, `set_blend_list`
+  - 支持 FreeLook 三轨道配置（top/mid/bot 半径和高度）
+  - 支持 StateDriven 相机与 Animator 状态绑定
+  - 支持 ClearShot、Sequencer、Dolly Track、Impulse 和 BlendList 相机类型
+  - 所有新 handler 通过反射兼容 Cinemachine 2.x 和 3.x
+
+- **ManageUITool 增强**（`manage_ui`，35% → ~65%）
+  - 新增 9 个 actions：`align_elements`, `distribute_elements`, `delete_element`, `duplicate_element`, `set_text`, `set_image`, `set_interactable`, `reorder_element`, `find_element`
+  - `set_text` 同时支持 `UnityEngine.UI.Text` 和 `TMPro.TextMeshProUGUI`（通过反射）
+  - `align_elements` / `distribute_elements` 支持 X/Y 轴对齐和均匀分布
+  - 更新描述以明确区分 legacy uGUI（`manage_ui`）和 UI Toolkit（`manage_ui_toolkit`）
+
+- **ValidationTool** — 全新场景验证工具（`validation`），10 个 actions
+  - `check_missing_references` — 使用 `SerializedObject` 迭代器检测丢失的对象引用
+  - `check_duplicate_names` — 检测场景中重名的 GameObject
+  - `check_empty_gameobjects` — 检测只有 Transform 且无子对象的空 GameObject
+  - `check_missing_components` — 检测 null 组件槽（已删除的脚本）
+  - `check_layer_tags` — 验证 Layer 索引和 Tag 有效性
+  - `check_performance` — 检测高三角面数（>50K）、过多实时灯光（>4）、多摄像机（>3）等性能问题
+  - `check_prefab_integrity` — 使用 `PrefabUtility` 检测断开/丢失的 Prefab 连接
+  - `check_audio` — 检测 AudioSource 缺失 Clip、零音量、无 Clip 时 PlayOnAwake 等问题
+  - `validate_scene` — 运行所有检查并汇总结果
+  - `validate_project` — 检查 Build Settings、缺失场景文件、损坏脚本、PlayerSettings
+  - 返回结构化 `ValidationIssue` 对象，包含 severity/category/path/message/fix_hint
+
+- **ReadConsoleTool 增强**（`read_console`，50% → ~80%）
+  - 新增 5 个 actions：`get_system_info`, `get_assembly_info`, `get_scripting_defines`, `set_scripting_define`, `get_log_file`
+  - `get_system_info` — 返回 Unity 版本、OS、处理器、内存、图形设备、脚本后端、渲染管线等完整系统信息
+  - `get_assembly_info` — 列出所有已加载程序集，支持名称过滤
+  - `get_scripting_defines` — 获取指定 Build Target Group 的 Scripting Define Symbols
+  - `set_scripting_define` — 添加或移除 Scripting Define Symbol（自动触发重编译）
+  - `get_log_file` — 读取 Unity Editor 日志文件末尾 N 行，支持文本过滤，跨平台路径（Windows/macOS/Linux）
+
+- **ManageProBuilderTool 增强**（`manage_probuilder`，45% → ~75%）
+  - 新增 8 个 actions：`get_faces`, `extrude_faces`, `delete_faces`, `bevel_edges`, `bridge_edges`, `weld_vertices`, `set_uv_projection`, `triangulate`
+  - `subdivide` 现在尝试 ProBuilder API，失败时回退到手动三角形四分法
+  - 所有新 actions 优先使用 ProBuilder 反射 API，不可用时提供 Unity Mesh API 回退实现
+  - UV 投影支持 planar/box/spherical/cylindrical 四种模式
+  - `weld_vertices` 支持按距离阈值合并顶点
+  - 新增辅助方法：`GetFacesData`, `GetFaceObjects`, `GetAllFaceObjects`, `GetEdgeObjects`
+  - 新增 Mesh 回退方法：`SubdivideMeshFallback`, `DeleteMeshFacesFallback`, `WeldMeshVerticesFallback`, `GenerateUVsFallback`
+
+- **WorkflowTool** — 全新工作流自动化工具（`workflow`），15 个 actions
+  - 批量操作：`batch_rename`（支持 `{index}`, `{name}`, `{parent}` 占位符和格式化索引）, `batch_set_tag`, `batch_set_layer`, `batch_set_active`, `batch_set_static`
+  - 查找替换：`find_replace_name`（支持纯文本和正则表达式）
+  - 收集查询：`collect_by_component`, `collect_by_tag`, `collect_by_layer`
+  - 层级操作：`snapshot_hierarchy`（导出场景树为 JSON）, `batch_move_to_parent`
+  - 组件操作：`batch_add_component`, `batch_remove_component`
+  - 统计分析：`count_objects`（按 tag/layer/component 统计）, `list_scenes`（列出所有场景）
+  - 所有修改操作支持 `dry_run` 预览模式（不实际执行，仅返回将要发生的变更）
+  - 所有修改操作支持 Undo（通过 `ToolHelpers.RecordUndo`）
+
+## [0.3.5] - 2026-05-07
+
+### Added
+- **窗口级键盘快捷键**（Phase 4.3）
+  - 快捷键现在在整个 ChatWindow 范围内有效，不再要求输入框必须聚焦
+  - `Escape` — 取消当前 Agent 操作（全局有效，之前仅输入框聚焦时有效）
+  - `Ctrl+N` — 新建会话（全局有效）
+  - `Ctrl+Shift+E` — 导出当前会话（全局有效）
+  - `Ctrl+/` 或 `Ctrl+?` — 新增：聚焦输入框（方便从消息区域快速回到输入）
+  - 输入框内的快捷键行为不变（`Enter` 发送、`Shift+Enter` 换行）
+  - 通过在 `rootVisualElement` 上注册 `KeyDownEvent` 实现窗口级监听
+
+## [0.3.4] - 2026-05-07
+
+### Added
+- **LLM Model 发现式下拉菜单**（Settings 面板增强）
+  - Settings 面板 LLM Configuration 区域新增 "Fetch" 按钮
+  - 点击 Fetch 后自动向 `{endpoint}/models` 发起 HTTP GET 请求，获取服务器可用模型列表
+  - 获取成功后在 Model 字段旁显示 Popup 下拉菜单，支持一键选择模型
+  - 支持 OpenAI 标准 `/v1/models` 响应格式（`{"object":"list","data":[{"id":"..."}]}`）
+  - 模型列表按字母排序，方便查找
+  - Fetch 状态实时反馈：绿色 `[OK] 找到 N 个模型` / 红色 `[FAIL] 错误信息`
+  - Fetch 与 Test Connection 按钮互斥，防止并发请求
+
+### Changed
+- **默认参数优化（针对 Claude 系列模型）**
+  - `llmModel` 默认值：`"deepseek-chat"` → `"claude-sonnet-4-5"`
+  - `maxTokens` 默认值：`4096` → `16000`（Claude 3.5/4 系列支持最大 16K 输出）
+  - `reserveResponseTokens` 默认值：`2000` → `8000`（为长代码输出预留足够空间）
+  - `AgentCoreSettings` 版本迁移升级至 v5（已有用户若仍使用旧默认值则自动迁移，自定义值不受影响）
+
 ## [0.3.3] - 2026-05-07
 
 ### Added

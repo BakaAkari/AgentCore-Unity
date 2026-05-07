@@ -1,22 +1,25 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEngine;
 
 namespace AgentCore.Editor.Tools.Native.Utility
 {
     /// <summary>
-    /// Read Unity Console log entries — errors, warnings, and messages.
+    /// Read Unity Console log entries, system info, assembly info, and manage scripting defines.
     /// Uses reflection to access internal UnityEditor.LogEntries API.
-    /// Critical for diagnosing compilation errors and runtime issues.
+    /// Critical for diagnosing compilation errors, runtime issues, and project configuration.
     /// </summary>
     [AgentTool("read_console",
-        Description = "Read Unity Editor Console logs — compilation errors, warnings, and messages. Essential for diagnosing script issues.",
+        Description = "Read Unity Editor Console logs (errors/warnings/messages), get system/environment info, list loaded assemblies, manage scripting define symbols, and access log files. Essential for diagnosing script issues and project configuration.",
         Category = "Utility",
         RequiresMainThread = true,
         MayModifyScripts = false)]
@@ -27,8 +30,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""get_errors"", ""get_warnings"", ""get_all"", ""get_count"", ""clear""],
-                    ""description"": ""Action: get_errors (compilation/runtime errors only), get_warnings (warnings only), get_all (all logs), get_count (count by type), clear (clear console)""
+                    ""enum"": [""get_errors"", ""get_warnings"", ""get_all"", ""get_count"", ""clear"", ""get_system_info"", ""get_assembly_info"", ""get_scripting_defines"", ""set_scripting_define"", ""get_log_file""],
+                    ""description"": ""Action: get_errors/get_warnings/get_all (console logs), get_count (count by type), clear (clear console), get_system_info (OS/Unity/platform info), get_assembly_info (loaded assemblies), get_scripting_defines (list define symbols), set_scripting_define (add/remove define symbol), get_log_file (read Unity Editor log file)""
                 },
                 ""max_entries"": {
                     ""type"": ""integer"",
@@ -37,6 +40,22 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 ""search"": {
                     ""type"": ""string"",
                     ""description"": ""Optional text filter — only return entries containing this text (case-insensitive)""
+                },
+                ""define"": {
+                    ""type"": ""string"",
+                    ""description"": ""Scripting define symbol name for set_scripting_define action (e.g. MY_FEATURE)""
+                },
+                ""enabled"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""For set_scripting_define: true to add the define, false to remove it""
+                },
+                ""build_target"": {
+                    ""type"": ""string"",
+                    ""description"": ""Build target group name for scripting defines (default: current active target). E.g. Standalone, Android, iOS, WebGL""
+                },
+                ""max_lines"": {
+                    ""type"": ""integer"",
+                    ""description"": ""For get_log_file: maximum lines to return from the end of the log file (default: 100, max: 500)""
                 }
             },
             ""required"": [""action""]
@@ -59,7 +78,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "read_console",
-            description: "Read Unity Editor Console logs — compilation errors, warnings, and messages. Essential for diagnosing script issues.",
+            description: "Read Unity Editor Console logs (errors/warnings/messages), get system/environment info, list loaded assemblies, manage scripting define symbols, and access log files. Essential for diagnosing script issues and project configuration.",
             category: "Utility",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -91,9 +110,24 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     case "clear":
                         response = HandleClear();
                         break;
+                    case "get_system_info":
+                        response = HandleGetSystemInfo();
+                        break;
+                    case "get_assembly_info":
+                        response = HandleGetAssemblyInfo(parameters);
+                        break;
+                    case "get_scripting_defines":
+                        response = HandleGetScriptingDefines(parameters);
+                        break;
+                    case "set_scripting_define":
+                        response = HandleSetScriptingDefine(parameters);
+                        break;
+                    case "get_log_file":
+                        response = HandleGetLogFile(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: get_errors, get_warnings, get_all, get_count, clear");
+                            $"Unknown action: '{action}'. Valid actions: get_errors, get_warnings, get_all, get_count, clear, get_system_info, get_assembly_info, get_scripting_defines, set_scripting_define, get_log_file");
                         break;
                 }
             }
@@ -220,6 +254,362 @@ namespace AgentCore.Editor.Tools.Native.Utility
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"Failed to clear console: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region New Action Handlers
+
+        /// <summary>
+        /// Returns comprehensive system and Unity environment information.
+        /// </summary>
+        private ToolResponse HandleGetSystemInfo()
+        {
+            var activeTarget = EditorUserBuildSettings.activeBuildTarget;
+            var activeTargetGroup = BuildPipeline.GetBuildTargetGroup(activeTarget);
+
+            var data = new JObject
+            {
+                // Unity version info
+                ["unityVersion"] = Application.unityVersion,
+                ["unityVersionNumeric"] = GetUnityVersionNumeric(),
+                ["unityEditorPath"] = EditorApplication.applicationPath,
+                ["unityDataPath"] = EditorApplication.applicationContentsPath,
+
+                // Project info
+                ["projectName"] = Application.productName,
+                ["companyName"] = Application.companyName,
+                ["projectPath"] = System.IO.Path.GetFullPath(Application.dataPath + "/.."),
+                ["dataPath"] = Application.dataPath,
+                ["persistentDataPath"] = Application.persistentDataPath,
+                ["streamingAssetsPath"] = Application.streamingAssetsPath,
+                ["temporaryCachePath"] = Application.temporaryCachePath,
+
+                // Build target
+                ["activeBuildTarget"] = activeTarget.ToString(),
+                ["activeBuildTargetGroup"] = activeTargetGroup.ToString(),
+                ["isPlaying"] = EditorApplication.isPlaying,
+                ["isCompiling"] = EditorApplication.isCompiling,
+                ["isPaused"] = EditorApplication.isPaused,
+                ["scriptCompilationFailed"] = EditorUtility.scriptCompilationFailed,
+
+                // OS / Runtime
+                ["operatingSystem"] = SystemInfo.operatingSystem,
+                ["operatingSystemFamily"] = SystemInfo.operatingSystemFamily.ToString(),
+                ["processorType"] = SystemInfo.processorType,
+                ["processorCount"] = SystemInfo.processorCount,
+                ["systemMemorySize"] = SystemInfo.systemMemorySize,
+                ["graphicsDeviceName"] = SystemInfo.graphicsDeviceName,
+                ["graphicsDeviceType"] = SystemInfo.graphicsDeviceType.ToString(),
+                ["graphicsMemorySize"] = SystemInfo.graphicsMemorySize,
+                ["graphicsShaderLevel"] = SystemInfo.graphicsShaderLevel,
+
+                // Scripting
+                ["scriptingBackend"] = PlayerSettings.GetScriptingBackend(activeTargetGroup).ToString(),
+                ["apiCompatibilityLevel"] = PlayerSettings.GetApiCompatibilityLevel(activeTargetGroup).ToString(),
+                ["dotNetVersion"] = System.Environment.Version.ToString(),
+                ["is64BitProcess"] = System.Environment.Is64BitProcess,
+                ["is64BitOS"] = System.Environment.Is64BitOperatingSystem,
+                ["machineName"] = System.Environment.MachineName,
+                ["userName"] = System.Environment.UserName,
+
+                // Rendering
+                ["colorSpace"] = PlayerSettings.colorSpace.ToString(),
+                ["renderPipeline"] = GetRenderPipelineName(),
+            };
+
+            return ToolResponse.OkWithData(data,
+                $"System info: Unity {Application.unityVersion}, {SystemInfo.operatingSystem}, target: {activeTarget}");
+        }
+
+        /// <summary>
+        /// Returns information about loaded assemblies, optionally filtered by name.
+        /// </summary>
+        private ToolResponse HandleGetAssemblyInfo(JObject parameters)
+        {
+            string search = ToolHelpers.GetOptionalString(parameters, "search");
+            int maxEntries = ToolHelpers.GetOptionalInt(parameters, "max_entries", 50);
+            maxEntries = Mathf.Clamp(maxEntries, 1, 200);
+
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            var filtered = assemblies
+                .Where(a => string.IsNullOrEmpty(search)
+                    || a.GetName().Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                    || a.FullName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderBy(a => a.GetName().Name)
+                .Take(maxEntries)
+                .ToArray();
+
+            var asmArray = new JArray();
+            foreach (var asm in filtered)
+            {
+                var asmName = asm.GetName();
+                var asmObj = new JObject
+                {
+                    ["name"] = asmName.Name,
+                    ["version"] = asmName.Version?.ToString(),
+                    ["fullName"] = asm.FullName,
+                    ["isDynamic"] = asm.IsDynamic,
+                };
+
+                if (!asm.IsDynamic)
+                {
+                    try
+                    {
+                        asmObj["location"] = asm.Location;
+                    }
+                    catch { /* some assemblies don't expose location */ }
+                }
+
+                asmArray.Add(asmObj);
+            }
+
+            var data = new JObject
+            {
+                ["totalLoaded"] = assemblies.Length,
+                ["returned"] = filtered.Length,
+                ["maxEntries"] = maxEntries,
+                ["assemblies"] = asmArray
+            };
+
+            if (!string.IsNullOrEmpty(search))
+                data["searchFilter"] = search;
+
+            return ToolResponse.OkWithData(data,
+                $"Loaded assemblies: {assemblies.Length} total, {filtered.Length} returned" +
+                (string.IsNullOrEmpty(search) ? "" : $" (filter: '{search}')"));
+        }
+
+        /// <summary>
+        /// Returns the scripting define symbols for the specified (or active) build target group.
+        /// </summary>
+        private ToolResponse HandleGetScriptingDefines(JObject parameters)
+        {
+            string buildTargetName = ToolHelpers.GetOptionalString(parameters, "build_target");
+            var targetGroup = ResolveTargetGroup(buildTargetName, out string resolvedName);
+
+            string definesStr = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
+            var defines = string.IsNullOrEmpty(definesStr)
+                ? new string[0]
+                : definesStr.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                             .Select(d => d.Trim())
+                             .Where(d => !string.IsNullOrEmpty(d))
+                             .OrderBy(d => d)
+                             .ToArray();
+
+            var data = new JObject
+            {
+                ["buildTargetGroup"] = resolvedName,
+                ["count"] = defines.Length,
+                ["defines"] = new JArray(defines),
+                ["rawString"] = definesStr
+            };
+
+            return ToolResponse.OkWithData(data,
+                $"Scripting defines for {resolvedName}: {defines.Length} symbol(s)");
+        }
+
+        /// <summary>
+        /// Adds or removes a scripting define symbol for the specified (or active) build target group.
+        /// </summary>
+        private ToolResponse HandleSetScriptingDefine(JObject parameters)
+        {
+            string define = ToolHelpers.GetRequiredString(parameters, "define").Trim().ToUpperInvariant();
+            bool enabled = ToolHelpers.GetOptionalBool(parameters, "enabled", true);
+            string buildTargetName = ToolHelpers.GetOptionalString(parameters, "build_target");
+            var targetGroup = ResolveTargetGroup(buildTargetName, out string resolvedName);
+
+            if (string.IsNullOrEmpty(define))
+                return ToolResponse.Fail("define parameter must not be empty.");
+
+            // Validate define symbol format (letters, digits, underscores only)
+            foreach (char c in define)
+            {
+                if (!char.IsLetterOrDigit(c) && c != '_')
+                    return ToolResponse.Fail($"Invalid define symbol '{define}': only letters, digits, and underscores are allowed.");
+            }
+
+            string currentDefinesStr = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
+            var currentDefines = new HashSet<string>(
+                string.IsNullOrEmpty(currentDefinesStr)
+                    ? new string[0]
+                    : currentDefinesStr.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                                       .Select(d => d.Trim())
+                                       .Where(d => !string.IsNullOrEmpty(d)),
+                StringComparer.OrdinalIgnoreCase);
+
+            bool wasPresent = currentDefines.Contains(define);
+
+            if (enabled)
+            {
+                if (wasPresent)
+                    return ToolResponse.Ok($"Define '{define}' is already present in {resolvedName}. No change made.");
+                currentDefines.Add(define);
+            }
+            else
+            {
+                if (!wasPresent)
+                    return ToolResponse.Ok($"Define '{define}' was not present in {resolvedName}. No change made.");
+                currentDefines.Remove(define);
+            }
+
+            string newDefinesStr = string.Join(";", currentDefines.OrderBy(d => d));
+            PlayerSettings.SetScriptingDefineSymbolsForGroup(targetGroup, newDefinesStr);
+
+            string action = enabled ? "Added" : "Removed";
+            return ToolResponse.OkWithData(new
+            {
+                define,
+                action = action.ToLowerInvariant(),
+                buildTargetGroup = resolvedName,
+                newDefineCount = currentDefines.Count,
+                newDefines = currentDefines.OrderBy(d => d).ToArray()
+            }, $"{action} scripting define '{define}' for {resolvedName}. Recompilation will be triggered.");
+        }
+
+        /// <summary>
+        /// Reads the Unity Editor log file and returns the last N lines.
+        /// </summary>
+        private ToolResponse HandleGetLogFile(JObject parameters)
+        {
+            int maxLines = ToolHelpers.GetOptionalInt(parameters, "max_lines", 100);
+            maxLines = Mathf.Clamp(maxLines, 1, 500);
+            string search = ToolHelpers.GetOptionalString(parameters, "search");
+
+            string logPath = GetEditorLogPath();
+            if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
+            {
+                return ToolResponse.Fail($"Unity Editor log file not found. Expected path: {logPath ?? "unknown"}");
+            }
+
+            try
+            {
+                // Read log file with shared read access (Unity keeps it open)
+                string[] allLines;
+                using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var reader = new StreamReader(fs))
+                {
+                    var lineList = new List<string>();
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                        lineList.Add(line);
+                    allLines = lineList.ToArray();
+                }
+
+                // Apply search filter if provided
+                string[] filteredLines = allLines;
+                if (!string.IsNullOrEmpty(search))
+                {
+                    filteredLines = allLines
+                        .Where(l => l.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                        .ToArray();
+                }
+
+                // Take last N lines
+                var lastLines = filteredLines.Length <= maxLines
+                    ? filteredLines
+                    : filteredLines.Skip(filteredLines.Length - maxLines).ToArray();
+
+                var data = new JObject
+                {
+                    ["logFilePath"] = logPath,
+                    ["totalLines"] = allLines.Length,
+                    ["filteredLines"] = filteredLines.Length,
+                    ["returnedLines"] = lastLines.Length,
+                    ["maxLines"] = maxLines,
+                    ["content"] = string.Join("\n", lastLines)
+                };
+
+                if (!string.IsNullOrEmpty(search))
+                    data["searchFilter"] = search;
+
+                return ToolResponse.OkWithData(data,
+                    $"Editor log: {allLines.Length} total lines, {lastLines.Length} returned" +
+                    (string.IsNullOrEmpty(search) ? "" : $" (filter: '{search}')"));
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Failed to read Editor log file: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        /// <summary>
+        /// Resolves a build target group from a string name, defaulting to the active target group.
+        /// </summary>
+        private static BuildTargetGroup ResolveTargetGroup(string name, out string resolvedName)
+        {
+            if (!string.IsNullOrEmpty(name))
+            {
+                if (Enum.TryParse<BuildTargetGroup>(name, true, out var parsed) && parsed != BuildTargetGroup.Unknown)
+                {
+                    resolvedName = parsed.ToString();
+                    return parsed;
+                }
+            }
+
+            var activeTarget = EditorUserBuildSettings.activeBuildTarget;
+            var group = BuildPipeline.GetBuildTargetGroup(activeTarget);
+            resolvedName = group.ToString();
+            return group;
+        }
+
+        /// <summary>
+        /// Returns the path to the Unity Editor log file based on the current OS.
+        /// </summary>
+        private static string GetEditorLogPath()
+        {
+            string os = SystemInfo.operatingSystemFamily.ToString();
+            if (os == "Windows")
+            {
+                // %LOCALAPPDATA%\Unity\Editor\Editor.log
+                string localAppData = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
+                return Path.Combine(localAppData, "Unity", "Editor", "Editor.log");
+            }
+            else if (os == "MacOSX")
+            {
+                // ~/Library/Logs/Unity/Editor.log
+                string home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal);
+                return Path.Combine(home, "Library", "Logs", "Unity", "Editor.log");
+            }
+            else
+            {
+                // Linux: ~/.config/unity3d/Editor.log
+                string home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal);
+                return Path.Combine(home, ".config", "unity3d", "Editor.log");
+            }
+        }
+
+        /// <summary>
+        /// Returns the Unity version as a numeric string (e.g. "2022.3.45").
+        /// </summary>
+        private static string GetUnityVersionNumeric()
+        {
+            string v = Application.unityVersion;
+            // Strip suffix like "f1", "b1", "a1"
+            int idx = v.IndexOfAny(new[] { 'f', 'b', 'a', 'p' });
+            return idx > 0 ? v.Substring(0, idx) : v;
+        }
+
+        /// <summary>
+        /// Returns the name of the active render pipeline asset, or "Built-in" if none.
+        /// </summary>
+        private static string GetRenderPipelineName()
+        {
+            try
+            {
+                var graphicsSettings = UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline;
+                if (graphicsSettings == null)
+                    return "Built-in";
+                return graphicsSettings.GetType().Name;
+            }
+            catch
+            {
+                return "Unknown";
             }
         }
 

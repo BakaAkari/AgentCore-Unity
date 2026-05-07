@@ -27,7 +27,9 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""create_canvas"", ""create_element"", ""modify_element"", ""get_info"", ""list"", ""set_layout"", ""add_layout_group"", ""configure_canvas"", ""add_ui_component""],
+                    ""enum"": [""create_canvas"", ""create_element"", ""modify_element"", ""get_info"", ""list"", ""set_layout"", ""add_layout_group"", ""configure_canvas"", ""add_ui_component"",
+                               ""align_elements"", ""distribute_elements"", ""delete_element"", ""duplicate_element"",
+                               ""set_text"", ""set_image"", ""set_interactable"", ""reorder_element"", ""find_element""],
                     ""description"": ""Action to perform""
                 },
                 ""name"": { ""type"": ""string"", ""description"": ""Element name or target GameObject name"" },
@@ -95,14 +97,35 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 },
                 ""enabled"": { ""type"": ""boolean"", ""description"": ""Enable or disable element"" },
                 ""image"": { ""type"": ""string"", ""description"": ""Sprite asset path for Image component"" },
-                ""canvas"": { ""type"": ""string"", ""description"": ""Canvas name filter for list action"" }
+                ""canvas"": { ""type"": ""string"", ""description"": ""Canvas name filter for list action"" },
+                ""targets"": {
+                    ""type"": ""array"",
+                    ""items"": { ""type"": ""string"" },
+                    ""description"": ""List of UI element names for align/distribute actions""
+                },
+                ""align_axis"": {
+                    ""type"": ""string"",
+                    ""enum"": [""left"", ""center_h"", ""right"", ""top"", ""center_v"", ""bottom""],
+                    ""description"": ""Alignment axis for align_elements action""
+                },
+                ""distribute_axis"": {
+                    ""type"": ""string"",
+                    ""enum"": [""horizontal"", ""vertical""],
+                    ""description"": ""Distribution axis for distribute_elements action""
+                },
+                ""new_name"": { ""type"": ""string"", ""description"": ""New name for duplicated element"" },
+                ""sibling_index"": { ""type"": ""integer"", ""description"": ""Sibling index for reorder_element (0 = first)"" },
+                ""move_to_first"": { ""type"": ""boolean"", ""description"": ""Move element to first sibling position"" },
+                ""move_to_last"": { ""type"": ""boolean"", ""description"": ""Move element to last sibling position"" },
+                ""search"": { ""type"": ""string"", ""description"": ""Search string for find_element action"" },
+                ""interactable"": { ""type"": ""boolean"", ""description"": ""Set interactable state on Button/Toggle/Slider/Dropdown"" }
             },
             ""required"": [""action""]
         }");
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_ui",
-            description: "Manage Unity UI elements including Canvas, Text, Image, Button and other UI components",
+            description: "Manage Unity legacy UI (uGUI): create Canvas/elements, modify properties, align/distribute elements, set anchor presets, manage layout groups, configure interactability. For new UI Toolkit (UIElements), use manage_ui_toolkit instead.",
             category: "specialized",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -196,9 +219,39 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     case "add_ui_component":
                         response = HandleAddUIComponent(parameters);
                         break;
+                    case "align_elements":
+                        response = HandleAlignElements(parameters);
+                        break;
+                    case "distribute_elements":
+                        response = HandleDistributeElements(parameters);
+                        break;
+                    case "delete_element":
+                        response = HandleDeleteElement(parameters);
+                        break;
+                    case "duplicate_element":
+                        response = HandleDuplicateElement(parameters);
+                        break;
+                    case "set_text":
+                        response = HandleSetText(parameters);
+                        break;
+                    case "set_image":
+                        response = HandleSetImage(parameters);
+                        break;
+                    case "set_interactable":
+                        response = HandleSetInteractable(parameters);
+                        break;
+                    case "reorder_element":
+                        response = HandleReorderElement(parameters);
+                        break;
+                    case "find_element":
+                        response = HandleFindElement(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: create_canvas, create_element, modify_element, get_info, list, set_layout, add_layout_group, configure_canvas, add_ui_component");
+                            $"Unknown action: '{action}'. Valid actions: create_canvas, create_element, modify_element, get_info, list, " +
+                            "set_layout, add_layout_group, configure_canvas, add_ui_component, " +
+                            "align_elements, distribute_elements, delete_element, duplicate_element, " +
+                            "set_text, set_image, set_interactable, reorder_element, find_element");
                         break;
                 }
             }
@@ -1353,6 +1406,507 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
                 array.Add(childInfo);
             }
+        }
+
+        #endregion
+
+        #region New Action Handlers
+
+        /// <summary>
+        /// Align multiple UI elements along a common axis.
+        /// </summary>
+        private ToolResponse HandleAlignElements(JObject parameters)
+        {
+            var targets = parameters["targets"]?.ToObject<List<string>>();
+            var alignAxis = ToolHelpers.GetRequiredString(parameters, "align_axis").ToLowerInvariant();
+
+            if (targets == null || targets.Count < 2)
+                return ToolResponse.Fail("'targets' must contain at least 2 element names.");
+
+            var rects = new List<(string name, RectTransform rt)>();
+            foreach (var name in targets)
+            {
+                var go = ToolHelpers.FindGameObject(name);
+                if (go == null)
+                    return ToolResponse.Fail($"UI element '{name}' not found.");
+                var rt = go.GetComponent<RectTransform>();
+                if (rt == null)
+                    return ToolResponse.Fail($"'{name}' does not have a RectTransform component.");
+                rects.Add((name, rt));
+            }
+
+            // Record undo for all
+            foreach (var (_, rt) in rects)
+                ToolHelpers.RecordUndo(rt, "Align UI Elements");
+
+            // Compute reference value from first element
+            var refRect = rects[0].rt;
+            var refPos = refRect.anchoredPosition;
+            var refSize = refRect.sizeDelta;
+
+            var aligned = new List<string>();
+
+            foreach (var (name, rt) in rects)
+            {
+                var pos = rt.anchoredPosition;
+                var size = rt.sizeDelta;
+
+                switch (alignAxis)
+                {
+                    case "left":
+                        // Align left edges: set x so left edge matches reference left edge
+                        pos.x = refPos.x - refRect.pivot.x * refSize.x + rt.pivot.x * size.x;
+                        break;
+                    case "center_h":
+                        // Align horizontal centers
+                        pos.x = refPos.x + (0.5f - refRect.pivot.x) * refSize.x + (rt.pivot.x - 0.5f) * size.x;
+                        break;
+                    case "right":
+                        // Align right edges
+                        pos.x = refPos.x + (1f - refRect.pivot.x) * refSize.x - (1f - rt.pivot.x) * size.x;
+                        break;
+                    case "top":
+                        // Align top edges
+                        pos.y = refPos.y + (1f - refRect.pivot.y) * refSize.y - (1f - rt.pivot.y) * size.y;
+                        break;
+                    case "center_v":
+                        // Align vertical centers
+                        pos.y = refPos.y + (0.5f - refRect.pivot.y) * refSize.y + (rt.pivot.y - 0.5f) * size.y;
+                        break;
+                    case "bottom":
+                        // Align bottom edges
+                        pos.y = refPos.y - refRect.pivot.y * refSize.y + rt.pivot.y * size.y;
+                        break;
+                    default:
+                        return ToolResponse.Fail($"Unknown align_axis: '{alignAxis}'. Valid: left, center_h, right, top, center_v, bottom");
+                }
+
+                rt.anchoredPosition = pos;
+                EditorUtility.SetDirty(rt);
+                aligned.Add(name);
+            }
+
+            return ToolResponse.OkWithData(new { aligned_count = aligned.Count, axis = alignAxis, reference = rects[0].name },
+                $"Aligned {aligned.Count} elements ({alignAxis}) relative to '{rects[0].name}'");
+        }
+
+        /// <summary>
+        /// Distribute UI elements evenly along an axis.
+        /// </summary>
+        private ToolResponse HandleDistributeElements(JObject parameters)
+        {
+            var targets = parameters["targets"]?.ToObject<List<string>>();
+            var axis = ToolHelpers.GetOptionalString(parameters, "distribute_axis", "horizontal").ToLowerInvariant();
+
+            if (targets == null || targets.Count < 3)
+                return ToolResponse.Fail("'targets' must contain at least 3 element names for distribution.");
+
+            var rects = new List<(string name, RectTransform rt)>();
+            foreach (var name in targets)
+            {
+                var go = ToolHelpers.FindGameObject(name);
+                if (go == null)
+                    return ToolResponse.Fail($"UI element '{name}' not found.");
+                var rt = go.GetComponent<RectTransform>();
+                if (rt == null)
+                    return ToolResponse.Fail($"'{name}' does not have a RectTransform.");
+                rects.Add((name, rt));
+            }
+
+            foreach (var (_, rt) in rects)
+                ToolHelpers.RecordUndo(rt, "Distribute UI Elements");
+
+            if (axis == "horizontal")
+            {
+                // Sort by X position
+                rects.Sort((a, b) => a.rt.anchoredPosition.x.CompareTo(b.rt.anchoredPosition.x));
+                var first = rects[0].rt;
+                var last = rects[rects.Count - 1].rt;
+                var totalSpan = last.anchoredPosition.x - first.anchoredPosition.x;
+                var step = totalSpan / (rects.Count - 1);
+
+                for (int i = 1; i < rects.Count - 1; i++)
+                {
+                    var pos = rects[i].rt.anchoredPosition;
+                    pos.x = first.anchoredPosition.x + step * i;
+                    rects[i].rt.anchoredPosition = pos;
+                    EditorUtility.SetDirty(rects[i].rt);
+                }
+            }
+            else if (axis == "vertical")
+            {
+                // Sort by Y position
+                rects.Sort((a, b) => a.rt.anchoredPosition.y.CompareTo(b.rt.anchoredPosition.y));
+                var first = rects[0].rt;
+                var last = rects[rects.Count - 1].rt;
+                var totalSpan = last.anchoredPosition.y - first.anchoredPosition.y;
+                var step = totalSpan / (rects.Count - 1);
+
+                for (int i = 1; i < rects.Count - 1; i++)
+                {
+                    var pos = rects[i].rt.anchoredPosition;
+                    pos.y = first.anchoredPosition.y + step * i;
+                    rects[i].rt.anchoredPosition = pos;
+                    EditorUtility.SetDirty(rects[i].rt);
+                }
+            }
+            else
+            {
+                return ToolResponse.Fail($"Unknown distribute_axis: '{axis}'. Valid: horizontal, vertical");
+            }
+
+            return ToolResponse.OkWithData(new { count = rects.Count, axis },
+                $"Distributed {rects.Count} elements evenly along {axis} axis");
+        }
+
+        /// <summary>
+        /// Delete a UI element from the scene.
+        /// </summary>
+        private ToolResponse HandleDeleteElement(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"UI element '{targetName}' not found.");
+
+            if (go.GetComponent<RectTransform>() == null)
+                return ToolResponse.Fail($"'{targetName}' does not have a RectTransform — it may not be a UI element.");
+
+            var parentName = go.transform.parent != null ? go.transform.parent.gameObject.name : null;
+            Undo.DestroyObjectImmediate(go);
+
+            return ToolResponse.OkWithData(new { deleted = targetName, parent = parentName },
+                $"Deleted UI element '{targetName}'");
+        }
+
+        /// <summary>
+        /// Duplicate a UI element.
+        /// </summary>
+        private ToolResponse HandleDuplicateElement(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var newName = ToolHelpers.GetOptionalString(parameters, "new_name", null);
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"UI element '{targetName}' not found.");
+
+            if (go.GetComponent<RectTransform>() == null)
+                return ToolResponse.Fail($"'{targetName}' does not have a RectTransform — it may not be a UI element.");
+
+            var duplicate = UnityEngine.Object.Instantiate(go, go.transform.parent);
+            duplicate.name = newName ?? (targetName + " (Copy)");
+            Undo.RegisterCreatedObjectUndo(duplicate, $"Duplicate {targetName}");
+
+            // Offset position slightly
+            var rt = duplicate.GetComponent<RectTransform>();
+            if (rt != null)
+            {
+                var pos = rt.anchoredPosition;
+                pos.x += 10f;
+                pos.y -= 10f;
+                rt.anchoredPosition = pos;
+            }
+
+            return ToolResponse.OkWithData(new
+            {
+                original = targetName,
+                duplicate = duplicate.name,
+                parent = go.transform.parent?.gameObject.name
+            }, $"Duplicated '{targetName}' as '{duplicate.name}'");
+        }
+
+        /// <summary>
+        /// Set text content on a Text or TMP_Text component.
+        /// </summary>
+        private ToolResponse HandleSetText(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var text = ToolHelpers.GetRequiredString(parameters, "text");
+            var fontSize = parameters["font_size"] != null ? (int?)parameters["font_size"].Value<int>() : null;
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"UI element '{targetName}' not found.");
+
+            ResolveUITypes();
+
+            var changes = new List<string>();
+
+            // Try legacy Text
+            if (_textType != null)
+            {
+                var textComp = go.GetComponent(_textType);
+                if (textComp != null)
+                {
+                    ToolHelpers.RecordUndo(textComp, "Set UI Text");
+                    SetPropertyViaReflection(textComp, "text", text);
+                    changes.Add($"text = '{text}'");
+
+                    if (fontSize.HasValue)
+                    {
+                        SetPropertyViaReflection(textComp, "fontSize", fontSize.Value);
+                        changes.Add($"fontSize = {fontSize.Value}");
+                    }
+
+                    EditorUtility.SetDirty(textComp);
+                    return ToolResponse.OkWithData(new { target = targetName, changes },
+                        $"Set text on '{targetName}' (UnityEngine.UI.Text)");
+                }
+            }
+
+            // Try TMP_Text via reflection
+            var tmpType = ToolHelpers.ResolveComponentType("TMPro.TMP_Text")
+                       ?? ToolHelpers.ResolveComponentType("TMPro.TextMeshProUGUI");
+            if (tmpType != null)
+            {
+                var tmpComp = go.GetComponent(tmpType);
+                if (tmpComp != null)
+                {
+                    ToolHelpers.RecordUndo(tmpComp, "Set TMP Text");
+                    SetPropertyViaReflection(tmpComp, "text", text);
+                    changes.Add($"text = '{text}'");
+
+                    if (fontSize.HasValue)
+                    {
+                        SetPropertyViaReflection(tmpComp, "fontSize", (float)fontSize.Value);
+                        changes.Add($"fontSize = {fontSize.Value}");
+                    }
+
+                    EditorUtility.SetDirty(tmpComp);
+                    return ToolResponse.OkWithData(new { target = targetName, changes },
+                        $"Set text on '{targetName}' (TextMeshProUGUI)");
+                }
+            }
+
+            return ToolResponse.Fail($"'{targetName}' has no Text or TextMeshProUGUI component.");
+        }
+
+        /// <summary>
+        /// Set sprite/image on an Image component.
+        /// </summary>
+        private ToolResponse HandleSetImage(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var imagePath = ToolHelpers.GetRequiredString(parameters, "image");
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"UI element '{targetName}' not found.");
+
+            ResolveUITypes();
+
+            if (_imageType == null)
+                return ToolResponse.Fail("UnityEngine.UI.Image type not found. Ensure Unity UI package is installed.");
+
+            var imageComp = go.GetComponent(_imageType);
+            if (imageComp == null)
+                return ToolResponse.Fail($"'{targetName}' does not have an Image component.");
+
+            // Load sprite
+            var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(imagePath);
+            if (sprite == null)
+            {
+                // Try finding by name
+                var guids = AssetDatabase.FindAssets($"{System.IO.Path.GetFileNameWithoutExtension(imagePath)} t:Sprite");
+                if (guids.Length > 0)
+                    sprite = AssetDatabase.LoadAssetAtPath<Sprite>(AssetDatabase.GUIDToAssetPath(guids[0]));
+            }
+
+            if (sprite == null)
+                return ToolResponse.Fail($"Sprite not found at '{imagePath}'. Provide a valid asset path (e.g. 'Assets/UI/Icons/icon.png').");
+
+            ToolHelpers.RecordUndo(imageComp, "Set UI Image");
+            SetPropertyViaReflection(imageComp, "sprite", sprite);
+            EditorUtility.SetDirty(imageComp);
+
+            return ToolResponse.OkWithData(new { target = targetName, sprite = sprite.name, path = imagePath },
+                $"Set sprite '{sprite.name}' on '{targetName}'");
+        }
+
+        /// <summary>
+        /// Set interactable state on interactive UI components.
+        /// </summary>
+        private ToolResponse HandleSetInteractable(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var interactable = ToolHelpers.GetOptionalBool(parameters, "interactable", true);
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"UI element '{targetName}' not found.");
+
+            ResolveUITypes();
+
+            // Try Button, Toggle, Slider, Dropdown, InputField
+            var interactableTypes = new[] { _buttonType, _toggleType, _sliderType, _dropdownType, _inputFieldType };
+            foreach (var type in interactableTypes)
+            {
+                if (type == null) continue;
+                var comp = go.GetComponent(type);
+                if (comp == null) continue;
+
+                ToolHelpers.RecordUndo(comp, "Set UI Interactable");
+                SetPropertyViaReflection(comp, "interactable", interactable);
+                EditorUtility.SetDirty(comp);
+
+                return ToolResponse.OkWithData(new
+                {
+                    target = targetName,
+                    component = type.Name,
+                    interactable
+                }, $"Set interactable={interactable} on '{targetName}' ({type.Name})");
+            }
+
+            return ToolResponse.Fail($"'{targetName}' has no interactable UI component (Button, Toggle, Slider, Dropdown, or InputField).");
+        }
+
+        /// <summary>
+        /// Reorder a UI element within its parent's children.
+        /// </summary>
+        private ToolResponse HandleReorderElement(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var siblingIndex = parameters["sibling_index"] != null ? (int?)parameters["sibling_index"].Value<int>() : null;
+            var moveToFirst = ToolHelpers.GetOptionalBool(parameters, "move_to_first", false);
+            var moveToLast = ToolHelpers.GetOptionalBool(parameters, "move_to_last", false);
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"UI element '{targetName}' not found.");
+
+            if (go.transform.parent == null)
+                return ToolResponse.Fail($"'{targetName}' has no parent — cannot reorder root objects.");
+
+            ToolHelpers.RecordUndo(go.transform, "Reorder UI Element");
+
+            int newIndex;
+            if (moveToFirst)
+            {
+                go.transform.SetAsFirstSibling();
+                newIndex = 0;
+            }
+            else if (moveToLast)
+            {
+                go.transform.SetAsLastSibling();
+                newIndex = go.transform.parent.childCount - 1;
+            }
+            else if (siblingIndex.HasValue)
+            {
+                go.transform.SetSiblingIndex(siblingIndex.Value);
+                newIndex = go.transform.GetSiblingIndex();
+            }
+            else
+            {
+                return ToolResponse.Fail("Specify 'sibling_index', 'move_to_first', or 'move_to_last'.");
+            }
+
+            EditorUtility.SetDirty(go.transform);
+
+            return ToolResponse.OkWithData(new
+            {
+                target = targetName,
+                sibling_index = newIndex,
+                parent = go.transform.parent.gameObject.name
+            }, $"Moved '{targetName}' to sibling index {newIndex}");
+        }
+
+        /// <summary>
+        /// Find UI elements by name, type, or text content.
+        /// </summary>
+        private ToolResponse HandleFindElement(JObject parameters)
+        {
+            var search = ToolHelpers.GetRequiredString(parameters, "search");
+            var canvasFilter = ToolHelpers.GetOptionalString(parameters, "canvas", null);
+
+            ResolveUITypes();
+
+            // Find all canvases
+            var canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
+            if (!string.IsNullOrEmpty(canvasFilter))
+                canvases = canvases.Where(c => c.gameObject.name.Contains(canvasFilter)).ToArray();
+
+            var results = new List<object>();
+
+            foreach (var canvas in canvases)
+            {
+                SearchUIChildren(canvas.transform, search, canvas.gameObject.name, results);
+            }
+
+            return ToolResponse.OkWithData(new
+            {
+                search,
+                count = results.Count,
+                elements = results
+            }, $"Found {results.Count} UI element(s) matching '{search}'");
+        }
+
+        private void SearchUIChildren(Transform parent, string search, string canvasName, List<object> results)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                var go = child.gameObject;
+
+                bool matches = go.name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0;
+
+                // Also check text content
+                if (!matches && _textType != null)
+                {
+                    var textComp = go.GetComponent(_textType);
+                    if (textComp != null)
+                    {
+                        var textVal = GetPropertyViaReflection(textComp, "text")?.ToString() ?? "";
+                        if (textVal.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                            matches = true;
+                    }
+                }
+
+                if (matches)
+                {
+                    var rt = go.GetComponent<RectTransform>();
+                    results.Add(new
+                    {
+                        name = go.name,
+                        canvas = canvasName,
+                        path = GetGameObjectPath(go),
+                        active = go.activeInHierarchy,
+                        position = rt != null ? (object)new { x = rt.anchoredPosition.x, y = rt.anchoredPosition.y } : null,
+                        components = go.GetComponents<Component>()
+                            .Where(c => c != null && !(c is Transform))
+                            .Select(c => c.GetType().Name).ToList()
+                    });
+                }
+
+                SearchUIChildren(child, search, canvasName, results);
+            }
+        }
+
+        private static string GetGameObjectPath(GameObject go)
+        {
+            var path = go.name;
+            var parent = go.transform.parent;
+            while (parent != null)
+            {
+                path = parent.gameObject.name + "/" + path;
+                parent = parent.parent;
+            }
+            return path;
+        }
+
+        private static void SetPropertyViaReflection(Component comp, string propertyName, object value)
+        {
+            var prop = comp.GetType().GetProperty(propertyName,
+                BindingFlags.Public | BindingFlags.Instance);
+            if (prop != null && prop.CanWrite)
+            {
+                prop.SetValue(comp, value);
+                return;
+            }
+            var field = comp.GetType().GetField(propertyName,
+                BindingFlags.Public | BindingFlags.Instance);
+            field?.SetValue(comp, value);
         }
 
         #endregion

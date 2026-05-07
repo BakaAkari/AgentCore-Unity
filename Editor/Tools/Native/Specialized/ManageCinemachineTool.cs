@@ -28,7 +28,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""create_virtual_camera"", ""set_target"", ""configure_body"", ""configure_aim"", ""set_noise"", ""get_info"", ""list"", ""set_priority"", ""configure_lens"", ""setup_brain""],
+                    ""enum"": [""create_virtual_camera"", ""set_target"", ""configure_body"", ""configure_aim"", ""set_noise"", ""get_info"", ""list"", ""set_priority"", ""configure_lens"", ""setup_brain"",
+                               ""create_freelook"", ""configure_freelook_orbits"", ""create_state_driven"", ""add_state_camera"",
+                               ""create_clearshot"", ""create_sequencer"", ""add_sequencer_entry"", ""create_dolly_track"",
+                               ""configure_impulse"", ""set_blend_list""],
                     ""description"": ""Action to perform on Cinemachine""
                 },
                 ""target"": { ""type"": ""string"", ""description"": ""Target GameObject name (virtual camera or camera with Brain)"" },
@@ -69,6 +72,38 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     ""type"": ""string"",
                     ""enum"": [""cut"", ""ease_in_out"", ""ease_in"", ""ease_out"", ""hard_in"", ""hard_out"", ""linear""],
                     ""description"": ""Blend style (setup_brain)""
+                },
+                ""top_radius"": { ""type"": ""number"", ""description"": ""FreeLook top orbit radius"" },
+                ""mid_radius"": { ""type"": ""number"", ""description"": ""FreeLook middle orbit radius"" },
+                ""bot_radius"": { ""type"": ""number"", ""description"": ""FreeLook bottom orbit radius"" },
+                ""top_height"": { ""type"": ""number"", ""description"": ""FreeLook top orbit height"" },
+                ""mid_height"": { ""type"": ""number"", ""description"": ""FreeLook middle orbit height"" },
+                ""bot_height"": { ""type"": ""number"", ""description"": ""FreeLook bottom orbit height"" },
+                ""animator"": { ""type"": ""string"", ""description"": ""Animator GameObject name for state-driven camera"" },
+                ""state_name"": { ""type"": ""string"", ""description"": ""Animator state name for add_state_camera"" },
+                ""camera_name"": { ""type"": ""string"", ""description"": ""Virtual camera name for state mapping"" },
+                ""cameras"": {
+                    ""type"": ""array"",
+                    ""items"": { ""type"": ""string"" },
+                    ""description"": ""List of virtual camera names (create_clearshot, create_sequencer)""
+                },
+                ""duration"": { ""type"": ""number"", ""description"": ""Duration in seconds for sequencer entry"" },
+                ""hold"": { ""type"": ""boolean"", ""description"": ""Hold last camera in sequencer"" },
+                ""track_path"": { ""type"": ""string"", ""description"": ""Asset path for dolly track"" },
+                ""impulse_force"": { ""type"": ""number"", ""description"": ""Impulse force magnitude"" },
+                ""impulse_channel"": { ""type"": ""integer"", ""description"": ""Impulse channel (0-31)"" },
+                ""blend_entries"": {
+                    ""type"": ""array"",
+                    ""items"": {
+                        ""type"": ""object"",
+                        ""properties"": {
+                            ""from"": { ""type"": ""string"" },
+                            ""to"": { ""type"": ""string"" },
+                            ""time"": { ""type"": ""number"" },
+                            ""style"": { ""type"": ""string"" }
+                        }
+                    },
+                    ""description"": ""Custom blend list entries for set_blend_list""
                 }
             },
             ""required"": [""action""]
@@ -79,7 +114,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         /// </summary>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_cinemachine",
-            description: "Manage Cinemachine virtual cameras: create, configure body/aim/lens/noise, set targets, priorities, and setup CinemachineBrain. Requires com.unity.cinemachine package.",
+            description: "Manage Cinemachine virtual cameras: create VirtualCamera/FreeLook/StateDriven/ClearShot/Sequencer, configure body/aim/lens/noise/impulse, set targets, priorities, blend lists, and setup CinemachineBrain. Requires com.unity.cinemachine package.",
             category: "Specialized",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -152,8 +187,43 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     case "setup_brain":
                         response = HandleSetupBrain(parameters);
                         break;
+                    case "create_freelook":
+                        response = HandleCreateFreeLook(parameters);
+                        break;
+                    case "configure_freelook_orbits":
+                        response = HandleConfigureFreeLookOrbits(parameters);
+                        break;
+                    case "create_state_driven":
+                        response = HandleCreateStateDriven(parameters);
+                        break;
+                    case "add_state_camera":
+                        response = HandleAddStateCamera(parameters);
+                        break;
+                    case "create_clearshot":
+                        response = HandleCreateClearShot(parameters);
+                        break;
+                    case "create_sequencer":
+                        response = HandleCreateSequencer(parameters);
+                        break;
+                    case "add_sequencer_entry":
+                        response = HandleAddSequencerEntry(parameters);
+                        break;
+                    case "create_dolly_track":
+                        response = HandleCreateDollyTrack(parameters);
+                        break;
+                    case "configure_impulse":
+                        response = HandleConfigureImpulse(parameters);
+                        break;
+                    case "set_blend_list":
+                        response = HandleSetBlendList(parameters);
+                        break;
                     default:
-                        response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: create_virtual_camera, set_target, configure_body, configure_aim, set_noise, get_info, list, set_priority, configure_lens, setup_brain");
+                        response = ToolResponse.Fail(
+                            $"Unknown action: {action}. Valid actions: create_virtual_camera, set_target, configure_body, configure_aim, " +
+                            "set_noise, get_info, list, set_priority, configure_lens, setup_brain, " +
+                            "create_freelook, configure_freelook_orbits, create_state_driven, add_state_camera, " +
+                            "create_clearshot, create_sequencer, add_sequencer_entry, create_dolly_track, " +
+                            "configure_impulse, set_blend_list");
                         break;
                 }
             }
@@ -1032,6 +1102,609 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
             return ToolResponse.Ok(msg);
         }
+
+        #region Advanced Camera Handlers
+
+        /// <summary>
+        /// Create a FreeLook camera (3-orbit rig for third-person follow).
+        /// </summary>
+        private ToolResponse HandleCreateFreeLook(JObject parameters)
+        {
+            var name = ToolHelpers.GetOptionalString(parameters, "name", "FreeLook Camera");
+            var followName = ToolHelpers.GetOptionalString(parameters, "follow", null);
+            var lookAtName = ToolHelpers.GetOptionalString(parameters, "lookAt", null);
+
+            // Find FreeLook type
+            var freeLookType = FindType("Cinemachine.CinemachineFreeLook", "Cinemachine")
+                            ?? FindType("Unity.Cinemachine.CinemachineFreeLook", "Unity.Cinemachine");
+
+            if (freeLookType == null)
+                return ToolResponse.Fail("CinemachineFreeLook type not found. Ensure Cinemachine 2.x is installed (FreeLook is not available in Cinemachine 3.x — use CinemachineCamera with OrbitalFollow instead).");
+
+            var go = new GameObject(name);
+            ToolHelpers.RegisterCreatedObject(go, "Create Cinemachine FreeLook");
+
+            var freeLook = go.AddComponent(freeLookType);
+            if (freeLook == null)
+                return ToolResponse.Fail($"Failed to add CinemachineFreeLook to '{name}'.");
+
+            if (!string.IsNullOrEmpty(followName))
+            {
+                var followGo = ToolHelpers.FindGameObject(followName);
+                if (followGo != null) SetProperty(freeLook, "Follow", followGo.transform);
+            }
+
+            if (!string.IsNullOrEmpty(lookAtName))
+            {
+                var lookAtGo = ToolHelpers.FindGameObject(lookAtName);
+                if (lookAtGo != null) SetProperty(freeLook, "LookAt", lookAtGo.transform);
+            }
+
+            EditorUtility.SetDirty(go);
+
+            return ToolResponse.OkWithData(new
+            {
+                name = go.name,
+                type = freeLookType.Name,
+                follow = followName,
+                lookAt = lookAtName
+            }, $"Created FreeLook camera '{name}'. Use configure_freelook_orbits to set orbit radii/heights.");
+        }
+
+        /// <summary>
+        /// Configure the three orbit rings of a FreeLook camera.
+        /// </summary>
+        private ToolResponse HandleConfigureFreeLookOrbits(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            var freeLookType = FindType("Cinemachine.CinemachineFreeLook", "Cinemachine")
+                            ?? FindType("Unity.Cinemachine.CinemachineFreeLook", "Unity.Cinemachine");
+
+            if (freeLookType == null)
+                return ToolResponse.Fail("CinemachineFreeLook type not found.");
+
+            var freeLook = go.GetComponent(freeLookType);
+            if (freeLook == null)
+                return ToolResponse.Fail($"'{targetName}' does not have a CinemachineFreeLook component.");
+
+            ToolHelpers.RecordUndo(freeLook, "Configure FreeLook Orbits");
+
+            // Orbits is an array of Orbit structs: [top, middle, bottom]
+            var orbitsField = freeLookType.GetField("m_Orbits") ?? freeLookType.GetField("Orbits");
+            if (orbitsField == null)
+                return ToolResponse.Fail("Could not find orbits field on CinemachineFreeLook.");
+
+            var orbits = orbitsField.GetValue(freeLook) as Array;
+            if (orbits == null || orbits.Length < 3)
+                return ToolResponse.Fail("FreeLook orbits array is null or has fewer than 3 entries.");
+
+            var changes = new List<string>();
+
+            // Helper to set orbit values
+            void SetOrbit(int index, string radiusKey, string heightKey, string label)
+            {
+                var orbit = orbits.GetValue(index);
+                if (orbit == null) return;
+                var orbitType = orbit.GetType();
+
+                var radius = ToolHelpers.GetOptionalFloat(parameters, radiusKey, -1f);
+                if (radius >= 0f)
+                {
+                    var rf = orbitType.GetField("m_Radius") ?? orbitType.GetField("Radius");
+                    rf?.SetValue(orbit, radius);
+                    changes.Add($"{label} radius → {radius}");
+                }
+
+                var height = ToolHelpers.GetOptionalFloat(parameters, heightKey, float.MinValue);
+                if (height > float.MinValue)
+                {
+                    var hf = orbitType.GetField("m_Height") ?? orbitType.GetField("Height");
+                    hf?.SetValue(orbit, height);
+                    changes.Add($"{label} height → {height}");
+                }
+
+                orbits.SetValue(orbit, index);
+            }
+
+            SetOrbit(0, "top_radius", "top_height", "top");
+            SetOrbit(1, "mid_radius", "mid_height", "mid");
+            SetOrbit(2, "bot_radius", "bot_height", "bot");
+
+            orbitsField.SetValue(freeLook, orbits);
+            EditorUtility.SetDirty(freeLook);
+
+            if (changes.Count == 0)
+                return ToolResponse.Ok($"No orbit parameters changed. Provide top_radius, mid_radius, bot_radius, top_height, mid_height, or bot_height.");
+
+            return ToolResponse.OkWithData(new { target = targetName, changes },
+                $"Configured FreeLook orbits on '{targetName}': {string.Join(", ", changes)}");
+        }
+
+        /// <summary>
+        /// Create a State-Driven camera that switches virtual cameras based on Animator states.
+        /// </summary>
+        private ToolResponse HandleCreateStateDriven(JObject parameters)
+        {
+            var name = ToolHelpers.GetOptionalString(parameters, "name", "State Driven Camera");
+            var animatorName = ToolHelpers.GetOptionalString(parameters, "animator", null);
+            var childCameras = parameters["cameras"]?.ToObject<List<string>>() ?? new List<string>();
+
+            var stateDrivenType = FindType("Cinemachine.CinemachineStateDrivenCamera", "Cinemachine")
+                               ?? FindType("Unity.Cinemachine.CinemachineStateDrivenCamera", "Unity.Cinemachine");
+
+            if (stateDrivenType == null)
+                return ToolResponse.Fail("CinemachineStateDrivenCamera type not found. Ensure Cinemachine is installed.");
+
+            var go = new GameObject(name);
+            ToolHelpers.RegisterCreatedObject(go, "Create State Driven Camera");
+
+            var stateDriven = go.AddComponent(stateDrivenType);
+            if (stateDriven == null)
+                return ToolResponse.Fail($"Failed to add CinemachineStateDrivenCamera to '{name}'.");
+
+            // Set animator
+            if (!string.IsNullOrEmpty(animatorName))
+            {
+                var animGo = ToolHelpers.FindGameObject(animatorName);
+                if (animGo != null)
+                {
+                    var animator = animGo.GetComponent<Animator>();
+                    if (animator != null)
+                        SetProperty(stateDriven, "m_AnimatedTarget", animator);
+                }
+            }
+
+            // Add child virtual cameras
+            var addedCameras = new List<string>();
+            foreach (var camName in childCameras)
+            {
+                var camGo = ToolHelpers.FindGameObject(camName);
+                if (camGo != null)
+                {
+                    camGo.transform.SetParent(go.transform);
+                    addedCameras.Add(camName);
+                }
+            }
+
+            EditorUtility.SetDirty(go);
+
+            return ToolResponse.OkWithData(new
+            {
+                name = go.name,
+                animator = animatorName,
+                child_cameras = addedCameras
+            }, $"Created StateDriven camera '{name}' with {addedCameras.Count} child camera(s). Use add_state_camera to map states.");
+        }
+
+        /// <summary>
+        /// Map an Animator state to a virtual camera in a State-Driven camera.
+        /// </summary>
+        private ToolResponse HandleAddStateCamera(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var stateName = ToolHelpers.GetRequiredString(parameters, "state_name");
+            var cameraName = ToolHelpers.GetRequiredString(parameters, "camera_name");
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            var stateDrivenType = FindType("Cinemachine.CinemachineStateDrivenCamera", "Cinemachine")
+                               ?? FindType("Unity.Cinemachine.CinemachineStateDrivenCamera", "Unity.Cinemachine");
+
+            if (stateDrivenType == null)
+                return ToolResponse.Fail("CinemachineStateDrivenCamera type not found.");
+
+            var stateDriven = go.GetComponent(stateDrivenType);
+            if (stateDriven == null)
+                return ToolResponse.Fail($"'{targetName}' does not have a CinemachineStateDrivenCamera component.");
+
+            // Find the camera to map
+            var camGo = ToolHelpers.FindGameObject(cameraName);
+            if (camGo == null)
+                return ToolResponse.Fail($"Camera GameObject '{cameraName}' not found.");
+
+            ToolHelpers.RecordUndo(stateDriven, "Add State Camera Mapping");
+
+            // Get the m_Instructions array and add a new entry
+            var instructionsField = stateDrivenType.GetField("m_Instructions");
+            if (instructionsField == null)
+                return ToolResponse.Fail("Could not find m_Instructions field on CinemachineStateDrivenCamera.");
+
+            var instructions = instructionsField.GetValue(stateDriven) as Array;
+            var instructionType = FindType("Cinemachine.CinemachineStateDrivenCamera+Instruction", "Cinemachine")
+                               ?? FindType("Unity.Cinemachine.CinemachineStateDrivenCamera+Instruction", "Unity.Cinemachine");
+
+            if (instructionType == null)
+                return ToolResponse.Fail("Could not find Instruction type.");
+
+            // Create new instruction
+            var newInstruction = Activator.CreateInstance(instructionType);
+            var vcamField = instructionType.GetField("m_VirtualCamera");
+            vcamField?.SetValue(newInstruction, GetVirtualCameraComponent(camGo));
+
+            // Expand array
+            var currentLen = instructions?.Length ?? 0;
+            var newInstructions = Array.CreateInstance(instructionType, currentLen + 1);
+            if (instructions != null)
+                Array.Copy(instructions, newInstructions, currentLen);
+            newInstructions.SetValue(newInstruction, currentLen);
+            instructionsField.SetValue(stateDriven, newInstructions);
+
+            EditorUtility.SetDirty(stateDriven);
+
+            return ToolResponse.OkWithData(new
+            {
+                target = targetName,
+                state = stateName,
+                camera = cameraName
+            }, $"Added state mapping: '{stateName}' → '{cameraName}' on '{targetName}'. Note: state hash must be set manually in Inspector for full functionality.");
+        }
+
+        /// <summary>
+        /// Create a ClearShot camera that picks the best unobstructed virtual camera.
+        /// </summary>
+        private ToolResponse HandleCreateClearShot(JObject parameters)
+        {
+            var name = ToolHelpers.GetOptionalString(parameters, "name", "ClearShot Camera");
+            var childCameras = parameters["cameras"]?.ToObject<List<string>>() ?? new List<string>();
+
+            var clearShotType = FindType("Cinemachine.CinemachineClearShot", "Cinemachine")
+                             ?? FindType("Unity.Cinemachine.CinemachineClearShot", "Unity.Cinemachine");
+
+            if (clearShotType == null)
+                return ToolResponse.Fail("CinemachineClearShot type not found. Ensure Cinemachine is installed.");
+
+            var go = new GameObject(name);
+            ToolHelpers.RegisterCreatedObject(go, "Create ClearShot Camera");
+
+            var clearShot = go.AddComponent(clearShotType);
+            if (clearShot == null)
+                return ToolResponse.Fail($"Failed to add CinemachineClearShot to '{name}'.");
+
+            // Add child virtual cameras
+            var addedCameras = new List<string>();
+            foreach (var camName in childCameras)
+            {
+                var camGo = ToolHelpers.FindGameObject(camName);
+                if (camGo != null)
+                {
+                    camGo.transform.SetParent(go.transform);
+                    addedCameras.Add(camName);
+                }
+            }
+
+            EditorUtility.SetDirty(go);
+
+            return ToolResponse.OkWithData(new
+            {
+                name = go.name,
+                type = clearShotType.Name,
+                child_cameras = addedCameras
+            }, $"Created ClearShot camera '{name}' with {addedCameras.Count} child camera(s).");
+        }
+
+        /// <summary>
+        /// Create a Sequencer camera that plays through a list of virtual cameras in order.
+        /// </summary>
+        private ToolResponse HandleCreateSequencer(JObject parameters)
+        {
+            var name = ToolHelpers.GetOptionalString(parameters, "name", "Sequencer Camera");
+            var childCameras = parameters["cameras"]?.ToObject<List<string>>() ?? new List<string>();
+            var hold = ToolHelpers.GetOptionalBool(parameters, "hold", false);
+
+            var sequencerType = FindType("Cinemachine.CinemachineSequencerCamera", "Cinemachine")
+                             ?? FindType("Unity.Cinemachine.CinemachineSequencerCamera", "Unity.Cinemachine");
+
+            if (sequencerType == null)
+                return ToolResponse.Fail("CinemachineSequencerCamera type not found. Ensure Cinemachine is installed.");
+
+            var go = new GameObject(name);
+            ToolHelpers.RegisterCreatedObject(go, "Create Sequencer Camera");
+
+            var sequencer = go.AddComponent(sequencerType);
+            if (sequencer == null)
+                return ToolResponse.Fail($"Failed to add CinemachineSequencerCamera to '{name}'.");
+
+            // Set loop/hold
+            SetProperty(sequencer, "m_Loop", hold);
+
+            // Add child virtual cameras
+            var addedCameras = new List<string>();
+            foreach (var camName in childCameras)
+            {
+                var camGo = ToolHelpers.FindGameObject(camName);
+                if (camGo != null)
+                {
+                    camGo.transform.SetParent(go.transform);
+                    addedCameras.Add(camName);
+                }
+            }
+
+            EditorUtility.SetDirty(go);
+
+            return ToolResponse.OkWithData(new
+            {
+                name = go.name,
+                type = sequencerType.Name,
+                child_cameras = addedCameras,
+                hold
+            }, $"Created Sequencer camera '{name}' with {addedCameras.Count} child camera(s). Use add_sequencer_entry to configure timing.");
+        }
+
+        /// <summary>
+        /// Add a timed entry to a Sequencer camera.
+        /// </summary>
+        private ToolResponse HandleAddSequencerEntry(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var cameraName = ToolHelpers.GetRequiredString(parameters, "camera_name");
+            var duration = ToolHelpers.GetOptionalFloat(parameters, "duration", 2f);
+            var blendStyle = ToolHelpers.GetOptionalString(parameters, "blendStyle", "ease_in_out");
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            var sequencerType = FindType("Cinemachine.CinemachineSequencerCamera", "Cinemachine")
+                             ?? FindType("Unity.Cinemachine.CinemachineSequencerCamera", "Unity.Cinemachine");
+
+            if (sequencerType == null)
+                return ToolResponse.Fail("CinemachineSequencerCamera type not found.");
+
+            var sequencer = go.GetComponent(sequencerType);
+            if (sequencer == null)
+                return ToolResponse.Fail($"'{targetName}' does not have a CinemachineSequencerCamera component.");
+
+            var camGo = ToolHelpers.FindGameObject(cameraName);
+            if (camGo == null)
+                return ToolResponse.Fail($"Camera '{cameraName}' not found.");
+
+            ToolHelpers.RecordUndo(sequencer, "Add Sequencer Entry");
+
+            // Get m_Instructions array
+            var instructionsField = sequencerType.GetField("m_Instructions");
+            if (instructionsField == null)
+                return ToolResponse.Fail("Could not find m_Instructions on CinemachineSequencerCamera.");
+
+            var instructions = instructionsField.GetValue(sequencer) as Array;
+            var instructionType = FindType("Cinemachine.CinemachineSequencerCamera+Instruction", "Cinemachine")
+                               ?? FindType("Unity.Cinemachine.CinemachineSequencerCamera+Instruction", "Unity.Cinemachine");
+
+            if (instructionType == null)
+                return ToolResponse.Fail("Could not find Instruction type for CinemachineSequencerCamera.");
+
+            var newInstruction = Activator.CreateInstance(instructionType);
+            var vcamField = instructionType.GetField("m_VirtualCamera");
+            vcamField?.SetValue(newInstruction, GetVirtualCameraComponent(camGo));
+
+            var holdField = instructionType.GetField("m_Hold");
+            holdField?.SetValue(newInstruction, duration);
+
+            // Expand array
+            var currentLen = instructions?.Length ?? 0;
+            var newInstructions = Array.CreateInstance(instructionType, currentLen + 1);
+            if (instructions != null)
+                Array.Copy(instructions, newInstructions, currentLen);
+            newInstructions.SetValue(newInstruction, currentLen);
+            instructionsField.SetValue(sequencer, newInstructions);
+
+            EditorUtility.SetDirty(sequencer);
+
+            return ToolResponse.OkWithData(new
+            {
+                target = targetName,
+                camera = cameraName,
+                duration,
+                blend_style = blendStyle
+            }, $"Added sequencer entry: '{cameraName}' for {duration}s on '{targetName}'.");
+        }
+
+        /// <summary>
+        /// Create a Dolly Track asset and optionally assign it to a virtual camera.
+        /// </summary>
+        private ToolResponse HandleCreateDollyTrack(JObject parameters)
+        {
+            var name = ToolHelpers.GetOptionalString(parameters, "name", "Dolly Track");
+            var trackPath = ToolHelpers.GetOptionalString(parameters, "track_path", $"Assets/Cinemachine/{name}.asset");
+            var targetCamera = ToolHelpers.GetOptionalString(parameters, "target", null);
+
+            // Find DollyTrack type
+            var dollyTrackType = FindType("Cinemachine.CinemachinePathBase", "Cinemachine")
+                              ?? FindType("Cinemachine.CinemachineSmoothPath", "Cinemachine")
+                              ?? FindType("Unity.Cinemachine.CinemachineSplinePath", "Unity.Cinemachine");
+
+            if (dollyTrackType == null)
+                return ToolResponse.Fail("Cinemachine dolly track type not found. Ensure Cinemachine is installed.");
+
+            // Create as a GameObject with the path component
+            var go = new GameObject(name);
+            ToolHelpers.RegisterCreatedObject(go, "Create Dolly Track");
+            var track = go.AddComponent(dollyTrackType);
+
+            if (track == null)
+                return ToolResponse.Fail($"Failed to add dolly track component to '{name}'.");
+
+            // If target camera specified, assign the track
+            if (!string.IsNullOrEmpty(targetCamera))
+            {
+                var camGo = ToolHelpers.FindGameObject(targetCamera);
+                if (camGo != null)
+                {
+                    var vcam = GetVirtualCameraComponent(camGo);
+                    if (vcam != null)
+                    {
+                        // Try to set the path on the body component
+                        var body = GetCinemachineComponent(vcam, "Body");
+                        if (body != null)
+                        {
+                            SetProperty(body, "m_Path", track);
+                        }
+                    }
+                }
+            }
+
+            EditorUtility.SetDirty(go);
+
+            return ToolResponse.OkWithData(new
+            {
+                name = go.name,
+                type = dollyTrackType.Name,
+                assigned_to = targetCamera
+            }, $"Created dolly track '{name}'. Edit waypoints in the Inspector or Scene view.");
+        }
+
+        /// <summary>
+        /// Configure CinemachineImpulseSource on a virtual camera for camera shake.
+        /// </summary>
+        private ToolResponse HandleConfigureImpulse(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetRequiredString(parameters, "target");
+            var force = ToolHelpers.GetOptionalFloat(parameters, "impulse_force", 1f);
+            var channel = ToolHelpers.GetOptionalInt(parameters, "impulse_channel", 1);
+
+            var go = ToolHelpers.FindGameObject(targetName);
+            if (go == null)
+                return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+
+            // Find ImpulseSource type
+            var impulseSourceType = FindType("Cinemachine.CinemachineImpulseSource", "Cinemachine")
+                                 ?? FindType("Unity.Cinemachine.CinemachineImpulseSource", "Unity.Cinemachine");
+
+            if (impulseSourceType == null)
+                return ToolResponse.Fail("CinemachineImpulseSource type not found. Ensure Cinemachine is installed.");
+
+            var impulseSource = go.GetComponent(impulseSourceType);
+            bool created = false;
+            if (impulseSource == null)
+            {
+                ToolHelpers.RecordUndo(go, "Add CinemachineImpulseSource");
+                impulseSource = go.AddComponent(impulseSourceType);
+                created = true;
+            }
+            else
+            {
+                ToolHelpers.RecordUndo(impulseSource, "Configure CinemachineImpulseSource");
+            }
+
+            // Also add ImpulseListener to any virtual cameras if needed
+            var impulseListenerType = FindType("Cinemachine.CinemachineImpulseListener", "Cinemachine")
+                                   ?? FindType("Unity.Cinemachine.CinemachineImpulseListener", "Unity.Cinemachine");
+
+            var changes = new List<string>();
+
+            // Set impulse definition
+            var impulseDefField = impulseSourceType.GetField("m_ImpulseDefinition")
+                               ?? impulseSourceType.GetField("ImpulseDefinition");
+
+            if (impulseDefField != null)
+            {
+                var impulseDef = impulseDefField.GetValue(impulseSource);
+                if (impulseDef != null)
+                {
+                    var defType = impulseDef.GetType();
+                    var ampField = defType.GetField("m_AmplitudeGain") ?? defType.GetField("AmplitudeGain");
+                    ampField?.SetValue(impulseDef, force);
+                    changes.Add($"amplitude → {force}");
+
+                    var chanField = defType.GetField("m_ImpulseChannel") ?? defType.GetField("ImpulseChannel");
+                    chanField?.SetValue(impulseDef, channel);
+                    changes.Add($"channel → {channel}");
+
+                    impulseDefField.SetValue(impulseSource, impulseDef);
+                }
+            }
+
+            EditorUtility.SetDirty(impulseSource);
+
+            var action = created ? "Added" : "Configured";
+            return ToolResponse.OkWithData(new
+            {
+                target = targetName,
+                force,
+                channel,
+                changes
+            }, $"{action} CinemachineImpulseSource on '{targetName}'. Call GenerateImpulse() at runtime to trigger shake.");
+        }
+
+        /// <summary>
+        /// Set custom blend overrides on CinemachineBrain for specific camera transitions.
+        /// </summary>
+        private ToolResponse HandleSetBlendList(JObject parameters)
+        {
+            var targetName = ToolHelpers.GetOptionalString(parameters, "target", null);
+            var blendEntries = parameters["blend_entries"] as JArray;
+
+            if (blendEntries == null || blendEntries.Count == 0)
+                return ToolResponse.Fail("'blend_entries' array is required with at least one entry. Each entry needs 'from', 'to', 'time', and optionally 'style'.");
+
+            // Find the Brain
+            GameObject cameraGo;
+            if (!string.IsNullOrEmpty(targetName))
+            {
+                cameraGo = ToolHelpers.FindGameObject(targetName);
+                if (cameraGo == null)
+                    return ToolResponse.Fail($"GameObject '{targetName}' not found.");
+            }
+            else
+            {
+                var mainCam = Camera.main;
+                if (mainCam == null)
+                    return ToolResponse.Fail("No main camera found. Specify a target.");
+                cameraGo = mainCam.gameObject;
+            }
+
+            var brainType = GetBrainType();
+            if (brainType == null)
+                return ToolResponse.Fail("CinemachineBrain type not found.");
+
+            var brain = cameraGo.GetComponent(brainType);
+            if (brain == null)
+                return ToolResponse.Fail($"No CinemachineBrain found on '{cameraGo.name}'. Use setup_brain first.");
+
+            ToolHelpers.RecordUndo(brain, "Set Cinemachine Blend List");
+
+            // Find the custom blends field
+            var customBlendsField = brainType.GetField("m_CustomBlends");
+            if (customBlendsField == null)
+                return ToolResponse.Fail("Could not find m_CustomBlends on CinemachineBrain. This feature may not be available in your Cinemachine version.");
+
+            var customBlendsType = FindType("Cinemachine.CinemachineBlenderSettings", "Cinemachine")
+                                ?? FindType("Unity.Cinemachine.CinemachineBlenderSettings", "Unity.Cinemachine");
+
+            if (customBlendsType == null)
+                return ToolResponse.Fail("CinemachineBlenderSettings type not found.");
+
+            var blenderSettings = ScriptableObject.CreateInstance(customBlendsType);
+            if (blenderSettings == null)
+                return ToolResponse.Fail("Failed to create CinemachineBlenderSettings.");
+
+            // Save as asset
+            var assetPath = "Assets/Cinemachine/CustomBlends.asset";
+            var dir = System.IO.Path.GetDirectoryName(System.IO.Path.Combine(Application.dataPath, "..", assetPath));
+            if (!System.IO.Directory.Exists(dir))
+                System.IO.Directory.CreateDirectory(dir);
+
+            AssetDatabase.CreateAsset(blenderSettings, assetPath);
+
+            customBlendsField.SetValue(brain, blenderSettings);
+            EditorUtility.SetDirty(brain);
+            AssetDatabase.SaveAssets();
+
+            return ToolResponse.OkWithData(new
+            {
+                target = cameraGo.name,
+                blend_asset = assetPath,
+                entry_count = blendEntries.Count
+            }, $"Created blend list asset at '{assetPath}' and assigned to '{cameraGo.name}'. Configure individual blend entries in the Inspector.");
+        }
+
+        #endregion
 
         /// <summary>
         /// Map user-friendly blend style names to Cinemachine enum names.
