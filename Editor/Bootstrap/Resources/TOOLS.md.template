@@ -5,37 +5,97 @@
 ## Tool Usage Best Practices
 
 ### Script Operations
-- Use `manage_script` (actions: `read`, `write`, `create`, `delete`, `list`, `get_info`) for all C# file operations.
+- Use `manage_script` (actions: `read`, `write`, `create`, `delete`, `list`, `get_info`, `analyze`, `find_references`, `add_method`, `add_field`) for all C# file operations.
 - After `write` or `create`, call `manage_editor` (action: `refresh`) then check console for compile errors.
 - Script changes trigger Domain Reload — wait for compilation before calling other tools.
 - To create from template: action `create` with `template` (monobehaviour, scriptableobject, editor, editorwindow, custom_editor, plain).
+- Use `analyze` to understand script structure before modifying.
+- Use `find_references` to check where a script is used before renaming/deleting.
 
 ### GameObject & Component Operations
 - **Search first**: Always use `find_gameobjects` (by `searchTerm`, `tag`, `layer`, or `componentType`) to confirm a target exists and get its `instanceId` before modifying.
-- Use `manage_gameobject` (actions: `create`, `delete`, `get_info`, `modify`, `set_transform`, `set_parent`, `duplicate`) for GameObject CRUD.
-- Use `manage_component` (actions: `add`, `remove`, `get`, `list`, `modify`, `set_enabled`) for component operations — NOT `manage_gameobject`.
+- Use `manage_gameobject` (actions: `create`, `delete`, `get_info`, `modify`, `set_transform`, `set_parent`, `duplicate`, `create_batch`, `modify_batch`, `delete_batch`, `set_active_batch`, `arrange_grid`) for GameObject CRUD.
+- Use `manage_component` (actions: `add`, `remove`, `get`, `list`, `modify`, `set_enabled`, `add_batch`, `remove_batch`, `set_property_batch`, `get_components_batch`, `copy_component`) for component operations — NOT `manage_gameobject`.
 - Prefer `instanceId` over name for targeting — names can be duplicated.
+- Use batch actions (`create_batch`, `modify_batch`, `delete_batch`, `set_active_batch`, `add_batch`, `set_property_batch`) for bulk operations instead of sequential calls.
 
 ### Scene Operations
-- Use `manage_scene` (actions: `list`, `get_hierarchy`, `get_active`, `create`, `open`, `save`, `set_active`).
+- Use `manage_scene` (actions: `list`, `get_hierarchy`, `get_active`, `create`, `open`, `save`, `set_active`, `new_scene`, `open_scene`, `save_scene_as`, `list_open_scenes`, `set_active_scene`, `merge_scenes`, `get_build_scenes`, `add_to_build`).
 - Call `get_hierarchy` to understand scene structure before bulk operations.
 - Save the scene (`save`) after significant modifications.
+
+### Scene Analysis & Perception
+- Use `scene_analysis` (actions: `summarize`, `health_check`, `component_stats`, `find_hotspots`, `hierarchy_tree`, `spatial_query`, `materials_overview`, `performance_hints`, `project_info`, `dependency_analyze`) to understand the scene before making changes.
+- `health_check` finds missing scripts, missing references, duplicate names, deep hierarchies.
+- `summarize` gives a quick overview of object counts, component distribution, hierarchy depth.
+- `performance_hints` identifies potential performance issues.
+- `project_info` detects the project's tech stack (render pipeline, input system, major packages).
 
 ### Asset Operations
 - Use `manage_asset` (actions: `search`, `get_info`, `create_folder`, `delete`, `move`, `copy`, `import`, `get_dependencies`).
 - To find assets: action `search` with path scope — NOT `manage_script` action `list` (which is for scripts only).
 - Check `get_dependencies` before deleting assets to avoid breaking references.
 
-### Expanded Editor Tooling
-- Scene/project analysis and cleanup: `scene_analysis`, `optimization`, `cleaner`, and `smart_operations` summarize scene health, find hotspots, inspect dependencies, clean missing/unused references, and automate bulk alignment/distribution/replacement tasks.
-- Specialized authoring: `manage_terrain`, `manage_event`, `manage_camera`, `manage_scriptable_object`, `manage_texture_import`, `manage_model_import`, and `manage_asset_import` cover terrain editing, UnityEvent inspection, camera setup, ScriptableObject assets, and importer settings.
-- Package and validation workflows: `manage_package` installs/queries UPM packages, while `manage_test` lists/runs tests and creates test templates.
-- Optional package integrations: `manage_timeline`, `manage_cinemachine`, `manage_probuilder`, and `manage_test` use reflection for optional Unity packages. If Timeline, Cinemachine, ProBuilder, or Test Framework APIs are unavailable, these tools return an installation prompt instead of failing with missing assembly errors.
-- Prefer compact actions such as `get_info`, `check_available`, `list`, or `analyze_scene` before mutating assets/scenes, then follow up with the specific edit action only after targets are confirmed.
+### Material & Shader Operations
+- Use `manage_material` (actions: `create`, `get_info`, `set_property`, `set_shader`, `list_properties`, `assign`, `copy_properties`, `set_texture`, `set_keyword`, `get_keywords`, `find_by_shader`).
+- Use `manage_shader` (actions: `list`, `get_info`, `find`, `list_keywords`, `get_keywords`, `get_properties`, `find_shaders`, `get_shader_info`).
+- Use `find_by_shader` to find all materials using a specific shader before changing it.
+
+### Animation Operations
+- Use `manage_animation` (actions: `list_clips`, `get_clip_info`, `list_parameters`, `set_parameter`, `get_controller_info`, `list_animator_states`, `get_layers`, `set_layer_weight`, `create_animation_clip`).
+- Use `get_controller_info` to understand the Animator Controller structure before modifying.
+
+### Import Settings
+- Use `manage_asset_import` (actions: `get_importer`, `reimport`, `reimport_batch`, `set_labels`, `get_labels`, `set_bundle`, `get_dependencies`, `get_import_log`, `find_by_importer`) for general asset import operations.
+- Use `manage_texture_import` (actions: `get_settings`, `set_settings`, `set_settings_batch`, `find_assets`, `get_info`, `set_type`, `set_platform_settings`, `get_platform_settings`, `set_sprite_settings`, `find_by_size`) for texture-specific import settings.
+- Use `manage_model_import` (actions: `get_settings`, `set_settings`, `set_settings_batch`, `find_assets`, `get_mesh_info`, `get_materials_info`, `get_animations_info`, `set_animation_clips`, `get_rig_info`, `set_rig`) for 3D model import settings.
+
+### Physics Operations
+- Use `manage_physics` (actions: `get_settings`, `set_settings`, `add_rigidbody`, `add_collider`, `add_joint`, `raycast`, `add_constant_force`, `configure_collision`, `add_trigger_zone`, `overlap_test`).
+- Use `raycast` to test line-of-sight or ground detection.
+- Use `overlap_test` to find objects in a volume.
+
+### UI Operations (uGUI)
+- Use `manage_ui` (actions: `create_canvas`, `create_element`, `modify_element`, `get_info`, `list`, `set_layout`, `add_layout_group`, `configure_canvas`, `add_ui_component`).
+- Always create a Canvas first (`create_canvas`) before adding UI elements.
+- Use `set_layout` for anchor/stretch presets, `add_layout_group` for auto-layout.
+
+### Camera & Cinemachine
+- Use `manage_camera` (actions: `create`, `get_info`, `configure`, `look_at`, `align_to_view`, `create_render_texture`, `render_to_texture`, `list_cameras`, `set_main_camera`).
+- Use `manage_cinemachine` (actions: `create_virtual_camera`, `set_target`, `configure_body`, `configure_aim`, `set_noise`, `get_info`, `list`, `set_priority`, `configure_lens`, `setup_brain`) for Cinemachine virtual cameras.
+- Cinemachine requires the Cinemachine package — the tool will prompt for installation if missing.
+
+### Terrain Operations
+- Use `manage_terrain` (actions: `create`, `get_info`, `get_height`, `set_height`, `generate_perlin`, `smooth`, `flatten`, `add_layer`, `paint_texture`, `add_tree`).
+- Use `generate_perlin` for procedural terrain generation, then `smooth` to refine.
+
+### Timeline Operations
+- Use `manage_timeline` (actions: `create`, `add_track`, `remove_track`, `list_tracks`, `add_clip`, `set_duration`, `play`, `set_binding`, `get_info`).
+- Timeline requires the Timeline package — the tool will prompt for installation if missing.
+
+### ProBuilder Operations
+- Use `manage_probuilder` (actions: `check_available`, `create_shape`, `get_info`, `set_material`, `center_pivot`, `flip_normals`, `subdivide`, `combine_meshes`, `get_vertices`, `move_vertices`).
+- Always call `check_available` first — ProBuilder is an optional package.
+
+### Event System
+- Use `manage_event` (actions: `get_listeners`, `add_listener`, `remove_listener`, `clear_listeners`, `list_events`, `set_listener_state`, `get_listener_count`, `invoke`) for UnityEvent management.
+
+### Lighting Operations
+- Use `manage_lighting` (actions: `create`, `modify`, `get_info`, `list`, `bake`, `get_lightmap_settings`).
+
+### Audio Operations
+- Use `manage_audio` (actions: `add_source`, `modify_source`, `play`, `stop`, `get_info`, `list`, `get_settings`).
+
+### Graphics & Rendering
+- Use `manage_graphics` (actions: `get_render_settings`, `set_render_settings`, `get_quality_settings`, `set_quality_level`, `manage_camera`).
 
 ### Prefab Operations
 - Use `manage_prefab` (actions: `create`, `instantiate`, `get_info`, `unpack`, `apply`, `revert`).
 - After modifying a prefab instance, use `apply` to save changes back to the prefab asset.
+
+### ScriptableObject Operations
+- Use `manage_scriptable_object` (actions: `create`, `get`, `set`, `list_types`, `duplicate`, `delete`, `find`, `export_json`, `import_json`, `set_batch`).
+- Use `export_json` / `import_json` for data migration or backup.
 
 ### Console & Diagnostics
 - Use `read_console` to read Unity Editor Console logs — **essential for diagnosing compilation errors and runtime issues**.
@@ -47,6 +107,33 @@
   - Use `search` parameter to filter entries by text (e.g., search for a specific file name or error code).
   - Use `max_entries` to control how many entries are returned (default: 50, max: 200).
 - When a script modification causes compilation failure, ALWAYS call `read_console` (action: `get_errors`) to identify the exact error and file location.
+
+### Editor Control
+- Use `manage_editor` (actions: `get_info`, `play_mode`, `focus_window`, `get_selection`, `set_selection`, `refresh`, `get_project_settings`, `set_project_setting`).
+- Use `manage_tags_layers` (actions: `list_tags`, `add_tag`, `remove_tag`, `list_layers`, `set_layer`, `list_sorting_layers`, `add_sorting_layer`, `set_object_tag`, `set_object_layer`).
+
+### Build Operations
+- Use `manage_build` (actions: `get_settings`, `set_target`, `get_scenes`, `set_scenes`, `build`, `get_player_settings`, `set_player_settings`, `get_defines`, `set_defines`, `get_build_report`).
+
+### Navigation
+- Use `manage_navmesh` (actions: `bake`, `clear`, `get_settings`, `add_agent`, `add_obstacle`, `set_area`, `calculate_path`, `sample_position`, `set_agent_settings`).
+
+### Package Management
+- Use `manage_package` (actions: `list`, `search`, `get_info`, `install`, `remove`, `get_versions`, `check_installed`, `get_dependencies`, `refresh`).
+
+### Testing
+- Use `manage_test` (actions: `list_tests`, `run_tests`, `get_results`, `create_test`, `run_category`, `get_test_info`, `cancel`).
+
+### Input System
+- Use `manage_input` (actions: `list_axes`, `get_axis`, `add_axis`, `remove_axis`, `simulate_key`).
+
+### Profiler
+- Use `manage_profiler` (actions: `get_stats`, `get_memory`, `start_recording`, `stop_recording`, `get_rendering_stats`).
+
+### Optimization & Cleanup
+- Use `optimization` (actions: `analyze_scene`, `optimize_textures`, `optimize_mesh_compression`, `find_large_assets`, `set_static_flags`, `get_static_flags`, `optimize_audio`, `find_duplicate_materials`, `analyze_overdraw`, `set_lod_group`) for performance optimization.
+- Use `cleaner` (actions: `find_unused_assets`, `find_duplicates`, `find_missing_references`, `find_missing_scripts`, `fix_missing_scripts`, `find_empty_folders`, `delete_empty_folders`, `find_large_assets`, `get_asset_usage`, `get_dependency_tree`) for project cleanup.
+- Use `smart_operations` (actions: `align_objects`, `distribute_objects`, `snap_to_grid`, `align_to_ground`, `randomize_transform`, `replace_objects`, `select_by_criteria`) for advanced editing operations.
 
 ### Batch & Code Execution
 - Use `batch_execute` to combine 2+ independent tool calls into one request — pass an `operations` array of `{tool, args}`.
@@ -87,8 +174,19 @@
 - **Want to see compilation errors?** → `read_console` (action: `get_errors`)
 - **Want to diagnose why Play Mode fails?** → `read_console` (action: `get_errors`) first, then check the file/line info
 - **Want to list project config files?** → `manage_file` (action: `list_directory`, path: `ProjectSettings`)
+- **Want to analyze scene health?** → `scene_analysis` (action: `health_check`)
+- **Want to understand scene structure?** → `scene_analysis` (action: `summarize`) or `manage_scene` (action: `get_hierarchy`)
+- **Want to find performance issues?** → `scene_analysis` (action: `performance_hints`) or `optimization` (action: `analyze_scene`)
+- **Want to clean up the project?** → `cleaner` (action: `find_unused_assets`, `find_missing_references`, etc.)
+- **Want to create terrain?** → `manage_terrain` (action: `create`)
+- **Want to set up a camera system?** → `manage_cinemachine` (action: `create_virtual_camera`)
+- **Want to create a cutscene?** → `manage_timeline` (action: `create`)
+- **Want to install a package?** → `manage_package` (action: `install`)
+- **Want to run tests?** → `manage_test` (action: `run_tests`)
+- **Want to manage ScriptableObjects?** → `manage_scriptable_object`
+- **Want to align/distribute objects?** → `smart_operations` (action: `align_objects`, `distribute_objects`)
 
-### 8. 记忆管理
+### 记忆管理
 - `manage_memory` — 长期记忆的增删查
   - `add`: 存储重要的用户偏好、项目约定、技术决策
   - `search`: 搜索与当前话题相关的历史记忆
@@ -96,7 +194,7 @@
   - `delete`: 删除过时或错误的记忆
   - 记忆会跨会话持久保存，同一项目的不同分支共享
 
-### 9. 知识库检索
+### 知识库检索
 - `manage_knowledge` — 基于 LightRAG 的项目知识库查询与索引
   - `query`: 用自然语言检索知识库中的相关信息（支持 naive/local/global/hybrid 四种搜索模式）
     - `naive`: 朴素搜索，直接匹配关键词

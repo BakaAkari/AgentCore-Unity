@@ -1,7 +1,7 @@
 # AgentCore vs Unity Skills — 能力覆盖度分析报告
 
-> 生成时间: 2026-04-29
-> 分析范围: `_archive/Unity-Skills/SkillsForUnity/Editor/Skills/` vs `Editor/Tools/Native/`
+> 生成时间: 2026-05-07 (修订版 — 纠正 2026-04-29 初版的数据错误)
+> 分析范围: `_archive/Unity-Skills/SkillsForUnity/Editor/Skills/` vs `Editor/Tools/`
 
 ---
 
@@ -9,206 +9,201 @@
 
 | 维度 | Unity Skills (归档) | AgentCore (当前) | 覆盖率 |
 |------|-------------------|-----------------|--------|
-| **技能/工具文件数** | 40+ Skill 文件 | 25 Tool 文件 | — |
-| **独立技能/Action 数** | 300+ 个 `[UnitySkill]` | ~70 个 actions | ~23% |
-| **功能分类数** | 40 个分类 | 18 个分类 | ~45% |
-| **代码总行数** | ~20,000+ 行 | ~8,000+ 行 | ~40% |
+| **技能/工具文件数** | 41 个 `*Skills.cs` | 42 个 `*Tool.cs` | ~102% |
+| **独立技能/Action 数** | **554** 个 `[UnitySkill]` | **335** 个 actions | **~60%** |
+| **功能分类覆盖** | 41 个分类 | 36 个分类 (含独有) | **~88%** |
+| **完全缺失的分类** | — | 5 个 | — |
+
+### ⚠️ 初版报告修正说明
+
+初版报告（2026-04-29）声称覆盖率约 23%（~70 actions / 300+ skills），这是**严重低估**：
+
+1. **Unity Skills 数量被低估**: 实际有 **554** 个 `[UnitySkill]`，不是 "300+"
+2. **AgentCore Actions 被严重低估**: 实际有 **335** 个 actions，不是 "~70"
+3. **初版是在项目早期编写的**，之后大量工具被新增和扩展（如 Terrain、Cinemachine、Timeline、ScriptableObject、ProBuilder、SmartOperations、Optimization、Cleaner、Event 等工具都是后来添加的）
+
+**修正后的覆盖率: 335/554 ≈ 60%**（按 action 数量计），**分类覆盖率约 88%**。
 
 ### 架构差异说明
 
 - **Unity Skills**: HTTP Server 模式，每个 skill 是独立的静态方法，通过 `[UnitySkill]` 注册，粒度极细（每个操作一个 skill）
 - **AgentCore**: LLM Tool Calling 模式，每个工具是一个类，通过 `action` 参数分发，粒度较粗（一个工具包含多个 action）
 
-这意味着 AgentCore 的 25 个工具文件理论上可以通过增加 action 来覆盖更多功能，但当前 action 数量远少于 Unity Skills 的独立技能数。
-
 ---
 
 ## 2. 逐分类对比分析
 
-### ✅ 已覆盖（基本对齐）
+### ✅ 已覆盖且基本对齐（17 个分类）
 
-| 分类 | Unity Skills | AgentCore Tool | 覆盖评估 |
-|------|-------------|----------------|----------|
-| **GameObject CRUD** | `GameObjectSkills` (18 skills: create, rename, delete, find, set_transform, duplicate, set_parent, get_info, set_active + batch 版本) | `manage_gameobject` (7 actions: create, delete, get_info, modify, set_transform, set_parent, duplicate) + `find_gameobjects` | ⚠️ **80%** — 缺少 batch 操作 (create_batch, delete_batch, rename_batch, set_transform_batch, set_active_batch, set_layer_batch, set_tag_batch, set_parent_batch) |
-| **Component 管理** | `ComponentSkills` (11 skills: add, remove, list, set_property, get_properties, copy, set_enabled + batch 版本) | `manage_component` (6 actions: add, remove, get, list, modify, set_enabled) | ⚠️ **75%** — 缺少 batch 操作和 copy |
-| **Scene 管理** | `SceneSkills` (10 skills: create, load, save, get_info, get_hierarchy, screenshot, get_loaded, unload, set_active, find_objects) | `manage_scene` (7 actions: list, get_hierarchy, get_active, create, open, save, set_active) | ⚠️ **70%** — 缺少 screenshot、unload、find_objects |
-| **Material 管理** | `MaterialSkills` (21 skills: create, assign, duplicate, set_color/texture/float/int/vector/emission/keyword/render_queue/shader/gi_flags, get_properties/keywords + batch 版本) | `manage_material` (6 actions: create, get_info, set_property, set_shader, list_properties, assign) | ⚠️ **60%** — 缺少 duplicate、batch 操作、细粒度属性设置 |
-| **Lighting** | `LightSkills` (10 skills: create, set_properties, get_info, find_all, set_enabled, add_probe_group, add_reflection_probe, get_lightmap_settings + batch 版本) | `manage_lighting` (6 actions: create, modify, get_info, list, bake, get_lightmap_settings) | ✅ **85%** — 基本覆盖，缺少 probe 管理和 batch |
-| **Physics** | `PhysicsSkills` (12 skills: raycast, check_overlap, get/set_gravity, raycast_all, spherecast, boxcast, overlap_box, create/set_material, get/set_layer_collision) | `manage_physics` (6 actions: get_settings, set_settings, add_rigidbody, add_collider, add_joint, raycast) | ⚠️ **50%** — 缺少 spherecast、boxcast、overlap、physics material、layer collision 管理 |
-| **Audio** | `AudioSkills` (10 skills: get/set_settings, find_clips, get_clip_info, add_source, get/set_source_properties, find_sources, create_mixer) | `manage_audio` (7 actions: add_source, modify_source, play, stop, get_info, list, get_settings) | ⚠️ **65%** — 缺少 mixer 创建、clip 搜索、batch 设置 |
-| **Prefab** | `PrefabSkills` (11 skills: create, instantiate, apply, unpack, get_overrides, revert_overrides, apply_overrides, create_variant, find_instances, set_property + batch) | `manage_prefab` (6 actions: create, instantiate, get_info, unpack, apply, revert) | ⚠️ **60%** — 缺少 create_variant、find_instances、get/apply/revert_overrides 细粒度控制 |
-| **Script 管理** | `ScriptSkills` (12 skills: create, read, delete, find_in_file, append, replace, list, get_info, rename, move, get_compile_feedback + batch) | `manage_script` (6 actions: read, write, create, delete, list, get_info) | ⚠️ **65%** — 缺少 find_in_file、append、replace、rename、move |
-| **Asset 管理** | `AssetSkills` (11 skills: import, delete, move, duplicate, find, create_folder, refresh, get_info + batch 版本) | `manage_asset` (8 actions: search, get_info, create_folder, delete, move, copy, import, get_dependencies) | ✅ **85%** — 较好覆盖，有 get_dependencies 是加分项 |
-| **Animation** | `AnimatorSkills` (10 skills: create_controller, add_parameter, get/set_parameter, play, get_info, assign_controller, list_states, add_state, add_transition) | `manage_animation` (6 actions: list_clips, get_clip_info, list_parameters, set_parameter, get_controller_info, list_animator_states) | ⚠️ **50%** — 缺少 create_controller、add_state、add_transition、assign_controller |
-| **Shader** | `ShaderSkills` (11 skills: create, read, list, get_properties, find, delete, check_errors, get_keywords, get_variant_count, create_urp, set_global_keyword) | `manage_shader` (4 actions: list, get_info, find, list_keywords) | ⚠️ **40%** — 缺少 create、delete、check_errors、create_urp |
-| **NavMesh** | `NavMeshSkills` (10 skills: bake, clear, calculate_path, add_agent, set_agent, add_obstacle, set_obstacle, sample_position, set_area_cost, get_settings) | `manage_navmesh` (6 actions: bake, clear, get_settings, add_agent, add_obstacle, set_area) | ⚠️ **60%** — 缺少 calculate_path、sample_position、set_agent/obstacle 修改 |
-| **Build** | `ProjectSkills` (11 skills) | `manage_build` (6 actions: get_settings, set_target, get_scenes, set_scenes, build, get_player_settings) | ✅ **80%** — 基本覆盖构建流程 |
-| **Editor 控制** | `EditorSkills` (12 skills: play, stop, pause, select, get_selection, undo, redo, get_state, execute_menu, get_tags, get_layers, get_context) | `manage_editor` (8 actions) + `execute_menu_item` (3 actions) + `manage_tags_layers` (9 actions) | ✅ **90%** — 覆盖较好 |
-| **Console** | `ConsoleSkills` (10 skills) + `DebugSkills` (10 skills) | `read_console` (5 actions) | ⚠️ **40%** — 缺少 debug 系统信息、assembly 信息、defines 管理 |
-| **Profiler** | `ProfilerSkills` (10 skills: get_stats, get_memory, get_runtime/texture/mesh/material/audio_memory, get_object_count, get_rendering_stats, get_asset_bundle_stats) | `manage_profiler` (5 actions: get_stats, get_memory, start/stop_recording, get_rendering_stats) | ⚠️ **50%** — 缺少细粒度内存分析 |
-| **UI (uGUI)** | `UISkills` (26+ skills: create_canvas/panel/button/text/image/inputfield/slider/toggle/dropdown/scrollview/rawimage/scrollbar, set_text/image/anchor/rect, layout_children, align/distribute_selected, add_layout_element/canvas_group/mask/outline, configure_selectable + batch) | `manage_ui` (5 actions: create_canvas, create_element, modify_element, get_info, list) | ⚠️ **35%** — 严重不足，缺少大量 UI 操作 |
+| Unity Skills | Skills数 | AgentCore Tool | Actions数 | 覆盖评估 |
+|-------------|----------|----------------|-----------|----------|
+| `AnimatorSkills` | 10 | `ManageAnimationTool` | 9 | ✅ **90%** — 新增 get_layers, set_layer_weight, create_animation_clip |
+| `AssetImportSkills` | 11 | `ManageAssetImportTool` | 9 | ✅ **82%** |
+| `AssetSkills` | 11 | `ManageAssetTool` | 8 | ✅ **73%** — 有 get_dependencies 加分项 |
+| `CameraSkills` | 11 | `ManageCameraTool` | 9 | ✅ **82%** — 新增 render_to_texture |
+| `CleanerSkills` | 10 | `CleanerTool` | 10 | ✅ **100%** — 完全覆盖 |
+| `ComponentSkills` | 10 | `ManageComponentTool` | 11 | ✅ **110%** — 超越，含 batch 操作 |
+| `EditorSkills` | 12 | `ManageEditorTool` + `ExecuteMenuItemTool` + `ManageTagsLayersTool` | 8+3+9=20 | ✅ **167%** — 大幅超越 |
+| `EventSkills` | 10 | `ManageEventTool` | 8 | ✅ **80%** |
+| `ModelSkills` | 10 | `ManageModelImportTool` | 10 | ✅ **100%** — 完全覆盖 |
+| `OptimizationSkills` | 10 | `OptimizationTool` | 10 | ✅ **100%** — 完全覆盖 |
+| `PackageSkills` | 11 | `ManagePackageTool` | 9 | ✅ **82%** |
+| `PhysicsSkills` | 12 | `ManagePhysicsTool` | 10 | ✅ **83%** — 新增 overlap_test, configure_collision |
+| `SceneSkills` | 10 | `ManageSceneTool` | 15 | ✅ **150%** — 大幅超越 |
+| `ScriptableObjectSkills` | 10 | `ManageScriptableObjectTool` | 10 | ✅ **100%** — 完全覆盖 |
+| `ScriptSkills` | 12 | `ManageScriptTool` | 10 | ✅ **83%** — 新增 analyze, find_references, add_method, add_field |
+| `TerrainSkills` | 10 | `ManageTerrainTool` | 10 | ✅ **100%** — 完全覆盖 |
+| `TextureSkills` | 10 | `ManageTextureImportTool` | 10 | ✅ **100%** — 完全覆盖 |
 
-### ❌ 完全缺失的分类
+### ⚠️ 已覆盖但深度不足（14 个分类）
 
-| 分类 | Unity Skills 能力 | 技能数 | 重要性 | 说明 |
-|------|-------------------|--------|--------|------|
-| **🔴 Terrain** | `TerrainSkills`: 创建地形、获取/设置高度、添加山丘、Perlin 噪声生成、平滑、展平、绘制纹理 | 10 | **高** | 地形编辑是 3D 游戏开发核心功能 |
-| **🔴 Cinemachine** | `CinemachineSkills`: 虚拟相机创建/配置、目标设置、Body/Aim/Noise 组件、Brain 管理、混合、脉冲、扩展、FreeLook、StateDriven、ClearShot、Sequencer 等 | 30+ | **高** | 专业相机系统，现代 Unity 项目标配 |
-| **🔴 Timeline** | `TimelineSkills`: 创建 Timeline、添加 Audio/Animation/Activation/Control/Signal 轨道、管理 Clip、播放控制、绑定 | 12 | **高** | 过场动画和序列编辑核心 |
-| **🔴 Perception/分析** | `PerceptionSkills`: 场景组件统计、热点分析、健康检查、契约验证、技术栈检测、场景分析/摘要、层级描述、脚本分析、空间查询、材质概览、场景上下文、导出报告、依赖分析、脚本依赖图、Tag/Layer 统计、性能提示、场景 Diff | 18 | **极高** | AI Agent 的"眼睛"——理解场景和项目的核心能力 |
-| **🔴 Smart 操作** | `SmartSkills`: 智能场景查询、场景布局、引用绑定、空间查询、对齐到地面、分布、网格吸附、随机化变换、替换对象、按组件选择 | 10 | **高** | 高级编辑操作，提升 AI 效率 |
-| **🔴 Optimization** | `OptimizationSkills`: 纹理优化、网格压缩、场景分析、大资源查找、静态标记、音频压缩、重复材质查找、过度绘制分析、LOD 组 | 10 | **高** | 性能优化是专业开发必需 |
-| **🔴 Cleaner** | `CleanerSkills`: 查找未使用资源、重复资源、缺失引用、删除资源、获取资源使用情况、空文件夹、大资源、修复缺失脚本、依赖树 | 10 | **中高** | 项目清理和维护 |
-| **🔴 Event 系统** | `EventSkills`: 获取/添加/移除监听器、调用事件、清除监听器、设置监听器状态、列出事件、批量添加、复制监听器 | 10 | **中** | UnityEvent 管理 |
-| **🔴 ScriptableObject** | `ScriptableObjectSkills`: 创建、获取/设置属性、列出类型、复制、批量设置、删除、查找、导出/导入 JSON | 10 | **中高** | 数据驱动开发核心 |
-| **🔴 Texture 管理** | `TextureSkills`: 获取/设置导入设置、批量设置、查找资源、获取信息、设置类型、平台设置、Sprite 设置、按尺寸查找 | 10 | **中** | 纹理资源管理 |
-| **🔴 Model 管理** | `ModelSkills`: 获取/设置导入设置、批量设置、查找模型、网格信息、材质信息、动画信息、动画切片、Rig 信息/设置 | 10 | **中** | 3D 模型资源管理 |
-| **🔴 Asset Import** | `AssetImportSkills`: 重新导入、批量重新导入、纹理/模型/音频/Sprite 导入设置、获取导入设置、标签管理 | 12 | **中** | 资源导入管线控制 |
-| **🔴 Package 管理** | `PackageSkills`: 列出/检查/安装/移除/刷新包、安装 Cinemachine/Splines、搜索、获取依赖/版本 | 11 | **中** | UPM 包管理 |
-| **🔴 ProBuilder** | `ProBuilderSkills`: 创建形状、挤出面/边、删除/合并/翻转面、倒角、细分、焊接顶点、设置材质、获取信息、中心枢轴、UV 投影、批量创建、移动/设置顶点、合并网格 | 25+ | **中** | 编辑器内 3D 建模 |
-| **🔴 XR** | `XRSkills`: XR 设置检查、Rig 创建、交互管理器、事件系统、射线/直接/插槽交互器、抓取/简单交互物、传送、连续移动/转向、UI Canvas XR 兼容、触觉反馈、交互事件、交互层 | 20+ | **低-中** | VR/AR 开发（特定项目需要） |
-| **🔴 UI Toolkit** | `UIToolkitSkills`: UI Toolkit 相关操作 | 未统计 | **中** | 新一代 UI 系统 |
-| **🔴 Validation** | `ValidationSkills`: 场景验证相关 | 未统计 | **中** | 质量保证 |
-| **🔴 Workflow** | `WorkflowSkills`: 工作流管理 | 未统计 | **低** | 工作流自动化 |
-| **🔴 Test** | `TestSkills`: 测试运行/结果/列表/取消/创建测试 | 11 | **中** | 自动化测试 |
-| **🔴 Batch 系统** | `BatchSkills`: 批量查询/预览/执行、作业管理、修复缺失脚本、标准化命名、替换材质、验证场景对象、清理临时对象 | 21 | **高** | 批量操作效率 |
+| Unity Skills | Skills数 | AgentCore Tool | Actions数 | 覆盖评估 | 主要缺失 |
+|-------------|----------|----------------|-----------|----------|----------|
+| `AudioSkills` | 10 | `ManageAudioTool` | 7 | ⚠️ **70%** | mixer 创建、clip 搜索 |
+| `CinemachineSkills` | 34 | `ManageCinemachineTool` | 10 | ⚠️ **29%** | FreeLook、StateDriven、ClearShot、Sequencer、扩展、脉冲等高级功能 |
+| `ConsoleSkills` | 10 | `ReadConsoleTool` | 5 | ⚠️ **50%** | 缺少 debug 系统信息 |
+| `GameObjectSkills` | 18 | `ManageGameObjectTool` | 12 | ⚠️ **67%** | 部分 batch 操作 |
+| `LightSkills` | 10 | `ManageLightingTool` | 6 | ⚠️ **60%** | probe 管理 |
+| `MaterialSkills` | 21 | `ManageMaterialTool` | 11 | ⚠️ **52%** | 细粒度属性 batch 设置 |
+| `NavMeshSkills` | 10 | `ManageNavMeshTool` | 6 | ⚠️ **60%** | calculate_path、sample_position |
+| `PerceptionSkills` | 18 | `SceneAnalysisTool` | 10 | ⚠️ **56%** | 场景 Diff、契约验证 |
+| `PrefabSkills` | 11 | `ManagePrefabTool` | 6 | ⚠️ **55%** | create_variant、find_instances |
+| `ProBuilderSkills` | 22 | `ManageProBuilderTool` | 10 | ⚠️ **45%** | 挤出、倒角、UV 投影等高级建模 |
+| `ProfilerSkills` | 10 | `ManageProfilerTool` | 5 | ⚠️ **50%** | 细粒度内存分析 |
+| `ProjectSkills` | 11 | `ManageBuildTool` | 6 | ⚠️ **55%** | 部分项目设置 |
+| `ShaderSkills` | 11 | `ManageShaderTool` | 8 | ⚠️ **73%** | create、delete |
+| `SmartSkills` | 10 | `SmartOperationsTool` | 7 | ⚠️ **70%** | 部分高级操作 |
+| `TestSkills` | 11 | `ManageTestTool` | 4 | ⚠️ **36%** | cancel、create_test_fixture |
+| `TimelineSkills` | 12 | `ManageTimelineTool` | 9 | ⚠️ **75%** | Signal 轨道、高级 clip 管理 |
+| `UISkills` | 26 | `ManageUITool` | 9 | ⚠️ **35%** | layout、align、distribute、anchor 预设 |
+
+### ❌ 完全缺失的分类（5 个）
+
+| Unity Skills | Skills数 | 重要性 | 说明 |
+|-------------|----------|--------|------|
+| `DebugSkills` | 10 | **中** | 系统信息、assembly 信息、defines 管理 |
+| `UIToolkitSkills` | 25 | **中** | UI Toolkit (新一代 UI 系统) |
+| `ValidationSkills` | 10 | **中** | 场景验证、质量保证 |
+| `WorkflowSkills` | 23 | **低** | 工作流自动化 |
+| `XRSkills` | 22 | **低-中** | VR/AR 开发（特定项目需要） |
+
+**缺失分类合计**: 90 个 skills (占 Unity Skills 总数的 16%)
+
+### 🆕 AgentCore 独有能力（Unity Skills 没有的）
+
+| AgentCore Tool | Actions数 | 说明 |
+|---------------|-----------|------|
+| `ManageFileTool` | 9 | 文件系统操作（读写、搜索、复制等） |
+| `ManageGraphicsTool` | 5 | 渲染设置、质量设置管理 |
+| `ManageInputTool` | 5 | 输入轴管理 |
+| `ExecuteCodeTool` | 1 | **万能后门** — 执行任意 C# 表达式 |
+| `Mem0Tool` | 4 | AI 记忆系统 |
+| `LightRAGTool` | 2 | 知识库检索 |
+| `BatchExecuteTool` | — | 批量执行多个工具调用 |
+
+**独有能力合计**: 26+ actions
 
 ---
 
 ## 3. 关键差距分析
 
-### 3.1 最严重的缺失（建议优先补充）
+### 3.1 最大的深度差距
 
-#### 🔴 P0 — Perception/场景分析能力（影响 AI 理解力）
+即使在已覆盖的分类中，以下工具的深度差距最大：
 
-这是 **最关键的缺失**。Unity Skills 的 `PerceptionSkills` 有 3056 行代码、18 个技能，提供了：
+| 工具 | AgentCore | Unity Skills | 差距 | 关键缺失 |
+|------|-----------|-------------|------|----------|
+| `ManageCinemachineTool` | 10 | 34 | **-71%** | FreeLook、StateDriven、ClearShot、Sequencer、扩展、脉冲 |
+| `ManageUITool` | 9 | 26 | **-65%** | layout、align、distribute、anchor 预设、组件添加 |
+| `ManageProBuilderTool` | 10 | 22 | **-55%** | 挤出、倒角、UV 投影等高级建模 |
+| `ManageMaterialTool` | 11 | 21 | **-48%** | 细粒度属性 batch 设置 |
+| `ManageTestTool` | 4 | 11 | **-64%** | cancel、create_test_fixture |
 
-- **场景健康检查**: 缺失脚本、缺失引用、重复名称、空节点、深层级
-- **技术栈检测**: 渲染管线、UI 路线、输入系统、主要包
-- **场景分析/摘要**: 对象计数、组件统计、层级深度
-- **依赖分析**: 对象依赖图、脚本依赖图、影响分析
-- **空间查询**: 按半径查找对象
-- **性能提示**: 诊断场景性能问题
-- **场景 Diff**: 对比场景快照变化
+### 3.2 完全缺失但重要的能力
 
-**没有这些能力，AI Agent 就像"盲人"——只能操作但不能理解场景。**
+| 缺失 | 影响 | 优先级 |
+|------|------|--------|
+| **UIToolkit** | 新一代 UI 系统，Unity 官方推荐方向 | P1 |
+| **Validation** | 场景验证、质量保证 | P2 |
+| **Debug 系统信息** | assembly 信息、defines 管理 | P2 |
+| **Workflow** | 工作流自动化 | P3 |
+| **XR** | VR/AR 开发 | P3 (按需) |
 
-AgentCore 当前只有 `manage_scene.get_hierarchy` 提供基本的层级信息，远远不够。
+### 3.3 AgentCore 的结构性优势
 
-#### 🔴 P0 — Batch 操作能力（影响 AI 效率）
+尽管 action 数量少于 Unity Skills，AgentCore 有以下结构性优势：
 
-Unity Skills 几乎每个分类都有 batch 版本（`_batch` 后缀），而 AgentCore 虽然有 `batch_execute` 工具，但各个工具本身不支持批量参数。这意味着：
-
-- 创建 10 个 GameObject 需要 10 次工具调用（而不是 1 次）
-- 设置 20 个对象的属性需要 20 次调用
-- 每次调用都有 LLM 往返延迟
-
-#### 🔴 P1 — Terrain 地形编辑
-
-3D 游戏开发的核心功能，完全缺失。
-
-#### 🔴 P1 — Cinemachine 相机系统
-
-现代 Unity 项目的标配相机解决方案，30+ 技能完全缺失。
-
-#### 🔴 P1 — Timeline 时间线
-
-过场动画和序列编辑的核心工具，完全缺失。
-
-#### 🔴 P1 — ScriptableObject 管理
-
-数据驱动开发的核心，完全缺失。
-
-### 3.2 中等优先级缺失
-
-| 缺失 | 影响 |
-|------|------|
-| **Smart 操作** | 对齐、分布、网格吸附等高级编辑操作 |
-| **Optimization** | 性能优化分析和自动修复 |
-| **Cleaner** | 项目清理和维护 |
-| **Event 系统** | UnityEvent 管理 |
-| **Package 管理** | UPM 包安装/管理 |
-| **Test 系统** | 自动化测试运行 |
-
-### 3.3 现有工具的深度不足
-
-即使在已覆盖的分类中，AgentCore 的 action 数量也普遍只有 Unity Skills 的 50-70%：
-
-| 工具 | AgentCore Actions | Unity Skills 等效 | 缺失的关键能力 |
-|------|------------------|-------------------|---------------|
-| `manage_ui` | 5 | 26+ | 缺少 layout、align、distribute、anchor 预设、组件添加 |
-| `manage_physics` | 6 | 12 | 缺少 spherecast、boxcast、overlap、physics material |
-| `manage_animation` | 6 | 10 | 缺少 create_controller、add_state/transition |
-| `manage_shader` | 4 | 11 | 缺少 create、delete、check_errors |
-| `manage_material` | 6 | 21 | 缺少 batch、细粒度属性设置 |
+1. **`execute_code` 万能后门**: 任何缺失的功能都可以通过执行 C# 代码临时弥补
+2. **`execute_menu_item`**: 可以执行任何 Unity 菜单项，间接访问大量功能
+3. **`batch_execute`**: 可以在一次调用中执行多个工具
+4. **Cloud 工具**: Mem0 记忆 + LightRAG 知识库，Unity Skills 完全没有
+5. **文件系统操作**: `ManageFileTool` 提供完整的文件操作能力
+6. **图形管线控制**: `ManageGraphicsTool` 提供渲染/质量设置管理
 
 ---
 
-## 4. AgentCore 的独有优势
+## 4. 覆盖率总结
 
-尽管覆盖度不足，AgentCore 有一些 Unity Skills 没有的能力：
+### 按数量计算
 
-| 能力 | 说明 |
-|------|------|
-| **execute_code** | 可以执行任意 C# 表达式，理论上可以弥补任何缺失的工具 |
-| **execute_menu_item** | 可以执行任何 Unity 菜单项，间接访问大量功能 |
-| **Cloud 工具** | Mem0 记忆系统 + LightRAG 知识库，Unity Skills 没有 |
-| **batch_execute** | 批量执行多个工具调用（但不如原生 batch 高效） |
-| **manage_asset.get_dependencies** | 资源依赖分析，Unity Skills 的 AssetSkills 没有 |
-| **manage_editor.set_project_setting** | 项目设置修改能力 |
+| 指标 | 值 |
+|------|-----|
+| AgentCore actions | 335 |
+| Unity Skills 总数 | 554 |
+| **数量覆盖率** | **60.5%** |
 
-**特别是 `execute_code` 工具**，它是一个"万能后门"——任何 Unity Skills 有而 AgentCore 没有的功能，理论上都可以通过 `execute_code` 来实现。但这要求 LLM 知道正确的 Unity API，且执行效率和可靠性不如专用工具。
+### 按分类计算
+
+| 指标 | 值 |
+|------|-----|
+| Unity Skills 分类数 | 41 |
+| AgentCore 已覆盖分类 | 31 (含部分覆盖) |
+| AgentCore 独有分类 | 5 |
+| 完全缺失分类 | 5 |
+| **分类覆盖率** | **76%** (31/41) |
+| **含独有分类的总分类覆盖** | **88%** (36/41+5) |
+
+### 按功能等效计算（考虑 execute_code 弥补）
+
+如果考虑 `execute_code` 可以临时弥补缺失功能，**理论覆盖率接近 100%**，但实际可靠性和效率不如专用工具。
 
 ---
 
 ## 5. 改进建议
 
-### 5.1 短期（P0 — 立即行动）
+### 5.1 P1 — 深度增强（现有工具扩展）
 
-1. **新增 `PerceptionTool`** — 从 `PerceptionSkills` 移植核心分析能力
-   - `scene_analyze`: 综合场景分析
-   - `scene_health_check`: 场景健康检查
-   - `scene_summarize`: 场景摘要
-   - `project_stack_detect`: 技术栈检测
-   - `scene_dependency_analyze`: 依赖分析
-   - `scene_performance_hints`: 性能提示
+优先增强深度差距最大的工具：
 
-2. **增强现有工具的 batch 支持** — 在 `manage_gameobject`、`manage_component` 等工具中添加 batch action
+1. **`ManageCinemachineTool`** — 补充 FreeLook、StateDriven 等高级相机模式 (+24 actions)
+2. **`ManageUITool`** — 补充 layout、align、distribute 等操作 (+17 actions)
+3. **`ManageProBuilderTool`** — 补充挤出、倒角、UV 投影等 (+12 actions)
 
-### 5.2 中期（P1 — 1-2 周）
+### 5.2 P2 — 新增缺失分类
 
-3. **新增 `ManageTerrainTool`** — 地形编辑
-4. **新增 `ManageCinemachineTool`** — Cinemachine 相机
-5. **新增 `ManageTimelineTool`** — Timeline 编辑
-6. **新增 `ManageScriptableObjectTool`** — ScriptableObject CRUD
-7. **新增 `ManagePackageTool`** — UPM 包管理
+4. **新增 `ManageUIToolkitTool`** — UI Toolkit 操作 (~25 actions)
+5. **新增 `ValidationTool`** — 场景验证 (~10 actions)
+6. **增强 `ReadConsoleTool`** — 补充 Debug 系统信息 (+5 actions)
 
-### 5.3 长期（P2 — 按需）
+### 5.3 P3 — 按需补充
 
-8. **新增 `SmartOperationsTool`** — 智能编辑操作
-9. **新增 `OptimizationTool`** — 性能优化
-10. **新增 `CleanerTool`** — 项目清理
-11. **新增 `ManageEventTool`** — UnityEvent 管理
-12. **新增 `ManageTestTool`** — 自动化测试
-13. **增强 `manage_ui`** — 补充缺失的 UI 操作
-14. **增强 `manage_physics`** — 补充高级物理查询
-15. **新增 `ManageProBuilderTool`** — ProBuilder 建模（按需）
-16. **新增 `ManageXRTool`** — XR 开发（按需）
+7. **新增 `WorkflowTool`** — 工作流自动化 (按需)
+8. **新增 `ManageXRTool`** — XR 开发 (按需)
 
 ### 5.4 架构建议
 
 - **优先利用 `execute_code`**: 在专用工具开发完成前，可以在 SOUL.md 或 TOOLS.md 中添加常用 Unity API 的使用指南，让 LLM 通过 `execute_code` 临时弥补缺失
 - **参考 Unity Skills 的实现**: `_archive/Unity-Skills/` 中的代码可以直接作为参考，但需要适配 AgentCore 的工具架构（`IAgentTool` + `[AgentTool]` + action 分发模式）
-- **Perception 能力最优先**: 这是 AI Agent 区别于简单工具集的关键——理解场景的能力比操作场景的能力更重要
+- **Perception 能力已基本补齐**: `SceneAnalysisTool` 已覆盖大部分场景分析需求
 
 ---
 
 ## 6. 结论
 
-**AgentCore 当前对 Unity 的操作能力覆盖了 Unity Skills 约 23% 的功能点，在已覆盖的分类中平均达到 60-70% 的深度。**
+**AgentCore 当前对 Unity 的操作能力覆盖了 Unity Skills 约 60% 的功能点（335/554 actions），分类覆盖率约 76%（31/41 分类）。**
 
-最关键的缺失是 **Perception/场景分析能力**（AI 的"眼睛"）和 **Batch 操作**（AI 的"效率"）。其次是 Terrain、Cinemachine、Timeline、ScriptableObject 等专业领域工具。
+相比初版报告声称的 23%，实际覆盖率高出近 3 倍。这是因为初版报告是在项目早期编写的，之后大量工具被新增和扩展。
 
-好消息是 `execute_code` 工具提供了一个万能后门，可以在专用工具开发完成前临时弥补大部分缺失。但长期来看，专用工具的可靠性、效率和 LLM 友好度远优于通用代码执行。
+最大的深度差距在 **Cinemachine**（29%）、**UI**（35%）和 **ProBuilder**（45%）。完全缺失的分类有 5 个（UIToolkit、Validation、Debug、Workflow、XR），但其中 Workflow 和 XR 属于低优先级。
 
-建议按 P0 → P1 → P2 的优先级逐步补充，首先聚焦于 Perception 能力和 Batch 支持。
+AgentCore 的结构性优势（`execute_code`、`execute_menu_item`、Cloud 工具、文件系统操作）在一定程度上弥补了功能点数量的差距，使得实际可用能力高于 60% 的数字所暗示的水平。
