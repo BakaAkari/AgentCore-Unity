@@ -1,6 +1,6 @@
 # Unity Agent Plugin — 完整架构设计
 
-> **版本**: 0.3.3 | **日期**: 2026-05-07
+> **版本**: 0.3.6 | **日期**: 2026-05-07
 >
 > AgentCore Unity 是一个 Unity Editor 内嵌的 AI Agent 插件，
 > 通过 Chat 窗口与 LLM 交互，使用自研原生工具系统操作 Unity Editor。
@@ -16,7 +16,7 @@
 | G1 | **对话式 AI 助手** | Unity Editor 内嵌 ChatGPT 风格对话窗口 |
 | G2 | **会话管理** | 支持会话持久化、自动记忆、导出 |
 | G3 | **云端服务集成** | LLM、mem0、LightRAG 均由管理员部署在内网云端 |
-| G4 | **自研原生工具** | 44 个工具、335+ 个 action，直接调用 Unity Editor API |
+| G4 | **自研原生工具** | 49 个工具、400+ 个 action，直接调用 Unity Editor API |
 | G5 | **零运维用户体验** | 用户只需配置云端端点，无需本地 Docker/WSL2 |
 | G6 | **UPM 包分发** | 标准 Unity Package Manager 格式，一键安装 |
 
@@ -961,7 +961,7 @@ graph TD
 | 项目 | 策略 |
 |------|------|
 | 版本号格式 | [SemVer 2.0](https://semver.org/)：`MAJOR.MINOR.PATCH` |
-| 当前版本 | `0.3.3` |
+| 当前版本 | `0.3.6` |
 | MINOR 递增 | 每个 Phase 完成时 |
 | PATCH 递增 | Bug 修复和小改进 |
 | MAJOR 递增 | 破坏性 API 变更（1.0.0 = 正式发布） |
@@ -979,8 +979,7 @@ graph LR
     P1[Phase 1: 能对话 ✅] --> P2[Phase 2: 能做事 ✅]
     P2 --> P25[Phase 2.5: 原生工具 ✅]
     P25 --> P3[Phase 3: 能记忆 ✅]
-    P3 --> P4[Phase 4: 更好用 🔄]
-    P4 --> P45[Phase 4.5: 当前 🔄]
+    P3 --> P4[Phase 4: 更好用 ✅]
 ```
 
 ### Phase 1: 能对话 ✅ (v0.1.0)
@@ -1042,7 +1041,7 @@ graph LR
 | 3.6 | 上下文窗口管理 (ContextWindowManager) | ✅ |
 | 3.7 | Token 计数 (TokenCounter) | ✅ |
 
-### Phase 4: 更好用 🔄 (v0.3.2 ~ v0.3.3, 进行中)
+### Phase 4: 更好用 ✅ (v0.3.2 ~ v0.3.6, 已完成)
 
 **目标**：打磨用户体验，提升专业度和可扩展性
 
@@ -1052,10 +1051,18 @@ graph LR
 | 4.2 | ToolCallGroup 分组展示 | ✅ |
 | 4.3 | FileChangeTracker 文件变更追踪 | ✅ |
 | 4.4 | FileChangeSummaryPanel UI | ✅ |
-| 4.5 | Markdown 渲染增强 | 🔄 |
-| 4.6 | 键盘快捷键 | 🔄 |
-| 4.7 | 工具启用/禁用管理 | 📋 |
-| 4.8 | 完善文档和示例 | 🔄 |
+| 4.5 | Markdown 渲染增强 | ❌ 已决定不实现（当前段落可视化满足需求） |
+| 4.6 | 键盘快捷键 | ✅ |
+| 4.7 | 工具启用/禁用管理 | ✅ |
+| 4.8 | 完善文档和示例 | ✅ |
+| 4.9 | 重试 UI (RetryLastMessage + FallbackRouter) | ✅ |
+| 4.10 | 新增工具：ManageUIToolkitTool (20 actions) | ✅ |
+| 4.11 | 新增工具：ValidationTool (10 actions) | ✅ |
+| 4.12 | 新增工具：WorkflowTool (15 actions) | ✅ |
+| 4.13 | 增强：ManageCinemachineTool (+11 actions) | ✅ |
+| 4.14 | 增强：ManageUITool (+9 actions) | ✅ |
+| 4.15 | 增强：ManageProBuilderTool (+8 actions) | ✅ |
+| 4.16 | 增强：ReadConsoleTool (+5 actions) | ✅ |
 
 ---
 
@@ -1087,7 +1094,7 @@ AgentCore 经历了以下架构演进：
 |------|------|------|
 | 初始设计 | 依赖 unity-mcp 桥接 | 计划通过 `CommandRegistry` 调用 unity-mcp 的 36+ 工具 |
 | Phase 2.5 | **自研原生工具** | 完全移除 unity-mcp 依赖，自研 37 个原生工具 |
-| 当前 (v0.3.3) | **零外部依赖** | 44 个工具、335+ 个 action，唯一依赖 Newtonsoft.Json |
+| 当前 (v0.3.6) | **零外部依赖** | 49 个工具、400+ 个 action，唯一依赖 Newtonsoft.Json |
 
 ### 10.2 保留的资产
 
@@ -1124,11 +1131,13 @@ agentcore-unity/                    # 仓库根目录
 | Q2 | 是否需要支持代理服务器？ | 企业网络环境 | 配置中预留 |
 | Q3 | 44 个工具全部发送给 LLM 是否 token 消耗过大？ | 成本/性能 | 计划实现工具分组启用/禁用 |
 | Q4 | 是否需要支持多 LLM 模型切换？ | 用户灵活性 | 配置已支持 |
-| Q5 | 是否需要 Markdown 完整渲染（代码高亮、表格）？ | 用户体验 | Phase 4 进行中 |
-| Q6 | 缺失的 5 个工具类别（Debug/UIToolkit/Validation/Workflow/XR）是否需要补充？ | 功能覆盖率 | 按需评估 |
+| Q5 | 是否需要 Markdown 完整渲染（代码高亮、表格）？ | 用户体验 | ✅ 已决定不实现，当前段落可视化满足需求 |
+| Q6 | 缺失的工具类别（UIToolkit/Validation/Workflow/XR）是否需要补充？ | 功能覆盖率 | ✅ UIToolkit/Validation/Workflow 已补充，XR 暂不实现 |
 
 > **已解决的问题**：
 > - ~~JSON 序列化选型~~ → 统一使用 Newtonsoft.Json（UPM 包依赖）
 > - ~~Unity Editor 工具如何实现~~ → 自研原生工具，通过 `[AgentTool]` + `IAgentTool` 自动发现
 > - ~~是否依赖 unity-mcp~~ → 不依赖，完全自研，零外部 asmdef 引用
 > - ~~Domain Reload 如何处理~~ → `DomainReloadState` + `InterruptPhase` 恢复机制
+> - ~~Markdown 渲染~~ → 已决定不实现，当前段落可视化满足需求
+> - ~~缺失工具类别~~ → UIToolkit/Validation/Workflow 已在 v0.3.6 补充完成

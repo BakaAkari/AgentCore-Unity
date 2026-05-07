@@ -56,13 +56,36 @@
 - Use `overlap_test` to find objects in a volume.
 
 ### UI Operations (uGUI)
-- Use `manage_ui` (actions: `create_canvas`, `create_element`, `modify_element`, `get_info`, `list`, `set_layout`, `add_layout_group`, `configure_canvas`, `add_ui_component`).
+- Use `manage_ui` (actions: `create_canvas`, `create_element`, `modify_element`, `get_info`, `list`, `set_layout`, `add_layout_group`, `configure_canvas`, `add_ui_component`, `align_elements`, `distribute_elements`, `delete_element`, `duplicate_element`, `set_text`, `set_image`, `set_interactable`, `reorder_element`, `find_element`).
 - Always create a Canvas first (`create_canvas`) before adding UI elements.
 - Use `set_layout` for anchor/stretch presets, `add_layout_group` for auto-layout.
+- Use `align_elements` / `distribute_elements` for precise multi-element alignment.
+- Use `find_element` to search for UI elements by name across all canvases.
+
+### UI Toolkit Operations
+- Use `manage_ui_toolkit` for Unity UI Toolkit (UXML/USS) asset management.
+  - `create_uxml` / `create_uss`: Create new UXML or USS files.
+  - `get_uxml_content` / `get_uss_content`: Read existing UXML/USS file content.
+  - `add_element`: Add a UI element to a UXML file (supports VisualElement, Label, Button, TextField, Toggle, Slider, ScrollView, ListView, DropdownField, etc.).
+  - `remove_element`: Remove an element by name from UXML.
+  - `set_attribute`: Set an attribute on a UXML element (text, value, label, tooltip, etc.).
+  - `set_style`: Add or update inline style properties on a UXML element.
+  - `add_class` / `remove_class`: Manage CSS class names on elements.
+  - `add_binding`: Add a `binding-path` attribute for data binding.
+  - `query_element` / `list_elements`: Find elements by name/class/type or list all elements.
+  - `validate_uxml`: Validate UXML structure and report errors.
+  - `create_panel_settings`: Create a PanelSettings asset for UI Document rendering.
+  - `configure_ui_document`: Assign UXML and PanelSettings to a UIDocument component on a GameObject.
+  - `list_ui_documents`: List all UIDocument components in the scene.
+  - `create_editor_window_template`: Generate a C# EditorWindow class with UXML/USS wiring.
+  - `create_custom_element_template`: Generate a C# custom VisualElement class.
+  - `list_assets`: List all UXML or USS assets in the project.
 
 ### Camera & Cinemachine
 - Use `manage_camera` (actions: `create`, `get_info`, `configure`, `look_at`, `align_to_view`, `create_render_texture`, `render_to_texture`, `list_cameras`, `set_main_camera`).
-- Use `manage_cinemachine` (actions: `create_virtual_camera`, `set_target`, `configure_body`, `configure_aim`, `set_noise`, `get_info`, `list`, `set_priority`, `configure_lens`, `setup_brain`) for Cinemachine virtual cameras.
+- Use `manage_cinemachine` for Cinemachine virtual cameras:
+  - Basic: `create_virtual_camera`, `set_target`, `configure_body`, `configure_aim`, `set_noise`, `get_info`, `list`, `set_priority`, `configure_lens`, `setup_brain`
+  - Advanced: `create_freelook`, `configure_freelook_orbits`, `create_state_driven`, `add_state_camera`, `create_clearshot`, `create_sequencer`, `add_sequencer_entry`, `create_dolly_track`, `configure_impulse`, `set_blend_list`
 - Cinemachine requires the Cinemachine package — the tool will prompt for installation if missing.
 
 ### Terrain Operations
@@ -74,8 +97,12 @@
 - Timeline requires the Timeline package — the tool will prompt for installation if missing.
 
 ### ProBuilder Operations
-- Use `manage_probuilder` (actions: `check_available`, `create_shape`, `get_info`, `set_material`, `center_pivot`, `flip_normals`, `subdivide`, `combine_meshes`, `get_vertices`, `move_vertices`).
+- Use `manage_probuilder` for ProBuilder mesh editing:
+  - Basic: `check_available`, `create_shape`, `get_info`, `set_material`, `center_pivot`, `flip_normals`, `subdivide`, `combine_meshes`, `get_vertices`, `move_vertices`
+  - Advanced: `get_faces`, `extrude_faces`, `delete_faces`, `bevel_edges`, `bridge_edges`, `weld_vertices`, `set_uv_projection`, `triangulate`
 - Always call `check_available` first — ProBuilder is an optional package.
+- `get_faces` returns face indices needed for `extrude_faces`, `delete_faces`, `bevel_edges`.
+- `set_uv_projection` supports modes: `planar`, `box`, `spherical`, `cylindrical`.
 
 ### Event System
 - Use `manage_event` (actions: `get_listeners`, `add_listener`, `remove_listener`, `clear_listeners`, `list_events`, `set_listener_state`, `get_listener_count`, `invoke`) for UnityEvent management.
@@ -104,9 +131,45 @@
   - `get_all`: Get all log entries (errors, warnings, and info logs).
   - `get_count`: Get a summary count of errors/warnings/logs without full details.
   - `clear`: Clear the console.
+  - `get_system_info`: Get Unity version, OS, processor, memory, graphics device, scripting backend, render pipeline.
+  - `get_assembly_info`: List all loaded assemblies with name/version/location; supports `search` filter.
+  - `get_scripting_defines`: Get all scripting define symbols for a build target group.
+  - `set_scripting_define`: Add or remove a scripting define symbol (`enabled: true/false`).
+  - `get_log_file`: Read the Unity Editor.log file; supports `max_lines` (tail) and `search` filter.
   - Use `search` parameter to filter entries by text (e.g., search for a specific file name or error code).
   - Use `max_entries` to control how many entries are returned (default: 50, max: 200).
 - When a script modification causes compilation failure, ALWAYS call `read_console` (action: `get_errors`) to identify the exact error and file location.
+
+### Scene Validation
+- Use `validation` to validate scene and project quality:
+  - `validate_scene`: Run all validators on the active scene — returns categorized issues (error/warning/info).
+  - `validate_naming`: Check GameObject naming conventions (configurable pattern, default: PascalCase).
+  - `validate_components`: Find missing scripts, missing references, and disabled components.
+  - `validate_performance`: Detect performance issues (high poly meshes, too many lights, missing LOD, etc.).
+  - `validate_layers_tags`: Verify all GameObjects use valid, defined layers and tags.
+  - `validate_prefabs`: Find broken prefab instances and unapplied overrides.
+  - `validate_audio`: Check AudioSource configurations (missing clips, 3D settings, etc.).
+  - `validate_physics`: Detect physics issues (missing colliders on Rigidbodies, trigger mismatches, etc.).
+  - `validate_ui`: Check UI hierarchy issues (missing EventSystem, overlapping elements, etc.).
+  - `validate_custom`: Run a custom validation rule with a C# expression.
+  - Use `severity_filter` to show only `error`, `warning`, or `info` level issues.
+  - Use `fix_auto` to automatically fix simple issues where possible.
+
+### Workflow Automation
+- Use `workflow` for bulk GameObject operations and scene utilities:
+  - `batch_rename`: Rename multiple GameObjects with a pattern supporting `{index}`, `{name}`, `{parent}`, `{index:00}` (zero-padded).
+  - `batch_set_tag` / `batch_set_layer`: Set tag or layer on multiple GameObjects at once.
+  - `batch_set_active` / `batch_set_static`: Toggle active state or static flags in bulk.
+  - `find_replace_name`: Find-and-replace text in GameObject names (supports regex).
+  - `collect_by_component`: Find all GameObjects with a specific component type.
+  - `collect_by_tag` / `collect_by_layer`: Find all GameObjects with a specific tag or layer.
+  - `snapshot_hierarchy`: Export the full scene hierarchy as a JSON tree (with component lists).
+  - `batch_add_component` / `batch_remove_component`: Add or remove a component from multiple GameObjects.
+  - `batch_move_to_parent`: Move multiple GameObjects under a new parent.
+  - `count_objects`: Get statistics — total count, breakdown by tag/layer/component.
+  - `list_scenes`: List all scenes (build settings + all .unity files + currently open scenes).
+  - All modification actions support `dry_run: true` to preview changes without applying them.
+  - All modification actions support `target_objects` (array of names/paths) or `target_tag`/`target_layer` for selection.
 
 ### Editor Control
 - Use `manage_editor` (actions: `get_info`, `play_mode`, `focus_window`, `get_selection`, `set_selection`, `refresh`, `get_project_settings`, `set_project_setting`).
@@ -185,6 +248,20 @@
 - **Want to run tests?** → `manage_test` (action: `run_tests`)
 - **Want to manage ScriptableObjects?** → `manage_scriptable_object`
 - **Want to align/distribute objects?** → `smart_operations` (action: `align_objects`, `distribute_objects`)
+- **Want to create/edit UXML or USS files?** → `manage_ui_toolkit`
+- **Want to add a UI element to a UXML file?** → `manage_ui_toolkit` (action: `add_element`)
+- **Want to set up a UIDocument on a GameObject?** → `manage_ui_toolkit` (action: `configure_ui_document`)
+- **Want to generate an EditorWindow template?** → `manage_ui_toolkit` (action: `create_editor_window_template`)
+- **Want to validate scene quality?** → `validation` (action: `validate_scene`)
+- **Want to find missing scripts/references?** → `validation` (action: `validate_components`)
+- **Want to rename many GameObjects at once?** → `workflow` (action: `batch_rename`)
+- **Want to find all objects with a component?** → `workflow` (action: `collect_by_component`)
+- **Want to export the scene hierarchy as JSON?** → `workflow` (action: `snapshot_hierarchy`)
+- **Want to get Unity system info?** → `read_console` (action: `get_system_info`)
+- **Want to read/search the Editor.log file?** → `read_console` (action: `get_log_file`)
+- **Want to add/remove a scripting define?** → `read_console` (action: `set_scripting_define`)
+- **Want to set up advanced Cinemachine cameras?** → `manage_cinemachine` (action: `create_freelook`, `create_state_driven`, `create_clearshot`, `create_sequencer`)
+- **Want to extrude/bevel ProBuilder faces?** → `manage_probuilder` (action: `extrude_faces`, `bevel_edges`)
 
 ### 记忆管理
 - `manage_memory` — 长期记忆的增删查
