@@ -5,14 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-05-07
+
+### Added
+- **文件变更追踪与展示面板**（Phase 4.5）
+  - `FileChangeTracker` — 追踪当前会话中所有工具调用产生的文件变更
+    - 支持追踪 `manage_script`、`manage_file`、`manage_asset` 三类工具的文件操作
+    - 执行前快照文件行数，执行后对比计算增减行数（`+N -N`）
+    - 自动识别变更类型：新建（Created）、修改（Modified）、删除（Deleted）、移动（Moved）、复制（Copied）
+    - 同一文件多次修改自动合并为一条摘要
+    - **Domain Reload 持久化**：文件变更记录跨 Domain Reload 保留
+      - `SerializeToJson()` / `RestoreFromJson()` — 序列化/反序列化变更记录
+      - 在 `OnBeforeAssemblyReload` 中自动保存到 `DomainReloadState`
+      - 在会话恢复时自动从 `DomainReloadState` 恢复
+  - `FileChangeSummaryPanel` — 输入栏上方的可折叠文件变更汇总面板
+    - 头部显示"此对话中已更改 N 个文件" + 总增减行数统计
+    - 每行显示变更类型图标（彩色）、文件路径、增减行数
+    - 单击文件行：在 Project 窗口中高亮定位（`EditorGUIUtility.PingObject`）
+    - 双击文件行：在 IDE 中打开文件（`AssetDatabase.OpenAsset`）
+    - 无变更时自动隐藏，有变更时自动显示
+    - 会话切换/重置时自动清空
+    - Domain Reload 后自动恢复显示
+  - `AgentEventType.FileChangesUpdated` — 新增文件变更更新事件类型
+  - `AgentEvent.FileChangesUpdated()` — 新增文件变更事件工厂方法
+  - `AgentLoop.FileTracker` — 公开属性供 UI 层访问文件变更追踪器
+  - `AgentLoop.EmitFileChangesUpdatedEvent()` — 公开方法供 UI 层在会话恢复后触发文件变更面板更新
+  - `DomainReloadState.SaveFileChangeRecords()` / `ClearFileChangeRecords()` — 文件变更数据的持久化管理
+
 ## [0.3.2] - 2026-05-06
 
 ### Added
 - **轻量级 Markdown 格式化**（Phase 4.1）
-  - `ContentFilter.FormatMarkdown()` — 将 Markdown 语法转换为可读的格式化文本
-  - 标题格式化：`# H1` → `═══ H1 ═══`，`## H2` → `── H2 ──`，`### H3` → `【H3】`
+  - `ContentFilter.FormatMarkdown()` — 将 Markdown 语法转换为可读的纯文本格式（不使用任何 Rich Text 标签）
+  - 标题格式化：`# H1` → `═══ H1 ═══`，`## H2` → `── H2 ──`，`### H3` → `【H3】`，`#### H4` → `▸ H4`
   - 表格格式化：解析 `| col | col |` 语法，生成对齐的纯文本表格（带 box-drawing 字符）
-  - 粗体/斜体：`**text**` → `<b>text</b>`，`*text*` → `<i>text</i>`（利用 Unity Rich Text）
+  - 粗体/斜体：`**text**` → `text`，`*text*` → `text`（直接去除标记符号）
   - 列表格式化：`- item` → `  · item`，`1. item` → `  1) item`
   - 代码块：保持内容不变，添加 `──── lang ────` 装饰分隔线
   - 引用块：`> text` → `  │ text`

@@ -78,6 +78,11 @@ namespace AgentCore.Editor.Core
         /// <summary>被中断的 tool_call ID</summary>
         [SerializeField] private string _interruptedToolCallId;
 
+        // === Phase 4.5 新增字段 ===
+
+        /// <summary>文件变更记录的 JSON 序列化数据（跨 Domain Reload 保留）</summary>
+        [SerializeField] private string _fileChangeRecordsJson;
+
         #endregion
 
         #region 公开属性
@@ -116,6 +121,11 @@ namespace AgentCore.Editor.Core
 
         /// <summary>被中断的 tool_call ID</summary>
         public string InterruptedToolCallId => _interruptedToolCallId;
+
+        // === Phase 4.5 新增属性 ===
+
+        /// <summary>文件变更记录的 JSON 序列化数据</summary>
+        public string FileChangeRecordsJson => _fileChangeRecordsJson;
 
         #endregion
 
@@ -182,8 +192,32 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
+        /// 保存文件变更记录的 JSON 数据。
+        /// 在 <c>AssemblyReloadEvents.beforeAssemblyReload</c> 回调中由 AgentLoop 调用，
+        /// 将 <see cref="FileChangeTracker"/> 的记录序列化后保存，以便 Domain Reload 后恢复。
+        /// </summary>
+        /// <param name="json">文件变更记录的 JSON 字符串（可为 null 或空）</param>
+        public void SaveFileChangeRecords(string json)
+        {
+            _fileChangeRecordsJson = json ?? string.Empty;
+            Save(true);
+        }
+
+        /// <summary>
+        /// 清除文件变更记录数据。
+        /// 在会话切换或重置时调用。
+        /// </summary>
+        public void ClearFileChangeRecords()
+        {
+            _fileChangeRecordsJson = string.Empty;
+            Save(true);
+        }
+
+        /// <summary>
         /// 清除中断标记。
         /// 在会话恢复完成后调用。
+        /// 注意：不清除文件变更记录（<see cref="_fileChangeRecordsJson"/>），
+        /// 因为文件变更数据需要在整个会话期间保留。
         /// </summary>
         public void ClearInterruption()
         {
@@ -201,6 +235,7 @@ namespace AgentCore.Editor.Core
             _compilationSucceeded = false;
             _compilationErrors = string.Empty;
             _interruptedToolCallId = string.Empty;
+            // 注意：不清除 _fileChangeRecordsJson，文件变更数据独立于中断状态
 
             Save(true);
 

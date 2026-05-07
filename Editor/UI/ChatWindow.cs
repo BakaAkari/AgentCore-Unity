@@ -85,6 +85,9 @@ namespace AgentCore.Editor.UI
         /// <summary>状态标签</summary>
         private Label _statusLabel;
 
+        /// <summary>文件变更汇总面板</summary>
+        private FileChangeSummaryPanel _fileChangeSummaryPanel;
+
         #endregion
 
         #region 侧边栏 UI 元素引用
@@ -214,6 +217,23 @@ namespace AgentCore.Editor.UI
             // 6.5 恢复侧边栏展开状态
             _sidebarExpanded = EditorPrefs.GetBool(SidebarExpandedKey, false);
             UpdateSidebarVisibility();
+
+            // 6.7 Phase 4.5: 创建文件变更汇总面板并插入到 input-area 之前
+            _fileChangeSummaryPanel = new FileChangeSummaryPanel();
+            var chatArea = rootVisualElement.Q<VisualElement>("chat-area");
+            var inputArea = rootVisualElement.Q<VisualElement>("input-area");
+            if (chatArea != null && inputArea != null)
+            {
+                var inputIndex = chatArea.IndexOf(inputArea);
+                if (inputIndex >= 0)
+                {
+                    chatArea.Insert(inputIndex, _fileChangeSummaryPanel);
+                }
+                else
+                {
+                    chatArea.Add(_fileChangeSummaryPanel);
+                }
+            }
 
             // 7. 创建并初始化 AgentLoop
             InitializeAgentLoop();
@@ -447,6 +467,11 @@ namespace AgentCore.Editor.UI
                 case AgentEventType.LoopCompleted:
                     // 循环结束，无需特殊 UI 处理
                     break;
+
+                // Phase 4.5: 文件变更更新事件
+                case AgentEventType.FileChangesUpdated:
+                    _fileChangeSummaryPanel?.UpdateChanges(evt.FileChanges);
+                    break;
             }
         }
 
@@ -668,6 +693,9 @@ namespace AgentCore.Editor.UI
             _activeToolCards.Clear();
             _currentToolCallGroup = null;
             _toolCallCounter = 0;
+
+            // Phase 4.5: 清空文件变更面板
+            _fileChangeSummaryPanel?.ClearAndHide();
         }
 
         /// <summary>
@@ -875,6 +903,9 @@ namespace AgentCore.Editor.UI
 
                 // 重建 UI 消息气泡
                 RebuildMessageBubbles();
+
+                // Phase 4.5: 恢复文件变更面板（Domain Reload 后 FileChangeTracker 数据已在 LoadSession 中恢复）
+                _agentLoop.EmitFileChangesUpdatedEvent();
 
                 Debug.Log($"[AgentCore] Session restored: {session.Id} ({session.Title}, {session.Turns.Count} turns)");
 
@@ -1298,6 +1329,17 @@ namespace AgentCore.Editor.UI
 
                 // 3. 重建消息气泡
                 RebuildMessageBubbles();
+
+                // 3.5 Phase 4.5: 切换会话后更新文件变更面板
+                // 新会话可能没有文件变更数据，需要清空面板；或者恢复了 Domain Reload 前的数据
+                if (_agentLoop.FileTracker != null && _agentLoop.FileTracker.HasChanges)
+                {
+                    _fileChangeSummaryPanel?.UpdateChanges(_agentLoop.FileTracker.GetSummaries());
+                }
+                else
+                {
+                    _fileChangeSummaryPanel?.ClearAndHide();
+                }
 
                 // 4. 刷新会话列表（更新高亮）
                 RefreshSessionList();

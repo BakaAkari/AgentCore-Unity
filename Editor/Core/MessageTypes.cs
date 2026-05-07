@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace AgentCore.Editor.Core
 {
@@ -71,7 +73,12 @@ namespace AgentCore.Editor.Core
         LoopRoundStarted,
 
         /// <summary>循环结束（最终回答）</summary>
-        LoopCompleted
+        LoopCompleted,
+
+        // === Phase 4.5 新增 ===
+
+        /// <summary>文件变更列表更新（工具执行后触发）</summary>
+        FileChangesUpdated
     }
 
     #endregion
@@ -130,6 +137,12 @@ namespace AgentCore.Editor.Core
         public ErrorDetail Detail { get; }
 
         /// <summary>
+        /// 文件变更摘要列表（<see cref="AgentEventType.FileChangesUpdated"/> 时有值）。
+        /// 包含当前会话中所有被修改文件的合并摘要。
+        /// </summary>
+        public List<FileChangeSummary> FileChanges { get; }
+
+        /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
         private AgentEvent(
@@ -144,7 +157,8 @@ namespace AgentCore.Editor.Core
             int currentRound = 0,
             int maxRounds = 0,
             double executionTimeMs = 0,
-            ErrorDetail detail = null)
+            ErrorDetail detail = null,
+            List<FileChangeSummary> fileChanges = null)
         {
             Type = type;
             State = state;
@@ -158,6 +172,7 @@ namespace AgentCore.Editor.Core
             MaxRounds = maxRounds;
             ExecutionTimeMs = executionTimeMs;
             Detail = detail;
+            FileChanges = fileChanges;
         }
 
         #region Phase 1 工厂方法
@@ -313,6 +328,23 @@ namespace AgentCore.Editor.Core
             return new AgentEvent(
                 AgentEventType.LoopCompleted,
                 currentRound: totalRounds
+            );
+        }
+
+        #endregion
+
+        #region Phase 4.5 工厂方法
+
+        /// <summary>
+        /// 创建文件变更更新事件。
+        /// </summary>
+        /// <param name="changes">文件变更摘要列表</param>
+        /// <returns>文件变更更新事件</returns>
+        public static AgentEvent FileChangesUpdated(List<FileChangeSummary> changes)
+        {
+            return new AgentEvent(
+                AgentEventType.FileChangesUpdated,
+                fileChanges: changes
             );
         }
 

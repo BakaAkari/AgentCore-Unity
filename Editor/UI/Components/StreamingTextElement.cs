@@ -158,12 +158,16 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>
         /// 轻量级 Markdown → 可读纯文本格式化。
         /// <para>
-        /// 不做完整的 Markdown 渲染（Unity UI Toolkit Label 不支持），
-        /// 而是将 Markdown 语法转换为更易读的纯文本格式：
+        /// 不使用任何 Rich Text 标签（无 &lt;b&gt;、&lt;i&gt;、&lt;size&gt;），
+        /// 仅通过纯文本符号和排版优化可读性：
         /// <list type="bullet">
+        ///   <item>标题 <c># Title</c> → <c>═══ Title ═══</c></item>
+        ///   <item>标题 <c>## Title</c> → <c>── Title ──</c></item>
         ///   <item>标题 <c>### Title</c> → <c>【Title】</c></item>
+        ///   <item>标题 <c>#### Title</c> → <c>▸ Title</c></item>
         ///   <item>表格 → 对齐的纯文本表格（去掉分隔线行）</item>
-        ///   <item>粗体 <c>**text**</c> → <c>&lt;b&gt;text&lt;/b&gt;</c>（Rich Text）</item>
+        ///   <item>粗体 <c>**text**</c> → 直接去掉标记符号</item>
+        ///   <item>斜体 <c>*text*</c> → 直接去掉标记符号</item>
         ///   <item>无序列表 <c>- item</c> → <c>  · item</c></item>
         ///   <item>有序列表 <c>1. item</c> → <c>  1) item</c></item>
         ///   <item>代码块保持原样（加缩进标记）</item>
@@ -296,7 +300,7 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
-        /// 格式化 Markdown 标题行。
+        /// 格式化 Markdown 标题行（纯文本，无 Rich Text 标签）。
         /// </summary>
         private static string FormatHeading(string line)
         {
@@ -308,26 +312,27 @@ namespace AgentCore.Editor.UI.Components
 
             return level switch
             {
-                1 => $"<b><size=16>═══ {title} ═══</size></b>",
-                2 => $"<b><size=15>── {title} ──</size></b>",
-                3 => $"<b>【{title}】</b>",
-                4 => $"<b>{title}</b>",
-                _ => $"<b>{title}</b>"
+                1 => $"═══ {title} ═══",
+                2 => $"── {title} ──",
+                3 => $"【{title}】",
+                4 => $"▸ {title}",
+                _ => $"▸ {title}"
             };
         }
 
         /// <summary>
-        /// 格式化内联样式：粗体、斜体、内联代码。
+        /// 格式化内联样式（纯文本，无 Rich Text 标签）。
+        /// 粗体和斜体标记符号直接去除，内联代码用方括号标记，链接展开为文本。
         /// </summary>
         private static string FormatInlineStyles(string text)
         {
             if (string.IsNullOrEmpty(text)) return text;
 
-            // 粗体 **text** → <b>text</b>
-            text = Regex.Replace(text, @"\*\*(.+?)\*\*", "<b>$1</b>");
+            // 粗体 **text** → text（直接去掉标记符号）
+            text = Regex.Replace(text, @"\*\*(.+?)\*\*", "$1");
 
-            // 斜体 *text*（不匹配 **）→ <i>text</i>
-            text = Regex.Replace(text, @"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "<i>$1</i>");
+            // 斜体 *text*（不匹配 **）→ text（直接去掉标记符号）
+            text = Regex.Replace(text, @"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "$1");
 
             // 内联代码 `code` → [code]（纯文本中用方括号标记）
             text = Regex.Replace(text, @"`([^`]+)`", "[$1]");
