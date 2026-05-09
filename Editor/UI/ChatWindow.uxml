@@ -49,12 +49,9 @@
           </ui:VisualElement>
         </ui:VisualElement>
 
-        <!-- Knowledge 面板（占位，Phase Hub-2 实现） -->
+        <!-- Knowledge 面板（Phase Hub-2 实现，由 KnowledgeBasePanel C# 组件填充） -->
         <ui:VisualElement name="knowledge-panel">
-          <ui:VisualElement name="knowledge-placeholder">
-            <ui:Label name="knowledge-placeholder-title" text="Knowledge Base" />
-            <ui:Label name="knowledge-placeholder-desc" text="知识库管理功能即将上线" />
-          </ui:VisualElement>
+          <!-- KnowledgeBasePanel 由 ChatWindow.cs 动态插入 -->
         </ui:VisualElement>
 
         <!-- Memory 面板（占位，Phase Hub-5 实现） -->

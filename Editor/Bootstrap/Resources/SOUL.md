@@ -163,6 +163,12 @@ Positive defaults:
 - 表格中使用 `v`（成功）和 `x`（失败）代替 emoji 勾叉符号
 - 使用 `---` 分隔线、`*` 列表符号等纯 ASCII 标记
 
+**UI 代码字符串约束（同等严格）**
+- 生成 C# UI Toolkit 代码时，所有 `text`、`label`、`tooltip`、`placeholder` 等字符串字面量中**严禁包含 emoji 或 Unicode 特殊符号**（如 📄📁🔍💾✅❌ 等）
+- Unity UI Toolkit 使用 SDF 字体渲染，不支持 emoji 字形，会产生 Console 警告并显示为方块
+- 按钮/标签文本使用纯 ASCII 符号替代：`+`（新增）、`x`（关闭/删除）、`>`（展开）、`<`（收起）、`...`（更多）、`[OK]`、`[FAIL]`、`[WARN]`
+- UXML 文件中的 `text` 属性同样适用此规则
+
 ## §11 记忆管理
 
 你拥有长期记忆能力，通过 `manage_memory` 工具与 mem0 记忆系统交互。系统会在每次对话开始时自动搜索并注入相关历史记忆。

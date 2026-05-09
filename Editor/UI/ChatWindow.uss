@@ -408,7 +408,7 @@
 }
 
 /* ============================================================
- * Knowledge 面板占位样式
+ * Knowledge 面板样式（Phase Hub-2）
  * ============================================================ */
 
 #knowledge-panel {
@@ -416,24 +416,220 @@
     flex-shrink: 1;
     flex-direction: column;
     display: none;
+    overflow: hidden;
 }
 
-#knowledge-placeholder {
+/* KnowledgeBasePanel 根容器 */
+.knowledge-panel-content {
     flex-grow: 1;
-    align-items: center;
-    justify-content: center;
+    flex-shrink: 1;
+    flex-direction: column;
+    padding: 16px;
+    overflow: scroll;
 }
 
-#knowledge-placeholder-title {
-    font-size: 18px;
+/* 面板标题 */
+.kb-panel__title {
+    font-size: 16px;
+    -unity-font-style: bold;
+    color: #d4d4d4;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom-width: 1px;
+    border-bottom-color: #3a3a3a;
+}
+
+/* 区块容器 */
+.kb-panel__section {
+    flex-direction: column;
+    margin-bottom: 16px;
+    padding: 12px;
+    background-color: #333333;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #3f3f3f;
+}
+
+/* 区块标题 */
+.kb-panel__section-title {
+    font-size: 11px;
     -unity-font-style: bold;
     color: #888888;
     margin-bottom: 8px;
+    letter-spacing: 0.5px;
 }
 
-#knowledge-placeholder-desc {
-    font-size: 13px;
+/* 状态行 */
+.kb-panel__status-row {
+    font-size: 12px;
+    color: #cccccc;
+    margin-bottom: 4px;
+}
+
+.kb-panel__status-row--muted {
+    color: #888888;
+    font-size: 11px;
+}
+
+/* 状态颜色修饰 */
+.kb-panel__status--enabled {
+    color: #5cb85c;
+}
+
+.kb-panel__status--disabled {
+    color: #d9534f;
+}
+
+.kb-panel__status--connected {
+    color: #5cb85c;
+}
+
+.kb-panel__status--failed {
+    color: #d9534f;
+}
+
+.kb-panel__status--testing {
+    color: #f0ad4e;
+}
+
+/* 按钮行 */
+.kb-panel__button-row {
+    flex-direction: row;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+/* 通用按钮 */
+.kb-panel__button {
+    height: 26px;
+    font-size: 12px;
+    padding: 0 12px;
+    margin-right: 6px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #555555;
+    background-color: #444444;
+    color: #cccccc;
+}
+
+.kb-panel__button:hover {
+    background-color: #505050;
+    color: #ffffff;
+}
+
+.kb-panel__button:active {
+    background-color: #3a3a3a;
+}
+
+.kb-panel__button:disabled {
+    background-color: #333333;
     color: #666666;
+    border-color: #444444;
+}
+
+/* 主要按钮（蓝色） */
+.kb-panel__button--primary {
+    background-color: #2d5a8e;
+    border-color: #3a6fa8;
+    color: #e0e0e0;
+    -unity-font-style: bold;
+    height: 30px;
+    font-size: 13px;
+    width: 100%;
+    margin-right: 0;
+}
+
+.kb-panel__button--primary:hover {
+    background-color: #3a6fa8;
+    color: #ffffff;
+}
+
+.kb-panel__button--primary:active {
+    background-color: #234a7a;
+}
+
+.kb-panel__button--primary:disabled {
+    background-color: #1e3a5a;
+    color: #666666;
+    border-color: #2a4a6a;
+}
+
+/* 次要按钮 */
+.kb-panel__button--secondary {
+    background-color: transparent;
+    border-color: #555555;
+    color: #888888;
+}
+
+.kb-panel__button--secondary:hover {
+    background-color: #3a3a3a;
+    color: #cccccc;
+}
+
+/* 强调按钮（绿色，Ask Agent） */
+.kb-panel__button--accent {
+    background-color: #2d6e3e;
+    border-color: #3a8a50;
+    color: #e0e0e0;
+    -unity-font-style: bold;
+    height: 30px;
+    font-size: 13px;
+    width: 100%;
+    margin-right: 0;
+    margin-top: 8px;
+}
+
+.kb-panel__button--accent:hover {
+    background-color: #3a8a50;
+    color: #ffffff;
+}
+
+.kb-panel__button--accent:active {
+    background-color: #235530;
+}
+
+/* 提示文字 */
+.kb-panel__hint {
+    font-size: 11px;
+    color: #666666;
+    margin-top: 6px;
+    white-space: normal;
+}
+
+/* 结果标签 */
+.kb-panel__result-label {
+    font-size: 12px;
+    color: #cccccc;
+    white-space: normal;
+    margin-bottom: 4px;
+}
+
+.kb-panel__result--success {
+    color: #5cb85c;
+}
+
+.kb-panel__result--failed {
+    color: #d9534f;
+}
+
+/* 进度遮罩 */
+.kb-panel__progress-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.kb-panel__progress-label {
+    font-size: 13px;
+    color: #d4d4d4;
+    -unity-font-style: bold;
 }
 
 /* ============================================================
@@ -649,4 +845,134 @@
     flex-direction: column;
     background-color: #292929;
     padding: 2px 0;
+}
+
+/* ============================================================
+ * Knowledge Base 文档列表样式（Phase RAG-Doc-1）
+ * ============================================================ */
+
+/* 小尺寸按钮（刷新、删除等行内按钮） */
+.kb-panel__button--small {
+    height: 20px;
+    font-size: 11px;
+    padding: 0 8px;
+    margin-right: 0;
+    margin-bottom: 0;
+}
+
+/* 危险按钮（删除，红色） */
+.kb-panel__button--danger {
+    background-color: #5a2020;
+    border-color: #7a3030;
+    color: #e08080;
+}
+
+.kb-panel__button--danger:hover {
+    background-color: #7a2a2a;
+    color: #ffaaaa;
+    border-color: #aa4040;
+}
+
+.kb-panel__button--danger:active {
+    background-color: #3a1515;
+}
+
+/* 文档列表 ScrollView */
+.kb-panel__docs-scroll {
+    background-color: #2a2a2a;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #3a3a3a;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+/* 文档列表条目 */
+.kb-panel__doc-item {
+    flex-direction: column;
+    padding: 8px 10px;
+    border-bottom-width: 1px;
+    border-bottom-color: #3a3a3a;
+    background-color: transparent;
+}
+
+.kb-panel__doc-item:hover {
+    background-color: #333333;
+}
+
+/* 文档条目：文件名 */
+.kb-panel__doc-item__name {
+    font-size: 12px;
+    color: #d4d4d4;
+    -unity-font-style: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 文档条目：摘要 */
+.kb-panel__doc-item__summary {
+    font-size: 11px;
+    color: #888888;
+    margin-top: 3px;
+    white-space: normal;
+}
+
+/* 文档条目：错误信息 */
+.kb-panel__doc-item__error {
+    font-size: 11px;
+    color: #d9534f;
+    margin-top: 3px;
+    white-space: normal;
+}
+
+/* 文档条目：元信息（块数等） */
+.kb-panel__doc-item__meta {
+    font-size: 10px;
+    color: #666666;
+    margin-top: 4px;
+}
+
+/* 文档条目：底部行 */
+.kb-panel__doc-item__bottom-row {
+    margin-top: 4px;
+}
+
+/* 文档条目：状态徽章 */
+.kb-panel__doc-item__status-badge {
+    font-size: 10px;
+    -unity-font-style: bold;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border-width: 1px;
+    margin-left: 6px;
+    flex-shrink: 0;
+}
+
+/* 状态徽章 — 已处理（绿色） */
+.kb-panel__doc-item__status-badge--processed {
+    color: #5cb85c;
+    border-color: #3a6b3a;
+    background-color: #1a3a1a;
+}
+
+/* 状态徽章 — 处理中（黄色） */
+.kb-panel__doc-item__status-badge--pending {
+    color: #f0ad4e;
+    border-color: #7a5a20;
+    background-color: #2a2010;
+}
+
+/* 状态徽章 — 失败（红色） */
+.kb-panel__doc-item__status-badge--failed {
+    color: #d9534f;
+    border-color: #6b3a3a;
+    background-color: #2a1515;
+}
+
+/* 状态徽章 — 未知 */
+.kb-panel__doc-item__status-badge--unknown {
+    color: #888888;
+    border-color: #555555;
+    background-color: #2a2a2a;
 }

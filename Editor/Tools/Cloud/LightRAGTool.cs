@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,31 +8,46 @@ using AgentCore.Editor.Cloud;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Tools.Infrastructure;
 using Newtonsoft.Json.Linq;
+using UnityEngine;
 
 namespace AgentCore.Editor.Tools.Cloud
 {
     /// <summary>
     /// LightRAG 知识库管理工具。
-    /// 封装 LightRAGClient，让 LLM 可以通过 tool_call 查询和索引知识库。
-    /// 支持查询和索引文本操作。
+    /// 封装 LightRAGClient，让 LLM 可以通过 tool_call 查询、索引和管理知识库文档。
+    /// 支持：query、index_text、index_file、list_documents、delete_document。
     /// </summary>
     [AgentTool("manage_knowledge",
-        Description = "管理项目知识库。支持查询(query)和索引文本(index_text)。知识库基于 LightRAG 提供图谱增强的检索能力。",
+        Description = "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、列出文档(list_documents)、删除文档(delete_document)。知识库基于 LightRAG 提供图谱增强的检索能力。",
         Category = "Cloud",
         RequiresMainThread = false)]
     public class LightRAGTool : IAgentTool
     {
+        /// <summary>允许索引的文件扩展名</summary>
+        private static readonly string[] AllowedExtensions =
+        {
+            ".md", ".txt", ".cs", ".json", ".xml", ".yaml", ".yml",
+            ".html", ".htm", ".rst", ".pdf"
+        };
+
+        /// <summary>单文件最大大小（字节）：5MB</summary>
+        private const long MaxFileSizeBytes = 5 * 1024 * 1024;
+
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
             ""type"": ""object"",
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""query"", ""index_text""],
-                    ""description"": ""操作类型：query(查询知识库)、index_text(索引文本到知识库)""
+                    ""enum"": [""query"", ""index_text"", ""index_file"", ""list_documents"", ""delete_document""],
+                    ""description"": ""操作类型：query(查询知识库)、index_text(索引文本)、index_file(索引项目内文件)、list_documents(列出知识库中所有文档)、delete_document(删除指定文档)""
                 },
                 ""content"": {
                     ""type"": ""string"",
                     ""description"": ""query 时为查询内容，index_text 时为要索引的文本""
+                },
+                ""file_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""index_file 时必填，相对于项目根目录的文件路径（如 docs/README.md）""
                 },
                 ""mode"": {
                     ""type"": ""string"",
@@ -41,19 +57,29 @@ namespace AgentCore.Editor.Tools.Cloud
                 ""description"": {
                     ""type"": ""string"",
                     ""description"": ""index_text 时可选，文本描述""
+                },
+                ""doc_id"": {
+                    ""type"": ""string"",
+                    ""description"": ""delete_document 时必填，文档 ID（来自 list_documents 返回的 id 字段）""
                 }
             },
-            ""required"": [""action"", ""content""]
+            ""required"": [""action""]
         }");
 
+        /// <summary>
+        /// 工具元数据，与 [AgentTool] 特性保持一致。
+        /// </summary>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_knowledge",
-            description: "管理项目知识库。支持查询(query)和索引文本(index_text)。知识库基于 LightRAG 提供图谱增强的检索能力。",
+            description: "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、列出文档(list_documents)、删除文档(delete_document)。知识库基于 LightRAG 提供图谱增强的检索能力。",
             category: "Cloud",
             parametersSchema: _parametersSchema,
             requiresMainThread: false
         );
 
+        /// <summary>
+        /// 执行知识库操作。
+        /// </summary>
         public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
         {
             var sw = Stopwatch.StartNew();
@@ -82,9 +108,18 @@ namespace AgentCore.Editor.Tools.Cloud
                     case "index_text":
                         response = await HandleIndexText(client, parameters, cancellationToken);
                         break;
+                    case "index_file":
+                        response = await HandleIndexFile(client, parameters, cancellationToken);
+                        break;
+                    case "list_documents":
+                        response = await HandleListDocuments(client, cancellationToken);
+                        break;
+                    case "delete_document":
+                        response = await HandleDeleteDocument(client, parameters, cancellationToken);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: query, index_text");
+                            $"Unknown action: '{action}'. Valid actions: query, index_text, index_file, list_documents, delete_document");
                         break;
                 }
             }
@@ -169,6 +204,163 @@ namespace AgentCore.Editor.Tools.Cloud
             }
 
             return ToolResponse.Fail("索引文本到知识库失败，请检查 LightRAG 服务状态");
+        }
+
+        private async Task<ToolResponse> HandleIndexFile(LightRAGClient client, JObject parameters, CancellationToken ct)
+        {
+            var relativePath = ToolHelpers.GetRequiredString(parameters, "file_path");
+
+            // 解析绝对路径（相对于项目根目录）
+            string projectRoot = Path.GetFullPath(
+                Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
+            string absolutePath = Path.GetFullPath(
+                Path.Combine(projectRoot, relativePath)).Replace('\\', '/');
+
+            // 安全校验：必须在项目根目录内
+            if (!absolutePath.StartsWith(projectRoot + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                return ToolResponse.Fail(
+                    $"安全限制：只允许索引项目根目录内的文件。\n" +
+                    $"项目根目录：{projectRoot}\n" +
+                    $"请求路径：{absolutePath}");
+            }
+
+            // 校验文件存在
+            if (!File.Exists(absolutePath))
+            {
+                return ToolResponse.Fail(
+                    $"文件不存在：{relativePath}\n" +
+                    $"（解析路径：{absolutePath}）");
+            }
+
+            // 校验扩展名
+            string ext = Path.GetExtension(absolutePath).ToLowerInvariant();
+            bool extAllowed = false;
+            foreach (var allowed in AllowedExtensions)
+            {
+                if (ext == allowed) { extAllowed = true; break; }
+            }
+            if (!extAllowed)
+            {
+                return ToolResponse.Fail(
+                    $"不支持的文件类型：'{ext}'。\n" +
+                    $"支持的类型：{string.Join(", ", AllowedExtensions)}");
+            }
+
+            // 校验文件大小
+            var fileInfo = new FileInfo(absolutePath);
+            if (fileInfo.Length > MaxFileSizeBytes)
+            {
+                float sizeMB = fileInfo.Length / (1024f * 1024f);
+                return ToolResponse.Fail(
+                    $"文件过大：{sizeMB:F1}MB（限制 5MB）。\n" +
+                    $"请将大文件拆分后分批索引，或使用 index_text 分段索引内容。");
+            }
+
+            // 排除目录检查（不索引 Library、Temp、.git 等）
+            var excludedDirs = new[] { "/Library/", "/Temp/", "/.git/", "/obj/", "/bin/" };
+            foreach (var excluded in excludedDirs)
+            {
+                if (absolutePath.IndexOf(excluded, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return ToolResponse.Fail(
+                        $"文件位于排除目录中，不允许索引：{relativePath}");
+                }
+            }
+
+            // 执行上传
+            string fileName = Path.GetFileName(absolutePath);
+            var result = await client.IndexFileAsync(absolutePath, ct);
+
+            if (!result.Accepted)
+            {
+                return ToolResponse.Fail(
+                    $"上传文件失败：{fileName}\n" +
+                    $"原因：{result.ErrorMessage ?? "请检查 LightRAG 服务状态和文件格式"}");
+            }
+
+            // 上传成功，返回结果（含 track_id 供进度追踪）
+            if (!string.IsNullOrEmpty(result.TrackId))
+            {
+                return ToolResponse.OkWithData(new
+                {
+                    action = "index_file",
+                    file_path = relativePath,
+                    file_name = fileName,
+                    file_size_kb = (int)(fileInfo.Length / 1024),
+                    track_id = result.TrackId,
+                    note = "文件已上传，LightRAG 正在异步处理。可通过 track_id 追踪进度，或稍后使用 list_documents 查看处理结果。"
+                }, $"文件已上传到知识库（处理中）：{fileName}");
+            }
+
+            return ToolResponse.OkWithData(new
+            {
+                action = "index_file",
+                file_path = relativePath,
+                file_name = fileName,
+                file_size_kb = (int)(fileInfo.Length / 1024)
+            }, $"文件已成功索引到知识库：{fileName}");
+        }
+
+        private async Task<ToolResponse> HandleListDocuments(LightRAGClient client, CancellationToken ct)
+        {
+            var docs = await client.GetDocumentsAsync(ct);
+
+            if (docs.Count == 0)
+            {
+                return ToolResponse.Ok("知识库中暂无文档。可使用 index_file 或 index_text 添加文档。");
+            }
+
+            var items = docs.Select(d => new
+            {
+                id = d.Id,
+                file_name = string.IsNullOrEmpty(d.FilePath)
+                    ? "(未知)"
+                    : Path.GetFileName(d.FilePath),
+                file_path = d.FilePath,
+                summary = d.ContentSummary,
+                status = d.Status,
+                chunks_count = d.ChunksCount,
+                created_at = d.CreatedAt,
+                error_msg = d.ErrorMsg
+            }).ToArray();
+
+            // 按状态分组统计
+            int processed = docs.Count(d => string.Equals(d.Status, "processed", StringComparison.OrdinalIgnoreCase));
+            int pending = docs.Count(d =>
+                string.Equals(d.Status, "pending", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(d.Status, "processing", StringComparison.OrdinalIgnoreCase));
+            int failed = docs.Count(d => string.Equals(d.Status, "failed", StringComparison.OrdinalIgnoreCase));
+
+            return ToolResponse.OkWithData(new
+            {
+                action = "list_documents",
+                total = docs.Count,
+                processed,
+                pending,
+                failed,
+                documents = items
+            }, $"知识库中共有 {docs.Count} 个文档（{processed} 已处理，{pending} 处理中，{failed} 失败）");
+        }
+
+        private async Task<ToolResponse> HandleDeleteDocument(LightRAGClient client, JObject parameters, CancellationToken ct)
+        {
+            var docId = ToolHelpers.GetRequiredString(parameters, "doc_id");
+
+            bool success = await client.DeleteDocumentAsync(docId, ct);
+
+            if (success)
+            {
+                return ToolResponse.OkWithData(new
+                {
+                    action = "delete_document",
+                    doc_id = docId
+                }, $"文档已从知识库中删除（ID：{docId}）");
+            }
+
+            return ToolResponse.Fail(
+                $"删除文档失败（ID：{docId}）。\n" +
+                $"请确认文档 ID 正确（可通过 list_documents 查看），并检查 LightRAG 服务状态。");
         }
     }
 }

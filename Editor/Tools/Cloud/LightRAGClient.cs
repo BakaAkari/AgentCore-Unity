@@ -15,7 +15,7 @@ using AgentCore.Editor.Utils;
 namespace AgentCore.Editor.Cloud
 {
     // ─────────────────────────────────────────────
-    //  数据模型
+    //  数据模型 — 查询
     // ─────────────────────────────────────────────
 
     /// <summary>
@@ -54,6 +54,95 @@ namespace AgentCore.Editor.Cloud
         public bool IsHealthy;
         public string Version;
         public int DocumentCount;
+    }
+
+    // ─────────────────────────────────────────────
+    //  数据模型 — 文档管理
+    // ─────────────────────────────────────────────
+
+    /// <summary>
+    /// LightRAG 知识库中的文档条目（来自 GET /documents）。
+    /// </summary>
+    [Serializable]
+    public class LightRAGDocument
+    {
+        /// <summary>文档唯一 ID，用于删除操作</summary>
+        [JsonProperty("id")]
+        public string Id;
+
+        /// <summary>文档文件路径（服务端存储路径或原始文件名）</summary>
+        [JsonProperty("file_path")]
+        public string FilePath;
+
+        /// <summary>文档内容摘要（由 LightRAG 自动生成）</summary>
+        [JsonProperty("content_summary")]
+        public string ContentSummary;
+
+        /// <summary>文档内容字节长度</summary>
+        [JsonProperty("content_length")]
+        public int ContentLength;
+
+        /// <summary>索引状态：processed / pending / processing / failed</summary>
+        [JsonProperty("status")]
+        public string Status;
+
+        /// <summary>创建时间（ISO 8601 字符串）</summary>
+        [JsonProperty("created_at")]
+        public string CreatedAt;
+
+        /// <summary>最后更新时间（ISO 8601 字符串）</summary>
+        [JsonProperty("updated_at")]
+        public string UpdatedAt;
+
+        /// <summary>上传时返回的追踪 ID，用于轮询索引进度</summary>
+        [JsonProperty("track_id")]
+        public string TrackId;
+
+        /// <summary>文档被分割的块数量</summary>
+        [JsonProperty("chunks_count")]
+        public int ChunksCount;
+
+        /// <summary>索引失败时的错误信息</summary>
+        [JsonProperty("error_msg")]
+        public string ErrorMsg;
+    }
+
+    /// <summary>
+    /// 文件上传（IndexFileAsync）的返回结果。
+    /// 区分"上传成功"和"索引完成"两个阶段。
+    /// </summary>
+    public class LightRAGIndexResult
+    {
+        /// <summary>HTTP 上传是否被服务端接受（200 OK）</summary>
+        public bool Accepted;
+
+        /// <summary>
+        /// 用于轮询索引进度的追踪 ID。
+        /// 为 null 时表示服务端未返回 track_id，无法追踪进度。
+        /// </summary>
+        public string TrackId;
+
+        /// <summary>上传失败时的错误信息</summary>
+        public string ErrorMessage;
+    }
+
+    /// <summary>
+    /// GET /documents/track_status/{track_id} 的响应。
+    /// </summary>
+    [Serializable]
+    public class LightRAGTrackStatus
+    {
+        /// <summary>当前状态：pending / processing / processed / failed</summary>
+        [JsonProperty("status")]
+        public string Status;
+
+        /// <summary>失败时的错误信息</summary>
+        [JsonProperty("error_msg")]
+        public string ErrorMsg;
+
+        /// <summary>处理完成后的文档 ID</summary>
+        [JsonProperty("document_id")]
+        public string DocumentId;
     }
 
     // ─────────────────────────────────────────────
@@ -110,13 +199,58 @@ namespace AgentCore.Editor.Cloud
         public int DocumentCount;
     }
 
+    [Serializable]
+    internal class RAGDocumentsResponse
+    {
+        [JsonProperty("statuses")]
+        public RAGDocumentStatuses Statuses;
+    }
+
+    [Serializable]
+    internal class RAGDocumentStatuses
+    {
+        [JsonProperty("processed")]
+        public List<LightRAGDocument> Processed;
+
+        [JsonProperty("pending")]
+        public List<LightRAGDocument> Pending;
+
+        [JsonProperty("failed")]
+        public List<LightRAGDocument> Failed;
+    }
+
+    /// <summary>
+    /// POST /documents/upload 的响应（用于提取 track_id）。
+    /// </summary>
+    [Serializable]
+    internal class RAGUploadResponse
+    {
+        /// <summary>LightRAG v1.4.x 返回的追踪 ID</summary>
+        [JsonProperty("track_id")]
+        public string TrackId;
+
+        /// <summary>兼容字段：部分版本使用 "id"</summary>
+        [JsonProperty("id")]
+        public string Id;
+
+        /// <summary>兼容字段：部分版本使用 "document_id"</summary>
+        [JsonProperty("document_id")]
+        public string DocumentId;
+
+        [JsonProperty("status")]
+        public string Status;
+
+        /// <summary>获取 track_id（多字段兼容）</summary>
+        public string GetTrackId() => TrackId ?? Id ?? DocumentId;
+    }
+
     // ─────────────────────────────────────────────
     //  客户端
     // ─────────────────────────────────────────────
 
     /// <summary>
     /// LightRAG 云服务 HTTP 客户端。
-    /// 封装 LightRAG REST API 调用，提供知识库的索引和查询操作。
+    /// 封装 LightRAG REST API 调用，提供知识库的索引、查询和文档管理操作。
     /// </summary>
     public class LightRAGClient
     {
@@ -151,7 +285,7 @@ namespace AgentCore.Editor.Cloud
         }
 
         // ─────────────────────────────────────────
-        //  公共 API
+        //  公共 API — 查询与索引
         // ─────────────────────────────────────────
 
         /// <summary>
@@ -233,12 +367,14 @@ namespace AgentCore.Editor.Cloud
         }
 
         /// <summary>
-        /// 索引文件到知识库（multipart/form-data 上传）。
+        /// 上传文件到知识库（multipart/form-data）。
+        /// 注意：上传成功（Accepted = true）不等于索引完成，
+        /// 需要通过 TrackStatusAsync(result.TrackId) 轮询真实进度。
         /// </summary>
         /// <param name="filePath">本地文件路径</param>
         /// <param name="ct">取消令牌</param>
-        /// <returns>是否索引成功</returns>
-        public async Task<bool> IndexFileAsync(
+        /// <returns>上传结果，包含 TrackId 用于进度追踪</returns>
+        public async Task<LightRAGIndexResult> IndexFileAsync(
             string filePath,
             CancellationToken ct = default)
         {
@@ -247,11 +383,26 @@ namespace AgentCore.Editor.Cloud
                 if (!File.Exists(filePath))
                 {
                     Debug.LogError($"[AgentCore] LightRAGClient.IndexFileAsync: File not found: {filePath}");
-                    return false;
+                    return new LightRAGIndexResult
+                    {
+                        Accepted = false,
+                        ErrorMessage = $"文件不存在：{filePath}"
+                    };
                 }
 
                 var url = $"{_baseUrl}/documents/upload";
                 var client = HttpClientFactory.GetClient();
+
+                var fileBytes = File.ReadAllBytes(filePath);
+                var fileName = Path.GetFileName(filePath);
+
+                // 注意：不对 formContent 使用 using，由 request 负责 dispose 其 Content，
+                // 避免 using var 逆序 dispose 导致 Content 在 SendAsync 完成前被释放。
+                var formContent = new MultipartFormDataContent();
+                var fileContent = new ByteArrayContent(fileBytes);
+                fileContent.Headers.ContentType =
+                    new MediaTypeHeaderValue("application/octet-stream");
+                formContent.Add(fileContent, "file", fileName);
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, url);
                 if (!string.IsNullOrEmpty(_apiKey))
@@ -259,40 +410,160 @@ namespace AgentCore.Editor.Cloud
                     request.Headers.Authorization =
                         new AuthenticationHeaderValue("Bearer", _apiKey);
                 }
-
-                var fileBytes = File.ReadAllBytes(filePath);
-                var fileName = Path.GetFileName(filePath);
-
-                using var formContent = new MultipartFormDataContent();
-                var fileContent = new ByteArrayContent(fileBytes);
-                fileContent.Headers.ContentType =
-                    new MediaTypeHeaderValue("application/octet-stream");
-                formContent.Add(fileContent, "file", fileName);
-
                 request.Content = formContent;
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
 
                 var response = await client.SendAsync(request, cts.Token);
+                var responseBody = await response.Content.ReadAsStringAsync();
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    var responseBody = await response.Content.ReadAsStringAsync();
                     Debug.LogError(
                         $"[AgentCore] LightRAGClient.IndexFileAsync error: " +
                         $"{(int)response.StatusCode} {response.ReasonPhrase} - {responseBody}");
-                    return false;
+                    return new LightRAGIndexResult
+                    {
+                        Accepted = false,
+                        ErrorMessage = $"HTTP {(int)response.StatusCode}: {responseBody}"
+                    };
                 }
 
-                return true;
+                // 解析 track_id（多字段兼容）
+                string trackId = null;
+                try
+                {
+                    var uploadResp = JsonConvert.DeserializeObject<RAGUploadResponse>(responseBody);
+                    trackId = uploadResp?.GetTrackId();
+                }
+                catch
+                {
+                    // 解析失败时 trackId 保持 null，降级为无进度追踪模式
+                }
+
+                return new LightRAGIndexResult
+                {
+                    Accepted = true,
+                    TrackId = trackId
+                };
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[AgentCore] LightRAGClient.IndexFileAsync failed: {ex.Message}");
+                return new LightRAGIndexResult
+                {
+                    Accepted = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        // ─────────────────────────────────────────
+        //  公共 API — 文档管理
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// 获取知识库中所有文档列表（processed + pending + failed 合并）。
+        /// </summary>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>所有文档列表；失败时返回空列表</returns>
+        public async Task<List<LightRAGDocument>> GetDocumentsAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var url = $"{_baseUrl}/documents";
+                var response = await GetAsync<RAGDocumentsResponse>(url, ct);
+
+                var all = new List<LightRAGDocument>();
+                if (response?.Statuses != null)
+                {
+                    if (response.Statuses.Processed != null) all.AddRange(response.Statuses.Processed);
+                    if (response.Statuses.Pending != null)   all.AddRange(response.Statuses.Pending);
+                    if (response.Statuses.Failed != null)    all.AddRange(response.Statuses.Failed);
+                }
+                return all;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore] LightRAGClient.GetDocumentsAsync failed: {ex.Message}");
+                return new List<LightRAGDocument>();
+            }
+        }
+
+        /// <summary>
+        /// 删除知识库中的指定文档。
+        /// </summary>
+        /// <param name="docId">文档 ID（来自 LightRAGDocument.Id）</param>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>是否删除成功</returns>
+        public async Task<bool> DeleteDocumentAsync(string docId, CancellationToken ct = default)
+        {
+            try
+            {
+                // LightRAG v1.4.x DELETE /documents/delete_document
+                // 参数通过 JSON body 传递：{"id": "xxx"}（query string 会返回 422）
+                var url = $"{_baseUrl}/documents/delete_document";
+                var client = HttpClientFactory.GetClient();
+                using var request = HttpClientFactory.CreateRequest(HttpMethod.Delete, url, _apiKey);
+                var payload = new JObject { ["doc_ids"] = new JArray(docId) };
+                request.Content = new StringContent(
+                    payload.ToString(Newtonsoft.Json.Formatting.None),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
+
+                var response = await client.SendAsync(request, cts.Token);
+                var responseBody = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Debug.LogError(
+                        $"[AgentCore] LightRAGClient.DeleteDocumentAsync error: " +
+                        $"{(int)response.StatusCode} {response.ReasonPhrase} - {responseBody}");
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore] LightRAGClient.DeleteDocumentAsync failed: {ex.Message}");
                 return false;
             }
         }
+
+        /// <summary>
+        /// 轮询文档索引进度。
+        /// 上传成功后，LightRAG 异步处理文档，需要通过此方法追踪真实进度。
+        /// </summary>
+        /// <param name="trackId">上传时返回的 track_id</param>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>当前索引状态；失败时返回 status = "failed"</returns>
+        public async Task<LightRAGTrackStatus> TrackStatusAsync(
+            string trackId,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                var url = $"{_baseUrl}/documents/track_status/{Uri.EscapeDataString(trackId)}";
+                return await GetAsync<LightRAGTrackStatus>(url, ct);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore] LightRAGClient.TrackStatusAsync failed: {ex.Message}");
+                return new LightRAGTrackStatus
+                {
+                    Status = "failed",
+                    ErrorMsg = ex.Message
+                };
+            }
+        }
+
+        // ─────────────────────────────────────────
+        //  公共 API — 连接与健康
+        // ─────────────────────────────────────────
 
         /// <summary>
         /// 测试与 LightRAG 服务的连接。

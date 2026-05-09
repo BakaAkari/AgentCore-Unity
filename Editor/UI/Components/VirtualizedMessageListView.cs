@@ -13,6 +13,10 @@ namespace AgentCore.Editor.UI.Components
     /// 用户点击"加载更多"时，批量恢复旧消息项到 DOM。
     /// </para>
     /// <para>
+    /// 当用户向上滚动查看历史消息后，再滚动回底部时，自动重新折叠旧消息，
+    /// 只保留最新的 <see cref="MaxVisibleItems"/> 条在 DOM 中，以恢复性能。
+    /// </para>
+    /// <para>
     /// 所有消息项的 VisualElement 引用始终保留在内存中（<see cref="_allItems"/>），
     /// 只有 DOM 挂载状态会变化，因此 <see cref="AgentCore.Editor.UI.ChatWindow"/> 中的
     /// <c>_messageBubbles</c> 字典仍然有效，流式更新不受影响。
@@ -23,10 +27,13 @@ namespace AgentCore.Editor.UI.Components
         #region 常量
 
         /// <summary>DOM 中最多同时保留的消息项数量</summary>
-        private const int MaxVisibleItems = 40;
+        private const int MaxVisibleItems = 8;
 
         /// <summary>点击"加载更多"时每次恢复的消息项数量</summary>
-        private const int LoadMoreBatchSize = 20;
+        private const int LoadMoreBatchSize = 4;
+
+        /// <summary>判断"到达底部"的滚动偏差阈值（像素）</summary>
+        private const float ScrollBottomThreshold = 20f;
 
         #endregion
 
@@ -34,6 +41,9 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>消息容器（ScrollView 内部的 VisualElement）</summary>
         private readonly VisualElement _container;
+
+        /// <summary>ScrollView 引用（用于监听滚动事件）</summary>
+        private ScrollView _scrollView;
 
         /// <summary>所有消息项（按添加顺序排列，包含已从 DOM 移除的旧项）</summary>
         private readonly List<VisualElement> _allItems = new();
@@ -43,6 +53,9 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>"加载更多"占位符元素（显示在列表顶部）</summary>
         private VisualElement _loadMorePlaceholder;
+
+        /// <summary>用户是否正在查看历史消息（已向上滚动离开底部）</summary>
+        private bool _userScrolledUp = false;
 
         #endregion
 
@@ -55,6 +68,26 @@ namespace AgentCore.Editor.UI.Components
         public MessageListManager(VisualElement container)
         {
             _container = container;
+        }
+
+        /// <summary>
+        /// 绑定 ScrollView，启用"滚动到底部时自动重新折叠"功能。
+        /// </summary>
+        /// <param name="scrollView">包含消息容器的 ScrollView</param>
+        public void AttachScrollView(ScrollView scrollView)
+        {
+            if (_scrollView != null)
+            {
+                _scrollView.UnregisterCallback<GeometryChangedEvent>(OnScrollViewGeometryChanged);
+            }
+            _scrollView = scrollView;
+            if (_scrollView != null)
+            {
+                // 监听滚动偏移变化（Unity UI Toolkit 通过 GeometryChangedEvent 或 scrollOffset 属性变化触发）
+                _scrollView.RegisterCallback<GeometryChangedEvent>(OnScrollViewGeometryChanged);
+                // 监听用户滚动
+                _scrollView.verticalScroller.valueChanged += OnScrollValueChanged;
+            }
         }
 
         #endregion
@@ -103,9 +136,94 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         public int VisibleCount => _allItems.Count - _hiddenCount;
 
+        /// <summary>
+        /// 解绑 ScrollView，清理事件监听。
+        /// </summary>
+        public void DetachScrollView()
+        {
+            if (_scrollView != null)
+            {
+                _scrollView.UnregisterCallback<GeometryChangedEvent>(OnScrollViewGeometryChanged);
+                _scrollView.verticalScroller.valueChanged -= OnScrollValueChanged;
+                _scrollView = null;
+            }
+        }
+
         #endregion
 
         #region 私有方法
+
+        /// <summary>
+        /// 响应 ScrollView 的 verticalScroller 值变化。
+        /// 当用户滚动到底部时，自动重新折叠旧消息。
+        /// </summary>
+        private void OnScrollValueChanged(float value)
+        {
+            if (_scrollView == null || _hiddenCount == 0) return;
+
+            // 检查是否到达底部
+            var scroller = _scrollView.verticalScroller;
+            bool atBottom = scroller.highValue <= 0f || (scroller.highValue - value) <= ScrollBottomThreshold;
+
+            if (atBottom && _userScrolledUp)
+            {
+                // 用户从历史消息滚回底部，重新折叠旧消息
+                _userScrolledUp = false;
+                RecollapseOldItems();
+            }
+            else if (!atBottom)
+            {
+                _userScrolledUp = true;
+            }
+        }
+
+        /// <summary>
+        /// 响应 ScrollView 几何变化（布局更新时检查滚动位置）。
+        /// </summary>
+        private void OnScrollViewGeometryChanged(GeometryChangedEvent evt)
+        {
+            if (_scrollView == null || _hiddenCount == 0 || !_userScrolledUp) return;
+
+            var scroller = _scrollView.verticalScroller;
+            bool atBottom = scroller.highValue <= 0f ||
+                            (scroller.highValue - scroller.value) <= ScrollBottomThreshold;
+
+            if (atBottom)
+            {
+                _userScrolledUp = false;
+                RecollapseOldItems();
+            }
+        }
+
+        /// <summary>
+        /// 重新折叠旧消息：将 DOM 中超出 MaxVisibleItems 的旧消息移出，只保留最新的。
+        /// 在用户滚回底部时调用，以恢复性能。
+        /// </summary>
+        private void RecollapseOldItems()
+        {
+            int visibleCount = _allItems.Count - _hiddenCount;
+            if (visibleCount <= MaxVisibleItems) return;
+
+            // 计算需要重新隐藏的项数
+            int toHide = visibleCount - MaxVisibleItems;
+
+            for (int i = 0; i < toHide; i++)
+            {
+                int idx = _hiddenCount + i;
+                if (idx < _allItems.Count)
+                {
+                    var item = _allItems[idx];
+                    if (item.parent == _container)
+                        _container.Remove(item);
+                }
+            }
+
+            _hiddenCount += toHide;
+
+            // 确保占位符存在并更新文本
+            EnsureLoadMorePlaceholder();
+            UpdateLoadMoreButtonText();
+        }
 
         /// <summary>
         /// 检查 DOM 中的项数是否超过阈值，超过时裁剪最旧的项。

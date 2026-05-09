@@ -43,6 +43,16 @@ namespace AgentCore.Editor.UI
 
         #endregion
 
+        #region 静态缓存（跨 CreateGUI 调用保持）
+
+        /// <summary>P0: 缓存动态字体，避免每次 CreateGUI 都重新创建（resize 时触发字形光栅化）</summary>
+        private static Font _cachedFont;
+
+        /// <summary>P0: 字体是否已初始化</summary>
+        private static bool _fontInitialized;
+
+        #endregion
+
         #region 核心字段
 
         /// <summary>Agent Loop 实例，管理对话逻辑</summary>
@@ -104,8 +114,11 @@ namespace AgentCore.Editor.UI
         /// <summary>Chat 面板</summary>
         private VisualElement _chatPanel;
 
-        /// <summary>Knowledge 面板</summary>
+        /// <summary>Knowledge 面板容器（UXML 中的 #knowledge-panel）</summary>
         private VisualElement _knowledgePanel;
+
+        /// <summary>Knowledge Base Panel 组件（Phase Hub-2）</summary>
+        private KnowledgeBasePanel _knowledgeBasePanel;
 
         /// <summary>Memory 面板</summary>
         private VisualElement _memoryPanel;
@@ -173,42 +186,26 @@ namespace AgentCore.Editor.UI
             }
 
             // 2.5 设置系统字体（跨平台回退链）
-            // P2-1 fix: 使用平台感知的字体回退链，避免硬编码 "Microsoft YaHei"
-            string[] fontCandidates;
-            
-            // P0: 缓存动态字体，避免每次 CreateGUI 都创建新实例
-            static Font cachedFont = null;
-            static bool fontInitialized = false;
-            if (!fontInitialized)
+            // P0: 缓存动态字体，避免每次 CreateGUI 都重新创建（resize 时触发字形光栅化）
+            if (!_fontInitialized)
             {
-                fontInitialized = true;
+                _fontInitialized = true;
+#if UNITY_EDITOR_WIN
+                string[] fontCandidates = { "Microsoft YaHei", "SimHei", "Arial" };
+#elif UNITY_EDITOR_OSX
+                string[] fontCandidates = { "PingFang SC", "Hiragino Sans GB", "Arial" };
+#else
+                string[] fontCandidates = { "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Arial" };
+#endif
                 foreach (var fontName in fontCandidates)
                 {
-                    cachedFont = Font.CreateDynamicFontFromOSFont(fontName, 14);
-                    if (cachedFont != null) break;
+                    _cachedFont = Font.CreateDynamicFontFromOSFont(fontName, 14);
+                    if (_cachedFont != null) break;
                 }
             }
-            if (cachedFont != null)
+            if (_cachedFont != null)
             {
-                rootVisualElement.style.unityFont = cachedFont;
-                rootVisualElement.style.unityFontStyleAndWeight = FontStyle.Bold;
-            }
-#if UNITY_EDITOR_WIN
-            fontCandidates = new[] { "Microsoft YaHei", "SimHei", "Arial" };
-#elif UNITY_EDITOR_OSX
-            fontCandidates = new[] { "PingFang SC", "Hiragino Sans GB", "Arial" };
-#else
-            fontCandidates = new[] { "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Arial" };
-#endif
-            Font font = null;
-            foreach (var fontName in fontCandidates)
-            {
-                font = Font.CreateDynamicFontFromOSFont(fontName, 14);
-                if (font != null) break;
-            }
-            if (font != null)
-            {
-                rootVisualElement.style.unityFont = font;
+                rootVisualElement.style.unityFont = _cachedFont;
                 rootVisualElement.style.unityFontStyleAndWeight = FontStyle.Bold;
             }
 
@@ -220,6 +217,9 @@ namespace AgentCore.Editor.UI
             if (_messageContainer != null)
             {
                 _messageListManager = new MessageListManager(_messageContainer);
+                // 连接 ScrollView，启用滚动到底部时自动折叠旧消息
+                if (_messageScrollView != null)
+                    _messageListManager.AttachScrollView(_messageScrollView);
             }
 
             _inputField = rootVisualElement.Q<TextField>("input-field");
@@ -235,6 +235,14 @@ namespace AgentCore.Editor.UI
             _newSessionButton = rootVisualElement.Q<Button>("new-session-button");
             _sessionListScrollView = rootVisualElement.Q<ScrollView>("session-list-scroll");
             _sessionListContainer = rootVisualElement.Q<VisualElement>("session-list-container");
+
+            // 3.6 初始化 KnowledgeBasePanel 并插入到 #knowledge-panel 容器
+            if (_knowledgePanel != null)
+            {
+                _knowledgeBasePanel = new KnowledgeBasePanel();
+                _knowledgeBasePanel.OnAskAgentRequested += OnKnowledgeAskAgentRequested;
+                _knowledgePanel.Add(_knowledgeBasePanel);
+            }
 
             // 3.7 创建 Hub Rail 并插入到 main-body 首位
             _hubRail = new HubRail();
@@ -324,6 +332,18 @@ namespace AgentCore.Editor.UI
             {
                 _hubRail.OnModuleChanged -= OnHubModuleChanged;
                 _hubRail = null;
+            }
+
+            // 断开 ScrollView 监听，防止内存泄漏
+            _messageListManager?.DetachScrollView();
+            _messageListManager = null;
+
+            // 释放 KnowledgeBasePanel 资源
+            if (_knowledgeBasePanel != null)
+            {
+                _knowledgeBasePanel.OnAskAgentRequested -= OnKnowledgeAskAgentRequested;
+                _knowledgeBasePanel.Dispose();
+                _knowledgeBasePanel = null;
             }
 
             _messageBubbles.Clear();
@@ -640,7 +660,7 @@ namespace AgentCore.Editor.UI
             var bubble = new MessageBubble(messageId, "user", content);
             _messageBubbles[messageId] = bubble;
             _messageListManager?.AddItem(bubble);
-            ScrollToBottom();
+            ScrollToBottom(force: true); // 新消息添加，强制滚动到底部
         }
 
         /// <summary>
@@ -676,7 +696,7 @@ namespace AgentCore.Editor.UI
             var bubble = new MessageBubble(messageId, "assistant", "", isStreaming: true);
             _messageBubbles[messageId] = bubble;
             _messageListManager?.AddItem(bubble);
-            ScrollToBottom();
+            ScrollToBottom(force: true); // 新消息气泡添加，强制滚动到底部
         }
 
         /// <summary>
@@ -753,7 +773,7 @@ namespace AgentCore.Editor.UI
                 bubble.AddRetryButton(() => RetryLastMessage(retryMessage));
             }
 
-            ScrollToBottom();
+            ScrollToBottom(force: true); // 错误消息添加，强制滚动到底部
         }
 
         /// <summary>
@@ -903,7 +923,7 @@ namespace AgentCore.Editor.UI
             card.Add(statusRow);
 
             _messageListManager?.AddItem(card);
-            ScrollToBottom();
+            ScrollToBottom(force: true); // Domain Reload 通知添加，强制滚动到底部
 
             Debug.Log($"[AgentCore] Domain Reload notification added: phase={phase}, tool={toolName}, " +
                       $"compilationOk={compilationSucceeded}");
@@ -1169,13 +1189,16 @@ namespace AgentCore.Editor.UI
             // 清除临时分组引用
             _currentToolCallGroup = null;
 
-            // 滚动到底部
-            ScrollToBottom();
+            // 滚动到底部（RebuildMessageBubbles 完成后强制滚动）
+            ScrollToBottom(force: true);
         }
 
         /// <summary>
         /// 滚动消息列表到底部。
-        /// 延迟一帧执行，确保布局已更新。
+        /// <para>
+        /// 普通调用（流式 token）有 100ms 节流，避免高频调用。
+        /// force=true 时跳过节流，并延迟两帧执行，确保 DOM 布局更新完成后再滚动。
+        /// </para>
         /// </summary>
         // P2: 节流滚动，避免流式输出时频繁调用
         private double _lastScrollTime = 0;
@@ -1190,13 +1213,26 @@ namespace AgentCore.Editor.UI
                 _lastScrollTime = now;
             }
 
-            _messageScrollView?.schedule.Execute(() =>
+            if (force)
             {
-                if (_messageScrollView != null)
+                // force 模式：延迟两帧，确保 DOM 布局（包括 MessageListManager 的 DOM 变更）完成后再滚动
+                _messageScrollView?.schedule.Execute(() =>
                 {
-                    _messageScrollView.scrollOffset = new Vector2(0, float.MaxValue);
-                }
-            });
+                    _messageScrollView?.schedule.Execute(() =>
+                    {
+                        if (_messageScrollView != null)
+                            _messageScrollView.scrollOffset = new Vector2(0, float.MaxValue);
+                    });
+                });
+            }
+            else
+            {
+                _messageScrollView?.schedule.Execute(() =>
+                {
+                    if (_messageScrollView != null)
+                        _messageScrollView.scrollOffset = new Vector2(0, float.MaxValue);
+                });
+            }
         }
 
         #endregion
@@ -1228,15 +1264,45 @@ namespace AgentCore.Editor.UI
             if (_memoryPanel != null)
                 _memoryPanel.style.display = module == HubModule.Memory ? DisplayStyle.Flex : DisplayStyle.None;
 
-            // 2. 控制 Context Sidebar 可见性
+            // 2. 通知 KnowledgeBasePanel 激活/停用
+            if (_knowledgeBasePanel != null)
+            {
+                if (module == HubModule.Knowledge)
+                    _knowledgeBasePanel.OnActivated();
+                else
+                    _knowledgeBasePanel.OnDeactivated();
+            }
+
+            // 3. 控制 Context Sidebar 可见性
             // Chat 模块：显示会话列表侧边栏（根据 _sidebarExpanded 状态）
             // Knowledge / Memory 模块：暂时隐藏侧边栏（后续 Phase 可扩展各模块的上下文面板）
             UpdateContextSidebarVisibility(module);
 
-            // 3. Chat 模块激活时刷新会话列表
+            // 4. Chat 模块激活时刷新会话列表
             if (module == HubModule.Chat && _sidebarExpanded)
             {
                 RefreshSessionList();
+            }
+        }
+
+        /// <summary>
+        /// 处理 KnowledgeBasePanel 的"向 Agent 询问此文档"请求。
+        /// 切换到 Chat 模块，并将建议的提示词填入输入框。
+        /// </summary>
+        /// <param name="prompt">建议的提示词文本</param>
+        private void OnKnowledgeAskAgentRequested(string prompt)
+        {
+            // 切换到 Chat 模块
+            _hubRail?.SetActiveModule(HubModule.Chat);
+            SwitchToModule(HubModule.Chat);
+
+            // 填入提示词并聚焦输入框
+            if (_inputField != null)
+            {
+                _inputField.value = prompt;
+                _inputField.Focus();
+                // 将光标移到末尾
+                _inputField.SelectRange(prompt.Length, prompt.Length);
             }
         }
 
@@ -1814,7 +1880,7 @@ namespace AgentCore.Editor.UI
             var key = GetToolCallKey(evt);
             _activeToolCards[key] = card;
             Debug.Log($"[AgentCore.UI] HandleToolCallStarted: card 已添加, key={key}, _activeToolCards.Count={_activeToolCards.Count}");
-            ScrollToBottom();
+            ScrollToBottom(force: true); // 新工具调用卡片添加，强制滚动到底部
         }
 
         /// <summary>
@@ -1927,7 +1993,7 @@ namespace AgentCore.Editor.UI
 
             // 分隔线添加到分组容器内部
             group.AddSeparator(separator);
-            ScrollToBottom();
+            ScrollToBottom(force: true); // 新轮次分隔线添加，强制滚动到底部
         }
 
         #endregion

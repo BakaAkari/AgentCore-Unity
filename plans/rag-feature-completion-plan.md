@@ -1,558 +1,789 @@
 # AgentCore RAG 功能补齐与强化设计
 
-> 状态：草案，用于迭代最终 RAG/知识库系统效果。
+> 状态：**修订版 v2**，基于 LightRAG v1.4.15/0287 实际 API 验证后更新。
 > 目标版本：0.4.x 起逐步落地。
-> 相关现状代码：`LightRAGClient`、`LightRAGTool`、`AgentCoreSettingsProvider`、`ManageFileTool`、`FileChangeTracker`。
+> 相关代码：`LightRAGClient`、`LightRAGTool`、`KnowledgeBasePanel`、`AgentCoreSettings`。
+>
+> **修订说明**：
+> - v1（草案）：API 端点未验证，功能范围较宽泛
+> - v2（本版）：基于实际 API 测试，聚焦 P0+P1 范围，新增文档管理功能
 
 ---
 
-## 1. 背景与问题
+## 1. 当前状态（已完成）
 
-AgentCore 已经具备 LightRAG 云服务接入能力，但目前更像“底层能力已经接上，产品闭环还没完成”。
+### 1.1 已实现能力
 
-当前能力：
+| 模块 | 已有功能 |
+|------|---------|
+| `LightRAGClient` | `QueryAsync`、`IndexTextAsync`、`IndexFileAsync`（已修复 dispose bug）、`TestConnectionAsync`、`GetHealthAsync` |
+| `LightRAGTool` | `query`、`index_text`、`index_file` actions |
+| `KnowledgeBasePanel` | 状态显示、测试连接、索引单文档、上次索引结果、Ask Agent 按钮 |
+| `AgentCoreSettings` | `lightragEnabled`、`lightragEndpoint`、API Key 存储 |
 
-- `LightRAGClient` 支持：
-  - 查询知识库。
-  - 索引文本。
-  - 上传单个文件。
-  - 健康检查。
-- `manage_knowledge` 工具支持：
-  - `query`
-  - `index_text`
-- Settings 界面支持：
-  - LightRAG Enabled。
-  - Endpoint。
-  - API Key。
-  - Test Connection。
+### 1.2 已修复 Bug
 
-主要缺口：
+**`LightRAGClient.IndexFileAsync` NullReferenceException**（已修复）
 
-1. 用户没有明确入口把文档交给 LightRAG。
-2. Agent 工具没有暴露 `index_file`，底层 `IndexFileAsync` 没被使用。
-3. 没有“索引哪些内容、何时索引、索引状态如何”的管理视图。
-4. 没有项目文档索引策略，也没有默认排除规则。
-5. 没有面向 Agent 对话自动检索的明确流程。
-6. 还没有把 RAG 与未来代码索引能力划清边界。
+- **根因**：`using var formContent` + `using var request` 的 C# 逆序 dispose 问题。`formContent` 在 `request` 之前被 dispose，但 `request.Content = formContent`，导致 `SendAsync` 后读取 response 时出现 `ObjectDisposedException`
+- **修复**：移除 `formContent` 的 `using`，由 `request` 统一负责 dispose 其 Content
 
----
+### 1.3 已确认的 LightRAG API（端口 9621）
 
-## 2. 最终效果定义
+通过 `/openapi.json` 和实际 curl 测试确认：
 
-最终目标不是简单加一个上传按钮，而是让 AgentCore 具备稳定、可控、可解释的“项目知识库”能力。
-
-### 2.1 用户视角
-
-用户应能在 Settings 或 Chat 中完成以下操作：
-
-1. 配置 LightRAG 服务。
-2. 测试连接并看到明确反馈。
-3. 手动选择一个文档并索引。
-4. 手动选择一个目录并批量索引。
-5. 一键索引项目文档。
-6. 查看最近索引结果：成功数、失败数、跳过数、耗时、失败原因。
-7. 在 Chat 中要求 Agent 查询知识库。
-8. Agent 在合适时主动查询知识库，并把检索结果用于回答或操作。
-
-### 2.2 Agent 视角
-
-Agent 应具备以下能力：
-
-1. 判断问题是否需要查询知识库。
-2. 调用 `manage_knowledge(query)` 检索项目知识。
-3. 在用户要求“记住这份文档 / 索引这个文件 / 索引项目文档”时调用索引工具。
-4. 清楚区分：
-   - mem0：用户偏好、长期记忆、历史决策。
-   - LightRAG：项目知识库、文档资料、设计说明。
-   - 文件搜索/代码索引：当前项目文件与代码结构。
-
-### 2.3 系统视角
-
-系统应具备以下属性：
-
-1. 可控：默认不自动上传用户项目内容。
-2. 可见：索引行为有进度和结果反馈。
-3. 可恢复：批量索引失败不会影响 Agent 正常运行。
-4. 可扩展：后续可以接入代码索引，但不把文档 RAG 和代码索引混成一个不可维护系统。
-5. 可解释：查询结果应尽量返回来源片段或文档来源。
-
----
-
-## 3. 范围边界
-
-### 3.1 本 RAG 系统负责什么
-
-RAG 系统主要负责“项目知识文档”的索引与查询。
-
-适合索引：
-
-- `README.md`
-- `CHANGELOG.md`
-- `docs/**/*.md`
-- `plans/**/*.md`
-- 设计文档
-- 需求文档
-- API 使用说明
-- 团队规范
-- 玩法设计文档
-- `.txt`、`.json`、`.yaml` 等轻量文本配置说明
-
-### 3.2 暂不负责什么
-
-以下内容不应在第一阶段强行纳入 LightRAG：
-
-- 大规模 C# 代码语义索引。
-- Prefab / Scene YAML 深度解析。
-- Binary 资产内容。
-- 自动监听所有文件变更并上传。
-- 替代 `manage_file(search_content)` 的精确搜索。
-
-### 3.3 与代码索引的边界
-
-LightRAG 适合“知识文档问答”；代码索引适合“代码结构理解”。
-
-后续应形成三层检索：
-
-| 层级 | 目标 | 示例 |
-|------|------|------|
-| 精确搜索 | 找文件内容、配置、字符串 | 正则搜 `PlayerController` |
-| 符号/代码索引 | 找类、方法、引用关系 | 找 `InventoryService` 的调用方 |
-| LightRAG | 理解文档和设计背景 | 查询“战斗系统设计原则” |
-
----
-
-## 4. 功能设计
-
-### 4.1 产品入口设计：独立 Knowledge Base 窗口
-
-原则：Settings 只负责插件配置，不承载“上传文档 / 批量索引 / 查询测试”这类业务 action。
-
-因此，添加文档给 RAG 不放在 `Project Settings > AgentCore`。建议新增独立入口：
-
-```text
-Window/AgentCore/Knowledge Base
+```
+GET  /health                              → 健康检查
+POST /query                               → 查询知识库
+POST /documents/text                      → 索引文本
+POST /documents/upload                    → 上传文件（multipart）
+GET  /documents                           → 列出所有文档（按状态分组）
+POST /documents/paginated                 → 分页列出文档
+GET  /documents/status_counts             → 各状态文档数量
+GET  /documents/track_status/{track_id}  → 轮询索引进度
+DELETE /documents/delete_document         → 删除文档（by doc_id）
 ```
 
-窗口类建议：
+**`GET /documents` 响应格式**（已验证）：
 
-```text
-Editor/UI/KnowledgeBaseWindow.cs
+```json
+{
+  "statuses": {
+    "processed": [
+      {
+        "id": "doc-xxx",
+        "file_path": "beautify-urp-documentation.md",
+        "content_summary": "...",
+        "content_length": 14295,
+        "status": "processed",
+        "created_at": "2026-05-09T...",
+        "updated_at": "2026-05-09T...",
+        "track_id": "upload_xxx",
+        "chunks_count": 6,
+        "error_msg": null
+      }
+    ],
+    "pending": [...],
+    "failed": [...]
+  }
+}
 ```
 
-这个窗口是 AgentCore 的知识库管理台，负责执行与 LightRAG 相关的用户操作。它读取 Settings 中的 LightRAG 配置，但不在窗口里重复编辑主要配置项；配置缺失时，提供 `Open Settings` 跳转。
+**重要发现**：上传成功（HTTP 200）≠ 索引完成。LightRAG 异步处理文档，需要通过 `track_id` 轮询 `/documents/track_status/{track_id}` 确认真实进度。
 
-不建议只做一个菜单按钮直接弹文件选择器。原因：
+---
 
-1. 用户需要看到 LightRAG 当前是否启用、Endpoint 是什么、连接是否正常。
-2. 用户需要看到索引过程和最后结果。
-3. 后续会扩展批量索引、目录索引、拖拽文件、查询测试、索引历史。
-4. 单次文件选择弹窗无法承载完整反馈，也不利于后续扩展。
+## 2. 目标范围（P0 + P1）
 
-所以最终设计应是一个独立 GUI 窗口，而不是 Settings 中的 action，也不是一次性菜单命令。
+### P0：文档列表 + 删除
 
-### 4.2 Knowledge Base Window 目标 UI
+| 功能 | 说明 |
+|------|------|
+| `LightRAGClient.GetDocumentsAsync()` | 调用 `GET /documents`，返回所有文档列表 |
+| `LightRAGClient.DeleteDocumentAsync(docId)` | 调用 `DELETE /documents/delete_document` |
+| `LightRAGTool.list_documents` action | LLM 可查询知识库中有哪些文档 |
+| `LightRAGTool.delete_document` action | LLM 可删除指定文档 |
+| `KnowledgeBasePanel` 文档列表区块 | 刷新按钮 + ScrollView + 每条显示名称/摘要/状态 + 删除按钮 |
 
-建议 UI：
+### P1：track_id 轮询真实进度
+
+| 功能 | 说明 |
+|------|------|
+| `LightRAGClient.TrackStatusAsync(trackId)` | 调用 `GET /documents/track_status/{track_id}` |
+| `IndexFileAsync` 返回 `track_id` | 上传成功后返回 track_id 而非 bool |
+| `KnowledgeBasePanel` 轮询进度 | 上传后持续轮询，直到 `status = processed` 或 `failed` |
+| UI 显示"处理中"状态 | 区分"已上传"和"已索引"两个阶段 |
+
+### 暂不实现（后续 Phase）
+
+- 批量目录索引（`index_folder`、`index_project_docs`）
+- 自动查询策略
+- 索引历史列表（本地持久化）
+- 代码索引
+- 拖拽文件索引
+
+---
+
+## 3. 数据模型设计
+
+### 3.1 新增 C# 数据类（在 `LightRAGClient.cs` 中）
+
+```csharp
+/// <summary>
+/// LightRAG 文档条目（来自 GET /documents）。
+/// </summary>
+[Serializable]
+public class LightRAGDocument
+{
+    [JsonProperty("id")]
+    public string Id;
+
+    [JsonProperty("file_path")]
+    public string FilePath;
+
+    [JsonProperty("content_summary")]
+    public string ContentSummary;
+
+    [JsonProperty("content_length")]
+    public int ContentLength;
+
+    [JsonProperty("status")]
+    public string Status;  // "processed" | "pending" | "failed"
+
+    [JsonProperty("created_at")]
+    public string CreatedAt;
+
+    [JsonProperty("updated_at")]
+    public string UpdatedAt;
+
+    [JsonProperty("track_id")]
+    public string TrackId;
+
+    [JsonProperty("chunks_count")]
+    public int ChunksCount;
+
+    [JsonProperty("error_msg")]
+    public string ErrorMsg;
+}
+
+/// <summary>
+/// GET /documents 的完整响应。
+/// </summary>
+[Serializable]
+internal class RAGDocumentsResponse
+{
+    [JsonProperty("statuses")]
+    public RAGDocumentStatuses Statuses;
+}
+
+[Serializable]
+internal class RAGDocumentStatuses
+{
+    [JsonProperty("processed")]
+    public List<LightRAGDocument> Processed;
+
+    [JsonProperty("pending")]
+    public List<LightRAGDocument> Pending;
+
+    [JsonProperty("failed")]
+    public List<LightRAGDocument> Failed;
+}
+
+/// <summary>
+/// GET /documents/track_status/{track_id} 的响应。
+/// </summary>
+[Serializable]
+public class LightRAGTrackStatus
+{
+    [JsonProperty("status")]
+    public string Status;  // "pending" | "processing" | "processed" | "failed"
+
+    [JsonProperty("error_msg")]
+    public string ErrorMsg;
+
+    [JsonProperty("document_id")]
+    public string DocumentId;
+}
+
+/// <summary>
+/// IndexFileAsync 的返回结果（P1 修改后）。
+/// </summary>
+public class LightRAGIndexResult
+{
+    public bool Accepted;      // HTTP 200 上传成功
+    public string TrackId;     // 用于轮询进度
+    public string ErrorMessage;
+}
+```
+
+### 3.2 修改 `IndexFileAsync` 返回类型
+
+当前返回 `Task<bool>`，P1 修改为返回 `Task<LightRAGIndexResult>`，以便传递 `track_id`。
+
+**注意**：`LightRAGTool.HandleIndexFile` 和 `KnowledgeBasePanel.IndexFileAsync` 都调用了此方法，需要同步更新。
+
+---
+
+## 4. LightRAGClient 新增方法
+
+### 4.1 `GetDocumentsAsync`
+
+```csharp
+/// <summary>
+/// 获取知识库中所有文档列表。
+/// </summary>
+/// <param name="ct">取消令牌</param>
+/// <returns>所有文档列表（processed + pending + failed 合并）</returns>
+public async Task<List<LightRAGDocument>> GetDocumentsAsync(CancellationToken ct = default)
+{
+    try
+    {
+        var url = $"{_baseUrl}/documents";
+        var response = await GetAsync<RAGDocumentsResponse>(url, ct);
+
+        var all = new List<LightRAGDocument>();
+        if (response?.Statuses != null)
+        {
+            if (response.Statuses.Processed != null) all.AddRange(response.Statuses.Processed);
+            if (response.Statuses.Pending != null)   all.AddRange(response.Statuses.Pending);
+            if (response.Statuses.Failed != null)    all.AddRange(response.Statuses.Failed);
+        }
+        return all;
+    }
+    catch (Exception ex)
+    {
+        Debug.LogError($"[AgentCore] LightRAGClient.GetDocumentsAsync failed: {ex.Message}");
+        return new List<LightRAGDocument>();
+    }
+}
+```
+
+### 4.2 `DeleteDocumentAsync`
+
+```csharp
+/// <summary>
+/// 删除知识库中的指定文档。
+/// </summary>
+/// <param name="docId">文档 ID（来自 LightRAGDocument.Id）</param>
+/// <param name="ct">取消令牌</param>
+/// <returns>是否删除成功</returns>
+public async Task<bool> DeleteDocumentAsync(string docId, CancellationToken ct = default)
+{
+    try
+    {
+        var url = $"{_baseUrl}/documents/delete_document";
+        var client = HttpClientFactory.GetClient();
+        using var request = HttpClientFactory.CreateRequest(HttpMethod.Delete, url, _apiKey);
+
+        // DELETE 请求携带 doc_id 作为 query param
+        // 实际参数格式需根据 API 确认（query string 或 body）
+        // 根据 openapi.json 确认后填写
+        var payload = new JObject { ["id"] = docId };
+        request.Content = new StringContent(
+            payload.ToString(Formatting.None), Encoding.UTF8, "application/json");
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
+
+        var response = await client.SendAsync(request, cts.Token);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Debug.LogError(
+                $"[AgentCore] LightRAGClient.DeleteDocumentAsync error: " +
+                $"{(int)response.StatusCode} {response.ReasonPhrase} - {responseBody}");
+            return false;
+        }
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Debug.LogError($"[AgentCore] LightRAGClient.DeleteDocumentAsync failed: {ex.Message}");
+        return false;
+    }
+}
+```
+
+> **实现前确认**：通过 `curl -X DELETE http://localhost:9621/documents/delete_document` 确认参数格式（query string `?id=xxx` 还是 JSON body）。
+
+### 4.3 `TrackStatusAsync`
+
+```csharp
+/// <summary>
+/// 轮询文档索引进度。
+/// </summary>
+/// <param name="trackId">上传时返回的 track_id</param>
+/// <param name="ct">取消令牌</param>
+/// <returns>当前索引状态</returns>
+public async Task<LightRAGTrackStatus> TrackStatusAsync(string trackId, CancellationToken ct = default)
+{
+    try
+    {
+        var url = $"{_baseUrl}/documents/track_status/{Uri.EscapeDataString(trackId)}";
+        return await GetAsync<LightRAGTrackStatus>(url, ct);
+    }
+    catch (Exception ex)
+    {
+        Debug.LogError($"[AgentCore] LightRAGClient.TrackStatusAsync failed: {ex.Message}");
+        return new LightRAGTrackStatus { Status = "failed", ErrorMsg = ex.Message };
+    }
+}
+```
+
+### 4.4 修改 `IndexFileAsync` 返回类型（P1）
+
+将返回类型从 `Task<bool>` 改为 `Task<LightRAGIndexResult>`：
+
+```csharp
+public async Task<LightRAGIndexResult> IndexFileAsync(
+    string filePath,
+    CancellationToken ct = default)
+{
+    // ... 现有校验逻辑不变 ...
+
+    var response = await client.SendAsync(request, cts.Token);
+    var responseBody = await response.Content.ReadAsStringAsync();
+
+    if (!response.IsSuccessStatusCode)
+    {
+        Debug.LogError(...);
+        return new LightRAGIndexResult { Accepted = false, ErrorMessage = responseBody };
+    }
+
+    // 解析 track_id
+    string trackId = null;
+    try
+    {
+        var json = JObject.Parse(responseBody);
+        trackId = json["track_id"]?.ToString()
+               ?? json["id"]?.ToString();  // 兼容不同字段名
+    }
+    catch { /* 解析失败时 trackId 为 null */ }
+
+    return new LightRAGIndexResult { Accepted = true, TrackId = trackId };
+}
+```
+
+---
+
+## 5. LightRAGTool 新增 Actions
+
+### 5.1 更新 `_parametersSchema`
+
+在现有 `enum` 中新增 `list_documents`、`delete_document`：
+
+```json
+{
+  "action": {
+    "type": "string",
+    "enum": ["query", "index_text", "index_file", "list_documents", "delete_document"],
+    "description": "操作类型：query(查询)、index_text(索引文本)、index_file(索引文件)、list_documents(列出文档)、delete_document(删除文档)"
+  },
+  "doc_id": {
+    "type": "string",
+    "description": "delete_document 时必填，文档 ID（来自 list_documents 返回的 id 字段）"
+  }
+}
+```
+
+### 5.2 `HandleListDocuments`
+
+```csharp
+private async Task<ToolResponse> HandleListDocuments(LightRAGClient client, CancellationToken ct)
+{
+    var docs = await client.GetDocumentsAsync(ct);
+
+    if (docs.Count == 0)
+    {
+        return ToolResponse.Ok("知识库中暂无文档。");
+    }
+
+    var items = docs.Select(d => new
+    {
+        id = d.Id,
+        file_name = Path.GetFileName(d.FilePath),
+        summary = d.ContentSummary,
+        status = d.Status,
+        chunks = d.ChunksCount,
+        created_at = d.CreatedAt
+    }).ToArray();
+
+    return ToolResponse.OkWithData(new
+    {
+        action = "list_documents",
+        total = docs.Count,
+        documents = items
+    }, $"知识库中共有 {docs.Count} 个文档");
+}
+```
+
+### 5.3 `HandleDeleteDocument`
+
+```csharp
+private async Task<ToolResponse> HandleDeleteDocument(LightRAGClient client, JObject parameters, CancellationToken ct)
+{
+    var docId = ToolHelpers.GetRequiredString(parameters, "doc_id");
+
+    bool success = await client.DeleteDocumentAsync(docId, ct);
+
+    if (success)
+    {
+        return ToolResponse.OkWithData(new
+        {
+            action = "delete_document",
+            doc_id = docId
+        }, $"文档已从知识库中删除：{docId}");
+    }
+
+    return ToolResponse.Fail($"删除文档失败：{docId}。请确认文档 ID 正确，并检查 LightRAG 服务状态。");
+}
+```
+
+### 5.4 更新 `Description` 和 `Metadata`
+
+```csharp
+[AgentTool("manage_knowledge",
+    Description = "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、列出文档(list_documents)、删除文档(delete_document)。知识库基于 LightRAG 提供图谱增强的检索能力。",
+    Category = "Cloud",
+    RequiresMainThread = false)]
+```
+
+---
+
+## 6. KnowledgeBasePanel UI 设计
+
+### 6.1 新增"知识库文档"区块
+
+在现有"添加知识"区块之后，新增"知识库文档"区块：
 
 ```text
-Window/AgentCore/Knowledge Base
-
 ┌─────────────────────────────────────────────────────────┐
-│ AgentCore Knowledge Base                                │
+│ Knowledge Base                                          │
 ├─────────────────────────────────────────────────────────┤
-│ Status                                                  │
-│   LightRAG: Enabled / Disabled                          │
+│ 状态                                                    │
+│   LightRAG: ✓ 已启用                                    │
 │   Endpoint: http://localhost:9621                       │
-│   Connection: Unknown / Connected / Failed              │
-│   [Test Connection] [Open Settings]                     │
+│   连接: ✓ 已连接                                        │
+│   [测试连接]  [打开设置]                                 │
 ├─────────────────────────────────────────────────────────┤
-│ Add Knowledge                                           │
-│   [Index Document...]                                   │
-│   [Index Folder...]                                     │
-│   [Index Project Docs]                                  │
-│                                                         │
-│   Drop files here to index                              │
+│ 添加知识                                                │
+│   [+ 索引文档...]                                       │
+│   支持 .md .txt .cs .json .xml .yaml 等格式，最大 5MB   │
 ├─────────────────────────────────────────────────────────┤
-│ Query Test                                              │
-│   Query: [________________________________________]      │
-│   Mode: [hybrid ▼]   [Query]                            │
-│   Result preview...                                     │
+│ 知识库文档                              [↻ 刷新]        │
+│   ┌─────────────────────────────────────────────────┐  │
+│   │ 📄 beautify-urp-documentation.md    [processed] │  │
+│   │    Beautify 3 是一个 URP 后处理插件...           │  │
+│   │                                        [🗑 删除] │  │
+│   ├─────────────────────────────────────────────────┤  │
+│   │ 📄 README.md                         [pending]  │  │
+│   │    处理中...                                     │  │
+│   │                                        [🗑 删除] │  │
+│   └─────────────────────────────────────────────────┘  │
+│   共 2 个文档（1 已处理，1 处理中）                      │
 ├─────────────────────────────────────────────────────────┤
-│ Last Index Result                                       │
-│   12 indexed, 1 failed, 4 skipped, 8.2s                 │
-│   - OK docs/Combat.md                                   │
-│   - FAIL docs/LargeSpec.pdf: unsupported / too large    │
+│ 上次索引结果                                            │
+│   ✓ 索引成功：README.md（处理中，等待 LightRAG 完成）   │
+│   [💬 向 Agent 询问此文档]                              │
 └─────────────────────────────────────────────────────────┘
 ```
 
-第一阶段只做：
+### 6.2 新增 UI 元素
 
-- 新菜单：`Window/AgentCore/Knowledge Base`
-- 独立 `KnowledgeBaseWindow`
-- 状态区：Enabled / Endpoint / Test Connection / Open Settings
-- `Index Document...`
-- Last result
+```csharp
+// 知识库文档区块
+private VisualElement _documentsSection;
+private Button _refreshDocumentsButton;
+private ScrollView _documentsScrollView;
+private Label _documentsSummaryLabel;
 
-第二阶段再做：
+// 进度轮询状态
+private string _pendingTrackId = null;
+private CancellationTokenSource _pollCts = null;
+```
 
-- `Index Project Docs`
-- 拖拽文件索引
-- Query Test
+### 6.3 文档列表条目结构
 
-第三阶段再做：
-
-- `Index Folder...`
-- Include / Exclude patterns 展示
-- Max file size MB 展示
-- 索引历史列表
-
-### 4.3 Settings 界面职责
-
-Settings 只保留配置项：
-
-- LightRAG Enabled
-- Endpoint
-- API Key
-- Test Connection
-- Include patterns
-- Exclude patterns
-- Max file size MB
-- Max batch files
-- Auto query policy
-
-Settings 不放这些 action：
-
-- `Index Document...`
-- `Index Folder...`
-- `Index Project Docs`
-- Query Test
-- 索引历史操作
-
-Settings 可以放一个轻量跳转按钮：
+每个文档条目（`DocumentListItem`）包含：
 
 ```text
-[Open Knowledge Base Window]
+┌─────────────────────────────────────────────────────────┐
+│ 📄 {file_name}                          [{status_badge}]│
+│    {content_summary 截断到 80 字符}                      │
+│                                              [🗑 删除]  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-这个按钮只是导航入口，不直接执行索引动作，可以接受。
+状态徽章颜色：
+- `processed` → 绿色
+- `pending` / `processing` → 黄色
+- `failed` → 红色
 
-### 4.4 Chat 工具补齐
-
-扩展 `manage_knowledge` actions：
-
-当前：
-
-- `query`
-- `index_text`
-
-建议新增：
-
-- `index_file`
-- `index_folder`
-- `index_project_docs`
-- `get_status`
-
-#### 4.4.1 `index_file`
-
-用途：让 Agent 将项目内某个文档上传到 LightRAG。
-
-参数：
-
-```json
-{
-  "action": "index_file",
-  "path": "Assets/Docs/CombatDesign.md"
-}
-```
-
-规则：
-
-- path 必须在项目根目录下。
-- 禁止上传 `Library`、`Temp`、`Obj`、`.git` 下文件。
-- 默认限制文件大小，例如 2MB。
-- 失败时返回明确原因。
-
-#### 4.4.2 `index_folder`
-
-用途：批量索引某个目录下的文档。
-
-参数：
-
-```json
-{
-  "action": "index_folder",
-  "path": "docs",
-  "recursive": true,
-  "include_patterns": "*.md,*.txt,*.json,*.yaml,*.yml",
-  "max_files": 100
-}
-```
-
-规则：
-
-- 默认 recursive = true。
-- 默认 max_files = 100。
-- 超出数量时停止并返回提示。
-- 每个文件单独失败，不中断整个批次。
-
-#### 4.4.3 `index_project_docs`
-
-用途：一键索引项目常见文档。
-
-默认扫描：
-
-- `README.md`
-- `CHANGELOG.md`
-- `AGENTS.md`
-- `docs/`
-- `plans/`
-- `Assets/Docs/`
-- `Assets/Documentation/`
-
-不默认扫描：
-
-- 全 `Assets/`
-- 全 `Packages/`
-- `Library/`
-- `ProjectSettings/`
-
-#### 4.4.4 `get_status`
-
-用途：查询 LightRAG 服务健康状态和最近索引摘要。
-
-第一阶段可以只返回服务健康状态；后续再接索引历史。
-
-### 4.5 自动查询策略
-
-第一阶段不建议做“每轮自动 RAG 查询”。原因：
-
-- 会增加延迟。
-- 会增加 LightRAG 服务压力。
-- 检索质量不稳定时可能污染上下文。
-
-建议第一阶段策略：
-
-1. 用户明确提到“知识库 / 文档 / 设计 / 规范 / 记忆中的文档 / 查一下文档”时，Agent 优先调用 `manage_knowledge(query)`。
-2. 用户要求实现功能但信息不足时，Agent 可以先查询知识库。
-3. 用户问当前代码/文件内容时，不使用 LightRAG，优先使用文件搜索和代码工具。
-
-第二阶段可增加可选设置：
-
-```text
-Auto Query Knowledge Base: Off / Conservative / Aggressive
-```
-
-默认：`Conservative` 或 `Off`。
-
----
-
-## 5. 数据与状态设计
-
-### 5.1 Settings 字段建议
-
-新增字段：
+### 6.4 刷新逻辑
 
 ```csharp
-public string lightragIncludePatterns = "*.md,*.txt,*.json,*.yaml,*.yml";
-public string lightragExcludePatterns = "Library/**,Temp/**,Obj/**,Build/**,.git/**,*.meta";
-public int lightragMaxFileSizeMb = 2;
-public int lightragMaxBatchFiles = 100;
-public bool lightragAutoQueryEnabled = false;
+private async void OnRefreshDocumentsClicked()
+{
+    _refreshDocumentsButton.SetEnabled(false);
+    _documentsScrollView.Clear();
+    _documentsSummaryLabel.text = "加载中...";
+
+    try
+    {
+        var client = LightRAGClient.FromSettings();
+        var docs = await client.GetDocumentsAsync(_cts.Token);
+        RenderDocumentList(docs);
+    }
+    catch (Exception ex)
+    {
+        _documentsSummaryLabel.text = $"加载失败：{ex.Message}";
+    }
+    finally
+    {
+        _refreshDocumentsButton.SetEnabled(true);
+    }
+}
 ```
 
-如果需要显示最近结果，可增加非关键持久化字段：
+### 6.5 删除逻辑
 
 ```csharp
-public string lightragLastIndexSummary = "";
-public string lightragLastIndexTimeUtc = "";
+private async void OnDeleteDocumentClicked(string docId, string fileName)
+{
+    bool confirm = EditorUtility.DisplayDialog(
+        "确认删除",
+        $"确定要从知识库中删除文档「{fileName}」吗？\n\n此操作不可撤销。",
+        "删除", "取消");
+
+    if (!confirm) return;
+
+    var client = LightRAGClient.FromSettings();
+    bool success = await client.DeleteDocumentAsync(docId, _cts.Token);
+
+    if (success)
+    {
+        // 刷新列表
+        OnRefreshDocumentsClicked();
+    }
+    else
+    {
+        EditorUtility.DisplayDialog("删除失败",
+            $"无法删除文档「{fileName}」，请检查 LightRAG 服务状态。", "确定");
+    }
+}
 ```
 
-注意：新增字段需要递增 `AgentCoreSettings.CurrentVersion` 并补迁移逻辑。
+### 6.6 track_id 轮询逻辑（P1）
 
-### 5.2 索引结果模型
-
-建议新增内部数据结构：
+上传文件后，如果获得了 `track_id`，启动后台轮询：
 
 ```csharp
-public class KnowledgeIndexResult
+private async Task PollIndexProgressAsync(string trackId, string fileName)
 {
-    public int Total;
-    public int Indexed;
-    public int Failed;
-    public int Skipped;
-    public double ElapsedMs;
-    public List<KnowledgeIndexItemResult> Items;
-}
+    _pollCts?.Cancel();
+    _pollCts = new CancellationTokenSource();
+    _pollCts.CancelAfter(TimeSpan.FromMinutes(5)); // 最长等待 5 分钟
 
-public class KnowledgeIndexItemResult
-{
-    public string Path;
-    public string Status;
-    public string Message;
+    var client = LightRAGClient.FromSettings();
+    int pollIntervalMs = 2000; // 每 2 秒轮询一次
+
+    while (!_pollCts.Token.IsCancellationRequested)
+    {
+        await Task.Delay(pollIntervalMs, _pollCts.Token);
+
+        var status = await client.TrackStatusAsync(trackId, _pollCts.Token);
+
+        if (status.Status == "processed")
+        {
+            // 索引完成
+            _lastIndexSummary = $"✓ 索引完成：{fileName}";
+            _lastResultLabel.text = _lastIndexSummary;
+            _lastResultLabel.AddToClassList("kb-panel__result--success");
+            _askAgentButton.style.display = DisplayStyle.Flex;
+            // 刷新文档列表
+            OnRefreshDocumentsClicked();
+            break;
+        }
+        else if (status.Status == "failed")
+        {
+            // 索引失败
+            _lastIndexSummary = $"✗ 索引失败：{fileName}\n原因：{status.ErrorMsg ?? "未知错误"}";
+            _lastResultLabel.text = _lastIndexSummary;
+            _lastResultLabel.AddToClassList("kb-panel__result--failed");
+            break;
+        }
+        else
+        {
+            // 仍在处理中（pending / processing）
+            _progressLabel.text = $"LightRAG 处理中：{fileName}（{status.Status}）...";
+        }
+    }
+
+    _progressOverlay.style.display = DisplayStyle.None;
 }
+```
+
+**UI 状态流转**（P1 修改后）：
+
+```
+用户点击"索引文档"
+  → 显示进度遮罩："正在上传：{fileName}..."
+  → IndexFileAsync 返回 LightRAGIndexResult
+    → Accepted = false → 显示上传失败，结束
+    → Accepted = true, TrackId = null → 显示"已上传（无法追踪进度）"，结束
+    → Accepted = true, TrackId = "upload_xxx"
+      → 更新进度遮罩："LightRAG 处理中：{fileName}..."
+      → 启动 PollIndexProgressAsync(trackId)
+        → 轮询直到 processed / failed / 超时
+        → 完成后刷新文档列表
 ```
 
 ---
 
-## 6. 安全与隐私规则
+## 7. 实现阶段规划（修订版）
 
-RAG 上传文档是敏感操作，必须显式可控。
+### Phase RAG-Doc-1：P0 文档列表与删除
 
-硬规则：
+**目标**：用户和 LLM 都能查看知识库中有哪些文档，并可删除。
 
-1. 默认不自动上传任何文件。
-2. Knowledge Base Window 中点击批量索引前，显示确认对话框。
-3. Chat 工具索引文件时，只允许项目根目录内路径。
-4. 默认排除：
-   - `.git/`
-   - `Library/`
-   - `Temp/`
-   - `Obj/`
-   - `Build/`
-   - `Logs/`
-   - `UserSettings/`
-   - `.meta`
-   - 常见二进制格式
-5. 默认限制单文件大小。
-6. 不上传 API Key、EditorPrefs、本地凭据文件。
+**任务清单**：
 
-建议默认禁止扩展名：
+1. **`LightRAGClient`**：
+   - 新增数据类：`LightRAGDocument`、`RAGDocumentsResponse`、`RAGDocumentStatuses`
+   - 新增方法：`GetDocumentsAsync()`
+   - 新增方法：`DeleteDocumentAsync(docId)`（实现前先确认 DELETE 参数格式）
 
-```text
-.png,.jpg,.jpeg,.psd,.fbx,.blend,.wav,.mp3,.mp4,.dll,.exe,.zip,.tgz,.unitypackage
-```
+2. **`LightRAGTool`**：
+   - 更新 `_parametersSchema`：新增 `list_documents`、`delete_document` 枚举值和 `doc_id` 参数
+   - 新增 `HandleListDocuments()` handler
+   - 新增 `HandleDeleteDocument()` handler
+   - 更新 `switch` 分发和 `Description`/`Metadata`
+
+3. **`KnowledgeBasePanel`**：
+   - 新增"知识库文档"区块（`_documentsSection`）
+   - 新增刷新按钮（`_refreshDocumentsButton`）
+   - 新增 `ScrollView`（`_documentsScrollView`）
+   - 新增文档摘要标签（`_documentsSummaryLabel`）
+   - 实现 `OnRefreshDocumentsClicked()`
+   - 实现 `RenderDocumentList(docs)`（含每条的删除按钮）
+   - 实现 `OnDeleteDocumentClicked(docId, fileName)`（含确认对话框）
+   - `OnActivated()` 时自动刷新文档列表
+
+**验收标准**：
+- [ ] `KnowledgeBasePanel` 显示知识库中所有文档（名称 + 摘要 + 状态）
+- [ ] 点击刷新按钮可重新加载文档列表
+- [ ] 点击删除按钮弹出确认对话框，确认后删除并刷新列表
+- [ ] Chat 中调用 `manage_knowledge(list_documents)` 返回文档列表
+- [ ] Chat 中调用 `manage_knowledge(delete_document, doc_id=xxx)` 可删除文档
+- [ ] LightRAG 未启用或未配置时，文档列表区块显示提示而非报错
+
+### Phase RAG-Doc-2：P1 track_id 轮询真实进度
+
+**目标**：上传文件后，UI 显示真实的索引进度，直到 LightRAG 完成处理。
+
+**任务清单**：
+
+1. **`LightRAGClient`**：
+   - 新增数据类：`LightRAGTrackStatus`、`LightRAGIndexResult`
+   - 新增方法：`TrackStatusAsync(trackId)`
+   - 修改 `IndexFileAsync` 返回类型：`Task<bool>` → `Task<LightRAGIndexResult>`
+
+2. **`LightRAGTool`**：
+   - 更新 `HandleIndexFile`：适配新的 `LightRAGIndexResult` 返回类型
+   - 在返回结果中包含 `track_id`（供用户手动查询进度）
+
+3. **`KnowledgeBasePanel`**：
+   - 新增 `_pendingTrackId` 和 `_pollCts` 字段
+   - 修改 `IndexFileAsync`：适配新返回类型，获取 `track_id`
+   - 实现 `PollIndexProgressAsync(trackId, fileName)`
+   - 进度遮罩区分"上传中"和"处理中"两个阶段
+   - 索引完成后自动刷新文档列表
+
+**验收标准**：
+- [ ] 上传文件后，进度遮罩显示"LightRAG 处理中..."而非立即消失
+- [ ] 轮询到 `status = processed` 时，显示"✓ 索引完成"并刷新文档列表
+- [ ] 轮询到 `status = failed` 时，显示"✗ 索引失败"和错误原因
+- [ ] 5 分钟超时后停止轮询，显示"处理超时，请稍后刷新文档列表"
+- [ ] `track_id` 为 null 时（服务不返回），降级为旧行为（显示"已上传"）
 
 ---
 
-## 7. 实现阶段规划
+## 8. 实现注意事项
 
-### Phase RAG-1：补齐最小闭环
+### 8.1 DELETE 参数格式确认
 
-目标：用户可以从独立 Knowledge Base Window 上传单个文档；Agent 可以索引单个文件。
+实现 `DeleteDocumentAsync` 前，需要通过以下命令确认参数格式：
 
-任务：
+```bash
+# 方式一：query string
+curl -X DELETE "http://localhost:9621/documents/delete_document?id=doc-xxx"
 
-1. `LightRAGTool` 新增 `index_file` action。
-2. 新增 `Window/AgentCore/Knowledge Base` 菜单。
-3. 新增 `KnowledgeBaseWindow`，包含状态区、`Index Document...`、Last result。
-4. 调用现有 `LightRAGClient.IndexFileAsync`。
-5. Settings 的 LightRAG 区域只保留配置，可加 `Open Knowledge Base Window` 导航按钮。
-6. 补充 `TOOLS.md.template` 中 `manage_knowledge` 说明。
+# 方式二：JSON body
+curl -X DELETE "http://localhost:9621/documents/delete_document" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "doc-xxx"}'
+```
 
-验收：
+根据实际响应选择正确的实现方式。
 
-- Knowledge Base Window 里选择 `.md` 文件后可以上传成功。
-- Chat 中可调用 `manage_knowledge(index_file)` 上传项目文档。
-- 服务未配置、文件不存在、文件过大时返回友好错误。
+### 8.2 `IndexFileAsync` 返回的 track_id 字段名
 
-### Phase RAG-2：项目文档批量索引
+上传响应中 `track_id` 的字段名需要通过实际测试确认：
 
-目标：一键索引常见项目文档。
+```bash
+curl -X POST "http://localhost:9621/documents/upload" \
+  -F "file=@README.md" | python -m json.tool
+```
 
-任务：
+可能的字段名：`track_id`、`id`、`document_id`。代码中应做多字段兼容。
 
-1. 新增文档扫描辅助类，例如 `KnowledgeDocumentScanner`。
-2. 支持默认扫描 `README.md`、`CHANGELOG.md`、`docs/`、`plans/`、`Assets/Docs/`。
-3. Knowledge Base Window 新增 `Index Project Docs`。
-4. 工具新增 `index_project_docs`。
-5. 批量结果结构化返回。
+### 8.3 文档列表的 CSS 样式
 
-验收：
+新增的文档列表条目需要在 `ChatWindow.uss` 中添加对应样式：
 
-- 能显示 indexed / failed / skipped。
-- 单个文件失败不影响其他文件。
-- 默认排除规则生效。
+```css
+.kb-panel__doc-item { ... }
+.kb-panel__doc-item__name { ... }
+.kb-panel__doc-item__summary { ... }
+.kb-panel__doc-item__status-badge { ... }
+.kb-panel__doc-item__status-badge--processed { color: #4CAF50; }
+.kb-panel__doc-item__status-badge--pending { color: #FF9800; }
+.kb-panel__doc-item__status-badge--failed { color: #F44336; }
+.kb-panel__doc-item__delete-btn { ... }
+```
 
-### Phase RAG-3：索引配置与目录索引
+### 8.4 并发安全
 
-目标：用户可以控制索引范围。
+- `OnRefreshDocumentsClicked` 和 `PollIndexProgressAsync` 可能并发执行
+- 刷新时应取消正在进行的刷新请求（使用独立的 `_refreshCts`）
+- 轮询时应取消上一次轮询（`_pollCts?.Cancel()` 后重新创建）
 
-任务：
+### 8.5 `KnowledgeBasePanel` 的 `_cts` 管理
 
-1. 新增 include/exclude patterns 设置。
-2. 新增 max file size / max batch files 设置。
-3. Knowledge Base Window 新增 `Index Folder...`。
-4. 工具新增 `index_folder`。
-5. 批量索引增加确认对话框。
+当前 `_cts` 被测试连接和索引文件共用，需要拆分：
 
-验收：
+| 字段 | 用途 |
+|------|------|
+| `_connectionCts` | 测试连接操作 |
+| `_indexCts` | 文件上传操作 |
+| `_pollCts` | track_id 轮询 |
+| `_refreshCts` | 文档列表刷新 |
 
-- 用户可以索引指定目录。
-- 大文件和排除文件不会上传。
-- 超出 max files 时给出明确提示。
+---
+
+## 9. 后续 Phase（参考）
+
+### Phase RAG-3：批量索引
+
+- `index_folder` action
+- `index_project_docs` action（扫描 README.md、docs/、plans/ 等）
+- `KnowledgeBasePanel` 新增"索引项目文档"按钮
+- 批量结果显示（indexed / failed / skipped）
 
 ### Phase RAG-4：查询体验强化
 
-目标：让 Agent 更稳定地使用知识库。
+- 更新 `SOUL.md` / `TOOLS.md.template`，明确何时使用知识库
+- `query` 支持 `top_k` 参数
+- 查询结果展示来源文档名称
 
-任务：
+### Phase RAG-5：Settings 扩展
 
-1. 更新 `SOUL.md` / `TOOLS.md.template`，明确何时使用知识库。
-2. `manage_knowledge(query)` 支持 `top_k` 参数。
-3. 查询结果展示来源信息。
-4. 可选增加 `Auto Query Knowledge Base` 设置。
-
-验收：
-
-- 用户问“根据项目文档”时，Agent 会先查 LightRAG。
-- 用户问代码现状时，Agent 不误用 LightRAG 替代文件搜索。
-
-### Phase RAG-5：与代码索引协同
-
-目标：形成文档 RAG + 代码索引的清晰分工。
-
-任务：
-
-1. 设计本地符号索引。
-2. 查询路由：文档问题走 LightRAG，代码结构问题走代码索引，文本精确问题走文件搜索。
-3. 在 UI 中拆分：Knowledge Base 与 Code Index。
-
-验收：
-
-- 不把所有内容都塞进 LightRAG。
-- Agent 能解释检索来源类型。
-
----
-
-## 8. 推荐第一轮实现范围
-
-为了避免一次做大，第一轮只建议做：
-
-1. `manage_knowledge.index_file`
-2. 新增 `Window/AgentCore/Knowledge Base`
-3. `KnowledgeBaseWindow`: `Index Document...` + Last result
-4. 基础安全检查：项目内路径、文件存在、大小限制、排除目录
-5. 更新工具说明
-
-暂不做：
-
-- 批量目录索引
-- 自动查询
-- 索引历史列表
-- 删除知识库文档
-- 代码索引
-
----
-
-## 9. 待讨论问题
-
-1. LightRAG 服务是否支持删除文档、列出文档？如果支持，是否需要 UI 暴露？
-2. 上传文件是否要保留原路径作为 metadata？当前 `IndexFileAsync` 只是 multipart 上传，需要确认服务端是否保存文件名和来源。
-3. 是否允许上传 `ProjectSettings` 里的文本配置？默认建议不允许，除非用户明确选择。
-4. 是否需要本地保存“已索引文件 hash”，避免重复上传？第一阶段可不做，第二/三阶段再做。
-5. 是否需要支持 Markdown 分块预处理？如果 LightRAG 服务端已处理，则 Unity 端不做。
-6. `Index Project Docs` 是否应该默认包含 `AGENTS.md`？它可能包含开发规则，通常有价值，但也可能包含内部策略，需要用户确认。
+- `lightragIncludePatterns`（默认 `*.md,*.txt,*.json,*.yaml,*.yml`）
+- `lightragExcludePatterns`（默认排除 Library、Temp、.git 等）
+- `lightragMaxFileSizeMb`（默认 5MB）
+- `lightragAutoQueryEnabled`（默认 false）
 
 ---
 
 ## 10. 成功标准
 
-RAG 功能补齐后，应该达到：
+P0 + P1 完成后，应达到：
 
-1. 用户能明确知道 LightRAG 是做什么的。
-2. 用户能在 Knowledge Base Window 中把文档交给 LightRAG。
-3. Agent 能在 Chat 中索引指定文档。
-4. Agent 能查询知识库并返回带来源的结果。
-5. 系统不会在用户不知情的情况下上传项目内容。
-6. 失败时用户能知道是连接问题、文件问题、服务问题还是限制规则导致。
-7. 后续代码索引可以独立演进，不被 LightRAG 设计绑死。
+1. 用户打开 Knowledge Base 面板，能看到 LightRAG 中已有哪些文档（名称 + 摘要 + 状态）
+2. 用户能删除不需要的文档（带确认对话框）
+3. 用户上传文档后，UI 显示真实的处理进度，而非立即显示"成功"
+4. LLM 能通过 `list_documents` 查询知识库文档列表
+5. LLM 能通过 `delete_document` 删除指定文档
+6. 所有操作失败时，用户能看到清晰的错误原因
+7. 服务未配置时，相关功能优雅降级（显示提示，不报错）
