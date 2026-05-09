@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-05-08
+
+### Changed
+- **Settings 界面重组**
+  - 顶部新增 AgentCore 状态概览，集中显示 LLM、mem0、LightRAG 与工具启用状态
+  - 将设置按用户工作流重排为 Setup、Agent、Context & Memory、Tools、Appearance、About & Diagnostics
+  - mem0 与 LightRAG 改为可折叠卡片，默认降低可选云服务对主配置流程的干扰
+  - Agent 高级 token/错误上限参数移动到 Advanced Limits 折叠区
+  - About 区域移除过时 Phase 文案，改为显示包名与实际版本
+
+### Added
+- **Settings 诊断操作**
+  - 新增 Diagnostics 区域，可快速测试 LLM、mem0、LightRAG 连接
+  - 新增快速打开或创建 `MEMORY.md` / `USER.md` 的入口
+  - Tool Management 新增安全模式与完整模式预设
+
+### Fixed
+- 统一 LLM、mem0、LightRAG 的连接状态显示逻辑，避免不同区域使用不一致的颜色和字符串判断
+
 ## [0.3.6] - 2026-05-07
 
 ### Added

@@ -1,0 +1,36 @@
+# ============================================
+# AgentCore Unity Plugin — .npmignore
+# 打包 .tgz 时排除的文件（不影响 Unity 安装）
+# ============================================
+
+# --- 归档文件（旧版本遗留，用户不需要） ---
+_archive/
+_archive.meta
+
+# --- 开发文档（用户不需要） ---
+plans/
+plans.meta
+PROJECT-ANALYSIS.md
+PROJECT-ANALYSIS.md.meta
+AGENTS.md
+AGENTS.md.meta
+
+# --- AI 开发工具配置（用户不需要） ---
+.agents/
+.roo/
+
+# --- IDE ---
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Git ---
+.gitignore
+.git/

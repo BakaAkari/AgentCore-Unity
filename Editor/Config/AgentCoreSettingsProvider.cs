@@ -35,10 +35,22 @@ namespace AgentCore.Editor.Config
         private List<string> _availableModels = new List<string>();
         private bool _isFetchingModels = false;
         private string _fetchModelsResult = "";
-        private bool _showModelDropdown = false;
 
         // --- 状态级别枚举（C3: 结构化状态消息） ---
         private enum StatusLevel { None, Success, Warning, Error, Loading }
+
+        // --- 顶层分组 UI 状态 ---
+        private bool _setupFoldout = true;
+        private bool _agentFoldout = true;
+        private bool _advancedAgentFoldout = false;
+        private bool _contextMemoryFoldout = false;
+        private bool _memoryServiceFoldout = false;
+        private bool _knowledgeBaseFoldout = false;
+        private bool _appearanceFoldout = false;
+        private bool _aboutDiagnosticsFoldout = true;
+
+        // --- LLM 连接测试状态 ---
+        private StatusLevel _connectionTestStatus = StatusLevel.None;
 
         // --- mem0 连接测试状态 ---
         private string _mem0ApiKeyDisplay = "";
@@ -61,6 +73,7 @@ namespace AgentCore.Editor.Config
         // --- LightRAG 连接测试状态 ---
         private string _lightragApiKeyDisplay = "";
         private string _lightragTestResult = "";
+        private StatusLevel _lightragTestStatus = StatusLevel.None;
         private bool _isLightRAGTesting = false;
 
         // --- 工具管理 UI 状态 ---
@@ -97,13 +110,44 @@ namespace AgentCore.Editor.Config
 
             EditorGUILayout.Space(10);
 
-            // === LLM Configuration ===
-            DrawLLMSection();
+            DrawOverviewSection();
+
+            EditorGUILayout.Space(10);
+
+            // === Setup ===
+            _setupFoldout = DrawSectionHeader("Setup", "LLM provider, API key, model selection and connection test.", _setupFoldout);
+            if (_setupFoldout)
+            {
+                EditorGUI.indentLevel++;
+                DrawLLMSection();
+                EditorGUI.indentLevel--;
+            }
 
             EditorGUILayout.Space(10);
 
             // === Agent Behavior ===
-            DrawAgentBehaviorSection();
+            _agentFoldout = DrawSectionHeader("Agent", "Runtime behavior, self-correction and advanced token limits.", _agentFoldout);
+            if (_agentFoldout)
+            {
+                EditorGUI.indentLevel++;
+                DrawAgentBehaviorSection();
+                EditorGUI.indentLevel--;
+            }
+
+            EditorGUILayout.Space(10);
+
+            // === Context & Memory ===
+            _contextMemoryFoldout = DrawSectionHeader("Context & Memory", "Bootstrap files, local context, mem0 memory and LightRAG knowledge base.", _contextMemoryFoldout);
+            if (_contextMemoryFoldout)
+            {
+                EditorGUI.indentLevel++;
+                DrawBootstrapSection();
+                EditorGUILayout.Space(8);
+                DrawMemoryServiceSection();
+                EditorGUILayout.Space(8);
+                DrawKnowledgeBaseSection();
+                EditorGUI.indentLevel--;
+            }
 
             EditorGUILayout.Space(10);
 
@@ -112,28 +156,26 @@ namespace AgentCore.Editor.Config
 
             EditorGUILayout.Space(10);
 
-            // === Bootstrap Files ===
-            DrawBootstrapSection();
-
-            EditorGUILayout.Space(10);
-
             // === UI Preferences ===
-            DrawUIPreferencesSection();
-
-            EditorGUILayout.Space(10);
-
-            // === Memory Service (mem0) ===
-            DrawMemoryServiceSection();
-
-            EditorGUILayout.Space(10);
-
-            // === Knowledge Base (LightRAG) ===
-            DrawKnowledgeBaseSection();
+            _appearanceFoldout = DrawSectionHeader("Appearance", "Chat window presentation preferences.", _appearanceFoldout);
+            if (_appearanceFoldout)
+            {
+                EditorGUI.indentLevel++;
+                DrawUIPreferencesSection();
+                EditorGUI.indentLevel--;
+            }
 
             EditorGUILayout.Space(20);
 
-            // === About ===
-            DrawAboutSection();
+            // === About & Diagnostics ===
+            _aboutDiagnosticsFoldout = DrawSectionHeader("About & Diagnostics", "Package information and quick diagnostic actions.", _aboutDiagnosticsFoldout);
+            if (_aboutDiagnosticsFoldout)
+            {
+                EditorGUI.indentLevel++;
+                DrawAboutSection();
+                DrawDiagnosticsSection();
+                EditorGUI.indentLevel--;
+            }
         }
 
         // ─────────────────────────────────────────────
@@ -164,6 +206,102 @@ namespace AgentCore.Editor.Config
             var style = new GUIStyle(baseStyle) { wordWrap = true };
             style.normal.textColor = GetStatusColor(level);
             EditorGUILayout.LabelField(text, style);
+        }
+
+        /// <summary>
+        /// Draws a consistent foldout header with a short description below it when expanded.
+        /// </summary>
+        private static bool DrawSectionHeader(string title, string description, bool foldout)
+        {
+            foldout = EditorGUILayout.Foldout(foldout, title, true, EditorStyles.foldoutHeader);
+            if (foldout && !string.IsNullOrEmpty(description))
+            {
+                EditorGUI.indentLevel++;
+                DrawHelpText(description);
+                EditorGUI.indentLevel--;
+                EditorGUILayout.Space(4);
+            }
+            return foldout;
+        }
+
+        /// <summary>
+        /// Draws small wrapped help text using a consistent indentation-friendly style.
+        /// </summary>
+        private static void DrawHelpText(string text)
+        {
+            var style = new GUIStyle(EditorStyles.miniLabel) { wordWrap = true };
+            EditorGUILayout.LabelField(text, style);
+        }
+
+        /// <summary>
+        /// Draws a masked API key row with Set and Clear actions.
+        /// </summary>
+        private static void DrawApiKeyRow(
+            string label,
+            string tooltip,
+            string displayValue,
+            string dialogTitle,
+            string dialogPrompt,
+            Action<string> setAction,
+            Action clearAction)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel(new GUIContent(label, tooltip));
+            EditorGUILayout.LabelField(displayValue, GUILayout.Width(120));
+
+            if (GUILayout.Button("Set", GUILayout.Width(40)))
+            {
+                var newKey = EditorInputDialog.Show(dialogTitle, dialogPrompt, "");
+                if (newKey != null)
+                {
+                    setAction?.Invoke(newKey);
+                }
+            }
+
+            if (GUILayout.Button("Clear", GUILayout.Width(50)))
+            {
+                clearAction?.Invoke();
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>
+        /// Draws the top status overview for the most important configuration areas.
+        /// </summary>
+        private void DrawOverviewSection()
+        {
+            EditorGUILayout.LabelField("AgentCore Settings", EditorStyles.boldLabel);
+            EditorGUI.indentLevel++;
+
+            var llmStatus = string.IsNullOrWhiteSpace(_settings.llmEndpoint)
+                ? "Not configured"
+                : $"{_settings.llmModel} @ {_settings.llmEndpoint}";
+            DrawStatusLabel($"LLM: {llmStatus}", string.IsNullOrWhiteSpace(_settings.llmEndpoint) ? StatusLevel.Warning : StatusLevel.Success, miniLabel: true);
+
+            DrawStatusLabel(
+                _settings.mem0Enabled ? $"mem0: Enabled @ {_settings.mem0Endpoint}" : "mem0: Disabled",
+                _settings.mem0Enabled ? StatusLevel.Success : StatusLevel.None,
+                miniLabel: true);
+
+            DrawStatusLabel(
+                _settings.lightragEnabled ? $"LightRAG: Enabled @ {_settings.lightragEndpoint}" : "LightRAG: Disabled",
+                _settings.lightragEnabled ? StatusLevel.Success : StatusLevel.None,
+                miniLabel: true);
+
+            var allTools = ToolRegistry.Instance.GetAllTools();
+            if (allTools != null && allTools.Count > 0)
+            {
+                var enabledCount = allTools.Count(t =>
+                    t.Metadata != null && !_settings.IsToolDisabled(t.Metadata.Name, t.Metadata.Category));
+                DrawStatusLabel($"Tools: {enabledCount}/{allTools.Count} enabled", StatusLevel.None, miniLabel: true);
+            }
+            else
+            {
+                DrawStatusLabel("Tools: not initialized yet", StatusLevel.Warning, miniLabel: true);
+            }
+
+            EditorGUI.indentLevel--;
         }
 
         // ─────────────────────────────────────────────
@@ -205,7 +343,8 @@ namespace AgentCore.Editor.Config
 
         private void DrawLLMSection()
         {
-            EditorGUILayout.LabelField("LLM Configuration", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("LLM Provider", EditorStyles.boldLabel);
+            DrawHelpText("Configure the OpenAI-compatible gateway used by AgentCore. This is the only required setup section.");
 
             EditorGUI.indentLevel++;
 
@@ -215,28 +354,26 @@ namespace AgentCore.Editor.Config
                 new GUIContent("API Endpoint", "OpenAI 兼容 API 端点地址"),
                 _settings.llmEndpoint);
 
-            // API Key 特殊处理 — 不直接显示明文
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel(new GUIContent("API Key", "LLM 服务的 API Key"));
-            EditorGUILayout.LabelField(_apiKeyDisplay, GUILayout.Width(120));
-
-            if (GUILayout.Button("Set", GUILayout.Width(40)))
-            {
-                var newKey = EditorInputDialog.Show("Set API Key", "Enter your LLM API Key:", "");
-                if (newKey != null)
+            DrawApiKeyRow(
+                "API Key",
+                "LLM 服务的 API Key",
+                _apiKeyDisplay,
+                "Set API Key",
+                "Enter your LLM API Key:",
+                newKey =>
                 {
                     SecureKeyStorage.SetLLMApiKey(newKey);
                     _apiKeyDisplay = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
-                }
-            }
-
-            if (GUILayout.Button("Clear", GUILayout.Width(50)))
-            {
-                SecureKeyStorage.SetLLMApiKey("");
-                _apiKeyDisplay = "(not set)";
-            }
-
-            EditorGUILayout.EndHorizontal();
+                    _connectionTestResult = "";
+                    _connectionTestStatus = StatusLevel.None;
+                },
+                () =>
+                {
+                    SecureKeyStorage.SetLLMApiKey("");
+                    _apiKeyDisplay = "(not set)";
+                    _connectionTestResult = "";
+                    _connectionTestStatus = StatusLevel.None;
+                });
 
             // Model 字段：Label + Popup下拉菜单 + Fetch 按钮（水平对齐）
             EditorGUILayout.BeginHorizontal();
@@ -272,12 +409,9 @@ namespace AgentCore.Editor.Config
             // 显示 Fetch 结果状态
             if (!string.IsNullOrEmpty(_fetchModelsResult))
             {
-                var isError = _fetchModelsResult.StartsWith("[FAIL]");
-                var style = new GUIStyle(EditorStyles.miniLabel) { wordWrap = true };
-                style.normal.textColor = isError ? Color.red : new Color(0.2f, 0.8f, 0.2f);
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Space(EditorGUIUtility.labelWidth + 2);
-                EditorGUILayout.LabelField(_fetchModelsResult, style);
+                DrawStatusLabel(_fetchModelsResult, _fetchModelsResult.StartsWith("[FAIL]") ? StatusLevel.Error : StatusLevel.Success, miniLabel: true);
                 EditorGUILayout.EndHorizontal();
             }
 
@@ -309,9 +443,7 @@ namespace AgentCore.Editor.Config
 
             if (!string.IsNullOrEmpty(_connectionTestResult))
             {
-                var style = new GUIStyle(EditorStyles.label);
-                style.normal.textColor = _connectionTestResult.StartsWith("[OK]") ? new Color(0.2f, 0.8f, 0.2f) : Color.red;
-                EditorGUILayout.LabelField(_connectionTestResult, style);
+                DrawStatusLabel(_connectionTestResult, _connectionTestStatus);
             }
 
             EditorGUILayout.EndHorizontal();
@@ -322,23 +454,10 @@ namespace AgentCore.Editor.Config
         private void DrawAgentBehaviorSection()
         {
             EditorGUILayout.LabelField("Agent Behavior", EditorStyles.boldLabel);
+            DrawHelpText("Keep the common safety and recovery switches visible. Token and retry limits are grouped under Advanced.");
 
             EditorGUI.indentLevel++;
             EditorGUI.BeginChangeCheck();
-
-            _settings.maxToolCallRounds = EditorGUILayout.IntSlider(
-                new GUIContent("Max Tool Rounds", "最大工具调用轮次（防止无限循环）"),
-                _settings.maxToolCallRounds, 1, 50);
-
-            _settings.maxContextTokens = EditorGUILayout.IntField(
-                new GUIContent("Max Context Tokens", "上下文窗口 token 上限（0 = 自动根据模型推断）"),
-                _settings.maxContextTokens);
-            _settings.maxContextTokens = Mathf.Max(_settings.maxContextTokens, 0);
-
-            _settings.reserveResponseTokens = EditorGUILayout.IntField(
-                new GUIContent("Reserve Response Tokens", "为 AI 回复预留的 token 数"),
-                _settings.reserveResponseTokens);
-            _settings.reserveResponseTokens = Mathf.Clamp(_settings.reserveResponseTokens, 500, 16000);
 
             _settings.autoCompileCheck = EditorGUILayout.Toggle(
                 new GUIContent("Auto Compile Check", "脚本修改后自动编译检查"),
@@ -352,9 +471,32 @@ namespace AgentCore.Editor.Config
                 new GUIContent("Fallback Routing", "启用工具失败恢复策略路由"),
                 _settings.fallbackRoutingEnabled);
 
-            _settings.maxConsecutiveErrors = EditorGUILayout.IntSlider(
-                new GUIContent("Max Consecutive Errors", "连续错误上限"),
-                _settings.maxConsecutiveErrors, 1, 20);
+            EditorGUILayout.Space(4);
+            _advancedAgentFoldout = EditorGUILayout.Foldout(_advancedAgentFoldout, "Advanced Limits", true);
+            if (_advancedAgentFoldout)
+            {
+                EditorGUI.indentLevel++;
+
+                _settings.maxToolCallRounds = EditorGUILayout.IntSlider(
+                    new GUIContent("Max Tool Rounds", "最大工具调用轮次（防止无限循环）"),
+                    _settings.maxToolCallRounds, 1, 50);
+
+                _settings.maxContextTokens = EditorGUILayout.IntField(
+                    new GUIContent("Max Context Tokens", "上下文窗口 token 上限（0 = 自动根据模型推断）"),
+                    _settings.maxContextTokens);
+                _settings.maxContextTokens = Mathf.Max(_settings.maxContextTokens, 0);
+
+                _settings.reserveResponseTokens = EditorGUILayout.IntField(
+                    new GUIContent("Reserve Response Tokens", "为 AI 回复预留的 token 数"),
+                    _settings.reserveResponseTokens);
+                _settings.reserveResponseTokens = Mathf.Clamp(_settings.reserveResponseTokens, 500, 16000);
+
+                _settings.maxConsecutiveErrors = EditorGUILayout.IntSlider(
+                    new GUIContent("Max Consecutive Errors", "连续错误上限"),
+                    _settings.maxConsecutiveErrors, 1, 20);
+
+                EditorGUI.indentLevel--;
+            }
 
             if (EditorGUI.EndChangeCheck())
             {
@@ -367,6 +509,7 @@ namespace AgentCore.Editor.Config
         private void DrawBootstrapSection()
         {
             EditorGUILayout.LabelField("Bootstrap Files", EditorStyles.boldLabel);
+            DrawHelpText("Controls the system prompt assembly pipeline and project-local context files.");
 
             EditorGUI.indentLevel++;
             EditorGUI.BeginChangeCheck();
@@ -724,7 +867,7 @@ namespace AgentCore.Editor.Config
         /// </summary>
         private void DrawToolManagementSection()
         {
-            _toolManagementFoldout = EditorGUILayout.Foldout(_toolManagementFoldout, "Tool Management", true, EditorStyles.foldoutHeader);
+            _toolManagementFoldout = DrawSectionHeader("Tools", "Enable or disable tool categories to reduce prompt size and focus Agent capabilities.", _toolManagementFoldout);
             if (!_toolManagementFoldout) return;
 
             EditorGUI.indentLevel++;
@@ -740,8 +883,6 @@ namespace AgentCore.Editor.Config
 
             // 统计信息
             var totalCount = allTools.Count;
-            var disabledToolCount = _settings.disabledTools?.Count ?? 0;
-            var disabledCategoryCount = _settings.disabledToolCategories?.Count ?? 0;
 
             // 按分类分组
             var grouped = allTools
@@ -778,8 +919,18 @@ namespace AgentCore.Editor.Config
                 }
                 _settings.SaveSettings();
             }
+            if (GUILayout.Button("安全模式", GUILayout.Width(80)))
+            {
+                ApplyToolPreset(allTools, "Safe");
+            }
+            if (GUILayout.Button("完整模式", GUILayout.Width(80)))
+            {
+                ApplyToolPreset(allTools, "Full");
+            }
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
+
+            DrawHelpText("安全模式会禁用 FileSystem 和 Scripting 分类，保留 Unity 场景/资源读取与低风险编辑工具；完整模式会清除所有工具禁用项。");
 
             EditorGUILayout.Space(3);
 
@@ -892,9 +1043,36 @@ namespace AgentCore.Editor.Config
             return text.Substring(0, maxLength) + "...";
         }
 
+        /// <summary>
+        /// Applies a built-in tool enablement preset.
+        /// </summary>
+        private void ApplyToolPreset(IReadOnlyList<IAgentTool> allTools, string preset)
+        {
+            _settings.disabledToolCategories.Clear();
+            _settings.disabledTools.Clear();
+
+            if (preset == "Safe")
+            {
+                foreach (var tool in allTools)
+                {
+                    var meta = tool.Metadata;
+                    if (meta == null) continue;
+
+                    if (meta.Category == "FileSystem" || meta.Category == "Scripting")
+                    {
+                        if (!_settings.disabledTools.Contains(meta.Name))
+                            _settings.disabledTools.Add(meta.Name);
+                    }
+                }
+            }
+
+            _settings.SaveSettings();
+        }
+
         private void DrawUIPreferencesSection()
         {
             EditorGUILayout.LabelField("UI Preferences", EditorStyles.boldLabel);
+            DrawHelpText("Controls how the chat window presents streaming responses and tool execution details.");
 
             EditorGUI.indentLevel++;
             EditorGUI.BeginChangeCheck();
@@ -925,7 +1103,13 @@ namespace AgentCore.Editor.Config
         /// </summary>
         private void DrawMemoryServiceSection()
         {
-            EditorGUILayout.LabelField("Memory Service - mem0", EditorStyles.boldLabel);
+            _memoryServiceFoldout = EditorGUILayout.Foldout(
+                _memoryServiceFoldout,
+                $"Memory Service - mem0 ({(_settings.mem0Enabled ? "Enabled" : "Disabled")})",
+                true);
+            if (!_memoryServiceFoldout) return;
+
+            DrawHelpText("Stores cross-session user and project memory in a mem0-compatible service. Optional.");
 
             EditorGUI.indentLevel++;
 
@@ -954,30 +1138,28 @@ namespace AgentCore.Editor.Config
                 _mem0TestStatus = StatusLevel.None;
             }
 
-            // mem0 API Key — 密码模式
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel(new GUIContent("API Key", "mem0 服务的 API Key"));
-            EditorGUILayout.LabelField(_mem0ApiKeyDisplay, GUILayout.Width(120));
-
-            if (GUILayout.Button("Set", GUILayout.Width(40)))
-            {
-                var newKey = EditorInputDialog.Show("Set mem0 API Key", "Enter your mem0 API Key:", "");
-                if (newKey != null)
+            DrawApiKeyRow(
+                "API Key",
+                "mem0 服务的 API Key",
+                _mem0ApiKeyDisplay,
+                "Set mem0 API Key",
+                "Enter your mem0 API Key:",
+                newKey =>
                 {
                     SecureKeyStorage.SetMem0ApiKey(newKey);
                     _mem0ApiKeyDisplay = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
-                    InvalidateConnectionCache(); // API Key 变化也清除缓存
-                }
-            }
-
-            if (GUILayout.Button("Clear", GUILayout.Width(50)))
-            {
-                SecureKeyStorage.SetMem0ApiKey("");
-                _mem0ApiKeyDisplay = "(not set)";
-                InvalidateConnectionCache();
-            }
-
-            EditorGUILayout.EndHorizontal();
+                    InvalidateConnectionCache();
+                    _mem0TestResult = "";
+                    _mem0TestStatus = StatusLevel.None;
+                },
+                () =>
+                {
+                    SecureKeyStorage.SetMem0ApiKey("");
+                    _mem0ApiKeyDisplay = "(not set)";
+                    InvalidateConnectionCache();
+                    _mem0TestResult = "";
+                    _mem0TestStatus = StatusLevel.None;
+                });
 
             // 测试连接按钮（紧跟在 Endpoint + API Key 之后）
             EditorGUILayout.BeginHorizontal();
@@ -1058,7 +1240,13 @@ namespace AgentCore.Editor.Config
 
         private void DrawKnowledgeBaseSection()
         {
-            EditorGUILayout.LabelField("Knowledge Base - LightRAG", EditorStyles.boldLabel);
+            _knowledgeBaseFoldout = EditorGUILayout.Foldout(
+                _knowledgeBaseFoldout,
+                $"Knowledge Base - LightRAG ({(_settings.lightragEnabled ? "Enabled" : "Disabled")})",
+                true);
+            if (!_knowledgeBaseFoldout) return;
+
+            DrawHelpText("Queries and indexes external project knowledge through a LightRAG-compatible service. Optional.");
 
             EditorGUI.indentLevel++;
             EditorGUI.BeginChangeCheck();
@@ -1071,28 +1259,26 @@ namespace AgentCore.Editor.Config
                 new GUIContent("Endpoint URL", "LightRAG 服务端点地址"),
                 _settings.lightragEndpoint);
 
-            // LightRAG API Key — 密码模式
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel(new GUIContent("API Key", "LightRAG 服务的 API Key"));
-            EditorGUILayout.LabelField(_lightragApiKeyDisplay, GUILayout.Width(120));
-
-            if (GUILayout.Button("Set", GUILayout.Width(40)))
-            {
-                var newKey = EditorInputDialog.Show("Set LightRAG API Key", "Enter your LightRAG API Key:", "");
-                if (newKey != null)
+            DrawApiKeyRow(
+                "API Key",
+                "LightRAG 服务的 API Key",
+                _lightragApiKeyDisplay,
+                "Set LightRAG API Key",
+                "Enter your LightRAG API Key:",
+                newKey =>
                 {
                     SecureKeyStorage.SetLightRAGApiKey(newKey);
                     _lightragApiKeyDisplay = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
-                }
-            }
-
-            if (GUILayout.Button("Clear", GUILayout.Width(50)))
-            {
-                SecureKeyStorage.SetLightRAGApiKey("");
-                _lightragApiKeyDisplay = "(not set)";
-            }
-
-            EditorGUILayout.EndHorizontal();
+                    _lightragTestResult = "";
+                    _lightragTestStatus = StatusLevel.None;
+                },
+                () =>
+                {
+                    SecureKeyStorage.SetLightRAGApiKey("");
+                    _lightragApiKeyDisplay = "(not set)";
+                    _lightragTestResult = "";
+                    _lightragTestStatus = StatusLevel.None;
+                });
 
             if (EditorGUI.EndChangeCheck())
             {
@@ -1113,11 +1299,7 @@ namespace AgentCore.Editor.Config
 
             if (!string.IsNullOrEmpty(_lightragTestResult))
             {
-                var style = new GUIStyle(EditorStyles.label);
-                style.normal.textColor = _lightragTestResult.StartsWith("连接成功")
-                    ? new Color(0.2f, 0.8f, 0.2f)
-                    : Color.red;
-                EditorGUILayout.LabelField(_lightragTestResult, style);
+                DrawStatusLabel(_lightragTestResult, _lightragTestStatus);
             }
 
             EditorGUILayout.EndHorizontal();
@@ -1130,9 +1312,99 @@ namespace AgentCore.Editor.Config
             EditorGUILayout.LabelField("About", EditorStyles.boldLabel);
 
             EditorGUI.indentLevel++;
-            EditorGUILayout.LabelField("Version", $"{GetPackageVersion()} (Phase 3)");
+            EditorGUILayout.LabelField("Package", "com.agentcore.unity");
+            EditorGUILayout.LabelField("Version", GetPackageVersion());
             EditorGUILayout.LabelField("Unity Agent Plugin", "通过自然语言对话驱动 Unity 开发工作流");
             EditorGUI.indentLevel--;
+        }
+
+        /// <summary>
+        /// Draws quick diagnostic actions that help verify the current configuration.
+        /// </summary>
+        private void DrawDiagnosticsSection()
+        {
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("Diagnostics", EditorStyles.boldLabel);
+            DrawHelpText("Quick access to user context files and common connection checks.");
+
+            EditorGUI.indentLevel++;
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(EditorGUI.indentLevel * 15);
+
+            if (GUILayout.Button("Test LLM", GUILayout.Width(90)))
+            {
+                TestLLMConnection();
+            }
+
+            GUI.enabled = _settings.mem0Enabled;
+            if (GUILayout.Button("Test mem0", GUILayout.Width(90)))
+            {
+                TestMem0Connection();
+            }
+
+            GUI.enabled = _settings.lightragEnabled;
+            if (GUILayout.Button("Test LightRAG", GUILayout.Width(110)))
+            {
+                TestLightRAGConnection();
+            }
+
+            GUI.enabled = true;
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            DrawDiagnosticsStatusRow("LLM", _connectionTestResult, _connectionTestStatus);
+            DrawDiagnosticsStatusRow("mem0", _mem0TestResult, _mem0TestStatus);
+            DrawDiagnosticsStatusRow("LightRAG", _lightragTestResult, _lightragTestStatus);
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(EditorGUI.indentLevel * 15);
+
+            if (GUILayout.Button("Open MEMORY.md", GUILayout.Width(130)))
+            {
+                OpenOrCreateUserFile("MEMORY.md");
+            }
+
+            if (GUILayout.Button("Open USER.md", GUILayout.Width(110)))
+            {
+                OpenOrCreateUserFile("USER.md");
+            }
+
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUI.indentLevel--;
+        }
+
+        /// <summary>
+        /// Draws a single diagnostics status line when a test has produced feedback.
+        /// </summary>
+        private static void DrawDiagnosticsStatusRow(string serviceName, string statusText, StatusLevel statusLevel)
+        {
+            if (string.IsNullOrEmpty(statusText)) return;
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(EditorGUI.indentLevel * 15 + EditorGUIUtility.labelWidth * 0.25f);
+            DrawStatusLabel($"{serviceName}: {statusText}", statusLevel, miniLabel: true);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>
+        /// Opens an existing user file or creates it from the built-in template first.
+        /// </summary>
+        private static void OpenOrCreateUserFile(string fileName)
+        {
+            var filePath = BootstrapLoader.FindUserFilePath(fileName);
+            if (filePath == null)
+            {
+                CreateUserFile(fileName);
+                filePath = BootstrapLoader.FindUserFilePath(fileName);
+            }
+
+            if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+            {
+                System.Diagnostics.Process.Start(filePath);
+            }
         }
 
         /// <summary>
@@ -1268,7 +1540,8 @@ namespace AgentCore.Editor.Config
         private void TestLLMConnection()
         {
             _isTesting = true;
-            _connectionTestResult = "";
+            _connectionTestResult = "Testing...";
+            _connectionTestStatus = StatusLevel.Loading;
 
             AsyncHelper.RunAsync(async () =>
             {
@@ -1286,10 +1559,12 @@ namespace AgentCore.Editor.Config
                         if (response.IsSuccessStatusCode)
                         {
                             _connectionTestResult = "[OK] Connected";
+                            _connectionTestStatus = StatusLevel.Success;
                         }
                         else
                         {
                             _connectionTestResult = $"[FAIL] HTTP {(int)response.StatusCode}: {response.ReasonPhrase}";
+                            _connectionTestStatus = StatusLevel.Error;
                         }
                         _isTesting = false;
                     });
@@ -1299,6 +1574,7 @@ namespace AgentCore.Editor.Config
                     AsyncHelper.RunOnMainThread(() =>
                     {
                         _connectionTestResult = $"[FAIL] {ex.Message}";
+                        _connectionTestStatus = StatusLevel.Error;
                         _isTesting = false;
                     });
                 }
@@ -1495,7 +1771,8 @@ namespace AgentCore.Editor.Config
         private void TestLightRAGConnection()
         {
             _isLightRAGTesting = true;
-            _lightragTestResult = "";
+            _lightragTestResult = "测试中...";
+            _lightragTestStatus = StatusLevel.Loading;
 
             AsyncHelper.RunAsync(async () =>
             {
@@ -1511,6 +1788,7 @@ namespace AgentCore.Editor.Config
                     AsyncHelper.RunOnMainThread(() =>
                     {
                         _lightragTestResult = success ? "连接成功" : "连接失败: 服务未响应或不健康";
+                        _lightragTestStatus = success ? StatusLevel.Success : StatusLevel.Error;
                         _isLightRAGTesting = false;
                     });
                 }
@@ -1519,6 +1797,7 @@ namespace AgentCore.Editor.Config
                     AsyncHelper.RunOnMainThread(() =>
                     {
                         _lightragTestResult = $"连接失败: {ex.Message}";
+                        _lightragTestStatus = StatusLevel.Error;
                         _isLightRAGTesting = false;
                     });
                 }

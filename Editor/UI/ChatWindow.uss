@@ -1,6 +1,7 @@
 /* ============================================================
- * ChatWindow.uss — AgentCore 主聊天窗口样式
+ * ChatWindow.uss — AgentCore 主窗口样式
  * 深色主题，与 Unity Editor 风格一致
+ * 三列布局：Hub Rail + Context Sidebar + Main Content
  * ============================================================ */
 
 /* --- 根容器 --- */
@@ -26,36 +27,6 @@
     min-height: 30px;
 }
 
-#sidebar-toggle-button {
-    width: 28px;
-    height: 24px;
-    font-size: 14px;
-    -unity-font-style: bold;
-    padding: 0;
-    margin: 0 6px 0 0;
-    border-radius: 4px;
-    background-color: #505050;
-    border-width: 1px;
-    border-color: #3a3a3a;
-    color: #cccccc;
-    -unity-text-align: middle-center;
-}
-
-#sidebar-toggle-button:hover {
-    background-color: #606060;
-    border-color: #4a86c8;
-}
-
-#sidebar-toggle-button:active {
-    background-color: #3a3a3a;
-}
-
-#sidebar-toggle-button.sidebar-active {
-    background-color: #4a86c8;
-    border-color: #5a96d8;
-    color: #ffffff;
-}
-
 #title-label {
     font-size: 13px;
     -unity-font-style: bold;
@@ -73,7 +44,10 @@
     margin-right: 8px;
 }
 
-/* --- 主体区域（侧边栏 + 聊天区域） --- */
+/* ============================================================
+ * 三列主体布局：Hub Rail + Context Sidebar + Main Content
+ * ============================================================ */
+
 #main-body {
     flex-grow: 1;
     flex-shrink: 1;
@@ -81,8 +55,75 @@
     overflow: hidden;
 }
 
-/* --- 会话侧边栏 --- */
-#session-sidebar {
+/* --- Hub Rail（左一列，固定宽度） --- */
+.hub-rail {
+    width: 52px;
+    min-width: 52px;
+    max-width: 52px;
+    flex-shrink: 0;
+    flex-direction: column;
+    background-color: #1e1e1e;
+    border-right-width: 1px;
+    border-right-color: #151515;
+}
+
+.hub-rail__nav {
+    flex-direction: column;
+    padding: 4px 0;
+    flex-shrink: 0;
+}
+
+.hub-rail__spacer {
+    flex-grow: 1;
+}
+
+.hub-rail__button {
+    width: 44px;
+    height: 36px;
+    margin: 2px 4px;
+    padding: 0;
+    font-size: 11px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    border-radius: 6px;
+    border-width: 0;
+    background-color: transparent;
+    color: #888888;
+}
+
+.hub-rail__button:hover {
+    background-color: #333333;
+    color: #cccccc;
+}
+
+.hub-rail__button:active {
+    background-color: #2a2a2a;
+}
+
+.hub-rail__button--active {
+    background-color: #3a4a5a;
+    color: #e0e0e0;
+    border-left-width: 2px;
+    border-left-color: #4a86c8;
+}
+
+.hub-rail__button--active:hover {
+    background-color: #3f5060;
+    color: #ffffff;
+}
+
+.hub-rail__settings-button {
+    margin-bottom: 6px;
+    color: #777777;
+}
+
+.hub-rail__settings-button:hover {
+    background-color: #333333;
+    color: #aaaaaa;
+}
+
+/* --- Context Sidebar（左二列，可折叠） --- */
+#context-sidebar {
     width: 200px;
     min-width: 200px;
     max-width: 200px;
@@ -94,8 +135,14 @@
     display: none;
 }
 
-#session-sidebar.sidebar-visible {
+#context-sidebar.sidebar-visible {
     display: flex;
+}
+
+/* 会话侧边栏内容（Chat 模块的 Context Sidebar 内容） */
+#session-sidebar-content {
+    flex-grow: 1;
+    flex-direction: column;
 }
 
 /* 侧边栏头部 */
@@ -210,6 +257,22 @@
     padding: 1px 4px;
     color: #d4d4d4;
     font-size: 13px;
+}
+
+/* --- 主内容区域（右列，flex-grow） --- */
+#main-content {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* --- Chat 面板 --- */
+#chat-panel {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* --- 聊天内容区域 --- */
@@ -342,6 +405,64 @@
 
 #cancel-button:active {
     background-color: #b83a3a;
+}
+
+/* ============================================================
+ * Knowledge 面板占位样式
+ * ============================================================ */
+
+#knowledge-panel {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: column;
+    display: none;
+}
+
+#knowledge-placeholder {
+    flex-grow: 1;
+    align-items: center;
+    justify-content: center;
+}
+
+#knowledge-placeholder-title {
+    font-size: 18px;
+    -unity-font-style: bold;
+    color: #888888;
+    margin-bottom: 8px;
+}
+
+#knowledge-placeholder-desc {
+    font-size: 13px;
+    color: #666666;
+}
+
+/* ============================================================
+ * Memory 面板占位样式
+ * ============================================================ */
+
+#memory-panel {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-direction: column;
+    display: none;
+}
+
+#memory-placeholder {
+    flex-grow: 1;
+    align-items: center;
+    justify-content: center;
+}
+
+#memory-placeholder-title {
+    font-size: 18px;
+    -unity-font-style: bold;
+    color: #888888;
+    margin-bottom: 8px;
+}
+
+#memory-placeholder-desc {
+    font-size: 13px;
+    color: #666666;
 }
 
 /* ============================================================

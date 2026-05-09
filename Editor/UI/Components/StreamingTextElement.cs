@@ -86,10 +86,9 @@ namespace AgentCore.Editor.UI.Components
 
             // 压缩过滤后产生的连续空行（3个以上换行 → 2个换行）
             filtered = ExcessiveNewlinesRegex.Replace(filtered, "\n\n");
-            // 替换 SDF 字体不支持的 emoji 字符
-            filtered = SanitizeUnsupportedEmoji(filtered);
-            // 轻量级 Markdown 格式化（流式输出中也需要，否则带 tool_calls 的消息不会被格式化）
-            filtered = FormatMarkdown(filtered);
+            // 流式阶段跳过 emoji 替换和 Markdown 格式化，以减少 CPU 开销
+            // filtered = SanitizeUnsupportedEmoji(filtered);
+            // filtered = FormatMarkdown(filtered);
             // 去除开头的空行，保留末尾的自然截断
             filtered = filtered.TrimStart('\n', '\r');
 
@@ -514,6 +513,9 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>当前累积的文本内容</summary>
         private string _currentText = "";
 
+        /// <summary>用于累积文本的 StringBuilder</summary>
+        private StringBuilder _currentTextBuilder;
+
         /// <summary>光标闪烁动画调度器</summary>
         private IVisualElementScheduledItem _cursorBlink;
 
@@ -570,9 +572,12 @@ namespace AgentCore.Editor.UI.Components
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            _currentText += text;
+            // 使用 StringBuilder 避免 string += 的性能问题
+            if (_currentTextBuilder == null)
+                _currentTextBuilder = new StringBuilder();
+            _currentTextBuilder.Append(text);
             // 流式过滤：移除已完成的标签对，截断不完整标签
-            _textLabel.text = ContentFilter.FilterStreaming(_currentText);
+            _textLabel.text = ContentFilter.FilterStreaming(_currentTextBuilder.ToString());
             ShowCursor();
         }
 

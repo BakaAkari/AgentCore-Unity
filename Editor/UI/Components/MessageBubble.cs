@@ -25,6 +25,19 @@ namespace AgentCore.Editor.UI.Components
 
         #endregion
 
+        #region 静态缓存
+
+        /// <summary>缓存的 UXML 模板</summary>
+        private static VisualTreeAsset _cachedUxml;
+
+        /// <summary>缓存的 USS 样式</summary>
+        private static StyleSheet _cachedUss;
+
+        /// <summary>是否已加载静态资源</summary>
+        private static bool _assetsLoaded;
+
+        #endregion
+
         #region 公开属性
 
         /// <summary>
@@ -78,11 +91,17 @@ namespace AgentCore.Editor.UI.Components
             Role = role;
             _isStreaming = isStreaming;
 
-            // 加载 UXML 模板
-            var visualTree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(UxmlPath);
-            if (visualTree != null)
+            // 加载 UXML 模板（静态缓存）
+            if (!_assetsLoaded)
             {
-                visualTree.CloneTree(this);
+                _cachedUxml = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(UxmlPath);
+                _cachedUss = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
+                _assetsLoaded = true;
+            }
+            
+            if (_cachedUxml != null)
+            {
+                _cachedUxml.CloneTree(this);
             }
             else
             {
@@ -90,11 +109,10 @@ namespace AgentCore.Editor.UI.Components
                 CreateFallbackLayout();
             }
 
-            // 加载 USS 样式
-            var styleSheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
-            if (styleSheet != null)
+            // 加载 USS 样式（静态缓存）
+            if (_cachedUss != null)
             {
-                this.styleSheets.Add(styleSheet);
+                this.styleSheets.Add(_cachedUss);
             }
 
             // 查询 UI 元素引用

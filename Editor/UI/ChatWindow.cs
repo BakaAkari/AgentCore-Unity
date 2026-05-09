@@ -13,13 +13,13 @@ using UnityEngine.UIElements;
 namespace AgentCore.Editor.UI
 {
     /// <summary>
-    /// AgentCore 主聊天窗口。
+    /// AgentCore 主窗口（Hub 架构）。
     /// <para>
-    /// 提供与 AI 助手对话的 Editor 窗口界面，基于 UI Toolkit 实现。
-    /// 支持流式文本显示、消息历史、取消操作和多会话管理。
+    /// 提供 Chat / Knowledge / Memory 三大模块的统一 Editor 窗口界面，基于 UI Toolkit 实现。
+    /// 左侧 Hub Rail 导航栏切换模块，中间 Context Sidebar 显示模块上下文，右侧 Main Content 显示模块内容。
     /// </para>
     /// <para>
-    /// 通过菜单 Window -> AgentCore -> Chat（快捷键 Ctrl+Shift+A）打开。
+    /// 通过菜单 Window -> AgentCore（快捷键 Ctrl+Shift+A）打开。
     /// </para>
     /// </summary>
     public class ChatWindow : EditorWindow
@@ -70,6 +70,9 @@ namespace AgentCore.Editor.UI
         /// <summary>消息滚动视图</summary>
         private ScrollView _messageScrollView;
 
+        /// <summary>消息列表管理器（负责 DOM 池化，解决长上下文卡顿）</summary>
+        private MessageListManager _messageListManager;
+
         /// <summary>消息容器（ScrollView 内部）</summary>
         private VisualElement _messageContainer;
 
@@ -90,13 +93,22 @@ namespace AgentCore.Editor.UI
 
         #endregion
 
-        #region 侧边栏 UI 元素引用
+        #region Hub 导航与面板引用
 
-        /// <summary>侧边栏切换按钮</summary>
-        private Button _sidebarToggleButton;
+        /// <summary>Hub Rail 导航组件</summary>
+        private HubRail _hubRail;
 
-        /// <summary>会话侧边栏面板</summary>
-        private VisualElement _sessionSidebar;
+        /// <summary>Context Sidebar 容器</summary>
+        private VisualElement _contextSidebar;
+
+        /// <summary>Chat 面板</summary>
+        private VisualElement _chatPanel;
+
+        /// <summary>Knowledge 面板</summary>
+        private VisualElement _knowledgePanel;
+
+        /// <summary>Memory 面板</summary>
+        private VisualElement _memoryPanel;
 
         /// <summary>新建会话按钮</summary>
         private Button _newSessionButton;
@@ -118,14 +130,14 @@ namespace AgentCore.Editor.UI
         #region 菜单入口
 
         /// <summary>
-        /// 通过 Unity 菜单打开聊天窗口。
+        /// 通过 Unity 菜单打开 AgentCore 主窗口。
         /// 快捷键：Ctrl+Shift+A (Windows) / Cmd+Shift+A (macOS)。
         /// </summary>
-        [MenuItem("Window/AgentCore/Chat %#a")]
+        [MenuItem("Window/AgentCore %#a")]
         public static void ShowWindow()
         {
             var window = GetWindow<ChatWindow>();
-            window.titleContent = new GUIContent("AgentCore Chat", EditorGUIUtility.IconContent("d_console.infoicon.sml").image);
+            window.titleContent = new GUIContent("AgentCore", EditorGUIUtility.IconContent("d_console.infoicon.sml").image);
             window.minSize = MinWindowSize;
             window.Show();
         }
@@ -163,6 +175,24 @@ namespace AgentCore.Editor.UI
             // 2.5 设置系统字体（跨平台回退链）
             // P2-1 fix: 使用平台感知的字体回退链，避免硬编码 "Microsoft YaHei"
             string[] fontCandidates;
+            
+            // P0: 缓存动态字体，避免每次 CreateGUI 都创建新实例
+            static Font cachedFont = null;
+            static bool fontInitialized = false;
+            if (!fontInitialized)
+            {
+                fontInitialized = true;
+                foreach (var fontName in fontCandidates)
+                {
+                    cachedFont = Font.CreateDynamicFontFromOSFont(fontName, 14);
+                    if (cachedFont != null) break;
+                }
+            }
+            if (cachedFont != null)
+            {
+                rootVisualElement.style.unityFont = cachedFont;
+                rootVisualElement.style.unityFontStyleAndWeight = FontStyle.Bold;
+            }
 #if UNITY_EDITOR_WIN
             fontCandidates = new[] { "Microsoft YaHei", "SimHei", "Arial" };
 #elif UNITY_EDITOR_OSX
@@ -185,24 +215,40 @@ namespace AgentCore.Editor.UI
             // 3. 查询 UI 元素引用
             _messageScrollView = rootVisualElement.Q<ScrollView>("message-scroll-view");
             _messageContainer = rootVisualElement.Q<VisualElement>("message-container");
+
+            // 3.1 初始化消息列表管理器（DOM 池化，解决长上下文卡顿）
+            if (_messageContainer != null)
+            {
+                _messageListManager = new MessageListManager(_messageContainer);
+            }
+
             _inputField = rootVisualElement.Q<TextField>("input-field");
             _sendButton = rootVisualElement.Q<Button>("send-button");
             _cancelButton = rootVisualElement.Q<Button>("cancel-button");
             _statusLabel = rootVisualElement.Q<Label>("status-label");
 
-            // 3.5 查询侧边栏 UI 元素引用
-            _sidebarToggleButton = rootVisualElement.Q<Button>("sidebar-toggle-button");
-            _sessionSidebar = rootVisualElement.Q<VisualElement>("session-sidebar");
+            // 3.5 查询 Hub 导航与面板 UI 元素引用
+            _contextSidebar = rootVisualElement.Q<VisualElement>("context-sidebar");
+            _chatPanel = rootVisualElement.Q<VisualElement>("chat-panel");
+            _knowledgePanel = rootVisualElement.Q<VisualElement>("knowledge-panel");
+            _memoryPanel = rootVisualElement.Q<VisualElement>("memory-panel");
             _newSessionButton = rootVisualElement.Q<Button>("new-session-button");
             _sessionListScrollView = rootVisualElement.Q<ScrollView>("session-list-scroll");
             _sessionListContainer = rootVisualElement.Q<VisualElement>("session-list-container");
+
+            // 3.7 创建 Hub Rail 并插入到 main-body 首位
+            _hubRail = new HubRail();
+            var mainBody = rootVisualElement.Q<VisualElement>("main-body");
+            mainBody?.Insert(0, _hubRail);
+
+            // 3.8 订阅 Hub 模块切换事件
+            _hubRail.OnModuleChanged += OnHubModuleChanged;
 
             // 4. 绑定按钮事件
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());
             _cancelButton?.RegisterCallback<ClickEvent>(_ => OnCancelClicked());
 
-            // 4.5 绑定侧边栏按钮事件
-            _sidebarToggleButton?.RegisterCallback<ClickEvent>(_ => ToggleSidebar());
+            // 4.5 绑定会话侧边栏按钮事件
             _newSessionButton?.RegisterCallback<ClickEvent>(_ => OnNewSessionClicked());
 
             // 5. 绑定输入框键盘事件（Enter 发送，Shift+Enter 换行，Escape 取消）
@@ -217,9 +263,9 @@ namespace AgentCore.Editor.UI
                 _cancelButton.style.display = DisplayStyle.None;
             }
 
-            // 6.5 恢复侧边栏展开状态
-            _sidebarExpanded = EditorPrefs.GetBool(SidebarExpandedKey, false);
-            UpdateSidebarVisibility();
+            // 6.5 初始化 Hub 模块面板可见性
+            _sidebarExpanded = EditorPrefs.GetBool(SidebarExpandedKey, true);
+            SwitchToModule(_hubRail.ActiveModule);
 
             // 6.7 Phase 4.5: 创建文件变更汇总面板并插入到 input-area 之前
             _fileChangeSummaryPanel = new FileChangeSummaryPanel();
@@ -271,6 +317,13 @@ namespace AgentCore.Editor.UI
                 _agentLoop.OnAgentEvent -= HandleAgentEvent;
                 _agentLoop.Dispose(); // P1-1 fix: 调用 Dispose() 释放 ConsoleErrorCapture、CompilationWatcher 等资源
                 _agentLoop = null;
+            }
+
+            // 取消订阅 Hub Rail 事件
+            if (_hubRail != null)
+            {
+                _hubRail.OnModuleChanged -= OnHubModuleChanged;
+                _hubRail = null;
             }
 
             _messageBubbles.Clear();
@@ -586,7 +639,7 @@ namespace AgentCore.Editor.UI
             var messageId = Guid.NewGuid().ToString();
             var bubble = new MessageBubble(messageId, "user", content);
             _messageBubbles[messageId] = bubble;
-            _messageContainer?.Add(bubble);
+            _messageListManager?.AddItem(bubble);
             ScrollToBottom();
         }
 
@@ -622,7 +675,7 @@ namespace AgentCore.Editor.UI
         {
             var bubble = new MessageBubble(messageId, "assistant", "", isStreaming: true);
             _messageBubbles[messageId] = bubble;
-            _messageContainer?.Add(bubble);
+            _messageListManager?.AddItem(bubble);
             ScrollToBottom();
         }
 
@@ -644,7 +697,7 @@ namespace AgentCore.Editor.UI
             }
 
             bubble.AppendStreamToken(token);
-            ScrollToBottom();
+            ScrollToBottom(); // 节流后，单次调用即可
         }
 
         /// <summary>
@@ -681,7 +734,7 @@ namespace AgentCore.Editor.UI
 
             var bubble = new MessageBubble(messageId, "error", displayMessage);
             _messageBubbles[messageId] = bubble;
-            _messageContainer?.Add(bubble);
+            _messageListManager?.AddItem(bubble);
 
             // 如果有堆栈信息，添加可展开的详情区域
             if (detail != null)
@@ -746,7 +799,7 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private void ClearMessages()
         {
-            _messageContainer?.Clear();
+            _messageListManager?.Clear();
             _messageBubbles.Clear();
             _activeToolCards.Clear();
             _currentToolCallGroup = null;
@@ -849,7 +902,7 @@ namespace AgentCore.Editor.UI
 
             card.Add(statusRow);
 
-            _messageContainer.Add(card);
+            _messageListManager?.AddItem(card);
             ScrollToBottom();
 
             Debug.Log($"[AgentCore] Domain Reload notification added: phase={phase}, tool={toolName}, " +
@@ -1047,7 +1100,7 @@ namespace AgentCore.Editor.UI
             }
 
             // 清空现有 UI
-            _messageContainer.Clear();
+            _messageListManager?.Clear();
             _messageBubbles.Clear();
             _activeToolCards.Clear();
 
@@ -1067,14 +1120,14 @@ namespace AgentCore.Editor.UI
                     // 用户消息气泡
                     var bubble = new MessageBubble(turn.Id, "user", turn.Content);
                     _messageBubbles[turn.Id] = bubble;
-                    _messageContainer.Add(bubble);
+                    _messageListManager?.AddItem(bubble);
                 }
                 else if (turn.Role == "assistant")
                 {
                     // 助手消息气泡（已完成状态，非流式）
                     var bubble = new MessageBubble(turn.Id, "assistant", turn.Content);
                     _messageBubbles[turn.Id] = bubble;
-                    _messageContainer.Add(bubble);
+                    _messageListManager?.AddItem(bubble);
 
                     // 恢复工具调用卡片（统一放入分组容器）
                     if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
@@ -1104,8 +1157,8 @@ namespace AgentCore.Editor.UI
 
                         // 历史工具调用全部完成，通知分组更新统计并折叠
                         restoreGroup.NotifyToolStatusChanged();
-                        _messageContainer.Add(restoreGroup);
-                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: ToolCallGroup 已添加到 _messageContainer (childCount={_messageContainer.childCount})");
+                        _messageListManager?.AddItem(restoreGroup);
+                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: ToolCallGroup 已通过 MessageListManager 添加");
 
                         // 助手消息后结束分组
                         restoreGroup = null;
@@ -1124,8 +1177,19 @@ namespace AgentCore.Editor.UI
         /// 滚动消息列表到底部。
         /// 延迟一帧执行，确保布局已更新。
         /// </summary>
-        private void ScrollToBottom()
+        // P2: 节流滚动，避免流式输出时频繁调用
+        private double _lastScrollTime = 0;
+        
+        private void ScrollToBottom(bool force = false)
         {
+            if (!force)
+            {
+                var now = EditorApplication.timeSinceStartup;
+                if (now - _lastScrollTime < 0.1) // 100ms 节流
+                    return;
+                _lastScrollTime = now;
+            }
+
             _messageScrollView?.schedule.Execute(() =>
             {
                 if (_messageScrollView != null)
@@ -1137,39 +1201,83 @@ namespace AgentCore.Editor.UI
 
         #endregion
 
-        #region 会话侧边栏
+        #region Hub 模块切换
 
         /// <summary>
-        /// 切换侧边栏的展开/折叠状态。
+        /// Hub 模块切换事件处理。
+        /// 当用户在 Hub Rail 中点击不同模块按钮时调用。
         /// </summary>
-        private void ToggleSidebar()
+        /// <param name="module">新激活的模块</param>
+        private void OnHubModuleChanged(HubModule module)
         {
-            _sidebarExpanded = !_sidebarExpanded;
-            EditorPrefs.SetBool(SidebarExpandedKey, _sidebarExpanded);
-            UpdateSidebarVisibility();
+            SwitchToModule(module);
+        }
 
-            if (_sidebarExpanded)
+        /// <summary>
+        /// 切换到指定的 Hub 模块。
+        /// 控制 Main Content 面板和 Context Sidebar 的显示/隐藏。
+        /// </summary>
+        /// <param name="module">目标模块</param>
+        private void SwitchToModule(HubModule module)
+        {
+            // 1. 切换 Main Content 面板可见性
+            if (_chatPanel != null)
+                _chatPanel.style.display = module == HubModule.Chat ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_knowledgePanel != null)
+                _knowledgePanel.style.display = module == HubModule.Knowledge ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_memoryPanel != null)
+                _memoryPanel.style.display = module == HubModule.Memory ? DisplayStyle.Flex : DisplayStyle.None;
+
+            // 2. 控制 Context Sidebar 可见性
+            // Chat 模块：显示会话列表侧边栏（根据 _sidebarExpanded 状态）
+            // Knowledge / Memory 模块：暂时隐藏侧边栏（后续 Phase 可扩展各模块的上下文面板）
+            UpdateContextSidebarVisibility(module);
+
+            // 3. Chat 模块激活时刷新会话列表
+            if (module == HubModule.Chat && _sidebarExpanded)
             {
                 RefreshSessionList();
             }
         }
 
         /// <summary>
-        /// 根据当前状态更新侧边栏的显示/隐藏。
+        /// 根据当前模块和侧边栏状态更新 Context Sidebar 的显示/隐藏。
         /// </summary>
-        private void UpdateSidebarVisibility()
+        /// <param name="module">当前激活的模块</param>
+        private void UpdateContextSidebarVisibility(HubModule module)
         {
-            if (_sessionSidebar == null) return;
+            if (_contextSidebar == null) return;
 
-            if (_sidebarExpanded)
+            // Chat 模块且侧边栏展开时显示
+            bool shouldShow = module == HubModule.Chat && _sidebarExpanded;
+
+            if (shouldShow)
             {
-                _sessionSidebar.AddToClassList("sidebar-visible");
-                _sidebarToggleButton?.AddToClassList("sidebar-active");
+                _contextSidebar.AddToClassList("sidebar-visible");
             }
             else
             {
-                _sessionSidebar.RemoveFromClassList("sidebar-visible");
-                _sidebarToggleButton?.RemoveFromClassList("sidebar-active");
+                _contextSidebar.RemoveFromClassList("sidebar-visible");
+            }
+        }
+
+        /// <summary>
+        /// 切换 Chat 模块侧边栏的展开/折叠状态。
+        /// </summary>
+        private void ToggleSidebar()
+        {
+            _sidebarExpanded = !_sidebarExpanded;
+            EditorPrefs.SetBool(SidebarExpandedKey, _sidebarExpanded);
+
+            // 仅在 Chat 模块时更新侧边栏可见性
+            if (_hubRail != null)
+            {
+                UpdateContextSidebarVisibility(_hubRail.ActiveModule);
+            }
+
+            if (_sidebarExpanded)
+            {
+                RefreshSessionList();
             }
         }
 
@@ -1643,8 +1751,8 @@ namespace AgentCore.Editor.UI
             if (_currentToolCallGroup == null)
             {
                 _currentToolCallGroup = new ToolCallGroup();
-                _messageContainer?.Add(_currentToolCallGroup);
-                Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 新建 ToolCallGroup, _messageContainer.childCount={_messageContainer?.childCount}");
+                _messageListManager?.AddItem(_currentToolCallGroup);
+                Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 新建 ToolCallGroup, 通过 MessageListManager 添加");
             }
             return _currentToolCallGroup;
         }
