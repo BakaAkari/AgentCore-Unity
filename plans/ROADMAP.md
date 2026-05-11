@@ -100,11 +100,11 @@
 
 | # | 任务 | 说明 | 关联计划 | 状态 |
 |---|------|------|---------|------|
-| 5.2.1 | **LightRAG 文档列表** | `LightRAGClient.GetDocumentsAsync()` + `KnowledgeBasePanel` 文档列表 UI + `manage_knowledge.list_documents` action | RAG-Doc-1 | [ ] |
-| 5.2.2 | **LightRAG 文档删除** | `LightRAGClient.DeleteDocumentAsync()` + UI 删除按钮 + `manage_knowledge.delete_document` action | RAG-Doc-1 | [ ] |
-| 5.2.3 | **track_id 轮询进度** | `LightRAGClient.TrackStatusAsync()` + `IndexFileAsync` 返回 `LightRAGIndexResult` + UI 进度轮询 | RAG-Doc-2 | [ ] |
-| 5.2.4 | **LightRAG 批量索引** | `index_folder` / `index_project_docs` action（扫描 README.md、docs/、plans/、Assets/Docs/） | Phase RAG-3 | [ ] |
-| 5.2.5 | **查询体验强化** | `query` 支持 `top_k` 参数；查询结果展示来源文档名称；更新 SOUL.md 明确知识库使用场景 | Phase RAG-4 | [ ] |
+| 5.2.1 | **LightRAG 文档列表** | `LightRAGClient.GetDocumentsAsync()` + `KnowledgeBasePanel` 文档列表 UI + `manage_knowledge.list_documents` action | RAG-Doc-1 | [x] |
+| 5.2.2 | **LightRAG 文档删除** | `LightRAGClient.DeleteDocumentAsync()` + UI 删除按钮 + `manage_knowledge.delete_document` action | RAG-Doc-1 | [x] |
+| 5.2.3 | **track_id 轮询进度** | `LightRAGClient.TrackStatusAsync()` + `IndexFileAsync` 返回 `LightRAGIndexResult` + UI 进度轮询 | RAG-Doc-2 | [x] |
+| 5.2.4 | **LightRAG 批量索引** | `index_folder` / `index_project_docs` action（扫描 README.md、docs/、plans/、Assets/Docs/） | Phase RAG-3 | [x] |
+| 5.2.5 | **查询体验强化** | `query` 支持 `top_k` 参数；查询结果展示来源文档名称；更新 SOUL.md 明确知识库使用场景 | Phase RAG-4 | [x] |
 
 ### 2.3 P2 — 能力补齐（与 Unity Skills 对齐）
 

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-05-09
+
+### Added
+- **知识库查询增强**
+  - `manage_knowledge` 的 `query` action 新增 `top_k` 参数（默认 5，范围 1~50）
+  - 查询结果中每条 source 新增 `document_name` 字段，显示来源文档名
+- **知识库批量索引**
+  - 新增 `index_folder` action：批量索引指定文件夹中的所有支持类型文件
+  - 新增 `index_project_docs` action：一键自动索引 README.md、docs/、plans/、Assets/Docs/、Assets/Documentation/
+  - KnowledgeBasePanel UI 新增 `[索引项目文档]` 按钮，提供一键索引入口
+- **知识库索引进度查询**
+  - 新增 `check_index_status` action：通过 `track_id` 查询异步索引进度
+- **SOUL.md 知识库引导**
+  - 新增 §12 知识库检索，明确 LLM 何时应查询/索引知识库，以及与记忆系统的区别
+
+### Changed
+- `manage_knowledge` 工具描述和参数 Schema 同步更新，覆盖全部 8 个 action
+- TOOLS.md.template 知识库检索章节重写，包含完整工作流建议
+
 ## [0.3.7] - 2026-05-08
 
 ### Changed

@@ -425,7 +425,8 @@
     flex-shrink: 1;
     flex-direction: column;
     padding: 16px;
-    overflow: scroll;
+    overflow: auto;
+    min-height: 0;
 }
 
 /* 面板标题 */
@@ -442,6 +443,7 @@
 /* 区块容器 */
 .kb-panel__section {
     flex-direction: column;
+    flex-shrink: 0;
     margin-bottom: 16px;
     padding: 12px;
     background-color: #333333;
@@ -885,6 +887,9 @@
     border-color: #3a3a3a;
     margin-top: 4px;
     margin-bottom: 4px;
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-height: 100px;
 }
 
 /* 文档列表条目 */

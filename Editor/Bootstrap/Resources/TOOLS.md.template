@@ -278,17 +278,36 @@
     - `local`: 局部搜索，基于实体关系的精确检索
     - `global`: 全局搜索，基于社区摘要的宏观检索
     - `hybrid`: 混合搜索（默认），结合 local 和 global 的优势
-    - 参数：`query`（必填，查询文本），`mode`（可选，默认 hybrid），`top_k`（可选，返回结果数，默认 10）
+    - 参数：`query`（必填，查询文本），`mode`（可选，默认 hybrid），`top_k`（可选，返回结果数，默认 5，范围 1~50）
+    - 返回：每条结果包含 `content`（内容片段）、`score`（相关度分数）、`document_name`（来源文档名）
   - `index_text`: 将文本内容直接索引到知识库中（如项目文档、设计规范、API 说明等）
     - 参数：`content`（必填，要索引的文本内容），`description`（可选，内容描述）
-  - `index_file`: 将项目内的文件索引到知识库中（支持 .md/.txt/.cs/.json/.xml/.yaml/.yml/.html/.htm/.rst/.pdf）
+  - `index_file`: 将项目内的单个文件索引到知识库中
     - 参数：`file_path`（必填，相对于项目根目录的文件路径，如 `Assets/Docs/Architecture.md`）
     - 限制：文件必须在项目根目录内，大小不超过 5MB，不能索引 Library/、Temp/、.git/、obj/、bin/ 目录下的文件
+    - 返回：成功时包含 `track_id`（用于追踪异步处理进度）
     - 示例：`{ "action": "index_file", "file_path": "Assets/Docs/GameDesign.md" }`
+  - `index_folder`: 批量索引文件夹中的所有支持类型文件
+    - 参数：`folder_path`（必填，相对于项目根目录的文件夹路径），`recursive`（可选，是否递归子目录，默认 true）
+    - 限制：同 `index_file`，自动排除 Library/、Temp/、.git/ 等目录
+    - 返回：汇总结果，包含 `succeeded`（成功数）、`failed`（失败数）、`track_ids`（追踪 ID 列表）
+  - `index_project_docs`: 自动索引项目预设路径的文档（README.md、docs/、plans/、Assets/Docs/、Assets/Documentation/）
+    - 无参数，自动扫描并索引
+    - 返回：同 `index_folder` 的汇总格式
+  - `list_documents`: 列出知识库中所有文档（按 processed/pending/failed 分组）
+  - `delete_document`: 删除知识库中的指定文档
+    - 参数：`doc_id`（必填，来自 `list_documents` 的 `id` 字段）
+  - `check_index_status`: 查询文档的异步索引进度
+    - 参数：`track_id`（必填，来自 `index_file`/`index_folder`/`index_project_docs` 返回的 `track_id`）
+    - 返回：`status`（pending/processing/processed/failed）、`document_id`、`error_msg`
   - 使用场景：
     - 查询项目架构设计文档中的约定
     - 检索之前索引过的技术规范
     - 在回答用户问题前先搜索知识库获取上下文
     - 将项目文档批量索引后，通过 `query` 进行语义检索
-  - **工作流建议**：先用 `index_file` 索引关键文档 → 再用 `query` 检索相关内容 → 结合检索结果回答用户问题
-  - 注意：知识库服务需要在 Settings 面板中配置 LightRAG 端点地址；`index_file` 和 `index_text` 为异步操作，索引完成后方可查询
+  - **工作流建议**：
+    1. 用 `index_project_docs` 一键索引项目核心文档，或用 `index_folder` 批量索引特定目录
+    2. 如需查询进度，用 `check_index_status` 轮询 `track_id`
+    3. 用 `query` 检索相关内容（默认 `top_k=5`，如需更广覆盖可提高到 8~10）
+    4. 结合检索结果回答用户问题
+  - 注意：知识库服务需要在 Settings 面板中配置 LightRAG 端点地址；索引操作是异步的，处理完成后方可查询

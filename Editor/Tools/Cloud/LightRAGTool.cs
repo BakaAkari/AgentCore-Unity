@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -18,7 +19,7 @@ namespace AgentCore.Editor.Tools.Cloud
     /// 支持：query、index_text、index_file、list_documents、delete_document。
     /// </summary>
     [AgentTool("manage_knowledge",
-        Description = "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、列出文档(list_documents)、删除文档(delete_document)。知识库基于 LightRAG 提供图谱增强的检索能力。",
+        Description = "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、批量索引文件夹(index_folder)、自动索引项目文档(index_project_docs)、列出文档(list_documents)、删除文档(delete_document)、查询索引进度(check_index_status)。知识库基于 LightRAG 提供图谱增强的检索能力。",
         Category = "Cloud",
         RequiresMainThread = false)]
     public class LightRAGTool : IAgentTool
@@ -38,8 +39,8 @@ namespace AgentCore.Editor.Tools.Cloud
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""query"", ""index_text"", ""index_file"", ""list_documents"", ""delete_document""],
-                    ""description"": ""操作类型：query(查询知识库)、index_text(索引文本)、index_file(索引项目内文件)、list_documents(列出知识库中所有文档)、delete_document(删除指定文档)""
+                    ""enum"": [""query"", ""index_text"", ""index_file"", ""index_folder"", ""index_project_docs"", ""list_documents"", ""delete_document"", ""check_index_status""],
+                    ""description"": ""操作类型：query(查询知识库)、index_text(索引文本)、index_file(索引单个文件)、index_folder(批量索引文件夹)、index_project_docs(自动索引项目文档)、list_documents(列出所有文档)、delete_document(删除指定文档)、check_index_status(查询索引进度)""
                 },
                 ""content"": {
                     ""type"": ""string"",
@@ -49,10 +50,26 @@ namespace AgentCore.Editor.Tools.Cloud
                     ""type"": ""string"",
                     ""description"": ""index_file 时必填，相对于项目根目录的文件路径（如 docs/README.md）""
                 },
+                ""folder_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""index_folder 时必填，相对于项目根目录的文件夹路径（如 docs/）""
+                },
+                ""recursive"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""index_folder 时可选，是否递归子目录，默认 true"",
+                    ""default"": true
+                },
                 ""mode"": {
                     ""type"": ""string"",
                     ""enum"": [""local"", ""global"", ""hybrid"", ""naive""],
                     ""description"": ""query 时可选，检索模式，默认 hybrid""
+                },
+                ""top_k"": {
+                    ""type"": ""integer"",
+                    ""description"": ""query 时可选，返回结果数量上限，默认 5，范围 1~50"",
+                    ""minimum"": 1,
+                    ""maximum"": 50,
+                    ""default"": 5
                 },
                 ""description"": {
                     ""type"": ""string"",
@@ -61,6 +78,10 @@ namespace AgentCore.Editor.Tools.Cloud
                 ""doc_id"": {
                     ""type"": ""string"",
                     ""description"": ""delete_document 时必填，文档 ID（来自 list_documents 返回的 id 字段）""
+                },
+                ""track_id"": {
+                    ""type"": ""string"",
+                    ""description"": ""check_index_status 时必填，上传时返回的追踪 ID""
                 }
             },
             ""required"": [""action""]
@@ -71,7 +92,7 @@ namespace AgentCore.Editor.Tools.Cloud
         /// </summary>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_knowledge",
-            description: "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、列出文档(list_documents)、删除文档(delete_document)。知识库基于 LightRAG 提供图谱增强的检索能力。",
+            description: "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、批量索引文件夹(index_folder)、自动索引项目文档(index_project_docs)、列出文档(list_documents)、删除文档(delete_document)、查询索引进度(check_index_status)。知识库基于 LightRAG 提供图谱增强的检索能力。",
             category: "Cloud",
             parametersSchema: _parametersSchema,
             requiresMainThread: false
@@ -111,15 +132,24 @@ namespace AgentCore.Editor.Tools.Cloud
                     case "index_file":
                         response = await HandleIndexFile(client, parameters, cancellationToken);
                         break;
+                    case "index_folder":
+                        response = await HandleIndexFolder(client, parameters, cancellationToken);
+                        break;
+                    case "index_project_docs":
+                        response = await HandleIndexProjectDocs(client, cancellationToken);
+                        break;
                     case "list_documents":
                         response = await HandleListDocuments(client, cancellationToken);
                         break;
                     case "delete_document":
                         response = await HandleDeleteDocument(client, parameters, cancellationToken);
                         break;
+                    case "check_index_status":
+                        response = await HandleCheckIndexStatus(client, parameters, cancellationToken);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: query, index_text, index_file, list_documents, delete_document");
+                            $"Unknown action: '{action}'. Valid actions: query, index_text, index_file, index_folder, index_project_docs, list_documents, delete_document, check_index_status");
                         break;
                 }
             }
@@ -158,14 +188,19 @@ namespace AgentCore.Editor.Tools.Cloud
                     $"无效的 mode 值: '{mode}'。有效值: local, global, hybrid, naive");
             }
 
-            var result = await client.QueryAsync(content, mode, ct: ct);
+            // 读取 top_k（1~50，默认 5）
+            int topK = ToolHelpers.GetOptionalInt(parameters, "top_k", 5);
+            topK = Mathf.Clamp(topK, 1, 50);
+
+            var result = await client.QueryAsync(content, mode, topK, ct);
 
             if (result.Success)
             {
                 var sources = result.Sources?.Select(s => new
                 {
                     content = s.Content,
-                    score = s.Score
+                    score = s.Score,
+                    document_name = GetDocumentNameFromMetadata(s.Metadata)
                 }).ToArray();
 
                 return ToolResponse.OkWithData(new
@@ -173,6 +208,7 @@ namespace AgentCore.Editor.Tools.Cloud
                     action = "query",
                     query = content,
                     mode,
+                    top_k = topK,
                     response = result.Response,
                     source_count = sources?.Length ?? 0,
                     sources
@@ -180,6 +216,16 @@ namespace AgentCore.Editor.Tools.Cloud
             }
 
             return ToolResponse.Fail($"知识库查询失败: {result.Response}");
+        }
+
+        private static string GetDocumentNameFromMetadata(Dictionary<string, object> metadata)
+        {
+            if (metadata == null) return "(未知来源)";
+            if (metadata.TryGetValue("file_path", out var fp) && fp != null)
+                return Path.GetFileName(fp.ToString()) ?? "(未知来源)";
+            if (metadata.TryGetValue("source", out var src) && src != null)
+                return Path.GetFileName(src.ToString()) ?? "(未知来源)";
+            return "(未知来源)";
         }
 
         private async Task<ToolResponse> HandleIndexText(LightRAGClient client, JObject parameters, CancellationToken ct)
@@ -361,6 +407,214 @@ namespace AgentCore.Editor.Tools.Cloud
             return ToolResponse.Fail(
                 $"删除文档失败（ID：{docId}）。\n" +
                 $"请确认文档 ID 正确（可通过 list_documents 查看），并检查 LightRAG 服务状态。");
+        }
+
+        private async Task<ToolResponse> HandleCheckIndexStatus(LightRAGClient client, JObject parameters, CancellationToken ct)
+        {
+            var trackId = ToolHelpers.GetRequiredString(parameters, "track_id");
+            var status = await client.TrackStatusAsync(trackId, ct);
+
+            return ToolResponse.OkWithData(new
+            {
+                action = "check_index_status",
+                track_id = trackId,
+                status = status?.Status ?? "unknown",
+                document_id = status?.DocumentId,
+                error_msg = status?.ErrorMsg
+            }, $"索引状态：{status?.Status ?? "unknown"}");
+        }
+
+        private async Task<ToolResponse> HandleIndexFolder(LightRAGClient client, JObject parameters, CancellationToken ct)
+        {
+            var relativePath = ToolHelpers.GetRequiredString(parameters, "folder_path");
+            bool recursive = ToolHelpers.GetOptionalBool(parameters, "recursive", true);
+
+            // 解析绝对路径
+            string projectRoot = Path.GetFullPath(
+                Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
+            string absolutePath = Path.GetFullPath(
+                Path.Combine(projectRoot, relativePath)).Replace('\\', '/');
+
+            // 安全校验
+            if (!absolutePath.StartsWith(projectRoot + "/", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(absolutePath, projectRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return ToolResponse.Fail(
+                    $"安全限制：只允许索引项目根目录内的文件夹。\n" +
+                    $"项目根目录：{projectRoot}\n" +
+                    $"请求路径：{absolutePath}");
+            }
+
+            if (!Directory.Exists(absolutePath))
+            {
+                return ToolResponse.Fail(
+                    $"文件夹不存在：{relativePath}\n" +
+                    $"(解析路径：{absolutePath})");
+            }
+
+            // 收集文件
+            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            var files = new List<string>();
+            foreach (var ext in AllowedExtensions)
+            {
+                try
+                {
+                    var found = Directory.GetFiles(absolutePath, $"*{ext}", searchOption);
+                    files.AddRange(found);
+                }
+                catch { /* 忽略无权限目录 */ }
+            }
+
+            // 去重并排序
+            files = files.Distinct().OrderBy(f => f).ToList();
+
+            // 排除目录检查
+            var excludedDirs = new[] { "/Library/", "/Temp/", "/.git/", "/obj/", "/bin/" };
+            files = files.Where(f =>
+            {
+                foreach (var excluded in excludedDirs)
+                {
+                    if (f.IndexOf(excluded, StringComparison.OrdinalIgnoreCase) >= 0)
+                        return false;
+                }
+                return true;
+            }).ToList();
+
+            if (files.Count == 0)
+            {
+                return ToolResponse.Ok(
+                    $"文件夹中没有可索引的文件。\n" +
+                    $"路径：{relativePath}\n" +
+                    $"支持的类型：{string.Join(", ", AllowedExtensions)}");
+            }
+
+            // 批量索引
+            int successCount = 0;
+            int failCount = 0;
+            var failedFiles = new List<string>();
+            var trackIds = new List<string>();
+
+            foreach (var filePath in files)
+            {
+                try
+                {
+                    var result = await client.IndexFileAsync(filePath, ct);
+                    if (result.Accepted)
+                    {
+                        successCount++;
+                        if (!string.IsNullOrEmpty(result.TrackId))
+                            trackIds.Add(result.TrackId);
+                    }
+                    else
+                    {
+                        failCount++;
+                        failedFiles.Add(Path.GetFileName(filePath));
+                    }
+                }
+                catch
+                {
+                    failCount++;
+                    failedFiles.Add(Path.GetFileName(filePath));
+                }
+            }
+
+            return ToolResponse.OkWithData(new
+            {
+                action = "index_folder",
+                folder_path = relativePath,
+                recursive,
+                total_files = files.Count,
+                succeeded = successCount,
+                failed = failCount,
+                failed_files = failedFiles,
+                track_ids = trackIds
+            }, $"已索引 {successCount}/{files.Count} 个文件" +
+               (failCount > 0 ? $"（{failCount} 个失败）" : "") +
+               (trackIds.Count > 0 ? $"。可通过 check_index_status 追踪进度。" : ""));
+        }
+
+        private async Task<ToolResponse> HandleIndexProjectDocs(LightRAGClient client, CancellationToken ct)
+        {
+            string projectRoot = Path.GetFullPath(
+                Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
+
+            var targets = new List<(string path, string desc)>();
+
+            // README 文件
+            foreach (var readme in new[] { "README.md", "README_CN.md", "readme.md", "Readme.md" })
+            {
+                var path = Path.Combine(projectRoot, readme);
+                if (File.Exists(path)) targets.Add((path, readme));
+            }
+
+            // 文档目录
+            var docDirs = new[]
+            {
+                Path.Combine(projectRoot, "docs"),
+                Path.Combine(projectRoot, "plans"),
+                Path.Combine(projectRoot, "Assets", "Docs"),
+                Path.Combine(projectRoot, "Assets", "Documentation")
+            };
+
+            foreach (var dir in docDirs)
+            {
+                if (!Directory.Exists(dir)) continue;
+                try
+                {
+                    var mdFiles = Directory.GetFiles(dir, "*.md", SearchOption.AllDirectories);
+                    foreach (var f in mdFiles)
+                    {
+                        targets.Add((f, Path.GetFileName(f)));
+                    }
+                }
+                catch { /* 忽略 */ }
+            }
+
+            // 去重
+            targets = targets.GroupBy(t => t.path).Select(g => g.First()).ToList();
+
+            int successCount = 0;
+            int failCount = 0;
+            var failedFiles = new List<string>();
+            var trackIds = new List<string>();
+
+            foreach (var (filePath, _) in targets)
+            {
+                if (!File.Exists(filePath)) continue;
+
+                try
+                {
+                    var result = await client.IndexFileAsync(filePath, ct);
+                    if (result.Accepted)
+                    {
+                        successCount++;
+                        if (!string.IsNullOrEmpty(result.TrackId))
+                            trackIds.Add(result.TrackId);
+                    }
+                    else
+                    {
+                        failCount++;
+                        failedFiles.Add(Path.GetFileName(filePath));
+                    }
+                }
+                catch
+                {
+                    failCount++;
+                    failedFiles.Add(Path.GetFileName(filePath));
+                }
+            }
+
+            return ToolResponse.OkWithData(new
+            {
+                action = "index_project_docs",
+                total_files = targets.Count,
+                succeeded = successCount,
+                failed = failCount,
+                failed_files = failedFiles,
+                track_ids = trackIds
+            }, $"已索引 {successCount}/{targets.Count} 个项目文档" +
+               (failCount > 0 ? $"（{failCount} 个失败）" : "") +
+               (trackIds.Count > 0 ? $"。可通过 check_index_status 追踪进度。" : ""));
         }
     }
 }
