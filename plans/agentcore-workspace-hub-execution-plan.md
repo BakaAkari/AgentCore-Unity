@@ -1,6 +1,6 @@
 # AgentCore 单主窗口 Hub 执行方案
 
-> 状态：草案 v2，架构决策已稳定，可进入实施阶段。
+> 状态：部分已落地。单主窗口 Hub、Chat/Knowledge/Memory 模块与 MemoryPanel 已接入；剩余迭代以 `ROADMAP.md` 为准，本文仅作 Hub 架构历史设计参考。
 > 核心决策：AgentCore 只保留一个主工作窗口，Hub 固定 Chat / Knowledge / Memory 三个模块，Diagnostics 和 Tools 保留在 Settings。
 > 相关文件：`Editor/UI/ChatWindow.cs`、`Editor/UI/ChatWindow.uxml`、`Editor/UI/ChatWindow.uss`、`Editor/UI/Components/`、`Editor/Config/AgentCoreSettingsProvider.cs`。
 

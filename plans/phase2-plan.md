@@ -1,5 +1,7 @@
 # Phase 2 实施计划：能做事（Tool Calling）
 
+> **文档状态（2026-05-12 校准）**: 历史归档。Phase 2 Tool Calling 已完成并已在 Phase 2.5 迁移为原生工具；本文涉及 unity-mcp 的旧设计仅作历史参考，当前工具系统以 `Editor/Tools/` 实际源码为准。
+
 > **目标**：让 Agent 能够调用 unity-mcp 工具操作 Unity Editor，实现"对话→思考→执行→反馈"的完整闭环。
 >
 > **前置条件**：Phase 1 已完成（LLM 对话、流式输出、Bootstrap 上下文、基础 UI）。

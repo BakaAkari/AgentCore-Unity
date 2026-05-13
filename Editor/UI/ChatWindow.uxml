@@ -54,12 +54,9 @@
           <!-- KnowledgeBasePanel 由 ChatWindow.cs 动态插入 -->
         </ui:VisualElement>
 
-        <!-- Memory 面板（占位，Phase Hub-5 实现） -->
+        <!-- Memory 面板（由 MemoryPanel C# 组件填充） -->
         <ui:VisualElement name="memory-panel">
-          <ui:VisualElement name="memory-placeholder">
-            <ui:Label name="memory-placeholder-title" text="Memory" />
-            <ui:Label name="memory-placeholder-desc" text="记忆管理功能即将上线" />
-          </ui:VisualElement>
+          <!-- MemoryPanel 由 ChatWindow.cs 动态插入 -->
         </ui:VisualElement>
       </ui:VisualElement>
     </ui:VisualElement>

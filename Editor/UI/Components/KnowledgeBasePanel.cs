@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Cloud;
@@ -53,7 +54,6 @@ namespace AgentCore.Editor.UI.Components
         // ─────────────────────────────────────────────
 
         private Button _indexDocumentButton;
-        private Button _indexProjectDocsButton;
 
         // ─────────────────────────────────────────────
         //  UI 元素引用 — 文档列表区
@@ -173,20 +173,10 @@ namespace AgentCore.Editor.UI.Components
             var addSection = CreateSection("添加知识");
             Add(addSection);
 
-            // 按钮行
-            var addButtonRow = new VisualElement();
-            addButtonRow.AddToClassList("kb-panel__button-row");
-            addSection.Add(addButtonRow);
-
             _indexDocumentButton = new Button(OnIndexDocumentClicked) { text = "+ 索引文档..." };
             _indexDocumentButton.AddToClassList("kb-panel__button");
             _indexDocumentButton.AddToClassList("kb-panel__button--primary");
-            addButtonRow.Add(_indexDocumentButton);
-
-            _indexProjectDocsButton = new Button(OnIndexProjectDocsClicked) { text = "[索引项目文档]" };
-            _indexProjectDocsButton.AddToClassList("kb-panel__button");
-            _indexProjectDocsButton.AddToClassList("kb-panel__button--secondary");
-            addButtonRow.Add(_indexProjectDocsButton);
+            addSection.Add(_indexDocumentButton);
 
             var hintLabel = new Label("支持 .md .txt .cs .json .xml .yaml 等格式，最大 5MB");
             hintLabel.AddToClassList("kb-panel__hint");
@@ -309,8 +299,8 @@ namespace AgentCore.Editor.UI.Components
             // 按钮可用性
             bool canOperate = enabled && !string.IsNullOrEmpty(endpoint);
             _testConnectionButton.SetEnabled(canOperate && _connectionStatus != ConnectionStatus.Testing);
-            _indexDocumentButton.SetEnabled(canOperate && _indexStatus == IndexStatus.Idle);
-            _indexProjectDocsButton?.SetEnabled(canOperate && _indexStatus == IndexStatus.Idle);
+            // 让索引按钮在上传过程中保持启用，允许用户继续操作
+            _indexDocumentButton.SetEnabled(canOperate);
             _refreshDocumentsButton?.SetEnabled(canOperate);
 
             if (!enabled)
@@ -476,6 +466,7 @@ namespace AgentCore.Editor.UI.Components
             }
 
             // 开始索引
+            // 不显示进度遮罩，让上传在后台执行
             await UploadAndTrackFileAsync(filePath);
         }
 
@@ -488,9 +479,9 @@ namespace AgentCore.Editor.UI.Components
 
             // ── 阶段一：上传 ──
             _indexStatus = IndexStatus.Uploading;
-            _indexDocumentButton.SetEnabled(false);
+            // 不禁用按钮，不显示进度遮罩，让上传在后台执行
             _progressLabel.text = $"正在上传：{fileName}...";
-            _progressOverlay.style.display = DisplayStyle.Flex;
+            // 不显示进度遮罩，不阻塞用户交互
             _lastResultSection.style.display = DisplayStyle.None;
             _askAgentButton.style.display = DisplayStyle.None;
 
@@ -519,7 +510,6 @@ namespace AgentCore.Editor.UI.Components
             // 上传失败
             if (uploadResult == null || !uploadResult.Accepted)
             {
-                _progressOverlay.style.display = DisplayStyle.None;
                 _indexDocumentButton.SetEnabled(true);
                 _indexStatus = IndexStatus.Failed;
 
@@ -539,7 +529,6 @@ namespace AgentCore.Editor.UI.Components
             if (string.IsNullOrEmpty(uploadResult.TrackId))
             {
                 // 无 track_id，降级为旧行为（直接显示成功）
-                _progressOverlay.style.display = DisplayStyle.None;
                 _indexDocumentButton.SetEnabled(true);
                 _indexStatus = IndexStatus.Success;
 
@@ -561,7 +550,7 @@ namespace AgentCore.Editor.UI.Components
 
             // 显示"处理中"的上次结果（让用户知道进度）
             _lastResultSection.style.display = DisplayStyle.Flex;
-            _lastIndexSummary = $"⏳ 处理中：{fileName}";
+            _lastIndexSummary = $"处理中：{fileName}";
             _lastResultLabel.text = _lastIndexSummary;
             _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
             _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
@@ -601,7 +590,6 @@ namespace AgentCore.Editor.UI.Components
                         // 索引完成
                         finished = true;
                         _indexStatus = IndexStatus.Success;
-                        _progressOverlay.style.display = DisplayStyle.None;
                         _indexDocumentButton.SetEnabled(true);
 
                         _lastIndexSummary = $"✓ 索引完成：{fileName}";
@@ -619,7 +607,6 @@ namespace AgentCore.Editor.UI.Components
                         // 索引失败
                         finished = true;
                         _indexStatus = IndexStatus.Failed;
-                        _progressOverlay.style.display = DisplayStyle.None;
                         _indexDocumentButton.SetEnabled(true);
 
                         string errMsg = status.ErrorMsg ?? "LightRAG 处理失败";
@@ -634,7 +621,7 @@ namespace AgentCore.Editor.UI.Components
                     {
                         // 仍在处理中（pending / processing）
                         _progressLabel.text = $"LightRAG 处理中：{fileName}（{status.Status}）...";
-                        _lastIndexSummary = $"⏳ 处理中：{fileName}（{status.Status}）";
+                        _lastIndexSummary = $"处理中：{fileName}（{status.Status}）";
                         _lastResultLabel.text = _lastIndexSummary;
                     }
                 }
@@ -652,7 +639,6 @@ namespace AgentCore.Editor.UI.Components
             if (!finished)
             {
                 _indexStatus = IndexStatus.Idle;
-                _progressOverlay.style.display = DisplayStyle.None;
                 _indexDocumentButton.SetEnabled(true);
 
                 _lastIndexSummary = $"⚠ 处理超时：{fileName}\n请稍后点击「↻ 刷新」查看文档列表确认结果。";
@@ -937,137 +923,6 @@ namespace AgentCore.Editor.UI.Components
             string fileName = Path.GetFileName(_lastIndexedFile);
             string prompt = $"请基于刚刚索引的文档「{fileName}」，总结关键内容和可执行建议。";
             OnAskAgentRequested?.Invoke(prompt);
-        }
-
-        // ─────────────────────────────────────────────
-        //  按钮事件 — 索引项目文档
-        // ─────────────────────────────────────────────
-
-        private async void OnIndexProjectDocsClicked()
-        {
-            var settings = AgentCoreSettings.instance;
-            if (!settings.lightragEnabled || string.IsNullOrEmpty(settings.lightragEndpoint))
-            {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中启用 LightRAG 并配置 Endpoint。", "确定");
-                return;
-            }
-
-            bool confirm = EditorUtility.DisplayDialog(
-                "索引项目文档",
-                "将自动索引以下路径的文档：\n" +
-                "- README.md / README_CN.md\n" +
-                "- docs/\n" +
-                "- plans/\n" +
-                "- Assets/Docs/\n" +
-                "- Assets/Documentation/\n\n" +
-                "是否继续？",
-                "开始索引", "取消");
-
-            if (!confirm) return;
-
-            _indexStatus = IndexStatus.Uploading;
-            _indexDocumentButton.SetEnabled(false);
-            _indexProjectDocsButton.SetEnabled(false);
-            _progressLabel.text = "正在索引项目文档...";
-            _progressOverlay.style.display = DisplayStyle.Flex;
-            _lastResultSection.style.display = DisplayStyle.None;
-            _askAgentButton.style.display = DisplayStyle.None;
-
-            try
-            {
-                var client = LightRAGClient.FromSettings();
-                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-
-                string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
-                var targets = new List<string>();
-
-                // README 文件
-                foreach (var readme in new[] { "README.md", "README_CN.md", "readme.md", "Readme.md" })
-                {
-                    var path = Path.Combine(projectRoot, readme);
-                    if (File.Exists(path)) targets.Add(path);
-                }
-
-                // 文档目录
-                var docDirs = new[] { "docs", "plans", "Assets/Docs", "Assets/Documentation" };
-                foreach (var dir in docDirs)
-                {
-                    var fullDir = Path.Combine(projectRoot, dir);
-                    if (!Directory.Exists(fullDir)) continue;
-                    try
-                    {
-                        var mdFiles = Directory.GetFiles(fullDir, "*.md", SearchOption.AllDirectories);
-                        targets.AddRange(mdFiles);
-                    }
-                    catch { }
-                }
-
-                targets = targets.Distinct().ToList();
-
-                if (targets.Count == 0)
-                {
-                    _progressOverlay.style.display = DisplayStyle.None;
-                    _indexDocumentButton.SetEnabled(true);
-                    _indexProjectDocsButton.SetEnabled(true);
-                    _indexStatus = IndexStatus.Idle;
-                    EditorUtility.DisplayDialog("提示", "未找到项目文档（README.md、docs/、plans/ 等）。", "确定");
-                    return;
-                }
-
-                int success = 0, failed = 0;
-                var trackIds = new List<string>();
-
-                foreach (var filePath in targets)
-                {
-                    try
-                    {
-                        var result = await client.IndexFileAsync(filePath, cts.Token);
-                        if (result.Accepted)
-                        {
-                            success++;
-                            if (!string.IsNullOrEmpty(result.TrackId))
-                                trackIds.Add(result.TrackId);
-                        }
-                        else
-                        {
-                            failed++;
-                        }
-                    }
-                    catch
-                    {
-                        failed++;
-                    }
-                }
-
-                _progressOverlay.style.display = DisplayStyle.None;
-                _indexDocumentButton.SetEnabled(true);
-                _indexProjectDocsButton.SetEnabled(true);
-                _indexStatus = IndexStatus.Success;
-
-                string msg = $"索引完成：{success} 个成功";
-                if (failed > 0) msg += $"，{failed} 个失败";
-                if (trackIds.Count > 0) msg += $"\n\n{trackIds.Count} 个文件正在后台处理中，稍后点击「刷新」查看结果。";
-
-                EditorUtility.DisplayDialog("索引项目文档", msg, "确定");
-
-                // 显示上次结果
-                _lastResultSection.style.display = DisplayStyle.Flex;
-                _lastIndexSummary = $"[项目文档] 已索引 {success}/{targets.Count} 个文件";
-                _lastResultLabel.text = _lastIndexSummary;
-                _lastResultLabel.AddToClassList("kb-panel__result--success");
-                _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
-
-                // 刷新文档列表
-                _ = RefreshDocumentsAsync();
-            }
-            catch (Exception ex)
-            {
-                _progressOverlay.style.display = DisplayStyle.None;
-                _indexDocumentButton.SetEnabled(true);
-                _indexProjectDocsButton.SetEnabled(true);
-                _indexStatus = IndexStatus.Idle;
-                EditorUtility.DisplayDialog("错误", $"索引过程中发生错误：{ex.Message}", "确定");
-            }
         }
 
         // ─────────────────────────────────────────────

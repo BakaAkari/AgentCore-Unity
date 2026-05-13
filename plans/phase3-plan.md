@@ -1,5 +1,7 @@
 # Phase 3 — 能记忆（Memory & Session）详细实施计划
 
+> **文档状态（2026-05-12 校准）**: 历史归档。Memory、Session、Mem0/LightRAG 基础链路已落地；本文仅作设计背景参考，当前状态以 `Editor/Session/`、`Editor/Tools/Cloud/`、`Editor/Bootstrap/` 和 `ROADMAP.md` 为准。
+
 > **版本**: 1.0  
 > **对应架构文档**: [ARCHITECTURE.md](./ARCHITECTURE.md) §4.4, §4.5, §5.4, §8  
 > **前置依赖**: Phase 2.5（原生工具迁移）已完成  

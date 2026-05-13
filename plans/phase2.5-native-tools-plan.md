@@ -1,5 +1,7 @@
 # Phase 2.5 实施计划：原生工具迁移（脱离 unity-mcp 依赖）
 
+> **文档状态（2026-05-12 校准）**: 历史归档。Phase 2.5 原生工具迁移已完成，当前工具清单与 actions 必须以 `Editor/Tools/Native/` 实际源码为准；本文仅作为迁移背景和历史设计参考，不再作为后续工具开发规划依据。
+
 > **目标**：将 AgentCore 的 Unity Editor 工具从依赖 unity-mcp 桥接层迁移为原生 `IAgentTool` 实现，直接调用 Unity Editor C# API，彻底消除对 `com.coplaydev.unity-mcp` 包的依赖。
 >
 > **前置条件**：Phase 2 已完成（工具调用闭环、自我纠错、编译检查、UI 展示均已工作）。

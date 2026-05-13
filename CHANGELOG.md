@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-05-13
+
+### Added
+- **ManageTestTool 增强** (5.3.2)
+  - 新增 `cancel` action — 通过反射调用 TestRunnerApi 取消正在运行的测试
+  - 新增 `create_test_fixture` action — 生成完整测试 Fixture 模板（含 OneTimeSetUp/TearDown、SetUp/TearDown、命名空间、描述注释），支持 EditMode/PlayMode
+- **ManageMaterialTool 增强** (5.3.5)
+  - 新增 `batch_set_properties` action — 批量设置材质属性（best-effort 策略，逐条设置并汇报成功/失败）
+  - 新增 `list_materials` action — 按文件夹和/或 Shader 过滤列出项目中的材质资产
+  - 新增 `get_shader_info` action — 获取 Shader 详细信息（属性列表、关键字、是否 Shader Graph 资产）
+
+## [0.4.7] - 2026-05-13
+
+### Changed
+- **文档状态校准（Documentation Status Alignment）**
+  - 全面审计 44 个 Native 工具（335+ actions）的实际代码功能
+  - 修正 ROADMAP.md Phase 5.3：ManageCinemachineTool (20 actions) 和 ManageUIToolkitTool (20 actions) 标记为已完成
+  - ManageXRTool 标记为 `[!]` 冻结（项目不涉及 VR/AR/MR）
+  - 16 份 plans/ 文档全部添加状态标注（历史归档 / 已完成 / 部分落地）
+  - 新增 ADR-3：「文档状态必须以代码事实校准」
+  - ROADMAP §7.4 新增「文档状态索引」，列出所有计划文档的当前状态
+  - ROADMAP §8「下一步行动建议」更新为 v0.4.6 后的实际优先级
+
+### Fixed
+- 修正 ROADMAP 中多处"未开始"标记与实际代码已完成的不一致
+- ADR 编号修正为连续序列（ADR-1, ADR-2, ADR-3）
+
+## [0.4.6] - 2026-05-12
+
+### Changed
+- **ChatWindow partial class 拆分**
+  - 将 2135 行的单体 `ChatWindow.cs` 拆分为 9 个 partial 文件（1 主文件 + 8 分区文件）
+  - `ChatWindow.cs` — 主文件：常量、字段、静态缓存、菜单入口、CreateGUI、OnDestroy、InitializeAgentLoop
+  - `ChatWindow.Input.cs` — 用户输入：发送、取消、输入框快捷键、窗口快捷键
+  - `ChatWindow.Events.cs` — 事件处理：HandleAgentEvent、UpdateUIState
+  - `ChatWindow.Messages.cs` — 消息 UI：气泡创建、流式追加、错误显示、重试、重建、滚动
+  - `ChatWindow.DomainReload.cs` — Domain Reload 通知卡片：创建、详情行、状态更新
+  - `ChatWindow.Restore.cs` — 会话恢复：TryRestoreSession、EnsureSessionExists
+  - `ChatWindow.Hub.cs` — Hub 模块切换：模块面板可见性、Knowledge ask-agent、侧边栏
+  - `ChatWindow.Sessions.cs` — 会话管理：列表刷新、切换、新建、重命名、删除、导出、相对时间
+  - `ChatWindow.Tools.cs` — 工具调用 UI：分组管理、卡片状态、轮次分隔线
+  - `ChatWindow.UIHelpers.cs` — UI 辅助：状态标签、发送按钮、取消按钮
+  - 纯机械移动，零行为变更，所有字段保留在主文件中供 partial 共享
+
+## [0.4.5] - 2026-05-12
+
+### Changed
+- **AgentLoop partial class 拆分**
+  - 将 2086 行的单体 `AgentLoop.cs` 拆分为 9 个 partial 文件（1 主文件 + 8 分区文件）
+  - `AgentLoop.cs` — 主文件：事件、属性、字段、构造函数、Initialize、SendMessage、Cancel、Reset、LoadSession、Dispose
+  - `AgentLoop.FileChanges.cs` — 文件变更追踪恢复与事件发射
+  - `AgentLoop.Events.cs` — SetState、EmitEvent
+  - `AgentLoop.Memory.cs` — 记忆召回：搜索、格式化、注入
+  - `AgentLoop.LLM.cs` — LLM 流式调用与 chunk 回调
+  - `AgentLoop.Tools.cs` — 工具定义构建、工具执行、结果消息构建
+  - `AgentLoop.Runner.cs` — RunToolCallLoop 主循环、最终响应处理、失败计数
+  - `AgentLoop.DomainReload.cs` — Domain Reload 保存与恢复全流程
+  - `AgentLoop.Sanitization.cs` — 消息历史清理（tool_use/tool_result 配对修复）
+  - 纯机械移动，零行为变更，所有字段保留在主文件中供 partial 共享
+
+## [0.4.4] - 2026-05-12
+
+### Added
+- **JSON Schema 参数预校验**
+  - 新增 `ToolParameterValidator` (`Editor/Tools/Infrastructure/ToolParameterValidator.cs`)
+  - 支持 JSON Schema 子集：`required`、`properties`、`type` (string/integer/number/boolean/array/object)、`enum`
+  - 在 `ToolCallDispatcher.DispatchAsync` 中于工具执行前自动校验参数
+  - 校验失败时直接返回 `ToolResult.Fail`，不调用具体工具
+  - 空 schema 或无 properties 时保持宽松，允许执行
+  - 未声明的额外字段默认允许
+- **Schema 校验测试**
+  - 新增 `ToolCallDispatcherSchemaValidationTests` (18 cases)
+  - 覆盖 required 缺失、类型错误、enum 不匹配、合法参数、空 schema 等场景
+
+### Changed
+- `ToolCallDispatcher.DispatchAsync` 新增第 3 步 schema 校验（原第 3 步"执行工具"变为第 4 步）
+
+## [0.4.3] - 2026-05-12
+
+### Added
+- **测试基础设施**
+  - 新增 `AgentCore.Tests.Editor` 测试程序集 (`Editor/Tests/AgentCore.Tests.Editor.asmdef`)
+  - 基于 Unity Test Framework (NUnit)，Editor-only，与主程序集隔离
+- **核心单元测试**
+  - `ToolResponseTests` — 覆盖 `ToolResponse.Ok/OkWithData/Fail/ToJson/ToToolResult` 及 `ToolResult` 全路径 (20 cases)
+  - `JsonHelperTests` — 覆盖 `Serialize/Deserialize/ParseObject/ParseArray/GetString/GetInt/GetBool` 含异常与边界 (16 cases)
+  - `TokenCounterTests` — 覆盖 `EstimateTokens/EstimateMessageTokens/EstimateConversationTokens` 含 CJK 与混合文本 (14 cases)
+  - `ToolHelpersTests` — 覆盖参数解析、枚举解析、Vector3/Color/Quaternion 解析与序列化 (22 cases)
+
+### Changed
+- 无运行时行为变更，本版本仅新增测试代码
+
+## [0.4.2] - 2026-05-11
+
+### Added
+- **MemoryPanel UI**
+  - Hub 的 Memory 模块新增可视化管理面板，支持 mem0 状态查看、连接测试和用户创建
+  - 支持手动添加长期记忆、搜索记忆、刷新记忆列表和删除记忆
+  - 新增记忆列表条目展示内容、创建时间、更新时间、状态和搜索相关度
+
+### Changed
+- Memory 模块从占位页面升级为可操作面板，并接入 `ChatWindow` 生命周期以在模块切换和窗口关闭时取消非必要请求
+
 ## [0.3.8] - 2026-05-09
 
 ### Added

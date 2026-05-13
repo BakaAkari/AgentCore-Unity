@@ -16,7 +16,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Directly calls Unity Material API as part of the native tool system.
     /// </summary>
     [AgentTool("manage_material",
-        Description = "Create, modify, and inspect materials",
+        Description = "Create, modify, inspect, and batch-manage materials. Supports shader info retrieval including Shader Graph identification.",
         Category = "Material",
         RequiresMainThread = true)]
     public class ManageMaterialTool : IAgentTool
@@ -26,7 +26,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""create"", ""get_info"", ""set_property"", ""set_shader"", ""list_properties"", ""assign"", ""copy_properties"", ""set_texture"", ""set_keyword"", ""get_keywords"", ""find_by_shader""],
+                    ""enum"": [""create"", ""get_info"", ""set_property"", ""set_shader"", ""list_properties"", ""assign"", ""copy_properties"", ""set_texture"", ""set_keyword"", ""get_keywords"", ""find_by_shader"", ""batch_set_properties"", ""list_materials"", ""get_shader_info""],
                     ""description"": ""Action to perform on materials""
                 },
                 ""material_path"": {
@@ -35,7 +35,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 },
                 ""shader_name"": {
                     ""type"": ""string"",
-                    ""description"": ""Shader name (e.g., 'Standard', 'Universal Render Pipeline/Lit')""
+                    ""description"": ""Shader name (e.g., 'Standard', 'Universal Render Pipeline/Lit'). Used by find_by_shader and get_shader_info.""
                 },
                 ""property_name"": {
                     ""type"": ""string"",
@@ -80,6 +80,35 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 ""asset_path"": {
                     ""type"": ""string"",
                     ""description"": ""Alias for material_path""
+                },
+                ""properties"": {
+                    ""type"": ""array"",
+                    ""description"": ""Array of property objects for batch_set_properties. Each object: {name, type, value}"",
+                    ""items"": {
+                        ""type"": ""object"",
+                        ""properties"": {
+                            ""name"": { ""type"": ""string"" },
+                            ""type"": { ""type"": ""string"", ""enum"": [""color"", ""float"", ""int"", ""vector"", ""texture"", ""keyword""] },
+                            ""value"": {}
+                        },
+                        ""required"": [""name"", ""type"", ""value""]
+                    }
+                },
+                ""folder"": {
+                    ""type"": ""string"",
+                    ""description"": ""Folder path filter for list_materials (e.g., 'Assets/Materials'). Default: entire project.""
+                },
+                ""shader_filter"": {
+                    ""type"": ""string"",
+                    ""description"": ""Shader name filter for list_materials (partial match supported)""
+                },
+                ""max_results"": {
+                    ""type"": ""integer"",
+                    ""description"": ""Maximum number of results to return for list_materials (default: 100)""
+                },
+                ""shader_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Shader asset path for get_shader_info (e.g., 'Assets/Shaders/MyShader.shadergraph')""
                 }
             },
             ""required"": [""action""]
@@ -87,7 +116,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_material",
-            description: "Create, modify, and inspect materials",
+            description: "Create, modify, inspect, and batch-manage materials. Supports shader info retrieval including Shader Graph identification.",
             category: "Material",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -137,9 +166,18 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     case "find_by_shader":
                         response = HandleFindByShader(parameters);
                         break;
+                    case "batch_set_properties":
+                        response = HandleBatchSetProperties(parameters);
+                        break;
+                    case "list_materials":
+                        response = HandleListMaterials(parameters);
+                        break;
+                    case "get_shader_info":
+                        response = HandleGetShaderInfo(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: create, get_info, set_property, set_shader, list_properties, assign, copy_properties, set_texture, set_keyword, get_keywords, find_by_shader");
+                            $"Unknown action: '{action}'. Valid actions: create, get_info, set_property, set_shader, list_properties, assign, copy_properties, set_texture, set_keyword, get_keywords, find_by_shader, batch_set_properties, list_materials, get_shader_info");
                         break;
                 }
             }
@@ -793,6 +831,326 @@ namespace AgentCore.Editor.Tools.Native.Utility
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"Find by shader failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Batch set multiple properties on a material in a single operation.
+        /// Uses a "best effort" strategy: sets as many properties as possible and reports failures.
+        /// </summary>
+        private ToolResponse HandleBatchSetProperties(JObject parameters)
+        {
+            try
+            {
+                var materialPath = GetMaterialPath(parameters);
+                materialPath = ToolHelpers.NormalizeAssetPath(materialPath);
+
+                var material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+                if (material == null)
+                    return ToolResponse.Fail($"Material not found at path: {materialPath}");
+
+                var propertiesToken = parameters["properties"] as JArray;
+                if (propertiesToken == null || propertiesToken.Count == 0)
+                    return ToolResponse.Fail("Parameter 'properties' is required and must be a non-empty array. Each item: {name, type, value}");
+
+                ToolHelpers.RecordUndo(material, "Batch Set Material Properties");
+
+                var successes = new List<string>();
+                var failures = new List<object>();
+
+                foreach (var propToken in propertiesToken)
+                {
+                    var propObj = propToken as JObject;
+                    if (propObj == null)
+                    {
+                        failures.Add(new { name = "(invalid)", error = "Property entry is not a valid object" });
+                        continue;
+                    }
+
+                    var propName = propObj["name"]?.ToString();
+                    var propType = propObj["type"]?.ToString()?.ToLowerInvariant();
+                    var valueToken = propObj["value"];
+
+                    if (string.IsNullOrEmpty(propName) || string.IsNullOrEmpty(propType))
+                    {
+                        failures.Add(new { name = propName ?? "(null)", error = "Missing 'name' or 'type'" });
+                        continue;
+                    }
+
+                    try
+                    {
+                        switch (propType)
+                        {
+                            case "color":
+                                var color = ToolHelpers.ParseColor(valueToken, Color.white);
+                                material.SetColor(propName, color);
+                                break;
+                            case "float":
+                                material.SetFloat(propName, valueToken.Value<float>());
+                                break;
+                            case "int":
+                                material.SetInt(propName, valueToken.Value<int>());
+                                break;
+                            case "vector":
+                                var vec = new Vector4(
+                                    valueToken["x"]?.Value<float>() ?? 0f,
+                                    valueToken["y"]?.Value<float>() ?? 0f,
+                                    valueToken["z"]?.Value<float>() ?? 0f,
+                                    valueToken["w"]?.Value<float>() ?? 0f
+                                );
+                                material.SetVector(propName, vec);
+                                break;
+                            case "texture":
+                                var texPath = ToolHelpers.NormalizeAssetPath(valueToken.ToString());
+                                var texture = AssetDatabase.LoadAssetAtPath<Texture>(texPath);
+                                if (texture == null)
+                                {
+                                    failures.Add(new { name = propName, error = $"Texture not found: {texPath}" });
+                                    continue;
+                                }
+                                material.SetTexture(propName, texture);
+                                break;
+                            case "keyword":
+                                var keywordEnabled = valueToken.Value<bool>();
+                                if (keywordEnabled)
+                                    material.EnableKeyword(propName);
+                                else
+                                    material.DisableKeyword(propName);
+                                break;
+                            default:
+                                failures.Add(new { name = propName, error = $"Unknown type: {propType}" });
+                                continue;
+                        }
+                        successes.Add(propName);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add(new { name = propName, error = ex.Message });
+                    }
+                }
+
+                EditorUtility.SetDirty(material);
+                AssetDatabase.SaveAssets();
+
+                var resultData = new JObject
+                {
+                    ["materialPath"] = materialPath,
+                    ["totalRequested"] = propertiesToken.Count,
+                    ["succeeded"] = successes.Count,
+                    ["failed"] = failures.Count,
+                    ["successProperties"] = new JArray(successes.ToArray()),
+                };
+
+                if (failures.Count > 0)
+                {
+                    var failArray = new JArray();
+                    foreach (var f in failures)
+                        failArray.Add(JObject.FromObject(f));
+                    resultData["failures"] = failArray;
+                }
+
+                string message = failures.Count == 0
+                    ? $"Successfully set {successes.Count} properties on '{materialPath}'."
+                    : $"Set {successes.Count}/{propertiesToken.Count} properties on '{materialPath}'. {failures.Count} failed.";
+
+                return ToolResponse.OkWithData(resultData, message);
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Batch set properties failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Lists all materials in the project with optional folder and shader filters.
+        /// </summary>
+        private ToolResponse HandleListMaterials(JObject parameters)
+        {
+            try
+            {
+                var folder = ToolHelpers.GetOptionalString(parameters, "folder");
+                var shaderFilter = ToolHelpers.GetOptionalString(parameters, "shader_filter");
+                var maxResults = ToolHelpers.GetOptionalInt(parameters, "max_results", 100);
+
+                // Find all material assets
+                var materialGuids = AssetDatabase.FindAssets("t:Material",
+                    string.IsNullOrEmpty(folder) ? null : new[] { folder });
+
+                var results = new JArray();
+                int totalFound = 0;
+
+                foreach (var guid in materialGuids)
+                {
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+
+                    // Apply folder filter (more precise than FindAssets search folder)
+                    if (!string.IsNullOrEmpty(folder) &&
+                        !path.StartsWith(folder, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+                    if (material == null) continue;
+
+                    // Apply shader filter
+                    if (!string.IsNullOrEmpty(shaderFilter))
+                    {
+                        if (material.shader == null) continue;
+                        if (material.shader.name.IndexOf(shaderFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                            continue;
+                    }
+
+                    totalFound++;
+
+                    if (results.Count < maxResults)
+                    {
+                        results.Add(new JObject
+                        {
+                            ["path"] = path,
+                            ["name"] = material.name,
+                            ["shader"] = material.shader != null ? material.shader.name : "None",
+                            ["renderQueue"] = material.renderQueue
+                        });
+                    }
+                }
+
+                return ToolResponse.OkWithData(new JObject
+                {
+                    ["folder"] = folder ?? "(all)",
+                    ["shaderFilter"] = shaderFilter ?? "(none)",
+                    ["totalFound"] = totalFound,
+                    ["returned"] = results.Count,
+                    ["truncated"] = totalFound > maxResults,
+                    ["materials"] = results
+                }, $"Found {totalFound} material(s)" +
+                   (!string.IsNullOrEmpty(folder) ? $" in '{folder}'" : "") +
+                   (!string.IsNullOrEmpty(shaderFilter) ? $" with shader matching '{shaderFilter}'" : "") +
+                   (totalFound > maxResults ? $" (showing first {maxResults})" : "") + ".");
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"List materials failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets detailed information about a shader, including whether it's a Shader Graph asset,
+        /// its properties, keywords, and variant count.
+        /// </summary>
+        private ToolResponse HandleGetShaderInfo(JObject parameters)
+        {
+            try
+            {
+                // Support both shader_name (by name lookup) and shader_path (by asset path)
+                var shaderPath = ToolHelpers.GetOptionalString(parameters, "shader_path");
+                var shaderName = GetStringWithFallback(parameters, "shader_name", "shaderName");
+
+                Shader shader = null;
+                string resolvedPath = null;
+                bool isShaderGraph = false;
+
+                if (!string.IsNullOrEmpty(shaderPath))
+                {
+                    // Load by asset path
+                    shaderPath = ToolHelpers.NormalizeAssetPath(shaderPath);
+                    shader = AssetDatabase.LoadAssetAtPath<Shader>(shaderPath);
+                    resolvedPath = shaderPath;
+
+                    // Check if it's a Shader Graph by extension
+                    isShaderGraph = shaderPath.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase)
+                        || shaderPath.EndsWith(".shadersubgraph", StringComparison.OrdinalIgnoreCase);
+                }
+                else if (!string.IsNullOrEmpty(shaderName))
+                {
+                    // Find by name
+                    shader = Shader.Find(shaderName);
+                    if (shader != null)
+                    {
+                        resolvedPath = AssetDatabase.GetAssetPath(shader);
+                        // Check if it's a Shader Graph by path or name prefix
+                        isShaderGraph = (!string.IsNullOrEmpty(resolvedPath) &&
+                            (resolvedPath.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase)
+                             || resolvedPath.EndsWith(".shadersubgraph", StringComparison.OrdinalIgnoreCase)))
+                            || shaderName.StartsWith("Shader Graphs/", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                else
+                {
+                    return ToolResponse.Fail("Either 'shader_name' or 'shader_path' is required for get_shader_info.");
+                }
+
+                if (shader == null)
+                    return ToolResponse.Fail($"Shader not found. Name: '{shaderName ?? "(none)"}', Path: '{shaderPath ?? "(none)"}'");
+
+                // Gather shader properties
+                var properties = new JArray();
+                int propCount = ShaderUtil.GetPropertyCount(shader);
+                for (int i = 0; i < propCount; i++)
+                {
+                    var prop = new JObject
+                    {
+                        ["name"] = ShaderUtil.GetPropertyName(shader, i),
+                        ["type"] = ShaderUtil.GetPropertyType(shader, i).ToString(),
+                        ["description"] = ShaderUtil.GetPropertyDescription(shader, i)
+                    };
+
+                    var propType = ShaderUtil.GetPropertyType(shader, i);
+                    if (propType == ShaderUtil.ShaderPropertyType.Range)
+                    {
+                        prop["rangeMin"] = ShaderUtil.GetRangeLimits(shader, i, 1);
+                        prop["rangeMax"] = ShaderUtil.GetRangeLimits(shader, i, 2);
+                    }
+
+                    properties.Add(prop);
+                }
+
+                // Determine shader type/category
+                string shaderType = "Standard";
+                if (isShaderGraph)
+                    shaderType = "Shader Graph";
+                else if (shader.name.StartsWith("Universal Render Pipeline/", StringComparison.OrdinalIgnoreCase)
+                    || shader.name.StartsWith("URP/", StringComparison.OrdinalIgnoreCase))
+                    shaderType = "URP Built-in";
+                else if (shader.name.StartsWith("HDRP/", StringComparison.OrdinalIgnoreCase)
+                    || shader.name.StartsWith("High Definition/", StringComparison.OrdinalIgnoreCase))
+                    shaderType = "HDRP Built-in";
+                else if (shader.name.StartsWith("Hidden/", StringComparison.OrdinalIgnoreCase))
+                    shaderType = "Hidden";
+                else if (string.IsNullOrEmpty(resolvedPath) || resolvedPath.StartsWith("Packages/"))
+                    shaderType = "Built-in/Package";
+
+                var info = new JObject
+                {
+                    ["name"] = shader.name,
+                    ["path"] = resolvedPath ?? "(built-in)",
+                    ["shaderType"] = shaderType,
+                    ["isShaderGraph"] = isShaderGraph,
+                    ["propertyCount"] = propCount,
+                    ["properties"] = properties,
+                    ["passCount"] = shader.passCount,
+                    ["isSupported"] = shader.isSupported,
+                    ["renderQueue"] = shader.renderQueue
+                };
+
+                // Try to get keyword info from a temporary material
+                try
+                {
+                    var tempMat = new Material(shader);
+                    var globalKeywords = tempMat.shaderKeywords;
+                    info["defaultKeywords"] = new JArray(globalKeywords);
+                    UnityEngine.Object.DestroyImmediate(tempMat);
+                }
+                catch
+                {
+                    info["defaultKeywords"] = new JArray();
+                }
+
+                return ToolResponse.OkWithData(info,
+                    $"Shader '{shader.name}' ({shaderType}): {propCount} properties, {shader.passCount} passes" +
+                    (isShaderGraph ? " [Shader Graph]" : ""));
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Get shader info failed: {ex.Message}");
             }
         }
 

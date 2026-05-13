@@ -1,11 +1,12 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.3.7+ | **制定日期**: 2026-05-09 | **状态**: 规范制定完成，待执行
+> **版本**: v0.4.8 | **制定日期**: 2026-05-09 | **状态**: 工具增强已完成 (v0.4.8)
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 >
 > **与现有计划的关系**:
 > - `rag-feature-completion-plan.md` → 纳入本路线图的 **Phase 5.2 (RAG 补齐)**
 > - `agentcore-workspace-hub-execution-plan.md` → Hub 骨架部分已实施，剩余 MemoryPanel 等内容纳入 **Phase 6.2**
+> - **代码事实优先**: 当本文件与实际源码不一致时，以 `Editor/` 下当前代码为准，并立即修正文档状态。
 
 ---
 
@@ -36,16 +37,16 @@
 | `[x]` | 已完成 |
 | `[!]` | 阻塞/暂停（依赖外部条件或用户决策） |
 
-### 0.3 当前项目快照 (v0.3.7)
+### 0.3 当前项目快照 (v0.4.8)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.3.7 (2026-05-08) |
-| **工具数量** | 44 个工具，335+ actions |
-| **核心架构** | AgentLoop + ToolAutoDiscovery + DomainReload 恢复 — 稳定 |
-| **UI 框架** | UI Toolkit Hub 架构 (Chat/Knowledge/Memory) — 骨架完成 |
+| **版本** | 0.4.8 (2026-05-13) |
+| **工具数量** | 44 个工具，340+ actions；Native 工具以 `Editor/Tools/Native/` 实际源码为准 |
+| **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery + DomainReload 恢复 + Schema 预校验 — 稳定 |
+| **UI 框架** | UI Toolkit Hub 架构 (Chat/Knowledge/Memory) — MemoryPanel UI 已接入 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
-| **测试覆盖** | 无单元测试 |
+| **测试覆盖** | 5 个测试文件，90+ test cases (ToolResponse, JsonHelper, TokenCounter, ToolHelpers, SchemaValidation) |
 | **归档参考** | `_archive/Unity-Skills/` 含 554 个 skills 可供迁移 |
 
 ### 0.4 已完成的 Phase 体系（历史归档）
@@ -68,7 +69,7 @@
 
 | 阶段 | 版本 | 核心目标 | 关键成果 |
 |------|------|---------|---------|
-| **Phase 5** | 0.4.x | 夯实基础、补齐 RAG、补齐 XR | 有测试 + RAG 完整 + 代码质量提升 |
+| **Phase 5** | 0.4.x | 夯实基础、补齐 RAG、清理文档债 | 有测试 + RAG 完整 + 代码质量提升 + 文档与代码一致 |
 | **Phase 6** | 0.5.x | 智能化增强、场景深化 | 工具推荐 + MemoryPanel + 代码审查 |
 | **Phase 7** | 0.6.x+ | 生态与分发 | 文档站 + 示例项目 + 插件市场就绪 |
 
@@ -84,14 +85,14 @@
 
 | # | 任务 | 说明 | 预估工作量 | 状态 |
 |---|------|------|-----------|------|
-| 5.1.1 | **创建 `AgentCore.Tests.Editor`** | 新增测试 asmdef，引入 Unity Test Framework | 中 | [ ] |
-| 5.1.2 | **测试 `ToolHelpers`** | 覆盖参数解析、Vector/Color 解析、GameObject 查找 | 低 | [ ] |
-| 5.1.3 | **测试 `ToolResponse` / `ToolResult`** | 覆盖 Ok/OkWithData/Fail/ToToolResult | 低 | [ ] |
-| 5.1.4 | **测试 `JsonHelper`** | 覆盖序列化/反序列化/安全解析/安全取值 | 低 | [ ] |
-| 5.1.5 | **测试 `TokenCounter`** | 验证中英文 token 估算准确性 | 低 | [ ] |
-| 5.1.6 | **拆分 `AgentLoop.cs`** | 将 `RunToolCallLoopAsync` 提取到 `AgentLoop.Runner.cs`，将记忆召回提取到 `AgentLoop.MemoryRecall.cs` | 中 | [ ] |
-| 5.1.7 | **拆分 `ChatWindow.cs`** | 将会话管理、Domain Reload 恢复、消息渲染逻辑提取到独立组件 | 中 | [ ] |
-| 5.1.8 | **JSON Schema 参数校验** | 在 `ToolCallDispatcher` 中基于 `ParametersSchema` 预校验 LLM 传入的参数，提前返回参数错误 | 中 | [ ] |
+| 5.1.1 | **创建 `AgentCore.Tests.Editor`** | 新增测试 asmdef，引入 Unity Test Framework | 中 | [x] |
+| 5.1.2 | **测试 `ToolHelpers`** | 覆盖参数解析、Vector/Color 解析、GameObject 查找 | 低 | [x] |
+| 5.1.3 | **测试 `ToolResponse` / `ToolResult`** | 覆盖 Ok/OkWithData/Fail/ToToolResult | 低 | [x] |
+| 5.1.4 | **测试 `JsonHelper`** | 覆盖序列化/反序列化/安全解析/安全取值 | 低 | [x] |
+| 5.1.5 | **测试 `TokenCounter`** | 验证中英文 token 估算准确性 | 低 | [x] |
+| 5.1.6 | **拆分 `AgentLoop.cs`** | 将 `RunToolCallLoopAsync` 提取到 `AgentLoop.Runner.cs`，将记忆召回提取到 `AgentLoop.Memory.cs`，共拆为 9 个 partial 文件 | 中 | [x] |
+| 5.1.7 | **拆分 `ChatWindow.cs`** | 将 ChatWindow 拆为 9 个 partial 文件 (主文件 + Input/Events/Messages/DomainReload/Restore/Hub/Sessions/Tools/UIHelpers)，从 2135 行降至主文件 ~290 行 | 中 | [x] |
+| 5.1.8 | **JSON Schema 参数校验** | 在 `ToolCallDispatcher` 中基于 `ParametersSchema` 预校验 LLM 传入的参数，提前返回参数错误 | 中 | [x] |
 
 ### 2.2 P1 — RAG 功能补齐
 
@@ -106,18 +107,20 @@
 | 5.2.4 | **LightRAG 批量索引** | `index_folder` / `index_project_docs` action（扫描 README.md、docs/、plans/、Assets/Docs/） | Phase RAG-3 | [x] |
 | 5.2.5 | **查询体验强化** | `query` 支持 `top_k` 参数；查询结果展示来源文档名称；更新 SOUL.md 明确知识库使用场景 | Phase RAG-4 | [x] |
 
-### 2.3 P2 — 能力补齐（与 Unity Skills 对齐）
+### 2.3 P2 — 能力补齐（以代码事实校准）
 
-> **目标**: 覆盖 `_archive/Unity-Skills/` 中尚未迁移的能力
+> **目标**: 不盲目按旧计划补工具；先以实际源码审计已有 actions，再只补真正缺失且通用的能力。
 > **参考源**: `_archive/Unity-Skills/SkillsForUnity/Editor/Skills/`
+> **审计日期**: 2026-05-12；结论以 `Editor/Tools/Native/` 当前实现为准。
 
 | # | 任务 | 说明 | 来源参考 | 状态 |
 |---|------|------|---------|------|
-| 5.3.1 | **ManageXRTool** | XR 开发工具：XR 设置、设备模拟、XR 组件管理 | `XRSkills.cs` (22 skills) | [ ] |
-| 5.3.2 | **ManageTestTool 增强** | 补充 `cancel`、`create_test_fixture` actions | `TestSkills.cs` | [ ] |
-| 5.3.3 | **ManageCinemachineTool 深度** | BlendList、Custom Extensions、Impulse 高级配置 | `CinemachineSkills.cs` | [ ] |
-| 5.3.4 | **ManageUIToolkitTool 增强** | 数据绑定高级功能、运行时 USS 切换、UXML 模板生成 | `UIToolkitSkills.cs` | [ ] |
-| 5.3.5 | **ManageMaterialTool 增强** | 细粒度属性 batch 设置、Shader Graph 材质支持 | `MaterialSkills.cs` | [ ] |
+| 5.3.1 | **ManageXRTool** | 项目当前不涉及 VR/AR/MR；XR 工具冻结，仅用户明确需要时解冻 | `XRSkills.cs` (22 skills) | [!] |
+| 5.3.2 | **ManageTestTool 增强** | 当前已有 `list_tests`、`run_tests`、`get_results`、`create_test`；已补 `cancel`、`create_test_fixture` | `TestSkills.cs` | [x] |
+| 5.3.3 | **ManageCinemachineTool 深度** | 已有 20 actions，包含 FreeLook、StateDriven、ClearShot、Sequencer、DollyTrack、Impulse、BlendList 等能力 | `CinemachineSkills.cs` | [x] |
+| 5.3.4 | **ManageUIToolkitTool 增强** | 已有 20 actions，包含 UXML/USS 创建编辑、UIDocument、PanelSettings、binding、EditorWindow 模板、自定义元素模板等能力 | `UIToolkitSkills.cs` | [x] |
+| 5.3.5 | **ManageMaterialTool 增强** | 当前已有 11 actions；已补 `batch_set_properties`、`list_materials`、`get_shader_info`（含 Shader Graph 识别） | `MaterialSkills.cs` | [x] |
+| 5.3.6 | **文档状态校准** | 审计 `plans/` 中旧计划，标注已完成、已并入 ROADMAP、冻结或仍有效，避免过时计划误导开发 | 当前源码 + plans | [x] |
 
 ### 2.4 Phase 5 里程碑
 
@@ -125,8 +128,11 @@
 v0.4.0 — 测试框架 + AgentLoop/ChatWindow 拆分
 v0.4.1 — LightRAG 文档列表/删除/进度轮询
 v0.4.2 — LightRAG 批量索引 + 查询强化
-v0.4.3 — XR 工具 + TestTool 增强
-v0.4.4 — Cinemachine/UIToolkit/Material 深度增强
+v0.4.3 — 稳定性优先：测试框架与基础测试
+v0.4.4 — JSON Schema 参数预校验
+v0.4.5 — AgentLoop partial 拆分
+v0.4.6 — ChatWindow partial 拆分
+v0.4.7 — 文档状态校准（plans/ 全量审计 + ROADMAP 修正 + ADR-3）
 ```
 
 
@@ -148,7 +154,7 @@ v0.4.4 — Cinemachine/UIToolkit/Material 深度增强
 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| 6.2.1 | **MemoryPanel UI** | Hub 架构 Memory 模块的可视化面板：对话历史浏览、自动记忆浏览、手动增删 | P1 | [ ] |
+| 6.2.1 | **MemoryPanel UI** | Hub 架构 Memory 模块的可视化面板：mem0 状态、用户创建、手动添加、搜索、列表刷新、删除 | P1 | [x] |
 | 6.2.2 | **高级记忆策略** | 上下文压缩（LongContext vs MemoryRecall 的智能选择）、记忆重要性评分 | P1 | [ ] |
 | 6.2.3 | **文件变更 Diff 视图** | 代码修改的 side-by-side 对比视图（简化版） | P1 | [ ] |
 | 6.2.4 | **主题系统** | 深色/浅色主题切换（不追求极致美观，追求可用性） | P1 | [ ] |
@@ -229,7 +235,22 @@ v0.6.4 — Asset Store 提交
   3. 可以作为 Phase 5.3.1 或后续需求驱动实现
 - **触发条件**: 用户明确需要 XR 开发支持时，解冻该任务
 
-### ADR-3: AgentLoop.cs 拆分策略
+### ADR-3: 文档状态必须以代码事实校准
+
+**状态**: `已决策 — 代码事实优先`
+**日期**: 2026-05-12
+
+- **决策**: ROADMAP 和专项计划中的工具状态必须以实际源码为准；当计划写着“未开发”但源码已经实现时，立即更新文档或标注为历史归档。
+- **原因**:
+  1. 已发现 `ManageCinemachineTool` 和 `ManageUIToolkitTool` 实际已具备深度能力，但 ROADMAP 仍将其列为未开发。
+  2. 过时计划会导致重复开发、错误优先级和错误版本规划。
+  3. 工具系统当前已有 44 个工具，必须避免依赖记忆或旧文档判断能力边界。
+- **执行规则**:
+  1. 规划工具开发前，先读取对应工具源码的 `ParametersSchema` 和 `switch action` 分发。
+  2. 旧计划文档不删除，统一标注“已实现/已并入 ROADMAP/历史参考/冻结”。
+  3. ROADMAP 是方向层唯一入口；专项计划只作为设计或历史参考。
+
+### ADR-4: AgentLoop.cs 拆分策略
 
 **状态**: `已决策 — 采用部分类拆分`
 **日期**: 2026-05-09
@@ -288,17 +309,40 @@ v0.6.0 → Phase 7.1 (UPM 发布)
 - 哪些任务比预期更慢？分析原因，调整后续计划
 - 用户反馈中出现了哪些未预见的需求？评估是否纳入当前 Phase
 
+### 7.4 文档状态索引
+
+| 文档 | 当前状态 | 后续使用规则 |
+|------|----------|--------------|
+| `ROADMAP.md` | 主导方向文档 | 唯一规划入口，必须与代码状态同步 |
+| `ARCHITECTURE.md` | 架构参考 | 保留，但阶段状态以 ROADMAP 为准 |
+| `phase1-plan.md` | 历史归档 | Phase 1 已完成，仅作历史参考 |
+| `phase2-plan.md` | 历史归档 | Phase 2 已完成，仅作历史参考 |
+| `phase2.5-native-tools-plan.md` | 历史归档 | 原生工具迁移已完成，工具清单以 `Editor/Tools/Native/` 为准 |
+| `phase3-plan.md` | 历史归档 | Memory/Session/RAG 基础已完成，仅作设计参考 |
+| `phase4-plan.md` | 历史归档 | Phase 4 已完成 |
+| `stability-first-plan.md` | 已落地/被拆分执行 | v0.4.3~v0.4.6 已覆盖主要内容 |
+| `json-schema-validation-plan.md` | 已完成 | v0.4.4 已实现，仅作设计参考 |
+| `agentloop-split-plan.md` | 已完成 | v0.4.5 已实现 |
+| `chatwindow-split-plan.md` | 已完成 | v0.4.6 已实现 |
+| `rag-feature-completion-plan.md` | 已完成 | Phase 5.2 已完成，后续 RAG 新需求另开计划 |
+| `agentcore-workspace-hub-execution-plan.md` | 部分已落地 | Hub/Knowledge/Memory 已接入，剩余事项以 ROADMAP 为准 |
+| `memory-panel-ui-plan.md` | 已完成 | MemoryPanel UI 已接入，仅作设计参考 |
+| `domain-reload-resilience.md` | 已落地 | DomainReloadState/恢复链路已实现，修改核心恢复逻辑前参考 |
+| `file-change-tracking-plan.md` | 部分已落地/仍有效 | 文件变更追踪已有基础，Diff 视图仍属 Phase 6.2.3 |
+| `mem0-settings-optimization.md` | 候选优化 | 需要再次对照当前 Settings/Client 代码后决定是否执行 |
+| `mem0-vs-openmemory-analysis.md` | 运维参考 | 仅用于部署选型和故障分析 |
+
 ---
 
 ## 8. 下一步行动建议
 
-当前（v0.3.7）最推荐的三个切入点：
+当前（v0.4.6）最推荐的三个切入点：
 
 | 推荐度 | 任务 | 原因 |
 |--------|------|------|
-| ⭐⭐⭐ | **5.1.1 创建测试框架** | 零到一的突破，后续所有重构和新增功能的信心基础 |
-| ⭐⭐⭐ | **5.2.1 LightRAG 文档列表** | 已有详细设计文档（`rag-feature-completion-plan.md`），实现路径清晰 |
-| ⭐⭐ | **5.1.6 拆分 AgentLoop.cs** | 技术债清偿，降低后续维护成本；但需配合测试框架一起进行 |
+| ⭐⭐⭐ | **5.3.6 文档状态校准** | 当前首要风险是旧计划误导开发，必须先统一文档事实源 |
+| ⭐⭐ | **5.3.2 ManageTestTool 小增强** | 范围小且通用：补 `cancel` 与 `create_test_fixture` |
+| ⭐⭐ | **5.3.5 ManageMaterialTool 小增强** | 范围小且通用：补批量属性设置、材质列表、Shader Graph 识别说明 |
 
 ---
 

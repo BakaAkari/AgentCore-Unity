@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.LLM;
+using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Utils;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -201,7 +202,22 @@ namespace AgentCore.Editor.Tools
                     );
                 }
 
-                // 3. 执行工具
+                // 3. Schema 参数预校验
+                var schema = tool.Metadata.ParametersSchema;
+                if (!ToolParameterValidator.Validate(parameters, schema, out var validationError))
+                {
+                    stopwatch.Stop();
+                    var errorMsg = $"Invalid arguments for tool '{toolName}': {validationError}";
+                    Debug.LogWarning($"{LogPrefix}{errorMsg}");
+                    return new ToolCallResult(
+                        toolCall,
+                        ToolResult.Fail(errorMsg, stopwatch.Elapsed.TotalMilliseconds),
+                        toolName,
+                        stopwatch.Elapsed.TotalMilliseconds
+                    );
+                }
+
+                // 4. 执行工具
                 Debug.Log($"{LogPrefix}Executing tool '{toolName}' (mainThread={tool.Metadata.RequiresMainThread})");
 
                 ToolResult result;

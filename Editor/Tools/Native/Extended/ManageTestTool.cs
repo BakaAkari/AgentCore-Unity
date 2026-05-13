@@ -18,7 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// Uses reflection to access Test Framework API since it is an optional package.
     /// </summary>
     [AgentTool("manage_test",
-        Description = "Run and manage Unity Test Runner tests (EditMode and PlayMode)",
+        Description = "Run and manage Unity Test Runner tests (EditMode and PlayMode). Supports listing, running, cancelling tests and creating test scripts/fixtures.",
         Category = "Extended",
         RequiresMainThread = true)]
     public class ManageTestTool : IAgentTool
@@ -28,13 +28,15 @@ namespace AgentCore.Editor.Tools.Native.Extended
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""list_tests"", ""run_tests"", ""get_results"", ""create_test""],
+                    ""enum"": [""list_tests"", ""run_tests"", ""get_results"", ""create_test"", ""cancel"", ""create_test_fixture""],
                     ""description"": ""Action to perform""
                 },
                 ""mode"": { ""type"": ""string"", ""description"": ""Test mode: edit, play, or all (default: all)"" },
                 ""filter"": { ""type"": ""string"", ""description"": ""Filter string for test names (optional)"" },
-                ""name"": { ""type"": ""string"", ""description"": ""Test class name for create_test"" },
-                ""path"": { ""type"": ""string"", ""description"": ""Output folder path for create_test (default: Assets/Tests)"" }
+                ""name"": { ""type"": ""string"", ""description"": ""Test class/fixture name for create_test/create_test_fixture"" },
+                ""path"": { ""type"": ""string"", ""description"": ""Output folder path for create_test/create_test_fixture (default: Assets/Tests)"" },
+                ""namespace"": { ""type"": ""string"", ""description"": ""Namespace for create_test_fixture (optional)"" },
+                ""description"": { ""type"": ""string"", ""description"": ""Description comment for the test fixture (optional)"" }
             },
             ""required"": [""action""]
         }");
@@ -44,7 +46,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// </summary>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_test",
-            description: "Run and manage Unity Test Runner tests (EditMode and PlayMode)",
+            description: "Run and manage Unity Test Runner tests (EditMode and PlayMode). Supports listing, running, cancelling tests and creating test scripts/fixtures.",
             category: "Extended",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -83,8 +85,14 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     case "create_test":
                         response = HandleCreateTest(parameters);
                         break;
+                    case "cancel":
+                        response = HandleCancel(parameters);
+                        break;
+                    case "create_test_fixture":
+                        response = HandleCreateTestFixture(parameters);
+                        break;
                     default:
-                        response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: list_tests, run_tests, get_results, create_test");
+                        response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: list_tests, run_tests, get_results, create_test, cancel, create_test_fixture");
                         break;
                 }
             }
@@ -356,6 +364,142 @@ namespace AgentCore.Editor.Tools.Native.Extended
                 asmdefPath,
                 asmdefCreated = !File.Exists(asmdefPath)
             }, $"Created {mode} mode test '{className}' at {filePath}");
+        }
+
+        /// <summary>
+        /// Cancel currently running tests via TestRunnerApi reflection.
+        /// </summary>
+        private ToolResponse HandleCancel(JObject parameters)
+        {
+            if (!EnsureReflectionTypes())
+                return ToolResponse.Fail($"Test Framework not available: {_reflectionError}. Please install 'com.unity.test-framework' package via Package Manager.");
+
+            try
+            {
+                var apiInstance = ScriptableObject.CreateInstance(_testRunnerApiType);
+                if (apiInstance == null)
+                    return ToolResponse.Fail("Failed to create TestRunnerApi instance.");
+
+                try
+                {
+                    // Try multiple method names for cancellation across Unity versions
+                    var cancelMethod = _testRunnerApiType.GetMethod("CancelTestRun")
+                        ?? _testRunnerApiType.GetMethod("Cancel")
+                        ?? _testRunnerApiType.GetMethod("StopTestRun");
+
+                    if (cancelMethod == null)
+                    {
+                        // Try to find any method containing "cancel" or "stop" (case-insensitive)
+                        cancelMethod = _testRunnerApiType.GetMethods()
+                            .FirstOrDefault(m => m.Name.IndexOf("cancel", StringComparison.OrdinalIgnoreCase) >= 0
+                                || m.Name.IndexOf("stop", StringComparison.OrdinalIgnoreCase) >= 0);
+                    }
+
+                    if (cancelMethod == null)
+                        return ToolResponse.Fail("Could not find a cancel/stop method on TestRunnerApi. Your Unity Test Framework version may not support programmatic cancellation.");
+
+                    // Invoke with no parameters or with default parameters
+                    var methodParams = cancelMethod.GetParameters();
+                    if (methodParams.Length == 0)
+                    {
+                        cancelMethod.Invoke(apiInstance, null);
+                    }
+                    else
+                    {
+                        // Pass default values for all parameters
+                        var args = new object[methodParams.Length];
+                        for (int i = 0; i < methodParams.Length; i++)
+                        {
+                            args[i] = methodParams[i].HasDefaultValue
+                                ? methodParams[i].DefaultValue
+                                : (methodParams[i].ParameterType.IsValueType
+                                    ? Activator.CreateInstance(methodParams[i].ParameterType)
+                                    : null);
+                        }
+                        cancelMethod.Invoke(apiInstance, args);
+                    }
+
+                    return ToolResponse.OkWithData(new
+                    {
+                        status = "cancelled",
+                        method = cancelMethod.Name,
+                        message = "Test run cancellation requested successfully."
+                    }, "Test run cancellation requested.");
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(apiInstance);
+                }
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Failed to cancel tests: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Create a comprehensive test fixture template with OneTimeSetUp, OneTimeTearDown,
+        /// SetUp, TearDown, and sample test methods organized in a proper fixture structure.
+        /// </summary>
+        private ToolResponse HandleCreateTestFixture(JObject parameters)
+        {
+            string name = ToolHelpers.GetRequiredString(parameters, "name");
+            string mode = ToolHelpers.GetOptionalString(parameters, "mode", "edit").ToLowerInvariant();
+            string path = ToolHelpers.GetOptionalString(parameters, "path", "Assets/Tests");
+            string namespaceName = ToolHelpers.GetOptionalString(parameters, "namespace");
+            string description = ToolHelpers.GetOptionalString(parameters, "description");
+
+            if (mode != "edit" && mode != "play")
+                return ToolResponse.Fail($"Invalid mode: {mode}. Must be edit or play.");
+
+            // Sanitize class name
+            string className = SanitizeFixtureName(name);
+            if (string.IsNullOrEmpty(className))
+                return ToolResponse.Fail($"Invalid fixture name: {name}. Must be a valid C# identifier.");
+
+            // Determine subfolder
+            string subFolder = mode == "edit" ? "EditMode" : "PlayMode";
+            string fullDir = Path.Combine(path, subFolder);
+
+            // Ensure directory exists
+            if (!Directory.Exists(fullDir))
+                Directory.CreateDirectory(fullDir);
+
+            // Generate fixture content
+            string content = mode == "edit"
+                ? GenerateEditModeFixtureTemplate(className, namespaceName, description)
+                : GeneratePlayModeFixtureTemplate(className, namespaceName, description);
+
+            string filePath = Path.Combine(fullDir, $"{className}.cs");
+
+            // Check if file already exists
+            if (File.Exists(filePath))
+                return ToolResponse.Fail($"Test fixture file already exists: {filePath}");
+
+            File.WriteAllText(filePath, content);
+
+            // Also ensure asmdef exists for the test folder
+            string asmdefPath = Path.Combine(fullDir, $"Tests.{subFolder}.asmdef");
+            bool asmdefCreated = false;
+            if (!File.Exists(asmdefPath))
+            {
+                string asmdefContent = GenerateTestAsmdef(subFolder, mode);
+                File.WriteAllText(asmdefPath, asmdefContent);
+                asmdefCreated = true;
+            }
+
+            AssetDatabase.Refresh();
+
+            return ToolResponse.OkWithData(new
+            {
+                filePath,
+                className,
+                mode,
+                namespaceName = namespaceName ?? "(none)",
+                asmdefPath,
+                asmdefCreated,
+                features = new[] { "OneTimeSetUp", "OneTimeTearDown", "SetUp", "TearDown", "Category", "TestFixture", "Sample Tests" }
+            }, $"Created {mode} mode test fixture '{className}' at {filePath}");
         }
 
         #endregion
@@ -718,6 +862,246 @@ public class {className}
         }
 
         /// <summary>
+        /// Generate an EditMode test fixture template with full lifecycle methods.
+        /// </summary>
+        private string GenerateEditModeFixtureTemplate(string className, string namespaceName, string description)
+        {
+            string desc = description ?? $"EditMode test fixture for {className}";
+            string indent = string.IsNullOrEmpty(namespaceName) ? "" : "    ";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("using NUnit.Framework;");
+            sb.AppendLine("using UnityEngine;");
+            sb.AppendLine("using UnityEditor;");
+            sb.AppendLine();
+
+            if (!string.IsNullOrEmpty(namespaceName))
+            {
+                sb.AppendLine($"namespace {namespaceName}");
+                sb.AppendLine("{");
+            }
+
+            sb.AppendLine($"{indent}/// <summary>");
+            sb.AppendLine($"{indent}/// {desc}");
+            sb.AppendLine($"{indent}/// </summary>");
+            sb.AppendLine($"{indent}[TestFixture]");
+            sb.AppendLine($"{indent}[Category(\"EditMode\")]");
+            sb.AppendLine($"{indent}public class {className}");
+            sb.AppendLine($"{indent}{{");
+            sb.AppendLine($"{indent}    #region Lifecycle");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called once before all tests in this fixture. Use for expensive setup.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [OneTimeSetUp]");
+            sb.AppendLine($"{indent}    public void OneTimeSetUp()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // One-time initialization (e.g., load shared resources)");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called once after all tests in this fixture. Use for expensive cleanup.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [OneTimeTearDown]");
+            sb.AppendLine($"{indent}    public void OneTimeTearDown()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // One-time cleanup (e.g., unload shared resources)");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called before each test method. Use for per-test setup.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [SetUp]");
+            sb.AppendLine($"{indent}    public void SetUp()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Per-test initialization");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called after each test method. Use for per-test cleanup.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [TearDown]");
+            sb.AppendLine($"{indent}    public void TearDown()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Per-test cleanup");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    #endregion");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    #region Tests");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    [Test]");
+            sb.AppendLine($"{indent}    public void SampleTest_WhenCondition_ShouldExpectedBehavior()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Arrange");
+            sb.AppendLine($"{indent}        var expected = true;");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Act");
+            sb.AppendLine($"{indent}        var actual = true;");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Assert");
+            sb.AppendLine($"{indent}        Assert.AreEqual(expected, actual);");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    [Test]");
+            sb.AppendLine($"{indent}    [Category(\"Integration\")]");
+            sb.AppendLine($"{indent}    public void SampleIntegrationTest_GameObjectCreation()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Arrange & Act");
+            sb.AppendLine($"{indent}        var go = new GameObject(\"TestObject\");");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Assert");
+            sb.AppendLine($"{indent}        Assert.IsNotNull(go);");
+            sb.AppendLine($"{indent}        Assert.AreEqual(\"TestObject\", go.name);");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Cleanup");
+            sb.AppendLine($"{indent}        Object.DestroyImmediate(go);");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    #endregion");
+            sb.AppendLine($"{indent}}}");
+
+            if (!string.IsNullOrEmpty(namespaceName))
+            {
+                sb.AppendLine("}");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Generate a PlayMode test fixture template with full lifecycle methods and coroutine support.
+        /// </summary>
+        private string GeneratePlayModeFixtureTemplate(string className, string namespaceName, string description)
+        {
+            string desc = description ?? $"PlayMode test fixture for {className}";
+            string indent = string.IsNullOrEmpty(namespaceName) ? "" : "    ";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("using System.Collections;");
+            sb.AppendLine("using NUnit.Framework;");
+            sb.AppendLine("using UnityEngine;");
+            sb.AppendLine("using UnityEngine.TestTools;");
+            sb.AppendLine();
+
+            if (!string.IsNullOrEmpty(namespaceName))
+            {
+                sb.AppendLine($"namespace {namespaceName}");
+                sb.AppendLine("{");
+            }
+
+            sb.AppendLine($"{indent}/// <summary>");
+            sb.AppendLine($"{indent}/// {desc}");
+            sb.AppendLine($"{indent}/// </summary>");
+            sb.AppendLine($"{indent}[TestFixture]");
+            sb.AppendLine($"{indent}[Category(\"PlayMode\")]");
+            sb.AppendLine($"{indent}public class {className}");
+            sb.AppendLine($"{indent}{{");
+            sb.AppendLine($"{indent}    #region Lifecycle");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called once before all tests in this fixture.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [OneTimeSetUp]");
+            sb.AppendLine($"{indent}    public void OneTimeSetUp()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // One-time initialization (e.g., load scene, create persistent objects)");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called once after all tests in this fixture.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [OneTimeTearDown]");
+            sb.AppendLine($"{indent}    public void OneTimeTearDown()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // One-time cleanup");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called before each test method.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [SetUp]");
+            sb.AppendLine($"{indent}    public void SetUp()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Per-test initialization");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>");
+            sb.AppendLine($"{indent}    /// Called after each test method.");
+            sb.AppendLine($"{indent}    /// </summary>");
+            sb.AppendLine($"{indent}    [TearDown]");
+            sb.AppendLine($"{indent}    public void TearDown()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Per-test cleanup");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    #endregion");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    #region Tests");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    [Test]");
+            sb.AppendLine($"{indent}    public void SampleTest_WhenCondition_ShouldExpectedBehavior()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Arrange");
+            sb.AppendLine($"{indent}        var expected = true;");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Act");
+            sb.AppendLine($"{indent}        var actual = true;");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Assert");
+            sb.AppendLine($"{indent}        Assert.AreEqual(expected, actual);");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    [UnityTest]");
+            sb.AppendLine($"{indent}    public IEnumerator SampleUnityTest_WaitsForFrames()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Arrange");
+            sb.AppendLine($"{indent}        var go = new GameObject(\"TestObject\");");
+            sb.AppendLine($"{indent}        var rb = go.AddComponent<Rigidbody>();");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Act — wait for physics to process");
+            sb.AppendLine($"{indent}        yield return new WaitForFixedUpdate();");
+            sb.AppendLine($"{indent}        yield return new WaitForFixedUpdate();");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Assert");
+            sb.AppendLine($"{indent}        Assert.IsNotNull(rb);");
+            sb.AppendLine($"{indent}        Assert.IsTrue(go.activeInHierarchy);");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Cleanup");
+            sb.AppendLine($"{indent}        Object.Destroy(go);");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    [UnityTest]");
+            sb.AppendLine($"{indent}    public IEnumerator SampleUnityTest_WithTimeout()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        // Arrange");
+            sb.AppendLine($"{indent}        float startTime = Time.time;");
+            sb.AppendLine($"{indent}        float timeout = 2f;");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Act — wait until condition or timeout");
+            sb.AppendLine($"{indent}        while (Time.time - startTime < timeout)");
+            sb.AppendLine($"{indent}        {{");
+            sb.AppendLine($"{indent}            // Check condition here");
+            sb.AppendLine($"{indent}            if (true) break; // Replace with actual condition");
+            sb.AppendLine($"{indent}            yield return null;");
+            sb.AppendLine($"{indent}        }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}        // Assert");
+            sb.AppendLine($"{indent}        Assert.IsTrue(Time.time - startTime < timeout, \"Test timed out\");");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    #endregion");
+            sb.AppendLine($"{indent}}}");
+
+            if (!string.IsNullOrEmpty(namespaceName))
+            {
+                sb.AppendLine("}");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
         /// Generate a test assembly definition file.
         /// </summary>
         private string GenerateTestAsmdef(string subFolder, string mode)
@@ -774,6 +1158,30 @@ public class {className}
             if (!sanitized.EndsWith("Tests", StringComparison.OrdinalIgnoreCase) &&
                 !sanitized.EndsWith("Test", StringComparison.OrdinalIgnoreCase))
                 sanitized += "Tests";
+
+            return string.IsNullOrEmpty(sanitized) ? null : sanitized;
+        }
+
+        /// <summary>
+        /// Sanitize a string to be a valid C# fixture class name.
+        /// Appends "Fixture" suffix if not already present.
+        /// </summary>
+        private string SanitizeFixtureName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+
+            // Remove invalid characters
+            var sanitized = new string(name.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+
+            // Ensure it starts with a letter or underscore
+            if (sanitized.Length > 0 && char.IsDigit(sanitized[0]))
+                sanitized = "_" + sanitized;
+
+            // Ensure it ends with "Fixture" or "Tests" if not already
+            if (!sanitized.EndsWith("Fixture", StringComparison.OrdinalIgnoreCase) &&
+                !sanitized.EndsWith("Tests", StringComparison.OrdinalIgnoreCase) &&
+                !sanitized.EndsWith("Test", StringComparison.OrdinalIgnoreCase))
+                sanitized += "Fixture";
 
             return string.IsNullOrEmpty(sanitized) ? null : sanitized;
         }

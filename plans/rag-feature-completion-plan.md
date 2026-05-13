@@ -1,6 +1,6 @@
 # AgentCore RAG 功能补齐与强化设计
 
-> 状态：**修订版 v2**，基于 LightRAG v1.4.15/0287 实际 API 验证后更新。
+> 状态：已完成（Phase 5.2）。本文为 RAG 补齐阶段历史设计参考；后续 RAG 新需求需新建计划或在 `ROADMAP.md` 中重新立项。
 > 目标版本：0.4.x 起逐步落地。
 > 相关代码：`LightRAGClient`、`LightRAGTool`、`KnowledgeBasePanel`、`AgentCoreSettings`。
 >
