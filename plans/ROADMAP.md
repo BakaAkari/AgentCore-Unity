@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.4.8 | **制定日期**: 2026-05-09 | **状态**: 工具增强已完成 (v0.4.8)
+> **版本**: v0.5.0 | **制定日期**: 2026-05-09 | **状态**: 上下文压缩系统已完成 (v0.5.0)
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 >
 > **与现有计划的关系**:
@@ -140,42 +140,74 @@ v0.4.7 — 文档状态校准（plans/ 全量审计 + ROADMAP 修正 + ADR-3）
 
 ## 3. Phase 6 — 智能化与体验 (v0.5.x)
 
-**主题**: AI 驱动的智能化功能、用户工作流体验优化
+**主题**: 上下文管理、模式系统、代码库理解 — 基于 Cline/Roo/Cursor 竞品分析的优先级调整
 
-### 3.1 P0 — 智能增强
+> **关联文档**: [`ai-coding-assistants-analysis.md`](plans/ai-coding-assistants-analysis.md) — 竞品深度分析与技术选型
+> **优先级调整原因**: 多轮对话和工具结果快速消耗上下文，上下文压缩是当前最紧急的痛点
+
+### 3.0 P0 — 上下文压缩与管理（最高优先级）
+
+| # | 任务 | 说明 | 关联计划 | 状态 |
+|---|------|------|---------|------|
+| 6.0.1 | **工具结果摘要** | 大型工具结果（>1000 tokens）自动调用 LLM 生成摘要，压缩到 200 tokens | Context-1 | [DONE] v0.5.0 |
+| 6.0.2 | **对话历史压缩** | 保留最近 N 轮完整对话，对更早消息生成摘要；支持多种压缩策略（滑动窗口/摘要/语义聚类） | Context-2 | [DONE] v0.5.0 |
+| 6.0.3 | **上下文预算管理** | 动态分配 token 预算（System Prompt / 历史 / 工具结果 / 响应预留），超限时自动触发压缩 | Context-3 | [DONE] v0.5.0 |
+| 6.0.4 | **压缩策略可视化** | UI 显示当前上下文使用情况、压缩状态、token 预算分配 | Context-4 | [ ] |
+
+### 3.1 P0 — 模式系统（高优先级）
+
+| # | 任务 | 说明 | 关联计划 | 状态 |
+|---|------|------|---------|------|
+| 6.1.1 | **Architect Mode** | 规划模式：只读文件 + 生成设计文档，不执行修改；定制 System Prompt 强调架构设计 | Mode-1 | [ ] |
+| 6.1.2 | **Review Mode** | 审查模式：代码质量分析 + Unity 最佳实践检查 + 性能问题检测 | Mode-2 | [ ] |
+| 6.1.3 | **模式切换 UI** | Chat 窗口顶部模式选择器；不同模式使用不同的图标和颜色 | Mode-3 | [ ] |
+| 6.1.4 | **模式特定上下文策略** | 每个模式有独立的上下文预算和压缩策略（Architect 需要更大上下文，Review 需要更多代码片段） | Mode-4 | [ ] |
+
+### 3.2 P1 — 代码库索引与理解（中优先级）
+
+| # | 任务 | 说明 | 关联计划 | 状态 |
+|---|------|------|---------|------|
+| 6.2.1 | **文件级索引** | 使用 Roslyn 解析 C# 文件，提取类名、命名空间、方法签名；存储到 SQLite | Codebase-1 | [ ] |
+| 6.2.2 | **符号检索** | 支持按类名、方法名、字段名搜索；支持模糊匹配和正则表达式 | Codebase-2 | [ ] |
+| 6.2.3 | **语义搜索** | 集成 LightRAG 进行代码片段嵌入；支持自然语言查询："找到所有处理网络请求的脚本" | Codebase-3 | [ ] |
+| 6.2.4 | **依赖图构建** | 分析类型引用、程序集边界、Unity 特殊引用（Scene/Prefab/Addressables） | Codebase-4 | [ ] |
+
+### 3.3 P1 — 规则系统与智能推荐（中优先级）
+
+| # | 任务 | 说明 | 关联计划 | 状态 |
+|---|------|------|---------|------|
+| 6.3.1 | **.agentcore/rules.md 支持** | 读取项目根目录的规则文件（编码规范、架构约定、测试要求） | Rules-1 | [ ] |
+| 6.3.2 | **规则自动注入** | 规则内容自动添加到 System Prompt；支持多文件规则（按模块拆分） | Rules-2 | [ ] |
+| 6.3.3 | **SmartToolRecommender** | 基于对话上下文和当前任务推荐可用工具；UI 显示推荐理由 | Smart-1 | [ ] |
+| 6.3.4 | **响应式建议** | LLM 响应末尾附带"下一步建议"（如"是否需要运行测试？"） | Smart-2 | [ ] |
+
+### 3.4 P2 — 体验优化（低优先级）
 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| 6.1.1 | **SmartToolRecommender** | 基于对话上下文自动推荐可用工具 | P0 | [ ] |
-| 6.1.2 | **代码审查模式** | `review_code` action：分析脚本质量、性能、风格问题 | P0 | [ ] |
-| 6.1.3 | **响应式建议** | LLM 响应末尾附带"下一步建议"（如"是否需要运行测试？"） | P0 | [ ] |
+| 6.4.1 | **文件变更 Diff 视图** | 代码修改的 side-by-side 对比视图（简化版） | P2 | [ ] |
+| 6.4.2 | **主题系统** | 深色/浅色主题切换（不追求极致美观，追求可用性） | P2 | [ ] |
+| 6.4.3 | **快捷键自定义** | 用户可自定义聊天窗口快捷键 | P2 | [ ] |
 
-### 3.2 P1 — 场景深化
-
-| # | 任务 | 说明 | 优先级 | 状态 |
-|---|------|------|--------|------|
-| 6.2.1 | **MemoryPanel UI** | Hub 架构 Memory 模块的可视化面板：mem0 状态、用户创建、手动添加、搜索、列表刷新、删除 | P1 | [x] |
-| 6.2.2 | **高级记忆策略** | 上下文压缩（LongContext vs MemoryRecall 的智能选择）、记忆重要性评分 | P1 | [ ] |
-| 6.2.3 | **文件变更 Diff 视图** | 代码修改的 side-by-side 对比视图（简化版） | P1 | [ ] |
-| 6.2.4 | **主题系统** | 深色/浅色主题切换（不追求极致美观，追求可用性） | P1 | [ ] |
-
-### 3.3 P2 — 集成扩展
-
-| # | 任务 | 说明 | 优先级 | 状态 |
-|---|------|------|--------|------|
-| 6.3.1 | **Google Sheets 集成** | Spreadsheet 读写工具（用于批量数据配置、本地化表管理） | P2 | [ ] |
-| 6.3.2 | **AI 驱动的测试生成** | 基于场景描述自动生成 PlayMode/EditMode 测试 | P2 | [ ] |
-| 6.3.3 | **快捷键自定义** | 用户可自定义聊天窗口快捷键 | P2 | [ ] |
-
-### 3.4 Phase 6 里程碑
+### 3.5 Phase 6 里程碑
 
 ```
-v0.5.0 — SmartToolRecommender + 代码审查模式 + 响应式建议
-v0.5.1 — MemoryPanel UI + 高级记忆策略
-v0.5.2 — 文件变更 Diff 视图 + 主题系统
-v0.5.3 — Google Sheets 集成
-v0.5.4 — AI 测试生成 + 快捷键自定义
+v0.5.0 — 上下文压缩与管理（工具结果摘要 + 对话历史压缩 + 预算管理 + 可视化）
+v0.5.1 — 模式系统（Architect Mode + Review Mode + 模式切换 UI）
+v0.5.2 — 代码库索引（文件级索引 + 符号检索 + 语义搜索）
+v0.5.3 — 规则系统与智能推荐（.agentcore/rules.md + SmartToolRecommender + 响应式建议）
+v0.5.4 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
 ```
+
+### 3.6 技术栈选型（基于竞品分析）
+
+| 模块 | 推荐技术 | 理由 | 替代方案 |
+|------|---------|------|---------|
+| **AST 解析** | Roslyn (Microsoft.CodeAnalysis) | C# 官方编译器 API，Unity 已内置 | 手动正则解析（不推荐） |
+| **向量数据库** | LightRAG (已集成) | 复用现有基础设施，支持语义搜索 | Qdrant（需外部服务，Phase 7 可选） |
+| **本地索引** | SQLite (System.Data.SQLite) | 轻量、零配置、完全离线 | JSON 文件（性能差） |
+| **上下文压缩** | LLM 摘要 (Claude Haiku) | 成本低、速度快、质量高 | 规则压缩（效果差） |
+| **规则解析** | Markdown Parser (Markdig) | 轻量、易扩展、社区成熟 | 自定义格式（学习成本高） |
 
 ---
 
@@ -311,26 +343,23 @@ v0.6.0 → Phase 7.1 (UPM 发布)
 
 ### 7.4 文档状态索引
 
-| 文档 | 当前状态 | 后续使用规则 |
-|------|----------|--------------|
-| `ROADMAP.md` | 主导方向文档 | 唯一规划入口，必须与代码状态同步 |
-| `ARCHITECTURE.md` | 架构参考 | 保留，但阶段状态以 ROADMAP 为准 |
-| `phase1-plan.md` | 历史归档 | Phase 1 已完成，仅作历史参考 |
-| `phase2-plan.md` | 历史归档 | Phase 2 已完成，仅作历史参考 |
-| `phase2.5-native-tools-plan.md` | 历史归档 | 原生工具迁移已完成，工具清单以 `Editor/Tools/Native/` 为准 |
-| `phase3-plan.md` | 历史归档 | Memory/Session/RAG 基础已完成，仅作设计参考 |
-| `phase4-plan.md` | 历史归档 | Phase 4 已完成 |
-| `stability-first-plan.md` | 已落地/被拆分执行 | v0.4.3~v0.4.6 已覆盖主要内容 |
-| `json-schema-validation-plan.md` | 已完成 | v0.4.4 已实现，仅作设计参考 |
-| `agentloop-split-plan.md` | 已完成 | v0.4.5 已实现 |
-| `chatwindow-split-plan.md` | 已完成 | v0.4.6 已实现 |
-| `rag-feature-completion-plan.md` | 已完成 | Phase 5.2 已完成，后续 RAG 新需求另开计划 |
-| `agentcore-workspace-hub-execution-plan.md` | 部分已落地 | Hub/Knowledge/Memory 已接入，剩余事项以 ROADMAP 为准 |
-| `memory-panel-ui-plan.md` | 已完成 | MemoryPanel UI 已接入，仅作设计参考 |
-| `domain-reload-resilience.md` | 已落地 | DomainReloadState/恢复链路已实现，修改核心恢复逻辑前参考 |
-| `file-change-tracking-plan.md` | 部分已落地/仍有效 | 文件变更追踪已有基础，Diff 视图仍属 Phase 6.2.3 |
-| `mem0-settings-optimization.md` | 候选优化 | 需要再次对照当前 Settings/Client 代码后决定是否执行 |
-| `mem0-vs-openmemory-analysis.md` | 运维参考 | 仅用于部署选型和故障分析 |
+> **重要更新（2026-05-13）**: 历史文档已归档至 [`_archive/`](_archive/) 目录，详见 [`README.md`](README.md)。
+
+| 文档 | 当前状态 | 位置 |
+|------|----------|------|
+| [`README.md`](README.md) | ✅ 文档导航 | `plans/` 顶层 |
+| [`ROADMAP.md`](ROADMAP.md) | ✅ 主导方向文档 | `plans/` 顶层 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | ✅ 架构参考（v0.4.8） | `plans/` 顶层 |
+| [`ai-coding-assistants-analysis.md`](ai-coding-assistants-analysis.md) | 📊 参考文档 | `plans/` 顶层 |
+| **Phase 计划** | 📦 历史归档 | [`_archive/phases/`](_archive/phases/) |
+| **重构计划** | 📦 历史归档 | [`_archive/refactoring/`](_archive/refactoring/) |
+| **功能计划** | 📦 历史归档 | [`_archive/features/`](_archive/features/) |
+| **技术分析** | 📦 历史归档 | [`_archive/analysis/`](_archive/analysis/) |
+
+**归档文档使用规则**：
+- 归档文档仅作历史参考，不作为当前开发依据
+- 当前功能状态以 `Editor/` 实际源码为准
+- 新功能计划在 `plans/` 顶层创建，完成后移至 `_archive/`
 
 ---
 

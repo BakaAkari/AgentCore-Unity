@@ -43,6 +43,7 @@ namespace AgentCore.Editor.Config
         private bool _setupFoldout = true;
         private bool _agentFoldout = true;
         private bool _advancedAgentFoldout = false;
+        private bool _compressionFoldout = false;
         private bool _contextMemoryFoldout = false;
         private bool _memoryServiceFoldout = false;
         private bool _knowledgeBaseFoldout = false;
@@ -75,6 +76,7 @@ namespace AgentCore.Editor.Config
         private string _lightragTestResult = "";
         private StatusLevel _lightragTestStatus = StatusLevel.None;
         private bool _isLightRAGTesting = false;
+
 
         // --- 工具管理 UI 状态 ---
         private bool _toolManagementFoldout = false;
@@ -131,6 +133,17 @@ namespace AgentCore.Editor.Config
             {
                 EditorGUI.indentLevel++;
                 DrawAgentBehaviorSection();
+                EditorGUI.indentLevel--;
+            }
+
+            EditorGUILayout.Space(10);
+
+            // === Context Compression ===
+            _compressionFoldout = DrawSectionHeader("Context Compression", "Smart compression for tool results and conversation history to maximize context window usage.", _compressionFoldout);
+            if (_compressionFoldout)
+            {
+                EditorGUI.indentLevel++;
+                DrawCompressionSection();
                 EditorGUI.indentLevel--;
             }
 
@@ -1067,6 +1080,74 @@ namespace AgentCore.Editor.Config
             }
 
             _settings.SaveSettings();
+        }
+
+        private void DrawCompressionSection()
+        {
+            EditorGUILayout.LabelField("Context Compression", EditorStyles.boldLabel);
+            DrawHelpText("Intelligently compresses tool results and conversation history instead of truncating them when the context window fills up.");
+
+            EditorGUI.indentLevel++;
+            EditorGUI.BeginChangeCheck();
+
+            _settings.compressionEnabled = EditorGUILayout.Toggle(
+                new GUIContent("Enabled", "启用上下文压缩系统（禁用后将回退到简单截断）"),
+                _settings.compressionEnabled);
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Tool Result Compression", EditorStyles.miniLabel);
+
+            _settings.toolResultCompressionThreshold = EditorGUILayout.IntField(
+                new GUIContent("Threshold (tokens)", "工具结果超过此 token 数时触发压缩"),
+                _settings.toolResultCompressionThreshold);
+
+            _settings.toolResultTargetTokens = EditorGUILayout.IntField(
+                new GUIContent("Target (tokens)", "压缩后的目标 token 数"),
+                _settings.toolResultTargetTokens);
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Conversation Compression", EditorStyles.miniLabel);
+
+            _settings.conversationCompressionTrigger = EditorGUILayout.Slider(
+                new GUIContent("Trigger Ratio", "上下文使用率超过此比例时触发对话压缩 (0.3-0.95)"),
+                _settings.conversationCompressionTrigger, 0.3f, 0.95f);
+
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("Separate Compression LLM (Optional)", EditorStyles.miniLabel);
+            DrawHelpText("Use a cheaper/faster model for compression tasks. If disabled, the main LLM is used.");
+
+            _settings.useSeparateCompressionLLM = EditorGUILayout.Toggle(
+                new GUIContent("Use Separate LLM", "使用独立的 LLM 进行压缩（推荐使用轻量模型如 Claude Haiku）"),
+                _settings.useSeparateCompressionLLM);
+
+            if (_settings.useSeparateCompressionLLM)
+            {
+                _settings.compressionLLMEndpoint = EditorGUILayout.TextField(
+                    new GUIContent("Endpoint", "压缩 LLM API 端点"),
+                    _settings.compressionLLMEndpoint);
+
+                _settings.compressionLLMModel = EditorGUILayout.TextField(
+                    new GUIContent("Model", "压缩 LLM 模型名称"),
+                    _settings.compressionLLMModel);
+
+                // API Key 行
+                DrawApiKeyRow(
+                    "API Key",
+                    "压缩 LLM API Key",
+                    SecureKeyStorage.HasCompressionLLMApiKey() ? "••••••••" : "(not set)",
+                    "Set Compression LLM API Key",
+                    "Enter your compression LLM API key:",
+                    SecureKeyStorage.SetCompressionLLMApiKey,
+                    () => SecureKeyStorage.SetCompressionLLMApiKey("")
+                );
+            }
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                _settings.SaveSettings();
+            }
+
+            EditorGUI.indentLevel--;
         }
 
         private void DrawUIPreferencesSection()

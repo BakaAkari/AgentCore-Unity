@@ -27,6 +27,9 @@ namespace AgentCore.Editor.Core
         /// <summary>正在执行工具调用</summary>
         ExecutingTool,
 
+        /// <summary>正在压缩上下文（Phase 5）</summary>
+        Compressing,
+
         /// <summary>发生错误</summary>
         Error
     }

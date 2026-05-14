@@ -6,6 +6,7 @@ using AgentCore.Editor.LLM;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Bootstrap;
 using AgentCore.Editor.Cloud;
+using AgentCore.Editor.Core.Compression;
 using AgentCore.Editor.Session;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
@@ -117,6 +118,15 @@ namespace AgentCore.Editor.Core
         /// <summary>文件变更追踪器 - 追踪当前会话中工具调用产生的文件变更</summary>
         private FileChangeTracker _fileChangeTracker;
 
+        /// <summary>工具结果压缩器 - 自动压缩过长的工具输出</summary>
+        private ToolResultCompressor _toolResultCompressor;
+
+        /// <summary>对话历史压缩器 - 在上下文窗口接近满时压缩旧对话</summary>
+        private ConversationCompressor _conversationCompressor;
+
+        /// <summary>压缩统计指标</summary>
+        private CompressionMetrics _compressionMetrics;
+
         /// <summary>默认系统提示词（Bootstrap 加载失败时的兜底方案）</summary>
         private const string DefaultSystemPrompt = "你是一个 Unity 开发助手。请用中文回复用户的问题，帮助他们解决 Unity 开发中遇到的问题。";
 
@@ -213,6 +223,12 @@ namespace AgentCore.Editor.Core
 
             // Phase 4.5: 初始化文件变更追踪器
             _fileChangeTracker = new FileChangeTracker();
+
+            // Phase 5: 初始化上下文压缩系统
+            _compressionMetrics = new CompressionMetrics();
+            var compressionClient = CompressionLLMClientFactory.CreateCompressionClient();
+            _toolResultCompressor = new ToolResultCompressor(compressionClient, _llmClient, _compressionMetrics);
+            _conversationCompressor = new ConversationCompressor(compressionClient, _llmClient, _compressionMetrics);
 
             _isInitialized = true;
 

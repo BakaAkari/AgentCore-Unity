@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config;
+using AgentCore.Editor.Core.Compression;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools;
 using UnityEngine;
@@ -33,6 +34,31 @@ namespace AgentCore.Editor.Core
                 ? settings.maxContextTokens
                 : ContextWindowManager.GetModelMaxTokens(settings.llmModel);
             int reserveTokens = settings.reserveResponseTokens;
+
+            // Phase 5: 在 TrimToFit 之前尝试对话压缩（智能压缩优先于暴力截断）
+            if (_conversationCompressor != null && settings.compressionEnabled)
+            {
+                // 预检查 token 使用率，仅在超过阈值时才显示压缩状态（避免每次 LLM 调用都闪烁状态）
+                int currentTokens = TokenCounter.EstimateConversationTokens(_messages);
+                float usageRatio = (float)currentTokens / maxTokens;
+
+                if (usageRatio >= settings.conversationCompressionTrigger)
+                {
+                    try
+                    {
+                        SetState(AgentState.Compressing);
+                        bool compressed = await _conversationCompressor.CompressIfNeededAsync(_messages, maxTokens, ct);
+                        if (compressed)
+                        {
+                            Debug.Log("[AgentCore] Conversation compression completed successfully.");
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogWarning($"[AgentCore] Conversation compression failed (non-fatal): {ex.Message}");
+                    }
+                }
+            }
 
             var messagesSnapshot = ContextWindowManager.TrimToFit(
                 _messages, maxTokens, reserveTokens);

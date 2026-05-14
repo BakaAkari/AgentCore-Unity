@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 5;
+        private const int CurrentVersion = 6;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -152,6 +152,30 @@ namespace AgentCore.Editor.Config
             return false;
         }
 
+        // --- 上下文压缩配置 ---
+        [Header("Context Compression")]
+        [Tooltip("启用上下文压缩系统")]
+        public bool compressionEnabled = true;
+
+        [Tooltip("使用独立的压缩 LLM（而非共享主 LLM）")]
+        public bool useSeparateCompressionLLM = false;
+
+        [Tooltip("压缩 LLM API 端点（仅在 useSeparateCompressionLLM=true 时使用）")]
+        public string compressionLLMEndpoint = "";
+
+        [Tooltip("压缩 LLM 模型名称（仅在 useSeparateCompressionLLM=true 时使用）")]
+        public string compressionLLMModel = "claude-3-haiku-20240307";
+
+        [Tooltip("工具结果压缩阈值（超过此 token 数的工具结果将被压缩）")]
+        public int toolResultCompressionThreshold = 1000;
+
+        [Tooltip("工具结果压缩目标 token 数")]
+        public int toolResultTargetTokens = 200;
+
+        [Tooltip("对话压缩触发比例（上下文使用率超过此值时触发对话压缩，0.0-1.0）")]
+        [Range(0.3f, 0.95f)]
+        public float conversationCompressionTrigger = 0.7f;
+
         // --- UI 偏好 ---
         [Header("UI Preferences")]
         [Tooltip("启用流式输出")]
@@ -243,6 +267,14 @@ namespace AgentCore.Editor.Config
                     reserveResponseTokens = 8000;
                     Debug.Log("[AgentCore] Settings migrated v4→v5: reserveResponseTokens updated to 8000");
                 }
+            }
+
+            // v5 -> v6: 初始化上下文压缩配置
+            if (settingsVersion < 6)
+            {
+                // 新字段使用声明时的默认值，无需额外迁移逻辑
+                // 仅记录日志表明迁移已执行
+                Debug.Log("[AgentCore] Settings migrated v5→v6: context compression settings initialized");
             }
 
             settingsVersion = CurrentVersion;

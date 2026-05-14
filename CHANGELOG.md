@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-14
+
+### Added
+- **上下文压缩系统 (Context Compression System)**
+  - 新增 `Editor/Core/Compression/` 模块 — 智能压缩替代简单截断
+  - `ToolResultCompressor` — 自动压缩超过阈值（默认 1000 tokens）的工具输出为 ~200 tokens 摘要
+  - `ConversationCompressor` — 当上下文使用率超过 70% 时，将旧对话段压缩为摘要
+  - `CompressionLLMClientFactory` — 支持独立的压缩 LLM（如 Claude Haiku），降低成本
+  - `CompressionMetrics` — 追踪压缩统计（token 节省量、压缩比、成功/失败次数）
+  - `CompressionPrompts` — 压缩专用 Prompt 模板
+  - 优雅降级：压缩 LLM 失败时自动回退到 head+tail 截断策略
+  - Settings 版本迁移 v5→v6，新增 7 个压缩配置字段
+  - `SecureKeyStorage` 新增压缩 LLM API Key 安全存储
+  - Settings Provider 新增 "Context Compression" 配置面板
+
+### Changed
+- `AgentLoop.LLM.cs` — 在 `TrimToFit` 之前调用 `ConversationCompressor`（智能压缩优先于暴力截断）
+- `AgentLoop.Tools.cs` — 工具结果添加到消息历史前通过 `ToolResultCompressor` 压缩
+- `AgentLoop.cs` — 初始化时创建压缩系统组件
+
 ## [0.4.8] - 2026-05-13
 
 ### Added

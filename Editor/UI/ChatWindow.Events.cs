@@ -109,6 +109,12 @@ namespace AgentCore.Editor.UI
                     SetCancelVisible(true);
                     break;
 
+                case AgentState.Compressing:
+                    UpdateStatusLabel("压缩上下文中...");
+                    SetSendEnabled(false);
+                    SetCancelVisible(true);
+                    break;
+
                 case AgentState.Error:
                     UpdateStatusLabel("错误", true);
                     break;

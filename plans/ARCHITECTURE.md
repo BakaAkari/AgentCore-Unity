@@ -1,6 +1,6 @@
 # Unity Agent Plugin — 完整架构设计
 
-> **版本**: 0.3.6 | **日期**: 2026-05-07
+> **版本**: 0.4.8 | **日期**: 2026-05-13
 >
 > AgentCore Unity 是一个 Unity Editor 内嵌的 AI Agent 插件，
 > 通过 Chat 窗口与 LLM 交互，使用自研原生工具系统操作 Unity Editor。
@@ -16,7 +16,7 @@
 | G1 | **对话式 AI 助手** | Unity Editor 内嵌 ChatGPT 风格对话窗口 |
 | G2 | **会话管理** | 支持会话持久化、自动记忆、导出 |
 | G3 | **云端服务集成** | LLM、mem0、LightRAG 均由管理员部署在内网云端 |
-| G4 | **自研原生工具** | 49 个工具、400+ 个 action，直接调用 Unity Editor API |
+| G4 | **自研原生工具** | 44 个工具、340+ 个 action，直接调用 Unity Editor API |
 | G5 | **零运维用户体验** | 用户只需配置云端端点，无需本地 Docker/WSL2 |
 | G6 | **UPM 包分发** | 标准 Unity Package Manager 格式，一键安装 |
 

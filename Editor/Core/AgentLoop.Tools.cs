@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Core.Compression;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
@@ -221,7 +222,8 @@ namespace AgentCore.Editor.Core
             }
 
             // Phase 2 Step 11: 构建带错误信息的 tool messages 追加到 LLM 历史
-            var toolMessages = BuildToolMessagesWithErrors(results, consoleErrors, compilationReport);
+            // Phase 5: 集成工具结果压缩 — 在添加到消息历史前压缩过长的工具输出
+            var toolMessages = await BuildToolMessagesWithCompressionAsync(results, consoleErrors, compilationReport, ct);
             _messages.AddRange(toolMessages);
 
             Debug.Log($"[AgentCore] Executed {results.Count} tool call(s), " +
@@ -303,6 +305,47 @@ namespace AgentCore.Editor.Core
                     consoleErrors,
                     compilationReport
                 );
+
+                messages.Add(ChatMessage.Tool(result.ToolCall.Id, content));
+            }
+
+            return messages;
+        }
+
+        /// <summary>
+        /// 构建带错误信息和压缩的 tool messages。
+        /// Phase 5: 在构建消息后对过长的工具结果进行智能压缩。
+        /// </summary>
+        private async Task<List<ChatMessage>> BuildToolMessagesWithCompressionAsync(
+            List<ToolCallResult> results,
+            List<ErrorInfo> consoleErrors,
+            ErrorReport compilationReport,
+            CancellationToken ct)
+        {
+            var messages = new List<ChatMessage>();
+
+            foreach (var result in results)
+            {
+                string content = BuildEnhancedToolContent(
+                    result.Result.GetContentForLLM(),
+                    result,
+                    consoleErrors,
+                    compilationReport
+                );
+
+                // Phase 5: 尝试压缩过长的工具结果
+                if (_toolResultCompressor != null)
+                {
+                    try
+                    {
+                        content = await _toolResultCompressor.CompressIfNeededAsync(
+                            result.ToolName, content, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[AgentCore] Tool result compression failed for '{result.ToolName}' (non-fatal): {ex.Message}");
+                    }
+                }
 
                 messages.Add(ChatMessage.Tool(result.ToolCall.Id, content));
             }
