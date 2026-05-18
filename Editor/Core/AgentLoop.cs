@@ -84,6 +84,11 @@ namespace AgentCore.Editor.Core
         /// </summary>
         public FileChangeTracker FileTracker => _fileChangeTracker;
 
+        /// <summary>
+        /// 压缩统计指标（只读），供 UI 层显示压缩信息。
+        /// </summary>
+        public CompressionMetrics CompressionMetrics => _compressionMetrics;
+
         #endregion
 
         #region 私有字段
@@ -229,6 +234,38 @@ namespace AgentCore.Editor.Core
             var compressionClient = CompressionLLMClientFactory.CreateCompressionClient();
             _toolResultCompressor = new ToolResultCompressor(compressionClient, _llmClient, _compressionMetrics);
             _conversationCompressor = new ConversationCompressor(compressionClient, _llmClient, _compressionMetrics);
+
+            // Phase 5: 尝试从 DomainReloadState 恢复压缩统计数据
+            try
+            {
+                var reloadState = DomainReloadState.instance;
+                if (reloadState.TotalTokensSaved > 0 ||
+                    reloadState.ToolResultCompressionSuccessCount > 0 ||
+                    reloadState.ConversationCompressionSuccessCount > 0)
+                {
+                    // 计算各自节省的 token 数
+                    int toolResultTokensSaved = reloadState.ToolResultOriginalTokens > 0
+                        ? reloadState.ToolResultOriginalTokens - (reloadState.TotalTokensSaved -
+                          (reloadState.ConversationOriginalTokens > 0 ? reloadState.ConversationOriginalTokens : 0))
+                        : 0;
+                    int conversationTokensSaved = reloadState.TotalTokensSaved - toolResultTokensSaved;
+
+                    _compressionMetrics.RestoreFromPersistence(
+                        reloadState.ToolResultCompressionSuccessCount,
+                        reloadState.ConversationCompressionSuccessCount,
+                        reloadState.ToolResultOriginalTokens,
+                        reloadState.ConversationOriginalTokens,
+                        toolResultTokensSaved,
+                        conversationTokensSaved
+                    );
+                    Debug.Log($"[AgentCore] Compression metrics restored from DomainReloadState: " +
+                              $"{reloadState.TotalTokensSaved} tokens saved.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to restore compression metrics: {ex.Message}");
+            }
 
             _isInitialized = true;
 
@@ -412,7 +449,8 @@ namespace AgentCore.Editor.Core
             {
                 SessionManager.Instance.ForceSave(
                     new List<ChatMessage>(_messages),
-                    new List<ConversationTurn>(_conversationTurns));
+                    new List<ConversationTurn>(_conversationTurns),
+                    _compressionMetrics);
             }
             catch (Exception ex)
             {
@@ -437,6 +475,10 @@ namespace AgentCore.Editor.Core
             // 3.5 Phase 4.5: 清空文件变更追踪器和持久化数据
             _fileChangeTracker?.Clear();
             DomainReloadState.instance.ClearFileChangeRecords();
+
+            // 3.6 Phase 5: 清空压缩统计数据
+            _compressionMetrics?.Reset();
+            DomainReloadState.instance.ClearCompressionMetrics();
 
             // 4. 不再通过 EmitEvent 发送 ConversationReset 事件。
             // EmitEvent 使用 EditorApplication.delayCall 延迟执行，会导致 ClearMessages()
@@ -492,6 +534,18 @@ namespace AgentCore.Editor.Core
             _messages.AddRange(restoredMessages);
             _conversationTurns.AddRange(restoredTurns);
 
+            // 恢复压缩统计数据（会话级别）
+            if (session.CompressionMetrics != null)
+            {
+                session.CompressionMetrics.RestoreToCompressionMetrics(_compressionMetrics);
+                Debug.Log($"[AgentCore] Restored compression metrics: {_compressionMetrics.TotalCompressionCount} compressions, {_compressionMetrics.TotalTokensSaved} tokens saved");
+            }
+            else
+            {
+                // 旧会话没有压缩统计数据，重置为空
+                _compressionMetrics.Reset();
+            }
+
             // 修复 #7: 清理恢复的消息历史中不完整的 tool_use/tool_result 配对
             // 防止发送到 LLM API 时因缺少 tool_result 导致 400 错误
             SanitizeMessageHistory();
@@ -514,6 +568,61 @@ namespace AgentCore.Editor.Core
             // RebuildMessageBubbles 之后才执行，导致重建的 UI 被清除。
 
             return true;
+        }
+
+        /// <summary>
+        /// 获取当前上下文预算信息，供 UI 层显示。
+        /// </summary>
+        /// <returns>上下文预算信息快照</returns>
+        public ContextBudgetInfo GetContextBudget()
+        {
+            if (!_isInitialized || _compressionMetrics == null)
+            {
+                return new ContextBudgetInfo
+                {
+                    CurrentTokens = 0,
+                    MaxTokens = 0,
+                    ReservedTokens = 0,
+                    AvailableTokens = 0,
+                    UsagePercentage = 0f,
+                    ToolResultCompressions = 0,
+                    ConversationCompressions = 0,
+                    TokensSaved = 0,
+                    CompressionRatio = 0f,
+                    IsCompressionActive = false,
+                    ModelName = "Unknown"
+                };
+            }
+
+            var settings = AgentCoreSettings.instance;
+            var modelName = settings.llmModel;
+            var maxTokens = ContextWindowManager.GetModelMaxTokens(modelName);
+            var reservedTokens = settings.reserveResponseTokens;
+
+            // 计算当前消息历史的 token 数
+            int currentTokens = 0;
+            foreach (var msg in _messages)
+            {
+                currentTokens += TokenCounter.EstimateMessageTokens(msg);
+            }
+
+            var availableTokens = maxTokens - reservedTokens - currentTokens;
+            var usagePercentage = maxTokens > 0 ? (float)currentTokens / maxTokens : 0f;
+
+            return new ContextBudgetInfo
+            {
+                CurrentTokens = currentTokens,
+                MaxTokens = maxTokens,
+                ReservedTokens = reservedTokens,
+                AvailableTokens = availableTokens > 0 ? availableTokens : 0,
+                UsagePercentage = usagePercentage,
+                ToolResultCompressions = _compressionMetrics.ToolResultCompressionSuccessCount,
+                ConversationCompressions = _compressionMetrics.ConversationCompressionSuccessCount,
+                TokensSaved = _compressionMetrics.TotalTokensSaved,
+                CompressionRatio = _compressionMetrics.OverallCompressionRatio,
+                IsCompressionActive = _compressionMetrics.TotalCompressionCount > 0,
+                ModelName = modelName
+            };
         }
 
         #endregion

@@ -161,6 +161,42 @@ namespace AgentCore.Editor.Core.Compression
         }
 
         /// <summary>
+        /// 从持久化数据恢复统计信息（用于 Domain Reload 后恢复）。
+        /// </summary>
+        /// <param name="toolResultSuccessCount">工具结果压缩成功次数</param>
+        /// <param name="conversationSuccessCount">对话压缩成功次数</param>
+        /// <param name="toolResultOriginalTokens">工具结果压缩前的总 token 数</param>
+        /// <param name="conversationOriginalTokens">对话压缩前的总 token 数</param>
+        /// <param name="toolResultTokensSaved">工具结果节省的 token 数</param>
+        /// <param name="conversationTokensSaved">对话节省的 token 数</param>
+        public void RestoreFromPersistence(
+            int toolResultSuccessCount,
+            int conversationSuccessCount,
+            int toolResultOriginalTokens,
+            int conversationOriginalTokens,
+            int toolResultTokensSaved,
+            int conversationTokensSaved)
+        {
+            // 恢复成功次数（同时设置总次数，假设恢复时只保留成功的压缩）
+            ToolResultCompressionSuccessCount = toolResultSuccessCount;
+            ToolResultCompressionCount = toolResultSuccessCount;
+            ConversationCompressionSuccessCount = conversationSuccessCount;
+            ConversationCompressionCount = conversationSuccessCount;
+
+            // 恢复 token 统计
+            ToolResultOriginalTokens = toolResultOriginalTokens;
+            ConversationOriginalTokens = conversationOriginalTokens;
+            ToolResultTokensSaved = toolResultTokensSaved;
+            ConversationTokensSaved = conversationTokensSaved;
+
+            // 失败和跳过次数不恢复（设为 0）
+            ToolResultCompressionFailureCount = 0;
+            ToolResultCompressionSkippedCount = 0;
+            ConversationCompressionFailureCount = 0;
+            ConversationMessagesCompressed = 0; // 消息数量不持久化
+        }
+
+        /// <summary>
         /// 生成人类可读的统计摘要。
         /// </summary>
         /// <returns>格式化的统计信息字符串</returns>

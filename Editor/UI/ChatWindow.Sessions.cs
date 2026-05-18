@@ -244,6 +244,9 @@ namespace AgentCore.Editor.UI
                     _fileChangeSummaryPanel?.ClearAndHide();
                 }
 
+                // 3.6 Phase 6.0.4: 切换会话后更新上下文使用情况面板
+                UpdateContextUsagePanel();
+
                 // 4. 刷新会话列表（更新高亮）
                 RefreshSessionList();
 

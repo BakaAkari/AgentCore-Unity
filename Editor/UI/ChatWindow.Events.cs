@@ -73,6 +73,9 @@ namespace AgentCore.Editor.UI
                     _fileChangeSummaryPanel?.UpdateChanges(evt.FileChanges);
                     break;
             }
+
+            // Phase 6.0.4: 每次事件后更新上下文使用情况面板
+            UpdateContextUsagePanel();
         }
 
         /// <summary>
@@ -118,6 +121,29 @@ namespace AgentCore.Editor.UI
                 case AgentState.Error:
                     UpdateStatusLabel("错误", true);
                     break;
+            }
+
+            // Phase 6.0.4: 状态变更后更新上下文使用情况面板
+            UpdateContextUsagePanel();
+        }
+
+        /// <summary>
+        /// 更新上下文使用情况面板。
+        /// Phase 6.0.4: 从 AgentLoop 获取最新的上下文预算信息并更新 UI。
+        /// </summary>
+        private void UpdateContextUsagePanel()
+        {
+            if (_contextUsagePanel == null || _agentLoop == null)
+                return;
+
+            try
+            {
+                var budget = _agentLoop.GetContextBudget();
+                _contextUsagePanel.UpdateDisplay(budget);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore.UI] Failed to update context usage panel: {ex.Message}");
             }
         }
 

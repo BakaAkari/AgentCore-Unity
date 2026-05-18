@@ -101,6 +101,9 @@ namespace AgentCore.Editor.UI
         /// <summary>文件变更汇总面板</summary>
         private FileChangeSummaryPanel _fileChangeSummaryPanel;
 
+        /// <summary>上下文使用情况面板</summary>
+        private ContextUsagePanel _contextUsagePanel;
+
         #endregion
 
         #region Hub 导航与面板引用
@@ -296,6 +299,21 @@ namespace AgentCore.Editor.UI
                 if (inputIndex >= 0)
                 {
                     chatArea.Insert(inputIndex, _fileChangeSummaryPanel);
+                }
+
+                // 6.8 Phase 6.0.4: 创建上下文使用情况面板并插入到 input-area 之前（在文件变更面板之后）
+                _contextUsagePanel = new ContextUsagePanel();
+                // 加载 ContextUsagePanel 的样式表
+                var contextPanelUss = AssetDatabase.LoadAssetAtPath<StyleSheet>(
+                    "Packages/com.agentcore.unity/Editor/UI/Components/ContextUsagePanel.uss");
+                if (contextPanelUss != null)
+                {
+                    _contextUsagePanel.styleSheets.Add(contextPanelUss);
+                }
+                inputIndex = chatArea.IndexOf(inputArea);
+                if (inputIndex >= 0)
+                {
+                    chatArea.Insert(inputIndex, _contextUsagePanel);
                 }
                 else
                 {

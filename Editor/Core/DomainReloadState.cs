@@ -83,6 +83,23 @@ namespace AgentCore.Editor.Core
         /// <summary>文件变更记录的 JSON 序列化数据（跨 Domain Reload 保留）</summary>
         [SerializeField] private string _fileChangeRecordsJson;
 
+        // === Phase 5 新增字段（压缩统计数据持久化）===
+
+        /// <summary>工具结果压缩成功次数</summary>
+        [SerializeField] private int _toolResultCompressionSuccessCount;
+
+        /// <summary>对话压缩成功次数</summary>
+        [SerializeField] private int _conversationCompressionSuccessCount;
+
+        /// <summary>总节省 token 数</summary>
+        [SerializeField] private int _totalTokensSaved;
+
+        /// <summary>工具结果压缩前的总 token 数</summary>
+        [SerializeField] private int _toolResultOriginalTokens;
+
+        /// <summary>对话压缩前的总 token 数</summary>
+        [SerializeField] private int _conversationOriginalTokens;
+
         #endregion
 
         #region 公开属性
@@ -126,6 +143,23 @@ namespace AgentCore.Editor.Core
 
         /// <summary>文件变更记录的 JSON 序列化数据</summary>
         public string FileChangeRecordsJson => _fileChangeRecordsJson;
+
+        // === Phase 5 新增属性（压缩统计数据）===
+
+        /// <summary>工具结果压缩成功次数</summary>
+        public int ToolResultCompressionSuccessCount => _toolResultCompressionSuccessCount;
+
+        /// <summary>对话压缩成功次数</summary>
+        public int ConversationCompressionSuccessCount => _conversationCompressionSuccessCount;
+
+        /// <summary>总节省 token 数</summary>
+        public int TotalTokensSaved => _totalTokensSaved;
+
+        /// <summary>工具结果压缩前的总 token 数</summary>
+        public int ToolResultOriginalTokens => _toolResultOriginalTokens;
+
+        /// <summary>对话压缩前的总 token 数</summary>
+        public int ConversationOriginalTokens => _conversationOriginalTokens;
 
         #endregion
 
@@ -214,10 +248,53 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
+        /// 保存压缩统计数据。
+        /// 在 <c>AssemblyReloadEvents.beforeAssemblyReload</c> 回调中由 AgentLoop 调用，
+        /// 将 <see cref="Compression.CompressionMetrics"/> 的统计数据保存，以便 Domain Reload 后恢复。
+        /// </summary>
+        /// <param name="toolResultSuccessCount">工具结果压缩成功次数</param>
+        /// <param name="conversationSuccessCount">对话压缩成功次数</param>
+        /// <param name="totalTokensSaved">总节省 token 数</param>
+        /// <param name="toolResultOriginalTokens">工具结果压缩前的总 token 数</param>
+        /// <param name="conversationOriginalTokens">对话压缩前的总 token 数</param>
+        public void SaveCompressionMetrics(
+            int toolResultSuccessCount,
+            int conversationSuccessCount,
+            int totalTokensSaved,
+            int toolResultOriginalTokens,
+            int conversationOriginalTokens)
+        {
+            _toolResultCompressionSuccessCount = toolResultSuccessCount;
+            _conversationCompressionSuccessCount = conversationSuccessCount;
+            _totalTokensSaved = totalTokensSaved;
+            _toolResultOriginalTokens = toolResultOriginalTokens;
+            _conversationOriginalTokens = conversationOriginalTokens;
+            Save(true);
+
+            Debug.Log($"[AgentCore] DomainReloadState: Compression metrics saved — " +
+                      $"toolResults={toolResultSuccessCount}, conversations={conversationSuccessCount}, " +
+                      $"tokensSaved={totalTokensSaved}");
+        }
+
+        /// <summary>
+        /// 清除压缩统计数据。
+        /// 在会话切换或重置时调用。
+        /// </summary>
+        public void ClearCompressionMetrics()
+        {
+            _toolResultCompressionSuccessCount = 0;
+            _conversationCompressionSuccessCount = 0;
+            _totalTokensSaved = 0;
+            _toolResultOriginalTokens = 0;
+            _conversationOriginalTokens = 0;
+            Save(true);
+        }
+
+        /// <summary>
         /// 清除中断标记。
         /// 在会话恢复完成后调用。
-        /// 注意：不清除文件变更记录（<see cref="_fileChangeRecordsJson"/>），
-        /// 因为文件变更数据需要在整个会话期间保留。
+        /// 注意：不清除文件变更记录（<see cref="_fileChangeRecordsJson"/>）和压缩统计数据，
+        /// 因为这些数据需要在整个会话期间保留。
         /// </summary>
         public void ClearInterruption()
         {
@@ -235,7 +312,7 @@ namespace AgentCore.Editor.Core
             _compilationSucceeded = false;
             _compilationErrors = string.Empty;
             _interruptedToolCallId = string.Empty;
-            // 注意：不清除 _fileChangeRecordsJson，文件变更数据独立于中断状态
+            // 注意：不清除 _fileChangeRecordsJson 和压缩统计数据，这些数据独立于中断状态
 
             Save(true);
 

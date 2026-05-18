@@ -175,7 +175,8 @@ namespace AgentCore.Editor.Core
             {
                 SessionManager.Instance.AutoSave(
                     new List<ChatMessage>(_messages),
-                    new List<ConversationTurn>(_conversationTurns));
+                    new List<ConversationTurn>(_conversationTurns),
+                    _compressionMetrics);
             }
             catch (Exception saveEx)
             {

@@ -1,0 +1,95 @@
+/* Context Usage Panel Styles */
+
+.context-usage-panel {
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    margin-bottom: 8px;
+    padding: 8px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.context-usage-panel__header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    cursor: link;
+}
+
+.context-usage-panel__header Label {
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.context-usage-panel__header Button {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin: 0;
+    background-color: transparent;
+    border-width: 0;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.context-usage-panel__header Button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.context-usage-panel__content {
+    flex-direction: column;
+}
+
+.context-usage-panel--collapsed .context-usage-panel__content {
+    display: none;
+}
+
+.context-usage-panel__progress-bar {
+    height: 8px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    margin-bottom: 6px;
+    overflow: hidden;
+}
+
+.context-usage-panel__progress-fill {
+    height: 100%;
+    background-color: rgb(51, 204, 77);
+    transition-property: width, background-color;
+    transition-duration: 0.3s;
+    transition-timing-function: ease-out;
+}
+
+.context-usage-panel__stats-row {
+    flex-direction: row;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.context-usage-panel__stat-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.context-usage-panel__stat-value {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.9);
+    -unity-font-style: bold;
+}
+
+.context-usage-panel__compression-badge {
+    background-color: rgba(100, 150, 255, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-top: 6px;
+    align-items: center;
+    justify-content: center;
+}
+
+.context-usage-panel__compression-badge Label {
+    font-size: 11px;
+    color: rgb(150, 200, 255);
+    -unity-font-style: bold;
+}

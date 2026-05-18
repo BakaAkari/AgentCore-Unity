@@ -45,11 +45,16 @@ namespace AgentCore.Editor.Session
         [JsonProperty("message_count")]
         public int MessageCount { get; set; }
 
+        /// <summary>压缩统计数据（会话级别）</summary>
+        [JsonProperty("compression_metrics", NullValueHandling = NullValueHandling.Ignore)]
+        public SerializableCompressionMetrics CompressionMetrics { get; set; }
+
         /// <summary>
         /// 从 AgentLoop 的运行时数据创建 SessionData。
         /// </summary>
         /// <param name="messages">LLM 消息历史</param>
         /// <param name="turns">UI 对话轮次</param>
+        /// <param name="compressionMetrics">压缩统计数据（会话级别）</param>
         /// <param name="existingSession">已有的会话数据（用于保留 Id、Title、CreatedAt）</param>
         /// <param name="updateTimestamp">
         /// 是否更新 UpdatedAt 时间戳。
@@ -60,6 +65,7 @@ namespace AgentCore.Editor.Session
         public static SessionData FromAgentLoop(
             List<ChatMessage> messages,
             List<ConversationTurn> turns,
+            Core.Compression.CompressionMetrics compressionMetrics = null,
             SessionData existingSession = null,
             bool updateTimestamp = true)
         {
@@ -69,7 +75,8 @@ namespace AgentCore.Editor.Session
                 Title = existingSession?.Title ?? "",
                 CreatedAt = existingSession?.CreatedAt ?? DateTime.UtcNow,
                 UpdatedAt = updateTimestamp ? DateTime.UtcNow : (existingSession?.UpdatedAt ?? DateTime.UtcNow),
-                MessageCount = messages?.Count ?? 0
+                MessageCount = messages?.Count ?? 0,
+                CompressionMetrics = SerializableCompressionMetrics.FromCompressionMetrics(compressionMetrics)
             };
 
             // 转换 ChatMessage -> SerializableChatMessage
@@ -420,5 +427,98 @@ namespace AgentCore.Editor.Session
         /// <summary>执行耗时（毫秒）</summary>
         [JsonProperty("execution_time_ms")]
         public double ExecutionTimeMs { get; set; }
+    }
+
+    /// <summary>
+    /// 可序列化的压缩统计数据 — 用于会话级别的压缩统计持久化。
+    /// </summary>
+    [Serializable]
+    public class SerializableCompressionMetrics
+    {
+        /// <summary>工具结果压缩次数</summary>
+        [JsonProperty("tool_result_compressions")]
+        public int ToolResultCompressions { get; set; }
+
+        /// <summary>工具结果压缩失败次数</summary>
+        [JsonProperty("tool_result_failures")]
+        public int ToolResultFailures { get; set; }
+
+        /// <summary>工具结果跳过压缩次数</summary>
+        [JsonProperty("tool_result_skipped")]
+        public int ToolResultSkipped { get; set; }
+
+        /// <summary>工具结果原始 token 总数</summary>
+        [JsonProperty("tool_result_original_tokens")]
+        public int ToolResultOriginalTokens { get; set; }
+
+        /// <summary>工具结果压缩后 token 总数</summary>
+        [JsonProperty("tool_result_compressed_tokens")]
+        public int ToolResultCompressedTokens { get; set; }
+
+        /// <summary>对话压缩次数</summary>
+        [JsonProperty("conversation_compressions")]
+        public int ConversationCompressions { get; set; }
+
+        /// <summary>对话压缩失败次数</summary>
+        [JsonProperty("conversation_failures")]
+        public int ConversationFailures { get; set; }
+
+        /// <summary>对话压缩的消息数</summary>
+        [JsonProperty("conversation_messages_compressed")]
+        public int ConversationMessagesCompressed { get; set; }
+
+        /// <summary>对话原始 token 总数</summary>
+        [JsonProperty("conversation_original_tokens")]
+        public int ConversationOriginalTokens { get; set; }
+
+        /// <summary>对话压缩后 token 总数</summary>
+        [JsonProperty("conversation_compressed_tokens")]
+        public int ConversationCompressedTokens { get; set; }
+
+        /// <summary>
+        /// 从 CompressionMetrics 创建可序列化版本。
+        /// </summary>
+        public static SerializableCompressionMetrics FromCompressionMetrics(Core.Compression.CompressionMetrics metrics)
+        {
+            if (metrics == null) return null;
+
+            return new SerializableCompressionMetrics
+            {
+                ToolResultCompressions = metrics.ToolResultCompressionCount,
+                ToolResultFailures = metrics.ToolResultCompressionFailureCount,
+                ToolResultSkipped = metrics.ToolResultCompressionSkippedCount,
+                ToolResultOriginalTokens = metrics.ToolResultOriginalTokens,
+                ToolResultCompressedTokens = metrics.ToolResultOriginalTokens - metrics.ToolResultTokensSaved,
+                ConversationCompressions = metrics.ConversationCompressionCount,
+                ConversationFailures = metrics.ConversationCompressionFailureCount,
+                ConversationMessagesCompressed = metrics.ConversationMessagesCompressed,
+                ConversationOriginalTokens = metrics.ConversationOriginalTokens,
+                ConversationCompressedTokens = metrics.ConversationOriginalTokens - metrics.ConversationTokensSaved
+            };
+        }
+
+        /// <summary>
+        /// 恢复到 CompressionMetrics 实例。
+        /// </summary>
+        public void RestoreToCompressionMetrics(Core.Compression.CompressionMetrics metrics)
+        {
+            if (metrics == null) return;
+
+            // RestoreFromPersistence 只接受 6 个参数：
+            // toolResultSuccessCount, conversationSuccessCount,
+            // toolResultOriginalTokens, conversationOriginalTokens,
+            // toolResultTokensSaved, conversationTokensSaved
+            int toolResultTokensSaved = ToolResultOriginalTokens - ToolResultCompressedTokens;
+            int conversationTokensSaved = ConversationOriginalTokens - ConversationCompressedTokens;
+
+            metrics.RestoreFromPersistence(
+                ToolResultCompressions,  // toolResultSuccessCount
+                ConversationCompressions,  // conversationSuccessCount
+                ToolResultOriginalTokens,
+                ConversationOriginalTokens,
+                toolResultTokensSaved,
+                conversationTokensSaved
+            );
+        }
     }
 }

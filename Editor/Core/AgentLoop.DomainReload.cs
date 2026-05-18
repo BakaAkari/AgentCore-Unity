@@ -43,11 +43,31 @@ namespace AgentCore.Editor.Core
                     Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save file change records (idle): {ex.Message}");
                 }
 
+                // Phase 5: 空闲状态也保存压缩统计数据
+                try
+                {
+                    if (_compressionMetrics != null)
+                    {
+                        DomainReloadState.instance.SaveCompressionMetrics(
+                            _compressionMetrics.ToolResultCompressionSuccessCount,
+                            _compressionMetrics.ConversationCompressionSuccessCount,
+                            _compressionMetrics.TotalTokensSaved,
+                            _compressionMetrics.ToolResultOriginalTokens,
+                            _compressionMetrics.ConversationOriginalTokens
+                        );
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save compression metrics (idle): {ex.Message}");
+                }
+
                 try
                 {
                     SessionManager.Instance.ForceSave(
                         new List<ChatMessage>(_messages),
-                        new List<ConversationTurn>(_conversationTurns));
+                        new List<ConversationTurn>(_conversationTurns),
+                        _compressionMetrics);
                 }
                 catch (Exception ex)
                 {
@@ -154,12 +174,32 @@ namespace AgentCore.Editor.Core
                 Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save file change records: {ex.Message}");
             }
 
+            // 7.5 Phase 5: 保存压缩统计数据到 DomainReloadState
+            try
+            {
+                if (_compressionMetrics != null)
+                {
+                    DomainReloadState.instance.SaveCompressionMetrics(
+                        _compressionMetrics.ToolResultCompressionSuccessCount,
+                        _compressionMetrics.ConversationCompressionSuccessCount,
+                        _compressionMetrics.TotalTokensSaved,
+                        _compressionMetrics.ToolResultOriginalTokens,
+                        _compressionMetrics.ConversationOriginalTokens
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save compression metrics: {ex.Message}");
+            }
+
             // 8. 强制保存当前对话历史到磁盘
             try
             {
                 SessionManager.Instance.ForceSave(
                     new List<ChatMessage>(_messages),
-                    new List<ConversationTurn>(_conversationTurns));
+                    new List<ConversationTurn>(_conversationTurns),
+                    _compressionMetrics);
                 Debug.Log("[AgentCore] beforeAssemblyReload: Session saved successfully.");
             }
             catch (Exception ex)

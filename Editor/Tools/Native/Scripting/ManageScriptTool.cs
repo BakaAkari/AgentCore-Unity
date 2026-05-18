@@ -29,7 +29,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""read"", ""write"", ""create"", ""delete"", ""list"", ""get_info"", ""analyze"", ""find_references"", ""add_method"", ""add_field""],
+                    ""enum"": [""read"", ""write"", ""create"", ""delete"", ""list"", ""get_info"", ""analyze"", ""find_references"", ""add_method"", ""add_field"", ""search""],
                     ""description"": ""Action to perform""
                 },
                 ""path"": {
@@ -105,6 +105,22 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 ""serialized"": {
                     ""type"": ""boolean"",
                     ""description"": ""Whether to add [SerializeField] attribute for add_field (default: true)""
+                },
+                ""query"": {
+                    ""type"": ""string"",
+                    ""description"": ""Search query for search action""
+                },
+                ""case_sensitive"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Whether search is case-sensitive (default: false)""
+                },
+                ""use_regex"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""Whether to use regex pattern matching (default: false)""
+                },
+                ""context_lines"": {
+                    ""type"": ""integer"",
+                    ""description"": ""Number of context lines to show around matches (default: 2)""
                 }
             },
             ""required"": [""action""]
@@ -112,7 +128,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_script",
-            description: "Manage C# scripts — read, write, create, delete, list, get info, analyze API, find references, add methods/fields",
+            description: "Manage C# scripts — read, write, create, delete, list, get info, analyze API, find references, add methods/fields, search content",
             category: "Scripting",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -159,9 +175,12 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                     case "add_field":
                         response = HandleAddField(parameters);
                         break;
+                    case "search":
+                        response = HandleSearch(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: read, write, create, delete, list, get_info, analyze, find_references, add_method, add_field");
+                            $"Unknown action: '{action}'. Valid actions: read, write, create, delete, list, get_info, analyze, find_references, add_method, add_field, search");
                         break;
                 }
             }
@@ -695,6 +714,140 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 ["access"] = access,
                 ["serialized"] = serialized
             }, $"Added field '{access} {fieldType} {fieldName}' to '{path}'.");
+        }
+
+        /// <summary>
+        /// Searches for content in script files.
+        /// Supports case-sensitive/insensitive search and regex patterns.
+        /// </summary>
+        private ToolResponse HandleSearch(JObject parameters)
+        {
+            var query = ToolHelpers.GetRequiredString(parameters, "query");
+            var directory = ToolHelpers.GetOptionalString(parameters, "directory", "Assets");
+            var recursive = ToolHelpers.GetOptionalBool(parameters, "recursive", true);
+            var caseSensitive = ToolHelpers.GetOptionalBool(parameters, "case_sensitive", false);
+            var useRegex = ToolHelpers.GetOptionalBool(parameters, "use_regex", false);
+            var contextLines = ToolHelpers.GetOptionalInt(parameters, "context_lines", 2);
+
+            directory = ToolHelpers.NormalizeAssetPath(directory);
+            var fullDir = Path.GetFullPath(directory);
+
+            if (!Directory.Exists(fullDir))
+                return ToolResponse.Fail($"Directory not found: {directory}");
+
+            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            var files = Directory.GetFiles(fullDir, "*.cs", searchOption);
+
+            var results = new JArray();
+            var totalMatches = 0;
+
+            foreach (var file in files)
+            {
+                try
+                {
+                    var content = File.ReadAllText(file);
+                    var lines = content.Split('\n');
+
+                    // Convert to asset-relative path
+                    var relativePath = file.Replace("\\", "/");
+                    var assetsIndex = relativePath.IndexOf("Assets/", StringComparison.OrdinalIgnoreCase);
+                    if (assetsIndex >= 0)
+                        relativePath = relativePath.Substring(assetsIndex);
+
+                    var fileMatches = new JArray();
+
+                    if (useRegex)
+                    {
+                        // Regex search
+                        var regexOptions = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
+                        Regex regex;
+                        try
+                        {
+                            regex = new Regex(query, regexOptions);
+                        }
+                        catch (ArgumentException ex)
+                        {
+                            return ToolResponse.Fail($"Invalid regex pattern: {ex.Message}");
+                        }
+
+                        for (int i = 0; i < lines.Length; i++)
+                        {
+                            if (regex.IsMatch(lines[i]))
+                            {
+                                fileMatches.Add(CreateMatchResult(lines, i, contextLines));
+                                totalMatches++;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Plain text search
+                        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                        for (int i = 0; i < lines.Length; i++)
+                        {
+                            if (lines[i].IndexOf(query, comparison) >= 0)
+                            {
+                                fileMatches.Add(CreateMatchResult(lines, i, contextLines));
+                                totalMatches++;
+                            }
+                        }
+                    }
+
+                    if (fileMatches.Count > 0)
+                    {
+                        results.Add(new JObject
+                        {
+                            ["path"] = relativePath,
+                            ["matchCount"] = fileMatches.Count,
+                            ["matches"] = fileMatches
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Skip files that can't be read
+                    Debug.LogWarning($"Could not search file {file}: {ex.Message}");
+                }
+            }
+
+            return ToolResponse.OkWithData(new JObject
+            {
+                ["query"] = query,
+                ["directory"] = directory,
+                ["caseSensitive"] = caseSensitive,
+                ["useRegex"] = useRegex,
+                ["filesSearched"] = files.Length,
+                ["filesWithMatches"] = results.Count,
+                ["totalMatches"] = totalMatches,
+                ["results"] = results
+            }, $"Found {totalMatches} match(es) in {results.Count} file(s)");
+        }
+
+        /// <summary>
+        /// Creates a match result with context lines.
+        /// </summary>
+        private static JObject CreateMatchResult(string[] lines, int matchLineIndex, int contextLines)
+        {
+            var startLine = Math.Max(0, matchLineIndex - contextLines);
+            var endLine = Math.Min(lines.Length - 1, matchLineIndex + contextLines);
+
+            var contextArray = new JArray();
+            for (int i = startLine; i <= endLine; i++)
+            {
+                contextArray.Add(new JObject
+                {
+                    ["lineNumber"] = i + 1,
+                    ["content"] = lines[i].TrimEnd('\r'),
+                    ["isMatch"] = i == matchLineIndex
+                });
+            }
+
+            return new JObject
+            {
+                ["lineNumber"] = matchLineIndex + 1,
+                ["line"] = lines[matchLineIndex].TrimEnd('\r'),
+                ["context"] = contextArray
+            };
         }
 
         #endregion

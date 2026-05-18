@@ -138,7 +138,8 @@ namespace AgentCore.Editor.Session
         /// </summary>
         /// <param name="messages">LLM 消息历史</param>
         /// <param name="turns">UI 对话轮次</param>
-        public void SaveCurrentSession(List<ChatMessage> messages, List<ConversationTurn> turns)
+        /// <param name="compressionMetrics">压缩统计数据（会话级别）</param>
+        public void SaveCurrentSession(List<ChatMessage> messages, List<ConversationTurn> turns, Core.Compression.CompressionMetrics compressionMetrics = null)
         {
             if (string.IsNullOrEmpty(CurrentSessionId))
             {
@@ -148,7 +149,7 @@ namespace AgentCore.Editor.Session
 
             try
             {
-                _currentSession = SessionData.FromAgentLoop(messages, turns, _currentSession, updateTimestamp: _isDirty);
+                _currentSession = SessionData.FromAgentLoop(messages, turns, compressionMetrics, _currentSession, updateTimestamp: _isDirty);
                 SessionStorage.Save(_currentSession);
                 _lastAutoSaveTime = DateTime.UtcNow;
 
@@ -277,7 +278,8 @@ namespace AgentCore.Editor.Session
         /// </summary>
         /// <param name="messages">LLM 消息历史</param>
         /// <param name="turns">UI 对话轮次</param>
-        public void AutoSave(List<ChatMessage> messages, List<ConversationTurn> turns)
+        /// <param name="compressionMetrics">压缩统计数据（会话级别）</param>
+        public void AutoSave(List<ChatMessage> messages, List<ConversationTurn> turns, Core.Compression.CompressionMetrics compressionMetrics = null)
         {
             if (string.IsNullOrEmpty(CurrentSessionId))
             {
@@ -291,7 +293,7 @@ namespace AgentCore.Editor.Session
                 return;
             }
 
-            SaveCurrentSession(messages, turns);
+            SaveCurrentSession(messages, turns, compressionMetrics);
             Debug.Log($"{LogPrefix}Auto-saved session: {CurrentSessionId}");
         }
 
@@ -301,7 +303,8 @@ namespace AgentCore.Editor.Session
         /// </summary>
         /// <param name="messages">LLM 消息历史</param>
         /// <param name="turns">UI 对话轮次</param>
-        public void ForceSave(List<ChatMessage> messages, List<ConversationTurn> turns)
+        /// <param name="compressionMetrics">压缩统计数据（会话级别）</param>
+        public void ForceSave(List<ChatMessage> messages, List<ConversationTurn> turns, Core.Compression.CompressionMetrics compressionMetrics = null)
         {
             if (string.IsNullOrEmpty(CurrentSessionId))
             {
@@ -316,7 +319,7 @@ namespace AgentCore.Editor.Session
                 return;
             }
 
-            SaveCurrentSession(messages, turns);
+            SaveCurrentSession(messages, turns, compressionMetrics);
         }
 
         /// <summary>
