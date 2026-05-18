@@ -628,8 +628,8 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 
 | 升级类型 | 触发条件 | 示例 |
 |----------|---------|------|
-| **Patch `+1`** | Bug 修复、小优化、文档修正、工具 action 的小修补 | `0.3.7` → `0.3.8` |
-| **Minor `+1`** | 新增功能、新工具、UI 增强、能力补齐 | `0.3.7` → `0.4.0` |
+| **Patch `+1`** | Bug 修复、小优化、文档修正、工具 action 的小修补 | `0.5.1` → `0.5.2` |
+| **Minor `+1`** | 新增功能、新工具、UI 增强、能力补齐 | `0.5.1` → `0.6.0` |
 | **Major `+1`** | 破坏性架构变更、移除/重命名公开 API、asmdef 结构变更 | `0.x.x` → `1.0.0` |
 
 **特殊规则**：
@@ -702,7 +702,7 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 **Bug 修复流程**：
 1. 用户给出编号 Bug 清单（`Bug-1`, `Bug-2`...）
 2. AI 逐条修复
-3. 每轮修复后更新 Patch 版本号（如 `0.3.8` → `0.3.8-hotfix-1`，最终合并为 `0.3.9`）
+3. 每轮修复后更新 Patch 版本号（如 `0.5.1` → `0.5.1-hotfix-1`，最终合并为 `0.5.2`）
 4. 用户重新测试验证
 
 ### 12.7 编码过程中的沟通规则
@@ -732,3 +732,4 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 > 项目演进时，更新规则和模式描述，但不要维护具体的文件列表。
 > 让 LLM 通过工具动态发现实际代码结构。
 > **开发流程变更时，同步更新本章节（§12）和 `plans/ROADMAP.md` 中的流程说明。**
+

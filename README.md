@@ -114,7 +114,7 @@ AgentCore Unity 是一个 Unity Editor 插件，提供类 ChatGPT 的对话窗�
 
 ## 开发状态
 
-🚧 **开发中** — v0.3.3 (Phase 4.5: 文件变更追踪)
+🚧 **开发中** — v0.5.1 (Phase 5: 夯实基础 — 测试框架 + RAG 补齐)
 
 ### 已完成的阶段
 - ✅ Phase 1: 核心架构（Agent Loop、LLM 客户端、会话管理）
