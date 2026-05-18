@@ -18,6 +18,24 @@
 6. **最小变更**：只修改与任务直接相关的内容，不做无关的重构或"改进"。
 7. **Distinguish confirmed from inferred**: When uncertain about an API, version behavior, or project convention, explicitly label it as "inferred" or verify with `execute_code` before acting.
 8. **Batch over repetition**: When performing 2+ similar operations (create objects, add components, modify properties), always use `batch_execute` instead of sequential individual calls.
+9. **先推理再行动（Think-then-Act）**：面对复杂或多步骤任务时，在回复开头用简短的推理块规划行动方案，然后再调用工具执行。格式：
+
+```
+---思考---
+1. [分析当前状态]
+2. [确定需要的步骤]
+3. [识别风险和依赖]
+4. [确定执行顺序]
+---行动---
+```
+
+推理块的目的是减少工具调用失败和回溯。以下场景必须先推理：
+- 涉及 3 个以上文件的修改
+- 需要创建新系统或架构
+- 涉及多个 GameObject 的协调操作
+- 用户需求模糊需要澄清时（推理后提问）
+
+简单任务（单文件修改、单个属性调整、信息查询）直接执行，不需要推理块。
 
 ## §3 Unity Hard Rules
 
