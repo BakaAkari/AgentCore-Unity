@@ -215,6 +215,13 @@ namespace AgentCore.Editor.Core
                 _messages.Add(ChatMessage.Assistant(assistantTurn.Content));
             }
 
+            // 兜底：如果最终内容仍为空，提供默认消息
+            if (string.IsNullOrEmpty(assistantTurn.Content))
+            {
+                assistantTurn.Content = "[系统提示] 助手未返回任何内容。";
+                Debug.LogWarning("[AgentCore] HandleFinalResponse: Assistant content is empty, using fallback message.");
+            }
+
             // 发送完整助手消息事件
             EmitEvent(AgentEvent.AssistantMessage(assistantTurn.Content, assistantTurn.Id));
         }

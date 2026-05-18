@@ -44,44 +44,44 @@ namespace AgentCore.Editor.Tools.Cloud
                 },
                 ""content"": {
                     ""type"": ""string"",
-                    ""description"": ""query 时为查询内容，index_text 时为要索引的文本""
+                    ""description"": ""【query 时必填】查询内容；【index_text 时必填】要索引的文本内容""
                 },
                 ""file_path"": {
                     ""type"": ""string"",
-                    ""description"": ""index_file 时必填，相对于项目根目录的文件路径（如 docs/README.md）""
+                    ""description"": ""【index_file 时必填】相对于项目根目录的文件路径（如 docs/README.md）""
                 },
                 ""folder_path"": {
                     ""type"": ""string"",
-                    ""description"": ""index_folder 时必填，相对于项目根目录的文件夹路径（如 docs/）""
+                    ""description"": ""【index_folder 时必填】相对于项目根目录的文件夹路径（如 docs/）""
                 },
                 ""recursive"": {
                     ""type"": ""boolean"",
-                    ""description"": ""index_folder 时可选，是否递归子目录，默认 true"",
+                    ""description"": ""【index_folder 时可选】是否递归子目录，默认 true"",
                     ""default"": true
                 },
                 ""mode"": {
                     ""type"": ""string"",
                     ""enum"": [""local"", ""global"", ""hybrid"", ""naive""],
-                    ""description"": ""query 时可选，检索模式，默认 hybrid""
+                    ""description"": ""【query 时可选】检索模式，默认 hybrid""
                 },
                 ""top_k"": {
                     ""type"": ""integer"",
-                    ""description"": ""query 时可选，返回结果数量上限，默认 5，范围 1~50"",
+                    ""description"": ""【query 时可选】返回结果数量上限，默认 5，范围 1~50"",
                     ""minimum"": 1,
                     ""maximum"": 50,
                     ""default"": 5
                 },
                 ""description"": {
                     ""type"": ""string"",
-                    ""description"": ""index_text 时可选，文本描述""
+                    ""description"": ""【index_text 时可选】文本描述""
                 },
                 ""doc_id"": {
                     ""type"": ""string"",
-                    ""description"": ""delete_document 时必填，文档 ID（来自 list_documents 返回的 id 字段）""
+                    ""description"": ""【delete_document 时必填】文档 ID（来自 list_documents 返回的 id 字段）""
                 },
                 ""track_id"": {
                     ""type"": ""string"",
-                    ""description"": ""check_index_status 时必填，上传时返回的追踪 ID""
+                    ""description"": ""【check_index_status 时必填】上传时返回的追踪 ID""
                 }
             },
             ""required"": [""action""]
@@ -172,10 +172,15 @@ namespace AgentCore.Editor.Tools.Cloud
 
         private async Task<ToolResponse> HandleQuery(LightRAGClient client, JObject parameters, CancellationToken ct)
         {
-            var content = ToolHelpers.GetOptionalString(parameters, "content");
+            // LLM 可能使用 "query" 或 "content" 作为参数名，两者都支持
+            var content = ToolHelpers.GetOptionalString(parameters, "query");
             if (string.IsNullOrEmpty(content))
             {
-                return ToolResponse.Fail("参数 'content' 在 query 操作中为必填项");
+                content = ToolHelpers.GetOptionalString(parameters, "content");
+            }
+            if (string.IsNullOrEmpty(content))
+            {
+                return ToolResponse.Fail("参数 'query' 或 'content' 在 query 操作中为必填项");
             }
 
             var mode = ToolHelpers.GetOptionalString(parameters, "mode", "hybrid");
