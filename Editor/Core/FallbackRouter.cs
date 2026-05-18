@@ -57,9 +57,11 @@ namespace AgentCore.Editor.Core
             Action<string> onStatusUpdate = null)
         {
             Exception lastException = null;
+            int actualAttempts = 0;
 
             for (int attempt = 0; attempt <= MaxRetries; attempt++)
             {
+                actualAttempts++;
                 try
                 {
                     if (attempt > 0)
@@ -98,9 +100,9 @@ namespace AgentCore.Editor.Core
                 }
             }
 
-            // 所有重试都失败了
+            // 所有重试都失败了（或遇到不可重试错误）
             throw new Exception(
-                $"LLM request failed after {MaxRetries + 1} attempts. Last error: {lastException?.Message}",
+                $"LLM request failed after {actualAttempts} attempt{(actualAttempts > 1 ? "s" : "")}. Last error: {lastException?.Message}",
                 lastException);
         }
 
@@ -122,9 +124,11 @@ namespace AgentCore.Editor.Core
             Action<string> onStatusUpdate = null)
         {
             Exception lastException = null;
+            int actualAttempts = 0;
 
             for (int attempt = 0; attempt <= MaxRetries; attempt++)
             {
+                actualAttempts++;
                 try
                 {
                     if (attempt > 0)
@@ -158,7 +162,7 @@ namespace AgentCore.Editor.Core
             }
 
             throw new Exception(
-                $"LLM request failed after {MaxRetries + 1} attempts. Last error: {lastException?.Message}",
+                $"LLM request failed after {actualAttempts} attempt{(actualAttempts > 1 ? "s" : "")}. Last error: {lastException?.Message}",
                 lastException);
         }
 

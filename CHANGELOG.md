@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-05-14
+
+### Fixed
+- **Tool Call Arguments 合法性修复** — 新增 `SanitizeToolArguments()` 方法，修复 LLM 生成的无效 JSON arguments（如 Windows 路径中的未转义反斜杠 `\U`, `\P`），防止 vLLM 等服务端在 `json.loads()` 时返回 HTTP 400 错误
+- **FallbackRouter 错误消息准确性** — 非重试错误（如 HTTP 400）现在正确报告实际尝试次数（"failed after 1 attempt"），而非误导性的 "failed after 3 attempts"
+- **项目路径标准化** — `ProjectContextCollector.GetProjectPath()` 返回正斜杠格式路径，避免 system prompt 中的反斜杠路径"教会"模型生成无效 JSON
+
 ## [0.5.0] - 2026-05-14
 
 ### Added

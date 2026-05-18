@@ -22,7 +22,6 @@ namespace AgentCore.Editor.Config
     {
         /// <summary>
         /// 从 package.json 读取的版本号缓存。
-        /// 避免每帧重复读取文件。
         /// </summary>
         private static string _cachedVersion;
 
@@ -1489,33 +1488,32 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
-        /// 从 UPM PackageInfo 或 package.json 读取版本号。
-        /// 结果会被缓存，避免每帧重复读取。
+        /// 从 package.json 读取版本号。
+        /// 优先直接读取文件（实时反映本地修改），
+        /// 失败时回退到 UPM PackageInfo API 或缓存值。
         /// </summary>
-        /// <returns>版本号字符串，如 "0.3.1"；读取失败时返回 "unknown"</returns>
+        /// <returns>版本号字符串，如 "0.3.8"；读取失败时返回 "unknown"</returns>
         private static string GetPackageVersion()
         {
-            if (!string.IsNullOrEmpty(_cachedVersion))
-                return _cachedVersion;
-
             try
             {
-                // 方式 1: 通过 UPM PackageInfo API（最可靠）
-                var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
-                    typeof(AgentCoreSettingsProvider).Assembly);
-                if (packageInfo != null)
-                {
-                    _cachedVersion = packageInfo.version;
-                    return _cachedVersion;
-                }
-
-                // 方式 2: 回退 — 直接读取 package.json 文件
+                // 方式 1: 直接读取 package.json（实时反映本地修改）
                 var packagePath = "Packages/com.agentcore.unity/package.json";
                 if (File.Exists(packagePath))
                 {
                     var json = File.ReadAllText(packagePath);
                     var jobj = JsonHelper.ParseObject(json);
-                    _cachedVersion = JsonHelper.GetString(jobj, "version", "unknown");
+                    var version = JsonHelper.GetString(jobj, "version", "unknown");
+                    _cachedVersion = version;
+                    return version;
+                }
+
+                // 方式 2: 通过 UPM PackageInfo API
+                var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(AgentCoreSettingsProvider).Assembly);
+                if (packageInfo != null)
+                {
+                    _cachedVersion = packageInfo.version;
                     return _cachedVersion;
                 }
             }
@@ -1524,8 +1522,7 @@ namespace AgentCore.Editor.Config
                 Debug.LogWarning($"[AgentCore] Failed to read package version: {ex.Message}");
             }
 
-            _cachedVersion = "unknown";
-            return _cachedVersion;
+            return _cachedVersion ?? "unknown";
         }
 
         // ─────────────────────────────────────────────

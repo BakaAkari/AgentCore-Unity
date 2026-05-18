@@ -107,11 +107,13 @@ namespace AgentCore.Editor.Bootstrap
 
         /// <summary>
         /// 获取 Unity 项目根目录路径。
+        /// 返回正斜杠格式路径，避免 LLM 学习使用反斜杠导致生成无效 JSON。
         /// </summary>
         private static string GetProjectPath()
         {
             // Application.dataPath 返回 "项目路径/Assets"
-            return Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            var path = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            return path.Replace('\\', '/');
         }
 
         /// <summary>
