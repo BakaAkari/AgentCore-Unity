@@ -1,5 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.UI.Components;
 using UnityEditor;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI
@@ -10,58 +15,154 @@ namespace AgentCore.Editor.UI
     /// </summary>
     public partial class ChatWindow
     {
+        #region Hub 模块常量
+
+        /// <summary>Chat 模块 ID。</summary>
+        private const string ChatModuleId = "chat";
+
+        #endregion
+
         #region Hub 模块切换
+
+        /// <summary>
+        /// 创建当前窗口可用的 Hub 模块定义。
+        /// </summary>
+        /// <returns>Hub 模块定义列表。</returns>
+        private List<HubModuleDefinition> CreateHubModuleDefinitions()
+        {
+            var modules = new List<HubModuleDefinition>
+            {
+                new HubModuleDefinition(ChatModuleId, "Chat", "Chat", 0)
+            };
+
+            modules.AddRange(_hubPanelContributions.Values
+                .OrderBy(contribution => contribution.Order)
+                .ThenBy(contribution => contribution.Id, StringComparer.Ordinal)
+                .Select(contribution => new HubModuleDefinition(
+                    contribution.Id,
+                    contribution.Label,
+                    contribution.Tooltip,
+                    contribution.Order)));
+
+            return modules;
+        }
+
+        /// <summary>
+        /// 初始化 Hub 动态扩展面板。
+        /// </summary>
+        private void InitializeHubPanels()
+        {
+            _hubPanels.Clear();
+            _hubPanelContributions.Clear();
+            _extensionPanelHost?.Clear();
+
+            if (_chatPanel != null)
+            {
+                _hubPanels[ChatModuleId] = _chatPanel;
+            }
+
+            foreach (var contribution in AgentCoreExtensionRegistry.Panels)
+            {
+                if (contribution == null || string.IsNullOrWhiteSpace(contribution.Id))
+                    continue;
+
+                if (_hubPanelContributions.ContainsKey(contribution.Id))
+                    continue;
+
+                try
+                {
+                    var panel = contribution.CreatePanel();
+                    if (panel == null)
+                        continue;
+
+                    panel.name = string.IsNullOrWhiteSpace(panel.name)
+                        ? $"{contribution.Id}-panel"
+                        : panel.name;
+                    panel.style.display = DisplayStyle.None;
+
+                    _hubPanelContributions[contribution.Id] = contribution;
+                    _hubPanels[contribution.Id] = panel;
+                    _extensionPanelHost?.Add(panel);
+
+                    if (panel is KnowledgeBasePanel knowledgePanel)
+                    {
+                        knowledgePanel.OnAskAgentRequested += OnKnowledgeAskAgentRequested;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] Failed to create Hub panel contribution '{contribution.Id}': {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 释放 Hub 动态扩展面板资源。
+        /// </summary>
+        private void DisposeHubPanels()
+        {
+            foreach (var panel in _hubPanels.Values)
+            {
+                if (panel is KnowledgeBasePanel knowledgePanel)
+                {
+                    knowledgePanel.OnAskAgentRequested -= OnKnowledgeAskAgentRequested;
+                }
+
+                if (panel is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+
+            _hubPanels.Clear();
+            _hubPanelContributions.Clear();
+            _extensionPanelHost?.Clear();
+        }
 
         /// <summary>
         /// Hub 模块切换事件处理。
         /// 当用户在 Hub Rail 中点击不同模块按钮时调用。
         /// </summary>
-        /// <param name="module">新激活的模块</param>
-        private void OnHubModuleChanged(HubModule module)
+        /// <param name="moduleId">新激活的模块 ID。</param>
+        private void OnHubModuleChanged(string moduleId)
         {
-            SwitchToModule(module);
+            SwitchToModule(moduleId);
         }
 
         /// <summary>
         /// 切换到指定的 Hub 模块。
         /// 控制 Main Content 面板和 Context Sidebar 的显示/隐藏。
         /// </summary>
-        /// <param name="module">目标模块</param>
-        private void SwitchToModule(HubModule module)
+        /// <param name="moduleId">目标模块 ID。</param>
+        private void SwitchToModule(string moduleId)
         {
-            // 1. 切换 Main Content 面板可见性
-            if (_chatPanel != null)
-                _chatPanel.style.display = module == HubModule.Chat ? DisplayStyle.Flex : DisplayStyle.None;
-            if (_knowledgePanel != null)
-                _knowledgePanel.style.display = module == HubModule.Knowledge ? DisplayStyle.Flex : DisplayStyle.None;
-            if (_memoryPanel != null)
-                _memoryPanel.style.display = module == HubModule.Memory ? DisplayStyle.Flex : DisplayStyle.None;
-
-            // 2. 通知 KnowledgeBasePanel 激活/停用
-            if (_knowledgeBasePanel != null)
+            foreach (var kvp in _hubPanels)
             {
-                if (module == HubModule.Knowledge)
-                    _knowledgeBasePanel.OnActivated();
-                else
-                    _knowledgeBasePanel.OnDeactivated();
+                var isActive = kvp.Key == moduleId;
+                kvp.Value.style.display = isActive ? DisplayStyle.Flex : DisplayStyle.None;
+
+                if (_hubPanelContributions.TryGetValue(kvp.Key, out var contribution))
+                {
+                    try
+                    {
+                        if (isActive)
+                            contribution.OnActivated(kvp.Value);
+                        else
+                            contribution.OnDeactivated(kvp.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[AgentCore] Hub panel contribution '{kvp.Key}' lifecycle callback failed: {ex.Message}");
+                    }
+                }
             }
 
-            // 2.5 通知 MemoryPanel 激活/停用
-            if (_memoryPanelComponent != null)
-            {
-                if (module == HubModule.Memory)
-                    _memoryPanelComponent.OnActivated();
-                else
-                    _memoryPanelComponent.OnDeactivated();
-            }
-
-            // 3. 控制 Context Sidebar 可见性
             // Chat 模块：显示会话列表侧边栏（根据 _sidebarExpanded 状态）
-            // Knowledge / Memory 模块：暂时隐藏侧边栏（后续 Phase 可扩展各模块的上下文面板）
-            UpdateContextSidebarVisibility(module);
+            // 其他模块：暂时隐藏侧边栏（后续 Phase 可扩展各模块的上下文面板）
+            UpdateContextSidebarVisibility(moduleId);
 
-            // 4. Chat 模块激活时刷新会话列表
-            if (module == HubModule.Chat && _sidebarExpanded)
+            // Chat 模块激活时刷新会话列表
+            if (moduleId == ChatModuleId && _sidebarExpanded)
             {
                 RefreshSessionList();
             }
@@ -75,8 +176,8 @@ namespace AgentCore.Editor.UI
         private void OnKnowledgeAskAgentRequested(string prompt)
         {
             // 切换到 Chat 模块
-            _hubRail?.SetActiveModule(HubModule.Chat);
-            SwitchToModule(HubModule.Chat);
+            _hubRail?.SetActiveModule(ChatModuleId);
+            SwitchToModule(ChatModuleId);
 
             // 填入提示词并聚焦输入框
             if (_inputField != null)
@@ -91,13 +192,13 @@ namespace AgentCore.Editor.UI
         /// <summary>
         /// 根据当前模块和侧边栏状态更新 Context Sidebar 的显示/隐藏。
         /// </summary>
-        /// <param name="module">当前激活的模块</param>
-        private void UpdateContextSidebarVisibility(HubModule module)
+        /// <param name="moduleId">当前激活的模块 ID。</param>
+        private void UpdateContextSidebarVisibility(string moduleId)
         {
             if (_contextSidebar == null) return;
 
             // Chat 模块且侧边栏展开时显示
-            bool shouldShow = module == HubModule.Chat && _sidebarExpanded;
+            bool shouldShow = moduleId == ChatModuleId && _sidebarExpanded;
 
             if (shouldShow)
             {
@@ -120,7 +221,7 @@ namespace AgentCore.Editor.UI
             // 仅在 Chat 模块时更新侧边栏可见性
             if (_hubRail != null)
             {
-                UpdateContextSidebarVisibility(_hubRail.ActiveModule);
+                UpdateContextSidebarVisibility(_hubRail.ActiveModuleId);
             }
 
             if (_sidebarExpanded)

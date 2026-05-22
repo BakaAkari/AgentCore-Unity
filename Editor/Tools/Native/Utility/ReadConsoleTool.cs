@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -186,7 +186,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 foreach (var e in entries)
                     if (e.Type == ConsoleEntryType.Error || e.Type == ConsoleEntryType.CompilerError)
                         errorCount++;
-                summary = $"⚠️ COMPILATION FAILED — {errorCount} error(s) found. {entries.Count} entries returned.";
+                summary = $" COMPILATION FAILED — {errorCount} error(s) found. {entries.Count} entries returned.";
             }
             else
             {
@@ -235,7 +235,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             };
 
             string summary = EditorUtility.scriptCompilationFailed
-                ? $"⚠️ COMPILATION FAILED — {compilerErrors} compiler error(s), {errors} runtime error(s), {warnings} warning(s), {logs} log(s)"
+                ? $" COMPILATION FAILED — {compilerErrors} compiler error(s), {errors} runtime error(s), {warnings} warning(s), {logs} log(s)"
                 : $"Console: {compilerErrors + errors} error(s), {warnings} warning(s), {logs} log(s)";
 
             return ToolResponse.OkWithData(data, summary);

@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
@@ -61,7 +61,7 @@ namespace AgentCore.Editor.UI.Components
             _headerLabel = new Label("上下文使用情况");
             _header.Add(_headerLabel);
 
-            _toggleButton = new Button(ToggleCollapse) { text = "▼" };
+            _toggleButton = new Button(ToggleCollapse) { text = "v" };
             _header.Add(_toggleButton);
 
             Add(_header);
@@ -98,7 +98,7 @@ namespace AgentCore.Editor.UI.Components
             // Compression badge
             _compressionBadge = new VisualElement();
             _compressionBadge.AddToClassList(CompressionBadgeClassName);
-            var badgeLabel = new Label("⟳ 压缩已激活");
+            var badgeLabel = new Label("压缩已激活");
             _compressionBadge.Add(badgeLabel);
             _compressionBadge.style.display = DisplayStyle.None;
             _content.Add(_compressionBadge);
@@ -170,13 +170,13 @@ namespace AgentCore.Editor.UI.Components
             if (_isCollapsed)
             {
                 AddToClassList(CollapsedClassName);
-                _toggleButton.text = "▶";
+                _toggleButton.text = ">";
                 _content.style.display = DisplayStyle.None;
             }
             else
             {
                 RemoveFromClassList(CollapsedClassName);
-                _toggleButton.text = "▼";
+                _toggleButton.text = "v";
                 _content.style.display = DisplayStyle.Flex;
             }
         }

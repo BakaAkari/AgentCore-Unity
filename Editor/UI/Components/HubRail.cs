@@ -1,31 +1,57 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
 {
     /// <summary>
-    /// Hub 模块标识枚举。
-    /// 定义主窗口中可切换的功能模块。
+    /// Describes one Hub navigation module entry.
     /// </summary>
-    public enum HubModule
+    public sealed class HubModuleDefinition
     {
-        /// <summary>对话模块（默认）</summary>
-        Chat,
+        /// <summary>
+        /// Creates a Hub module definition.
+        /// </summary>
+        /// <param name="id">Stable module identifier.</param>
+        /// <param name="label">Short navigation label.</param>
+        /// <param name="tooltip">Navigation tooltip.</param>
+        /// <param name="order">Sorting order.</param>
+        public HubModuleDefinition(string id, string label, string tooltip, int order)
+        {
+            Id = id;
+            Label = label;
+            Tooltip = tooltip;
+            Order = order;
+        }
 
-        /// <summary>知识库模块（LightRAG）</summary>
-        Knowledge,
+        /// <summary>
+        /// Gets the stable module identifier.
+        /// </summary>
+        public string Id { get; }
 
-        /// <summary>记忆模块（mem0）</summary>
-        Memory
+        /// <summary>
+        /// Gets the short navigation label.
+        /// </summary>
+        public string Label { get; }
+
+        /// <summary>
+        /// Gets the navigation tooltip.
+        /// </summary>
+        public string Tooltip { get; }
+
+        /// <summary>
+        /// Gets the sorting order.
+        /// </summary>
+        public int Order { get; }
     }
 
     /// <summary>
     /// Hub Rail 导航组件。
     /// <para>
     /// 位于主窗口最左侧的窄栏（~52px），提供模块切换导航。
-    /// 顶部为模块导航按钮（Chat / Know / Mem），底部固定 Settings 按钮。
+    /// 顶部为模块导航按钮，底部固定 Settings 按钮。
     /// </para>
     /// </summary>
     public class HubRail : VisualElement
@@ -33,43 +59,59 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>EditorPrefs key：上次激活的 Hub 模块</summary>
         private const string ActiveModuleKey = "AgentCore_ActiveHubModule";
 
-        /// <summary>当前激活的模块</summary>
-        private HubModule _activeModule;
+        /// <summary>当前激活的模块 ID</summary>
+        private string _activeModuleId;
+
+        /// <summary>模块定义列表</summary>
+        private readonly List<HubModuleDefinition> _modules;
 
         /// <summary>模块按钮字典</summary>
-        private readonly Dictionary<HubModule, Button> _moduleButtons = new();
+        private readonly Dictionary<string, Button> _moduleButtons = new Dictionary<string, Button>();
 
         /// <summary>Settings 按钮</summary>
         private Button _settingsButton;
 
         /// <summary>
         /// 模块切换事件。
-        /// 当用户点击不同模块按钮时触发，参数为新激活的模块。
+        /// 当用户点击不同模块按钮时触发，参数为新激活的模块 ID。
         /// </summary>
-        public event Action<HubModule> OnModuleChanged;
+        public event Action<string> OnModuleChanged;
 
         /// <summary>
-        /// 当前激活的模块。
+        /// 当前激活的模块 ID。
         /// </summary>
-        public HubModule ActiveModule => _activeModule;
+        public string ActiveModuleId => _activeModuleId;
 
         /// <summary>
         /// 创建 HubRail 实例并构建 UI。
         /// </summary>
-        public HubRail()
+        /// <param name="modules">可显示的 Hub 模块定义。</param>
+        /// <param name="defaultModuleId">默认激活的模块 ID。</param>
+        public HubRail(IEnumerable<HubModuleDefinition> modules, string defaultModuleId)
         {
             name = "hub-rail";
             AddToClassList("hub-rail");
 
-            // 恢复上次激活的模块
-            var savedModule = EditorPrefs.GetString(ActiveModuleKey, HubModule.Chat.ToString());
-            if (Enum.TryParse<HubModule>(savedModule, out var parsed))
+            _modules = modules?
+                .Where(module => module != null && !string.IsNullOrWhiteSpace(module.Id))
+                .GroupBy(module => module.Id)
+                .Select(group => group.First())
+                .OrderBy(module => module.Order)
+                .ThenBy(module => module.Id, StringComparer.Ordinal)
+                .ToList() ?? new List<HubModuleDefinition>();
+
+            if (_modules.Count == 0)
             {
-                _activeModule = parsed;
+                _modules.Add(new HubModuleDefinition("chat", "Chat", "Chat", 0));
             }
-            else
+
+            var fallbackModuleId = !string.IsNullOrWhiteSpace(defaultModuleId) ? defaultModuleId : _modules[0].Id;
+            var savedModuleId = EditorPrefs.GetString(ActiveModuleKey, fallbackModuleId);
+            _activeModuleId = _modules.Any(module => module.Id == savedModuleId) ? savedModuleId : fallbackModuleId;
+
+            if (_modules.All(module => module.Id != _activeModuleId))
             {
-                _activeModule = HubModule.Chat;
+                _activeModuleId = _modules[0].Id;
             }
 
             BuildUI();
@@ -86,9 +128,10 @@ namespace AgentCore.Editor.UI.Components
             navContainer.name = "hub-rail-nav";
             navContainer.AddToClassList("hub-rail__nav");
 
-            AddModuleButton(navContainer, HubModule.Chat, "Chat");
-            AddModuleButton(navContainer, HubModule.Knowledge, "Know");
-            AddModuleButton(navContainer, HubModule.Memory, "Mem");
+            foreach (var module in _modules)
+            {
+                AddModuleButton(navContainer, module);
+            }
 
             Add(navContainer);
 
@@ -111,36 +154,36 @@ namespace AgentCore.Editor.UI.Components
         /// 添加一个模块导航按钮。
         /// </summary>
         /// <param name="container">父容器</param>
-        /// <param name="module">模块标识</param>
-        /// <param name="label">按钮文字</param>
-        private void AddModuleButton(VisualElement container, HubModule module, string label)
+        /// <param name="module">模块定义</param>
+        private void AddModuleButton(VisualElement container, HubModuleDefinition module)
         {
-            var button = new Button(() => OnModuleButtonClicked(module));
-            button.name = $"hub-rail-{module.ToString().ToLowerInvariant()}";
-            button.text = label;
-            button.tooltip = module.ToString();
+            var moduleId = module.Id;
+            var button = new Button(() => OnModuleButtonClicked(moduleId));
+            button.name = $"hub-rail-{moduleId.ToLowerInvariant()}";
+            button.text = module.Label;
+            button.tooltip = string.IsNullOrWhiteSpace(module.Tooltip) ? module.Id : module.Tooltip;
             button.AddToClassList("hub-rail__button");
             button.AddToClassList("hub-rail__module-button");
             container.Add(button);
-            _moduleButtons[module] = button;
+            _moduleButtons[moduleId] = button;
         }
 
         /// <summary>
         /// 模块按钮点击处理。
         /// </summary>
-        /// <param name="module">被点击的模块</param>
-        private void OnModuleButtonClicked(HubModule module)
+        /// <param name="moduleId">被点击的模块 ID</param>
+        private void OnModuleButtonClicked(string moduleId)
         {
-            if (_activeModule == module)
+            if (_activeModuleId == moduleId)
             {
                 // 点击已激活的模块 → 不切换，但可以通知外部（用于折叠 Context Sidebar）
                 return;
             }
 
-            _activeModule = module;
-            EditorPrefs.SetString(ActiveModuleKey, module.ToString());
+            _activeModuleId = moduleId;
+            EditorPrefs.SetString(ActiveModuleKey, moduleId);
             UpdateActiveState();
-            OnModuleChanged?.Invoke(module);
+            OnModuleChanged?.Invoke(moduleId);
         }
 
         /// <summary>
@@ -150,7 +193,7 @@ namespace AgentCore.Editor.UI.Components
         {
             foreach (var kvp in _moduleButtons)
             {
-                if (kvp.Key == _activeModule)
+                if (kvp.Key == _activeModuleId)
                 {
                     kvp.Value.AddToClassList("hub-rail__button--active");
                 }
@@ -173,15 +216,19 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>
         /// 以编程方式切换到指定模块。
         /// </summary>
-        /// <param name="module">目标模块</param>
-        public void SetActiveModule(HubModule module)
+        /// <param name="moduleId">目标模块 ID</param>
+        public void SetActiveModule(string moduleId)
         {
-            if (_activeModule == module) return;
+            if (string.IsNullOrWhiteSpace(moduleId) || _activeModuleId == moduleId)
+                return;
 
-            _activeModule = module;
-            EditorPrefs.SetString(ActiveModuleKey, module.ToString());
+            if (_modules.All(module => module.Id != moduleId))
+                return;
+
+            _activeModuleId = moduleId;
+            EditorPrefs.SetString(ActiveModuleKey, moduleId);
             UpdateActiveState();
-            OnModuleChanged?.Invoke(module);
+            OnModuleChanged?.Invoke(moduleId);
         }
     }
 }

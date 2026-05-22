@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
@@ -59,9 +59,9 @@ namespace AgentCore.Editor.UI.Components
         private const string IconCompleted = "[v]";
         private const string IconFailed = "[x]";
 
-        // 折叠/展开箭头指示器
-        private const string ArrowCollapsed = "\u25B6"; // ▶
-        private const string ArrowExpanded = "\u25BC";  // ▼
+        // 折叠/展开箭头指示器（纯 ASCII，避免 Unity 字体缺字）
+        private const string ArrowCollapsed = ">";
+        private const string ArrowExpanded = "v";
 
         #endregion
 

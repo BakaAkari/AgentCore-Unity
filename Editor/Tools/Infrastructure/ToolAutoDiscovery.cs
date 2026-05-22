@@ -18,19 +18,18 @@ namespace AgentCore.Editor.Tools.Infrastructure
         public static int DiscoveredCount { get; private set; }
 
         /// <summary>
-        /// 扫描所有程序集，发现并注册原生工具
+        /// 扫描所有程序集，发现并注册当前已编译进域内的工具。
         /// </summary>
+        /// <remarks>
+        /// 发现过程会先重建 <see cref="ToolRegistry"/>，避免可选组件被禁用或重新编译后留下旧工具实例。
+        /// </remarks>
         public static void DiscoverAndRegisterAll()
         {
             lock (_lock)
             {
-                if (_initialized)
-                {
-                    Debug.Log("[AgentCore] ToolAutoDiscovery: Already initialized, skipping.");
-                    return;
-                }
+                Debug.Log("[AgentCore] ToolAutoDiscovery: Rebuilding tool registry...");
 
-                Debug.Log("[AgentCore] ToolAutoDiscovery: Scanning for native tools...");
+                ToolRegistry.Instance.Clear();
 
                 int registered = 0;
                 int errors = 0;
@@ -75,7 +74,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
                 DiscoveredCount = registered;
                 _initialized = true;
 
-                Debug.Log($"[AgentCore] ToolAutoDiscovery: Registered {registered} native tools ({errors} errors).");
+                Debug.Log($"[AgentCore] ToolAutoDiscovery: Registered {registered} tools ({errors} errors).");
             }
         }
 
@@ -108,7 +107,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
         }
 
         /// <summary>
-        /// 重置发现状态（用于测试或重新加载）
+        /// 重置发现状态并清空工具注册表（用于测试或重新加载）。
         /// </summary>
         public static void Reset()
         {
@@ -116,6 +115,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
             {
                 _initialized = false;
                 DiscoveredCount = 0;
+                ToolRegistry.Instance.Clear();
             }
         }
     }

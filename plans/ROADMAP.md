@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.5.1+ | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.5.1）
+> **版本**: v0.6.1 | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.6.1）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 >
 > **与现有计划的关系**:
@@ -37,14 +37,14 @@
 | `[x]` | 已完成 |
 | `[!]` | 阻塞/暂停（依赖外部条件或用户决策） |
 
-### 0.3 当前项目快照 (v0.4.8)
+### 0.3 当前项目快照 (v0.6.1)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.4.8 (2026-05-13) |
-| **工具数量** | 44 个工具，340+ actions；Native 工具以 `Editor/Tools/Native/` 实际源码为准 |
-| **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery + DomainReload 恢复 + Schema 预校验 — 稳定 |
-| **UI 框架** | UI Toolkit Hub 架构 (Chat/Knowledge/Memory) — MemoryPanel UI 已接入 |
+| **版本** | 0.6.1 (2026-05-22) |
+| **工具数量** | 以 `ToolAutoDiscovery` 当前已编译程序集发现结果为准；VCS 工具默认不编译，启用 `AGENTCORE_VCS` 后注册 |
+| **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
+| **UI 框架** | UI Toolkit 动态 Hub 架构 (Chat/Knowledge/Memory + 可选组件 contribution)；Project Settings 使用 Settings shell + section registry |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
 | **测试覆盖** | 5 个测试文件，90+ test cases (ToolResponse, JsonHelper, TokenCounter, ToolHelpers, SchemaValidation) |
 | **归档参考** | `_archive/Unity-Skills/` 含 554 个 skills 可供迁移 |
@@ -152,18 +152,23 @@ v0.4.7 — 文档状态校准（plans/ 全量审计 + ROADMAP 修正 + ADR-3）
 | 6.0.1 | **工具结果摘要** | 大型工具结果（>1000 tokens）自动调用 LLM 生成摘要，压缩到 200 tokens | Context-1 | [DONE] v0.5.0 |
 | 6.0.2 | **对话历史压缩** | 保留最近 N 轮完整对话，对更早消息生成摘要；支持多种压缩策略（滑动窗口/摘要/语义聚类） | Context-2 | [DONE] v0.5.0 |
 | 6.0.3 | **上下文预算管理** | 动态分配 token 预算（System Prompt / 历史 / 工具结果 / 响应预留），超限时自动触发压缩 | Context-3 | [DONE] v0.5.0 |
-| 6.0.4 | **压缩策略可视化** | UI 显示当前上下文使用情况、压缩状态、token 预算分配 | Context-4 | [ ] |
+| 6.0.4 | **压缩策略可视化** | UI 显示当前上下文使用情况、压缩状态、token 预算分配 | Context-4 | [DONE] v0.5.2 |
 
-### 3.1 P0 — 模式系统（高优先级）
+### 3.1 ~~P0 — 模式系统~~（已废弃 — 参见 ADR-5）
+
+> **废弃原因**: AgentCore 是自主智能体，应根据上下文自动适应，而非手动切换模式。
+> **替代方案**: 通过情境感知增强、工具推荐系统、响应式建议来提升智能化水平。
 
 | # | 任务 | 说明 | 关联计划 | 状态 |
 |---|------|------|---------|------|
-| 6.1.1 | **Architect Mode** | 规划模式：只读文件 + 生成设计文档，不执行修改；定制 System Prompt 强调架构设计 | Mode-1 | [ ] |
-| 6.1.2 | **Review Mode** | 审查模式：代码质量分析 + Unity 最佳实践检查 + 性能问题检测 | Mode-2 | [ ] |
-| 6.1.3 | **模式切换 UI** | Chat 窗口顶部模式选择器；不同模式使用不同的图标和颜色 | Mode-3 | [ ] |
-| 6.1.4 | **模式特定上下文策略** | 每个模式有独立的上下文预算和压缩策略（Architect 需要更大上下文，Review 需要更多代码片段） | Mode-4 | [ ] |
+| ~~6.1.1~~ | ~~**Architect Mode**~~ | ~~规划模式：只读文件 + 生成设计文档~~ | ~~Mode-1~~ | [DEPRECATED] |
+| ~~6.1.2~~ | ~~**Review Mode**~~ | ~~审查模式：代码质量分析 + Unity 最佳实践检查~~ | ~~Mode-2~~ | [DEPRECATED] |
+| ~~6.1.3~~ | ~~**模式切换 UI**~~ | ~~Chat 窗口顶部模式选择器~~ | ~~Mode-3~~ | [DEPRECATED] |
+| ~~6.1.4~~ | ~~**模式特定上下文策略**~~ | ~~每个模式有独立的上下文预算和压缩策略~~ | ~~Mode-4~~ | [DEPRECATED] |
 
-### 3.2 P1 — 代码库索引与理解（中优先级）
+### 3.2 P0 — 代码库索引与理解（提升为高优先级）
+
+> **优先级提升原因**: 代码库理解是 Agent 自主能力的基础，比手动模式切换更重要。
 
 | # | 任务 | 说明 | 关联计划 | 状态 |
 |---|------|------|---------|------|
@@ -189,15 +194,30 @@ v0.4.7 — 文档状态校准（plans/ 全量审计 + ROADMAP 修正 + ADR-3）
 | 6.4.2 | **主题系统** | 深色/浅色主题切换（不追求极致美观，追求可用性） | P2 | [ ] |
 | 6.4.3 | **快捷键自定义** | 用户可自定义聊天窗口快捷键 | P2 | [ ] |
 
-### 3.5 Phase 6 里程碑
+### 3.5 Phase 6 里程碑（已调整）
 
 ```
-v0.5.0 — 上下文压缩与管理（工具结果摘要 + 对话历史压缩 + 预算管理 + 可视化）
-v0.5.1 — 模式系统（Architect Mode + Review Mode + 模式切换 UI）
-v0.5.2 — 代码库索引（文件级索引 + 符号检索 + 语义搜索）
-v0.5.3 — 规则系统与智能推荐（.agentcore/rules.md + SmartToolRecommender + 响应式建议）
-v0.5.4 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
+v0.5.0 — 上下文压缩与管理（工具结果摘要 + 对话历史压缩 + 预算管理）[DONE]
+v0.5.1 — Tool Call Arguments 合法性修复 + FallbackRouter 错误消息准确性 [DONE]
+v0.5.2 — 上下文压缩可视化（ContextUsagePanel + 压缩统计持久化 + Bug 修复）[DONE]
+v0.5.3 — 模式系统废弃（ADR-5 决策记录）[DONE]
+v0.5.4 — 版本控制集成 Phase 1（VCS 检测 + 只读查询 + VersionControlPanel UI）[DONE]
+v0.5.5 — 版本控制集成 Phase 2（写操作 + 确认机制 + 26 个 actions 完整实现）[DONE]
+v0.6.0 — VCS 可选组件化（Optional Components + 动态 Hub/Settings contribution）[DONE]
+v0.6.1 — Settings 页面架构重构（Settings shell + section registry + Provider 业务逻辑清理）[DONE]
+v0.6.2 — 代码库索引 Phase 1（文件级索引 + 符号检索）
+v0.6.3 — 代码库索引 Phase 2（语义搜索 + 依赖图构建）
+v0.6.4 — 规则系统与智能推荐（.agentcore/rules.md + SmartToolRecommender + 响应式建议）
+v0.6.5 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
 ```
+
+**变更说明**:
+- ~~v0.5.3 模式系统~~ → 废弃（ADR-5），v0.5.3 用于记录该决策
+- v0.5.4 → 版本控制集成 Phase 1（新增功能）
+- v0.5.5 → 版本控制集成 Phase 2（写操作 + 确认机制）
+- v0.6.0 → Optional Components 平台能力落地，VCS 改为默认禁用可选组件
+- v0.6.1 → Settings 页面架构重构，Provider shell 化并固化 section 开发规则
+- v0.6.2+ → 原计划顺延
 
 ### 3.6 技术栈选型（基于竞品分析）
 
@@ -229,11 +249,11 @@ v0.5.4 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
 ### 4.2 Phase 7 里程碑
 
 ```
-v0.6.0 — UPM 发布流程自动化
-v0.6.1 — 文档网站上线
-v0.6.2 — 示例项目 v1 发布
-v0.6.3 — Plugin 系统 + 多 LLM 后端
-v0.6.4 — Asset Store 提交
+v0.7.0 — UPM 发布流程自动化
+v0.7.1 — 文档网站上线
+v0.7.2 — 示例项目 v1 发布
+v0.7.3 — Plugin 系统 + 多 LLM 后端
+v0.7.4 — Asset Store 提交
 ```
 
 ---
@@ -298,6 +318,58 @@ v0.6.4 — Asset Store 提交
   - `AgentLoop.MemoryRecall.cs` — 记忆召回 + 上下文构建
   - `AgentLoop.LLMCall.cs` — `CallLLMStreamAsync` + 流解析
 
+### ADR-5: 拒绝模式系统 — AgentCore 是自主智能体
+
+**状态**: `已决策 — 废弃模式系统`
+**日期**: 2026-05-18
+
+- **决策**: 废弃 Phase 6.1 中规划的"模式系统"（Architect Mode / Review Mode / 模式切换 UI）
+- **核心理念**: **AgentCore 是智能体（Agent），不是 IDE**
+  - AgentCore 应该根据对话上下文**自动识别**用户需求，自主选择合适的行为模式
+  - 不需要用户手动切换"规划模式"、"审查模式"、"编码模式"
+  - 智能体应该具备**情境感知能力**，而不是依赖显式的模式锁定
+- **原因**:
+  1. **当前架构已经是自主智能体设计**:
+     - SOUL.md 定义了统一的智能体身份，而非多模式角色
+     - 工具系统通过 LLM 自主选择，无模式限制
+     - System Prompt 提供统一行为准则，Agent 根据任务自动调整
+  2. **手动模式切换违背 AI Agent 本质**:
+     - 用户不应该需要判断"现在该用哪个模式"
+     - 模式切换增加认知负担，降低使用体验
+     - 限制工具可用性会降低 Agent 的灵活性
+  3. **竞品分析误导**:
+     - Cline/Roo/Cursor 的"模式"更多是 UI 组织方式，而非能力隔离
+     - AgentCore 的工具系统已经比竞品更灵活
+- **替代方案**:
+  - **情境感知增强**: 通过改进 System Prompt 和上下文管理，让 Agent 更好地理解当前任务类型
+  - **工具推荐系统**: 基于对话历史推荐相关工具，而非限制工具可用性
+  - **响应式建议**: 在 LLM 响应中自然地提供"下一步建议"，而非强制模式切换
+- **影响**:
+  - Phase 6.1 的 4 个任务（6.1.1 ~ 6.1.4）全部废弃
+  - v0.5.3 里程碑重新规划为"代码库索引与理解"（原 Phase 6.2）
+  - Phase 6 重新聚焦于**增强 Agent 的自主能力**，而非限制其行为
+
+### ADR-6: Settings Provider Shell — 设置页禁止回到 God Object
+
+**状态**: `已决策 — 采用 Settings shell + section registry`
+**日期**: 2026-05-22
+
+- **决策**: `AgentCoreSettingsProvider` 只承担 Settings shell 职责，业务设置必须迁移到独立 `IAgentCoreSettingsSection` 或明确的 service/helper。
+- **核心理念**: Project Settings 是可扩展配置系统，不是功能代码堆放点。
+- **原因**:
+  1. 旧 Provider 已膨胀为 2000+ 行 God Object，混合持久化设置、UI 状态、异步动作和 extension 绘制逻辑。
+  2. Optional Components、Extension Settings、Tools 等扩展点继续写入 Provider 会重新制造污染。
+  3. 左侧导航 + 右侧 section 内容能把配置按 ownership 组织，降低后续新增功能的回归风险。
+- **执行规则**:
+  - 新增设置项必须归属到明确 section，不得直接修改 Provider 绘制业务 UI。
+  - foldout、异步状态和测试结果等 UI 临时状态必须放入 `AgentCoreSettingsState`。
+  - 连接型设置优先复用统一的 Enabled / Endpoint / API Key / Test Connection / Result / Advanced Options 模式。
+  - Tool Exposure 与 Optional Component 启用/禁用保持职责分离。
+- **影响**:
+  - v0.6.1 完成 settings shell、section registry、ModelSettingsService、Extensions section、Tools section 和 Provider 清理。
+  - 更严格的 settings 开发规范已固化到 `AGENTS.md` §10.1。
+  - settings contribution V2 mount point 仍作为未来增强项，当前兼容现有 `IAgentCoreSettingsContribution`。
+
 ---
 
 
@@ -347,14 +419,15 @@ v0.6.0 → Phase 7.1 (UPM 发布)
 
 | 文档 | 当前状态 | 位置 |
 |------|----------|------|
-| [`README.md`](README.md) | ✅ 文档导航 | `plans/` 顶层 |
-| [`ROADMAP.md`](ROADMAP.md) | ✅ 主导方向文档 | `plans/` 顶层 |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | ✅ 架构参考（v0.4.8） | `plans/` 顶层 |
-| [`ai-coding-assistants-analysis.md`](ai-coding-assistants-analysis.md) | 📊 参考文档 | `plans/` 顶层 |
-| **Phase 计划** | 📦 历史归档 | [`_archive/phases/`](_archive/phases/) |
-| **重构计划** | 📦 历史归档 | [`_archive/refactoring/`](_archive/refactoring/) |
-| **功能计划** | 📦 历史归档 | [`_archive/features/`](_archive/features/) |
-| **技术分析** | 📦 历史归档 | [`_archive/analysis/`](_archive/analysis/) |
+| [`README.md`](README.md) |  文档导航 | `plans/` 顶层 |
+| [`ROADMAP.md`](ROADMAP.md) |  主导方向文档 | `plans/` 顶层 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) |  架构参考 | `plans/` 顶层 |
+| [`ai-coding-assistants-analysis.md`](ai-coding-assistants-analysis.md) |  参考文档 | `plans/` 顶层 |
+| [`teamcity-svn-unity-build-quality-plan.md`](teamcity-svn-unity-build-quality-plan.md) |  外部客户方案草案，持续迭代 | `plans/` 顶层 |
+| **Phase 计划** |  历史归档 | [`_archive/phases/`](_archive/phases/) |
+| **重构计划** |  历史归档，含 VCS 可选组件化与 Settings 架构重构 | [`_archive/refactoring/`](_archive/refactoring/) |
+| **功能计划** |  历史归档，含上下文压缩、上下文可视化与版本控制集成 | [`_archive/features/`](_archive/features/) |
+| **技术分析** |  历史归档，含上下文压缩 LLM 选型分析 | [`_archive/analysis/`](_archive/analysis/) |
 
 **归档文档使用规则**：
 - 归档文档仅作历史参考，不作为当前开发依据
@@ -365,13 +438,37 @@ v0.6.0 → Phase 7.1 (UPM 发布)
 
 ## 8. 下一步行动建议
 
-当前（v0.4.6）最推荐的三个切入点：
+当前（v0.6.1）最推荐的三个切入点：
 
 | 推荐度 | 任务 | 原因 |
 |--------|------|------|
-| ⭐⭐⭐ | **5.3.6 文档状态校准** | 当前首要风险是旧计划误导开发，必须先统一文档事实源 |
-| ⭐⭐ | **5.3.2 ManageTestTool 小增强** | 范围小且通用：补 `cancel` 与 `create_test_fixture` |
-| ⭐⭐ | **5.3.5 ManageMaterialTool 小增强** | 范围小且通用：补批量属性设置、材质列表、Shader Graph 识别说明 |
+|  | **6.2.1 文件级索引** | 代码库理解是 Agent 自主能力的基础，优先级最高 |
+|  | **6.2.2 符号检索** | 配合文件级索引，提供精确的代码导航能力 |
+|  | **6.3.1 .agentcore/rules.md 支持** | 让 Agent 理解项目特定规则，增强情境感知 |
+
+**Phase 5 已完成**，当前进入 **Phase 6 — 智能化与体验**。
+
+**v0.5.4 完成内容**：
+- 版本控制集成 Phase 1（只读查询）
+- 支持 Git、SVN、Perforce 三种 VCS
+- VersionControlPanel UI 组件
+- 7 个只读 actions 供 Agent 使用
+
+**v0.5.5 完成内容**：
+- 版本控制集成 Phase 2（写操作 + 确认机制）
+- 补齐 Phase 1 剩余 5 个高级查询 actions（blame, commit_info, client_info, changelist, info）
+- 新增 14 个写操作 actions（stage, unstage, commit, revert, sync, create_branch, switch_branch, stash, stash_pop + VCS 别名）
+- 用户确认机制（写操作需二次确认）
+- VersionControlPanel UI 增强（操作按钮、文件选择、Git 特有操作区域）
+- 总计 26 个 actions 完整覆盖日常 VCS 工作流
+
+**v0.6.0 完成内容**：
+- VCS 改为默认禁用的内置可选组件
+- 新增 `Editor/Extensions/` 扩展宿主机制（Panel contribution + Settings contribution）
+- Hub 从固定模块改为动态模块，主窗口不再强引用 VCS 类型
+- 新增 `AgentCore.VCS.Editor` 独立 asmdef，通过 `AGENTCORE_VCS` define 控制是否编译
+- `version_control` 工具仅在启用 VCS 组件后注册
+- ToolAutoDiscovery 每次发现前重建 ToolRegistry，避免禁用组件后残留旧工具
 
 ---
 

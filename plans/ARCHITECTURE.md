@@ -1,4 +1,4 @@
-# Unity Agent Plugin — 完整架构设计
+﻿# Unity Agent Plugin — 完整架构设计
 
 > **版本**: 0.4.8 | **日期**: 2026-05-13
 >
@@ -652,22 +652,22 @@ public async Task<List<ToolCallResult>> ExecuteToolCallsAsync(
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│  AgentCore                                    [⚙️] [➕]  │
+│  AgentCore                                    [] []  │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │ 👤 User                                         │   │
+│  │  User                                         │   │
 │  │ 帮我查看场景中所有的 Camera 组件                  │   │
 │  └─────────────────────────────────────────────────┘   │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │ 🤖 Assistant                                    │   │
+│  │  Assistant                                    │   │
 │  │ 我来帮你搜索场景中的 Camera 组件。               │   │
 │  │                                                   │   │
-│  │ ┌─ 🔧 find_gameobjects ────────────────────┐    │   │
+│  │ ┌─  find_gameobjects ────────────────────┐    │   │
 │  │ │ action: by_component                      │    │   │
 │  │ │ component_type: Camera                    │    │   │
-│  │ │ ✅ 找到 3 个结果                          │    │   │
+│  │ │  找到 3 个结果                          │    │   │
 │  │ └──────────────────────────────────────────┘    │   │
 │  │                                                   │   │
 │  │ 场景中有 3 个 Camera 组件：                       │   │
@@ -676,14 +676,14 @@ public async Task<List<ToolCallResult>> ExecuteToolCallsAsync(
 │  │ 3. Minimap Camera (orthographic)                 │   │
 │  └─────────────────────────────────────────────────┘   │
 │                                                         │
-│  ┌─ 📁 文件变更摘要 ──────────────────────────────┐   │
+│  ┌─  文件变更摘要 ──────────────────────────────┐   │
 │  │ 修改: Assets/Scripts/Player.cs                   │   │
 │  │ 新增: Assets/Scripts/Enemy.cs                    │   │
 │  └──────────────────────────────────────────────────┘   │
 │                                                         │
 ├─────────────────────────────────────────────────────────┤
-│  [📎] 输入消息...                              [发送 ▶] │
-│                                                [⏹ 停止] │
+│  [] 输入消息...                              [发送 ] │
+│                                                [ 停止] │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -976,93 +976,93 @@ graph TD
 
 ```mermaid
 graph LR
-    P1[Phase 1: 能对话 ✅] --> P2[Phase 2: 能做事 ✅]
-    P2 --> P25[Phase 2.5: 原生工具 ✅]
-    P25 --> P3[Phase 3: 能记忆 ✅]
-    P3 --> P4[Phase 4: 更好用 ✅]
+    P1[Phase 1: 能对话 ] --> P2[Phase 2: 能做事 ]
+    P2 --> P25[Phase 2.5: 原生工具 ]
+    P25 --> P3[Phase 3: 能记忆 ]
+    P3 --> P4[Phase 4: 更好用 ]
 ```
 
-### Phase 1: 能对话 ✅ (v0.1.0)
+### Phase 1: 能对话  (v0.1.0)
 
 **目标**：最小可用的对话窗口 + LLM 调用 + Bootstrap Files 系统
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 1.1 | UPM 包结构搭建 | ✅ |
-| 1.2 | 配置系统 (Settings + SecureKeyStorage) | ✅ |
-| 1.3 | LLM 客户端 (OpenAI 兼容 + SSE 流式) | ✅ |
-| 1.4 | Bootstrap Files 系统 (SOUL + TOOLS + PROJECT) | ✅ |
-| 1.5 | Agent Loop 基础版 (单轮对话) | ✅ |
-| 1.6 | Chat Window 基础 UI | ✅ |
-| 1.7 | 流式文本显示 | ✅ |
+| 1.1 | UPM 包结构搭建 |  |
+| 1.2 | 配置系统 (Settings + SecureKeyStorage) |  |
+| 1.3 | LLM 客户端 (OpenAI 兼容 + SSE 流式) |  |
+| 1.4 | Bootstrap Files 系统 (SOUL + TOOLS + PROJECT) |  |
+| 1.5 | Agent Loop 基础版 (单轮对话) |  |
+| 1.6 | Chat Window 基础 UI |  |
+| 1.7 | 流式文本显示 |  |
 
-### Phase 2: 能做事 ✅ (v0.2.0)
+### Phase 2: 能做事  (v0.2.0)
 
 **目标**：Agent 能调用工具完成实际 Unity 任务，并具备自主纠错能力
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 2.1 | IAgentTool 接口与 ToolRegistry | ✅ |
-| 2.2 | ToolCallDispatcher 统一调度器 | ✅ |
-| 2.3 | ToolDefinitionBuilder (OpenAI function schema) | ✅ |
-| 2.4 | ToolAutoDiscovery 自动发现注册 | ✅ |
-| 2.5 | ErrorInfoCollector 错误信息收集 | ✅ |
-| 2.6 | ConsoleErrorCapture 控制台捕获 | ✅ |
-| 2.7 | FallbackRouter 恢复策略 | ✅ |
-| 2.8 | CompilationWatcher 编译监控 | ✅ |
-| 2.9 | Agent Loop 完整版 (多轮工具循环) | ✅ |
-| 2.10 | ToolCallCard UI 展示 | ✅ |
+| 2.1 | IAgentTool 接口与 ToolRegistry |  |
+| 2.2 | ToolCallDispatcher 统一调度器 |  |
+| 2.3 | ToolDefinitionBuilder (OpenAI function schema) |  |
+| 2.4 | ToolAutoDiscovery 自动发现注册 |  |
+| 2.5 | ErrorInfoCollector 错误信息收集 |  |
+| 2.6 | ConsoleErrorCapture 控制台捕获 |  |
+| 2.7 | FallbackRouter 恢复策略 |  |
+| 2.8 | CompilationWatcher 编译监控 |  |
+| 2.9 | Agent Loop 完整版 (多轮工具循环) |  |
+| 2.10 | ToolCallCard UI 展示 |  |
 
-### Phase 2.5: 原生工具系统 ✅ (v0.3.0)
+### Phase 2.5: 原生工具系统  (v0.3.0)
 
 **目标**：自研完整的 Unity Editor 原生工具，替代外部依赖
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 2.5.1 | Core 工具 (Scene/GO/Component/Find/Analysis) | ✅ 5 个工具 |
-| 2.5.2 | Meta 工具 (Batch/Editor/MenuItem) | ✅ 3 个工具 |
-| 2.5.3 | Scripting 工具 (Script/Prefab/SO/Code) | ✅ 4 个工具 |
-| 2.5.4 | Specialized 工具 (Camera/Physics/Terrain/...) | ✅ 11 个工具 |
-| 2.5.5 | Utility 工具 (Asset/Material/Shader/...) | ✅ 8 个工具 |
-| 2.5.6 | Extended 工具 (Package/Profiler/Test/...) | ✅ 6 个工具 |
-| 2.5.7 | FileSystem 工具 (ManageFileTool) | ✅ 1 个工具 |
+| 2.5.1 | Core 工具 (Scene/GO/Component/Find/Analysis) |  5 个工具 |
+| 2.5.2 | Meta 工具 (Batch/Editor/MenuItem) |  3 个工具 |
+| 2.5.3 | Scripting 工具 (Script/Prefab/SO/Code) |  4 个工具 |
+| 2.5.4 | Specialized 工具 (Camera/Physics/Terrain/...) |  11 个工具 |
+| 2.5.5 | Utility 工具 (Asset/Material/Shader/...) |  8 个工具 |
+| 2.5.6 | Extended 工具 (Package/Profiler/Test/...) |  6 个工具 |
+| 2.5.7 | FileSystem 工具 (ManageFileTool) |  1 个工具 |
 
-### Phase 3: 能记忆 ✅ (v0.3.1)
+### Phase 3: 能记忆  (v0.3.1)
 
 **目标**：Agent 具备跨会话记忆能力，支持会话管理和持久化
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 3.1 | mem0 HTTP 客户端 + Mem0Tool | ✅ |
-| 3.2 | LightRAG HTTP 客户端 + LightRAGTool | ✅ |
-| 3.3 | 自动记忆策略 (AutoMemoryStrategy) | ✅ |
-| 3.4 | 会话持久化 (SessionStorage) | ✅ |
-| 3.5 | 会话导出 (SessionExporter) | ✅ |
-| 3.6 | 上下文窗口管理 (ContextWindowManager) | ✅ |
-| 3.7 | Token 计数 (TokenCounter) | ✅ |
+| 3.1 | mem0 HTTP 客户端 + Mem0Tool |  |
+| 3.2 | LightRAG HTTP 客户端 + LightRAGTool |  |
+| 3.3 | 自动记忆策略 (AutoMemoryStrategy) |  |
+| 3.4 | 会话持久化 (SessionStorage) |  |
+| 3.5 | 会话导出 (SessionExporter) |  |
+| 3.6 | 上下文窗口管理 (ContextWindowManager) |  |
+| 3.7 | Token 计数 (TokenCounter) |  |
 
-### Phase 4: 更好用 ✅ (v0.3.2 ~ v0.3.6, 已完成)
+### Phase 4: 更好用  (v0.3.2 ~ v0.3.6, 已完成)
 
 **目标**：打磨用户体验，提升专业度和可扩展性
 
 | # | 任务 | 状态 |
 |---|------|------|
-| 4.1 | Domain Reload 恢复机制 | ✅ |
-| 4.2 | ToolCallGroup 分组展示 | ✅ |
-| 4.3 | FileChangeTracker 文件变更追踪 | ✅ |
-| 4.4 | FileChangeSummaryPanel UI | ✅ |
-| 4.5 | Markdown 渲染增强 | ❌ 已决定不实现（当前段落可视化满足需求） |
-| 4.6 | 键盘快捷键 | ✅ |
-| 4.7 | 工具启用/禁用管理 | ✅ |
-| 4.8 | 完善文档和示例 | ✅ |
-| 4.9 | 重试 UI (RetryLastMessage + FallbackRouter) | ✅ |
-| 4.10 | 新增工具：ManageUIToolkitTool (20 actions) | ✅ |
-| 4.11 | 新增工具：ValidationTool (10 actions) | ✅ |
-| 4.12 | 新增工具：WorkflowTool (15 actions) | ✅ |
-| 4.13 | 增强：ManageCinemachineTool (+11 actions) | ✅ |
-| 4.14 | 增强：ManageUITool (+9 actions) | ✅ |
-| 4.15 | 增强：ManageProBuilderTool (+8 actions) | ✅ |
-| 4.16 | 增强：ReadConsoleTool (+5 actions) | ✅ |
+| 4.1 | Domain Reload 恢复机制 |  |
+| 4.2 | ToolCallGroup 分组展示 |  |
+| 4.3 | FileChangeTracker 文件变更追踪 |  |
+| 4.4 | FileChangeSummaryPanel UI |  |
+| 4.5 | Markdown 渲染增强 |  已决定不实现（当前段落可视化满足需求） |
+| 4.6 | 键盘快捷键 |  |
+| 4.7 | 工具启用/禁用管理 |  |
+| 4.8 | 完善文档和示例 |  |
+| 4.9 | 重试 UI (RetryLastMessage + FallbackRouter) |  |
+| 4.10 | 新增工具：ManageUIToolkitTool (20 actions) |  |
+| 4.11 | 新增工具：ValidationTool (10 actions) |  |
+| 4.12 | 新增工具：WorkflowTool (15 actions) |  |
+| 4.13 | 增强：ManageCinemachineTool (+11 actions) |  |
+| 4.14 | 增强：ManageUITool (+9 actions) |  |
+| 4.15 | 增强：ManageProBuilderTool (+8 actions) |  |
+| 4.16 | 增强：ReadConsoleTool (+5 actions) |  |
 
 ---
 
@@ -1131,8 +1131,8 @@ agentcore-unity/                    # 仓库根目录
 | Q2 | 是否需要支持代理服务器？ | 企业网络环境 | 配置中预留 |
 | Q3 | 44 个工具全部发送给 LLM 是否 token 消耗过大？ | 成本/性能 | 计划实现工具分组启用/禁用 |
 | Q4 | 是否需要支持多 LLM 模型切换？ | 用户灵活性 | 配置已支持 |
-| Q5 | 是否需要 Markdown 完整渲染（代码高亮、表格）？ | 用户体验 | ✅ 已决定不实现，当前段落可视化满足需求 |
-| Q6 | 缺失的工具类别（UIToolkit/Validation/Workflow/XR）是否需要补充？ | 功能覆盖率 | ✅ UIToolkit/Validation/Workflow 已补充，XR 暂不实现 |
+| Q5 | 是否需要 Markdown 完整渲染（代码高亮、表格）？ | 用户体验 |  已决定不实现，当前段落可视化满足需求 |
+| Q6 | 缺失的工具类别（UIToolkit/Validation/Workflow/XR）是否需要补充？ | 功能覆盖率 |  UIToolkit/Validation/Workflow 已补充，XR 暂不实现 |
 
 > **已解决的问题**：
 > - ~~JSON 序列化选型~~ → 统一使用 Newtonsoft.Json（UPM 包依赖）

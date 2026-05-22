@@ -1,9 +1,152 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.6.1] - 2026-05-22
+
+### Added
+- **Settings 页面架构重构 (Settings Hub + Section System)**
+  - 新增模块化 settings section 架构，将 AgentCore 设置页拆分为 General、Model、Agent、Context、Memory、Knowledge、Context Management、Extensions、Tools、Interface、Diagnostics 等独立 section。
+  - 新增 settings shell / context / transient state / shared IMGUI helper / section registry，新增设置功能无需继续污染 `AgentCoreSettingsProvider`。
+  - 新增 `ModelSettingsService`，将模型拉取与连接测试逻辑从 Provider 中抽离。
+
+### Changed
+- **AgentCoreSettingsProvider Shell 化** — Provider 仅保留 settings 初始化、左侧导航和 section dispatch，不再直接绘制业务设置。
+- **Settings 信息架构重组** — Project Settings > AgentCore 改为左侧导航 + 右侧内容布局，避免单页无限 foldout 膨胀。
+- **Extensions 设置归属收敛** — Optional Components 与启用组件贡献的 settings 统一由 Extensions section 管理。
+- **Tools 设置独立化** — Tool exposure preset、category toggle、individual tool toggle 迁移到 Tools section，并与 Optional Components 启用/禁用职责解耦。
+
+## [0.6.0] - 2026-05-21
+
+### Added
+- **VCS 可选组件化 (Optional Component Framework)**
+  - 新增 `Editor/Extensions/` 扩展宿主机制，支持 Hub Panel 与 Settings Contribution 动态发现。
+  - 新增 Optional Components 设置入口，用户可通过 `AGENTCORE_VCS` scripting define 启用或禁用 VCS 组件。
+  - 新增 `AgentCore.VCS.Editor` 独立 Editor 程序集，VCS 仅在启用 `AGENTCORE_VCS` 后参与编译。
+  - 新增 VCS 设置贡献区块，支持控制面板打开时自动刷新与默认提交历史数量。
+
+### Changed
+- **VCS 默认禁用** — 新安装 AgentCore 后不再默认显示 VCS Hub 入口，也不会默认注册 `version_control` 工具。
+- **Hub 动态化** — Chat / Knowledge / Memory / VCS 统一通过动态 Panel contribution 接入，主窗口不再强引用 VCS 类型。
+- **ToolAutoDiscovery 重建化** — 每次发现工具前重建 `ToolRegistry`，避免可选组件禁用后残留旧工具实例。
+- **VCS 目录迁移** — VCS Tool、Adapter、Panel 与样式文件迁移至 `Editor/VCS/` 组件目录。
+
+## [0.5.5] - 2026-05-21
+
+### Added
+- **版本控制集成 (Version Control Integration) - Phase 2 完整实现**
+  - Phase 1 补齐 5 个高级查询 actions：
+    - `get_blame` — 获取文件逐行归属信息（支持 Git/SVN/Perforce）
+    - `get_commit_info` — 获取 Git 提交详细信息（作者、日期、变更文件）
+    - `get_client_info` — 获取 Perforce 客户端工作区信息
+    - `get_changelist` — 获取 Perforce 变更列表详情
+    - `get_info` — 获取 SVN 仓库/文件详细信息
+  - Phase 2 通用写操作 actions（所有 VCS 支持）：
+    - `stage_files` — 暂存文件（Git: add, P4: edit/add, SVN: add）
+    - `unstage_files` — 取消暂存（Git: reset HEAD, P4/SVN: revert）
+    - `commit` — 提交变更（Git: commit, P4: submit, SVN: commit）
+    - `revert_files` — 还原文件修改（所有 VCS）
+    - `sync` — 同步远程（Git: pull, P4: sync, SVN: update）
+  - Phase 2 Git 特有操作：
+    - `create_branch` — 创建新分支
+    - `switch_branch` — 切换分支
+    - `stash` — 暂存当前修改
+    - `stash_pop` — 恢复暂存的修改
+  - Phase 2 VCS 别名映射：
+    - `checkout_files` → Perforce edit/add
+    - `submit` → Perforce submit
+    - `update` → SVN update
+    - `commit_svn` → SVN commit
+    - `revert_svn` → SVN revert
+    - `add_files` → SVN add
+  - **用户确认机制** — 所有写操作首次调用返回预览，需 `confirmed=true` 才执行
+  - `IVcsAdapter` 接口扩展 — 新增 6 个写操作方法
+  - 新增数据类：`VcsBlameResult`, `VcsBlameLine`, `VcsOperationResult`, `VcsCommitDetail`, `VcsSvnInfo`, `VcsPerforceClientInfo`, `VcsPerforceChangelist`
+  - `VersionControlPanel` UI 增强：
+    - 操作按钮区域（Stage All, Unstage All, Commit, Sync, Revert All）
+    - Git 特有操作区域（Create Branch, Switch Branch, Stash, Stash Pop）
+    - 提交消息输入框
+    - 分支名输入框
+    - 文件选择复选框（支持选择性操作）
+    - 按 VCS 类型自适应按钮标签（Git/SVN/Perforce 各有对应术语）
+    - 危险操作确认对话框（Revert 前弹出确认）
+    - 操作成功消息自动消失（5 秒）
+
+### Changed
+- `VersionControlTool` — 从 7 个 actions 扩展到 26 个 actions
+- `GitAdapter` — 从 6 个方法扩展到 15 个方法（含 4 个 Git 特有操作）
+- `SvnAdapter` — 从 6 个方法扩展到 11 个方法（含 SVN info 查询）
+- `PerforceAdapter` — 从 6 个方法扩展到 11 个方法（含 client/changelist 查询）
+- `VersionControlPanel.uss` — 新增操作按钮样式（primary/danger/operation 三种风格）
+
+## [0.5.4] - 2026-05-21
+
+### Added
+- **版本控制集成 (Version Control Integration) - Phase 1**
+  - 新增 `Editor/Tools/Native/VersionControl/` 模块 — 多 VCS 支持（SVN > Perforce > Git 优先级）
+  - `VcsDetector` — 自动检测项目使用的版本控制系统
+  - `IVcsAdapter` 接口 — 统一的 VCS 操作抽象层
+  - `GitAdapter` — Git 版本控制适配器（只读查询操作）
+  - `SvnAdapter` — SVN 版本控制适配器（只读查询操作）
+  - `PerforceAdapter` — Perforce 版本控制适配器（只读查询操作）
+  - `VcsCommandExecutor` — 统一的命令行执行器（超时控制、输出捕获）
+  - `VersionControlTool` — Agent 工具，支持 7 个 actions：
+    - `detect_vcs` — 检测 VCS 类型和可用性
+    - `get_status` — 获取工作区状态（已修改文件列表）
+    - `get_branch` — 获取当前分支/工作区信息
+    - `get_log` — 获取提交历史（最多 100 条）
+    - `get_diff` — 获取文件差异
+    - `get_remote` — 获取远程仓库信息
+    - `get_tags` — 获取标签/标记列表
+  - `VersionControlPanel` UI 组件 — 独立的版本控制面板
+    - 实时显示 VCS 类型、分支、版本号
+    - 工作区状态列表（按状态分组）
+    - 最近提交历史（最多 10 条）
+    - Refresh 按钮手动刷新数据
+    - View Diff 按钮查看差异（输出到 Console）
+  - Hub Rail 新增 "VCS" 模块按钮
+  - ChatWindow 集成 VersionControl 模块（与 Chat/Knowledge/Memory 同级）
+
+### Changed
+- `HubModule` 枚举 — 新增 `VersionControl` 模块
+- `ChatWindow.Hub.cs` — 更新模块切换逻辑支持 VersionControl 面板
+- `ChatWindow.uxml` — 新增 `#version-control-panel` 容器
+
+## [0.5.3] - 2026-05-19
+
+### Deprecated
+- **模式系统 (Mode System) 废弃** — ADR-5 决策
+  - AgentCore 定位为自主智能体，不需要手动模式切换
+  - Agent 可根据需求自动识别环境并调用相应能力
+  - 原计划的 Phase 6.1 模式系统任务已标记为 `[DEPRECATED]`
+
+### Changed
+- `plans/ROADMAP.md` — 新增 ADR-5 记录模式系统废弃决策
+- `plans/ROADMAP.md` — 重新规划 v0.5.3+ 里程碑，移除模式系统相关任务
+
+## [0.5.2] - 2026-05-18
+
+### Added
+- **上下文使用情况可视化 (Context Usage Visualization)**
+  - 新增 `ContextUsagePanel` UI 组件 — 实时显示 token 使用情况和压缩统计
+  - 新增 `ContextBudgetInfo` 数据结构 — 封装上下文预算和压缩指标
+  - `AgentLoop.GetContextBudget()` — 暴露上下文预算信息供 UI 查询
+  - 压缩统计持久化 — 支持 Domain Reload 后恢复压缩数据
+  - 按会话统计 — 压缩数据随会话保存，支持历史查看
+
+### Fixed
+- **manage_knowledge 工具参数兼容性** — `query` action 现在同时支持 `"query"` 和 `"content"` 参数名，修复 LLM 参数名不匹配导致的连续失败
+- **ContextUsagePanel UI 布局** — 添加 `flex-shrink: 0` 防止面板被消息滚动视图挤压
+- **空回复兜底处理** — 当达到工具调用上限后 LLM 返回空内容时，显示"[系统提示] 助手未返回任何内容。"而非空白消息
+
+### Changed
+- `ChatWindow` — 集成 `ContextUsagePanel`，每次 LLM 调用后自动更新显示
+- `CompressionMetrics` — 新增 `RestoreFromPersistence()` 方法支持 Domain Reload 恢复
+- `SessionData` — 新增 `SerializableCompressionMetrics` 支持压缩数据序列化
+- `DomainReloadState` — 新增压缩指标持久化方法
 
 ## [0.5.1] - 2026-05-14
 
@@ -325,7 +468,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - 全部启用/全部禁用快捷按钮
     - 实时显示启用/禁用工具数量统计
 - **错误重试 UI**（Phase 4.2）
-  - 错误消息气泡底部显示「🔄 重试」按钮
+  - 错误消息气泡底部显示「 重试」按钮
   - 点击重试按钮自动重新发送上一条用户消息
   - 重试按钮点击后自动禁用防止重复操作
   - `MessageBubble.AddRetryButton()` — 支持为错误气泡添加重试回调

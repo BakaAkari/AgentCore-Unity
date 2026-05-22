@@ -1,0 +1,20 @@
+{
+    "name": "AgentCore.VCS.Editor",
+    "rootNamespace": "AgentCore.Editor.Components.VCS",
+    "references": [
+        "AgentCore.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "AGENTCORE_VCS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

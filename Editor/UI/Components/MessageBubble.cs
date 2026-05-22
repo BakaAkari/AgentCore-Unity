@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
@@ -223,7 +223,7 @@ namespace AgentCore.Editor.UI.Components
                 btn.text = "重试中...";
                 OnRetryClicked?.Invoke();
             });
-            btn.text = "🔄 重试";
+            btn.text = " 重试";
             btn.style.paddingLeft = 8;
             btn.style.paddingRight = 8;
             btn.style.paddingTop = 3;
@@ -273,7 +273,7 @@ namespace AgentCore.Editor.UI.Components
             var isExpanded = false;
             var headerBtn = new Button();
             headerBtn.AddToClassList("error-detail-header");
-            headerBtn.text = $"▶ {title}";
+            headerBtn.text = $"> {title}";
 
             // 内容区域（默认隐藏）
             var contentLabel = new Label();
@@ -285,7 +285,7 @@ namespace AgentCore.Editor.UI.Components
             headerBtn.clicked += () =>
             {
                 isExpanded = !isExpanded;
-                headerBtn.text = isExpanded ? $"▼ {title}" : $"▶ {title}";
+                headerBtn.text = isExpanded ? $"v {title}" : $"> {title}";
                 contentLabel.style.display = isExpanded ? DisplayStyle.Flex : DisplayStyle.None;
             };
 

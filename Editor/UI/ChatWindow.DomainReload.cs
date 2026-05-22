@@ -1,4 +1,4 @@
-using AgentCore.Editor.Core;
+﻿using AgentCore.Editor.Core;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -37,7 +37,7 @@ namespace AgentCore.Editor.UI
             var header = new VisualElement();
             header.AddToClassList("domain-reload-notification__header");
 
-            var headerIcon = new Label("⚡");
+            var headerIcon = new Label("");
             headerIcon.AddToClassList("domain-reload-notification__header-icon");
             header.Add(headerIcon);
 
@@ -67,7 +67,7 @@ namespace AgentCore.Editor.UI
             card.Add(phaseRow);
 
             // === 详情行：编译结果 ===
-            string compileIcon = compilationSucceeded ? "✅" : "❌";
+            string compileIcon = compilationSucceeded ? "" : "";
             string compileText = compilationSucceeded ? "编译成功" : "编译失败";
             if (!compilationSucceeded && !string.IsNullOrEmpty(compilationErrors))
             {
@@ -93,7 +93,7 @@ namespace AgentCore.Editor.UI
             statusRow.AddToClassList("domain-reload-notification__status");
             statusRow.name = "reload-notification-status";
 
-            var statusIcon = new Label("⏳");
+            var statusIcon = new Label("");
             statusIcon.AddToClassList("domain-reload-notification__status-icon");
             statusIcon.name = "reload-status-icon";
             statusRow.Add(statusIcon);
@@ -157,21 +157,21 @@ namespace AgentCore.Editor.UI
             {
                 // 恢复成功
                 card.AddToClassList("domain-reload-notification--success");
-                if (statusIcon != null) statusIcon.text = "✅";
+                if (statusIcon != null) statusIcon.text = "";
                 if (statusText != null) statusText.text = "会话已恢复，继续执行中";
             }
             else
             {
                 // 恢复失败
                 card.AddToClassList("domain-reload-notification--error");
-                if (statusIcon != null) statusIcon.text = "❌";
+                if (statusIcon != null) statusIcon.text = "";
 
                 var failText = "恢复失败";
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
                     failText += $"：{errorMessage}";
                 }
-                failText += "\n💡 建议：请手动重新发送消息继续操作";
+                failText += "\n 建议：请手动重新发送消息继续操作";
 
                 if (statusText != null) statusText.text = failText;
             }

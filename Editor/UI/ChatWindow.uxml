@@ -49,15 +49,8 @@
           </ui:VisualElement>
         </ui:VisualElement>
 
-        <!-- Knowledge 面板（Phase Hub-2 实现，由 KnowledgeBasePanel C# 组件填充） -->
-        <ui:VisualElement name="knowledge-panel">
-          <!-- KnowledgeBasePanel 由 ChatWindow.cs 动态插入 -->
-        </ui:VisualElement>
-
-        <!-- Memory 面板（由 MemoryPanel C# 组件填充） -->
-        <ui:VisualElement name="memory-panel">
-          <!-- MemoryPanel 由 ChatWindow.cs 动态插入 -->
-        </ui:VisualElement>
+        <!-- 动态扩展面板宿主（内置与可选组件由 C# 动态插入） -->
+        <ui:VisualElement name="extension-panel-host" />
       </ui:VisualElement>
     </ui:VisualElement>
   </ui:VisualElement>

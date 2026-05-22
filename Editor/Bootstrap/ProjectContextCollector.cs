@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -259,7 +259,7 @@ namespace AgentCore.Editor.Bootstrap
             for (int i = 0; i < scenes.Length; i++)
             {
                 var scene = scenes[i];
-                var status = scene.enabled ? "✓" : "✗";
+                var status = scene.enabled ? "" : "";
                 var path = scene.path;
                 sb.AppendLine($"- [{status}] `{i}`: {path}");
             }

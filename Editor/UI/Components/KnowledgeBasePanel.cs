@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -283,8 +283,8 @@ namespace AgentCore.Editor.UI.Components
 
             // 启用状态
             _statusEnabledLabel.text = enabled
-                ? "LightRAG: ✓ 已启用"
-                : "LightRAG: ✗ 未启用";
+                ? "LightRAG:  已启用"
+                : "LightRAG:  未启用";
             _statusEnabledLabel.EnableInClassList("kb-panel__status--enabled", enabled);
             _statusEnabledLabel.EnableInClassList("kb-panel__status--disabled", !enabled);
 
@@ -328,13 +328,13 @@ namespace AgentCore.Editor.UI.Components
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--failed");
                     break;
                 case ConnectionStatus.Connected:
-                    _statusConnectionLabel.text = "连接: ✓ 已连接";
+                    _statusConnectionLabel.text = "连接:  已连接";
                     _statusConnectionLabel.AddToClassList("kb-panel__status--connected");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--failed");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--testing");
                     break;
                 case ConnectionStatus.Failed:
-                    _statusConnectionLabel.text = "连接: ✗ 连接失败";
+                    _statusConnectionLabel.text = "连接:  连接失败";
                     _statusConnectionLabel.AddToClassList("kb-panel__status--failed");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--connected");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--testing");
@@ -515,7 +515,7 @@ namespace AgentCore.Editor.UI.Components
 
                 _lastResultSection.style.display = DisplayStyle.Flex;
                 string reason = uploadResult?.ErrorMessage ?? errorMessage ?? "请检查 LightRAG 服务状态";
-                _lastIndexSummary = $"✗ 上传失败：{fileName}\n原因：{reason}";
+                _lastIndexSummary = $" 上传失败：{fileName}\n原因：{reason}";
                 _lastResultLabel.text = _lastIndexSummary;
                 _lastResultLabel.AddToClassList("kb-panel__result--failed");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
@@ -533,7 +533,7 @@ namespace AgentCore.Editor.UI.Components
                 _indexStatus = IndexStatus.Success;
 
                 _lastResultSection.style.display = DisplayStyle.Flex;
-                _lastIndexSummary = $"✓ 已上传：{fileName}（无法追踪处理进度）";
+                _lastIndexSummary = $" 已上传：{fileName}（无法追踪处理进度）";
                 _lastResultLabel.text = _lastIndexSummary;
                 _lastResultLabel.AddToClassList("kb-panel__result--success");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
@@ -592,7 +592,7 @@ namespace AgentCore.Editor.UI.Components
                         _indexStatus = IndexStatus.Success;
                         _indexDocumentButton.SetEnabled(true);
 
-                        _lastIndexSummary = $"✓ 索引完成：{fileName}";
+                        _lastIndexSummary = $" 索引完成：{fileName}";
                         _lastResultLabel.text = _lastIndexSummary;
                         _lastResultLabel.AddToClassList("kb-panel__result--success");
                         _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
@@ -610,7 +610,7 @@ namespace AgentCore.Editor.UI.Components
                         _indexDocumentButton.SetEnabled(true);
 
                         string errMsg = status.ErrorMsg ?? "LightRAG 处理失败";
-                        _lastIndexSummary = $"✗ 索引失败：{fileName}\n原因：{errMsg}";
+                        _lastIndexSummary = $" 索引失败：{fileName}\n原因：{errMsg}";
                         _lastResultLabel.text = _lastIndexSummary;
                         _lastResultLabel.AddToClassList("kb-panel__result--failed");
                         _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
@@ -641,7 +641,7 @@ namespace AgentCore.Editor.UI.Components
                 _indexStatus = IndexStatus.Idle;
                 _indexDocumentButton.SetEnabled(true);
 
-                _lastIndexSummary = $"⚠ 处理超时：{fileName}\n请稍后点击「↻ 刷新」查看文档列表确认结果。";
+                _lastIndexSummary = $" 处理超时：{fileName}\n请稍后点击「↻ 刷新」查看文档列表确认结果。";
                 _lastResultLabel.text = _lastIndexSummary;
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");

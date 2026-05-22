@@ -1,4 +1,4 @@
-# AgentCore Unity
+﻿# AgentCore Unity
 
 > Unity Editor 内置 AI Agent 插件 — 通过自然语言对话驱动 Unity 开发工作流
 
@@ -8,16 +8,16 @@ AgentCore Unity 是一个 Unity Editor 插件，提供类 ChatGPT 的对话窗�
 
 ### 核心特性
 
-- 🧠 **智能 Agent Loop** — "Loop until final answer" 模式，自主规划和执行多步任务
-- 🔧 **40+ 内置工具** — 覆盖场景、脚本、资产、物理、UI、地形、相机、动画、构建等 Unity 核心功能，共 335+ 个 actions
-- 🔄 **自主纠错能力** — 错误即信息、自动编译检查、Console 错误捕获、Fallback 路由
-- 💬 **多会话管理** — 标签页式多会话，支持历史记录和上下文恢复
-- 📝 **Bootstrap Files** — SOUL/TOOLS/PROJECT/MEMORY/USER 五层系统提示词
-- 🔌 **UPM 包分发** — 标准 Unity Package Manager 安装
-- 🔍 **工具自动发现** — 基于 `[AgentTool]` 属性的反射自动注册机制
-- 🧩 **Domain Reload 恢复** — 脚本修改触发重编译后自动恢复对话上下文
-- 📊 **文件变更追踪** — 实时追踪工具调用产生的文件变更，可视化展示增减行数
-- 🎛️ **工具启用/禁用** — Settings 面板中按分类或单个工具控制启用状态
+-  **智能 Agent Loop** — "Loop until final answer" 模式，自主规划和执行多步任务
+-  **40+ 内置工具** — 覆盖场景、脚本、资产、物理、UI、地形、相机、动画、构建等 Unity 核心功能，共 335+ 个 actions
+-  **自主纠错能力** — 错误即信息、自动编译检查、Console 错误捕获、Fallback 路由
+-  **多会话管理** — 标签页式多会话，支持历史记录和上下文恢复
+-  **Bootstrap Files** — SOUL/TOOLS/PROJECT/MEMORY/USER 五层系统提示词
+-  **UPM 包分发** — 标准 Unity Package Manager 安装
+-  **工具自动发现** — 基于 `[AgentTool]` 属性的反射自动注册机制
+-  **Domain Reload 恢复** — 脚本修改触发重编译后自动恢复对话上下文
+-  **文件变更追踪** — 实时追踪工具调用产生的文件变更，可视化展示增减行数
+-  **工具启用/禁用** — Settings 面板中按分类或单个工具控制启用状态
 
 ## 架构
 
@@ -114,14 +114,14 @@ AgentCore Unity 是一个 Unity Editor 插件，提供类 ChatGPT 的对话窗�
 
 ## 开发状态
 
-🚧 **开发中** — v0.5.1 (Phase 5: 夯实基础 — 测试框架 + RAG 补齐)
+ **开发中** — v0.5.1 (Phase 5: 夯实基础 — 测试框架 + RAG 补齐)
 
 ### 已完成的阶段
-- ✅ Phase 1: 核心架构（Agent Loop、LLM 客户端、会话管理）
-- ✅ Phase 2: 基础工具系统（场景/对象/组件/脚本/资产）
-- ✅ Phase 2.5: 原生工具扩展（物理/光照/UI/音频/构建/导航等）
-- ✅ Phase 3: Domain Reload 恢复、上下文窗口管理、Fallback 路由
-- ✅ Phase 4: UI 增强（Markdown 格式化、错误重试、工具管理、文件变更追踪）
+-  Phase 1: 核心架构（Agent Loop、LLM 客户端、会话管理）
+-  Phase 2: 基础工具系统（场景/对象/组件/脚本/资产）
+-  Phase 2.5: 原生工具扩展（物理/光照/UI/音频/构建/导航等）
+-  Phase 3: Domain Reload 恢复、上下文窗口管理、Fallback 路由
+-  Phase 4: UI 增强（Markdown 格式化、错误重试、工具管理、文件变更追踪）
 
 ## 目录结构
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Core;
 using UnityEditor;
@@ -49,9 +49,9 @@ namespace AgentCore.Editor.UI.Components
         // 文件行悬停颜色
         private static readonly Color FileRowHover = new Color(0.22f, 0.22f, 0.22f);    // #383838
 
-        // 折叠/展开箭头
-        private const string ArrowCollapsed = "\u25B6"; // ▶
-        private const string ArrowExpanded = "\u25BC";  // ▼
+        // 折叠/展开箭头（纯 ASCII，避免 Unity 字体缺字）
+        private const string ArrowCollapsed = ">";
+        private const string ArrowExpanded = "v";
 
         // 双击检测时间阈值（毫秒）
         private const long DoubleClickThresholdMs = 400;

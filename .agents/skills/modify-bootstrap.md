@@ -1,11 +1,11 @@
-# Skill: 修改 Bootstrap / SOUL
+﻿# Skill: 修改 Bootstrap / SOUL
 
 > 当需要修改 Bootstrap 系统（SOUL.md、TOOLS.md.template、BootstrapLoader、ProjectContextCollector）时，加载此 Skill。
 > Bootstrap 系统决定了 AI Agent 的行为基础。
 
 ---
 
-## 风险等级：🟡 中
+## 风险等级： 中
 
 Bootstrap 修改影响：
 - AI Agent 的角色定义和行为模式（SOUL.md）

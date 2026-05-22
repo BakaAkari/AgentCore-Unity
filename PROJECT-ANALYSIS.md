@@ -1,4 +1,4 @@
-# AgentCore vs Unity Skills — 能力覆盖度分析报告
+﻿# AgentCore vs Unity Skills — 能力覆盖度分析报告
 
 > 生成时间: 2026-05-07 (修订版 — 纠正 2026-04-29 初版的数据错误)
 > 分析范围: `_archive/Unity-Skills/SkillsForUnity/Editor/Skills/` vs `Editor/Tools/`
@@ -14,7 +14,7 @@
 | **功能分类覆盖** | 41 个分类 | 36 个分类 (含独有) | **~88%** |
 | **完全缺失的分类** | — | 5 个 | — |
 
-### ⚠️ 初版报告修正说明
+###  初版报告修正说明
 
 初版报告（2026-04-29）声称覆盖率约 23%（~70 actions / 300+ skills），这是**严重低估**：
 
@@ -33,51 +33,51 @@
 
 ## 2. 逐分类对比分析
 
-### ✅ 已覆盖且基本对齐（17 个分类）
+###  已覆盖且基本对齐（17 个分类）
 
 | Unity Skills | Skills数 | AgentCore Tool | Actions数 | 覆盖评估 |
 |-------------|----------|----------------|-----------|----------|
-| `AnimatorSkills` | 10 | `ManageAnimationTool` | 9 | ✅ **90%** — 新增 get_layers, set_layer_weight, create_animation_clip |
-| `AssetImportSkills` | 11 | `ManageAssetImportTool` | 9 | ✅ **82%** |
-| `AssetSkills` | 11 | `ManageAssetTool` | 8 | ✅ **73%** — 有 get_dependencies 加分项 |
-| `CameraSkills` | 11 | `ManageCameraTool` | 9 | ✅ **82%** — 新增 render_to_texture |
-| `CleanerSkills` | 10 | `CleanerTool` | 10 | ✅ **100%** — 完全覆盖 |
-| `ComponentSkills` | 10 | `ManageComponentTool` | 11 | ✅ **110%** — 超越，含 batch 操作 |
-| `EditorSkills` | 12 | `ManageEditorTool` + `ExecuteMenuItemTool` + `ManageTagsLayersTool` | 8+3+9=20 | ✅ **167%** — 大幅超越 |
-| `EventSkills` | 10 | `ManageEventTool` | 8 | ✅ **80%** |
-| `ModelSkills` | 10 | `ManageModelImportTool` | 10 | ✅ **100%** — 完全覆盖 |
-| `OptimizationSkills` | 10 | `OptimizationTool` | 10 | ✅ **100%** — 完全覆盖 |
-| `PackageSkills` | 11 | `ManagePackageTool` | 9 | ✅ **82%** |
-| `PhysicsSkills` | 12 | `ManagePhysicsTool` | 10 | ✅ **83%** — 新增 overlap_test, configure_collision |
-| `SceneSkills` | 10 | `ManageSceneTool` | 15 | ✅ **150%** — 大幅超越 |
-| `ScriptableObjectSkills` | 10 | `ManageScriptableObjectTool` | 10 | ✅ **100%** — 完全覆盖 |
-| `ScriptSkills` | 12 | `ManageScriptTool` | 10 | ✅ **83%** — 新增 analyze, find_references, add_method, add_field |
-| `TerrainSkills` | 10 | `ManageTerrainTool` | 10 | ✅ **100%** — 完全覆盖 |
-| `TextureSkills` | 10 | `ManageTextureImportTool` | 10 | ✅ **100%** — 完全覆盖 |
+| `AnimatorSkills` | 10 | `ManageAnimationTool` | 9 |  **90%** — 新增 get_layers, set_layer_weight, create_animation_clip |
+| `AssetImportSkills` | 11 | `ManageAssetImportTool` | 9 |  **82%** |
+| `AssetSkills` | 11 | `ManageAssetTool` | 8 |  **73%** — 有 get_dependencies 加分项 |
+| `CameraSkills` | 11 | `ManageCameraTool` | 9 |  **82%** — 新增 render_to_texture |
+| `CleanerSkills` | 10 | `CleanerTool` | 10 |  **100%** — 完全覆盖 |
+| `ComponentSkills` | 10 | `ManageComponentTool` | 11 |  **110%** — 超越，含 batch 操作 |
+| `EditorSkills` | 12 | `ManageEditorTool` + `ExecuteMenuItemTool` + `ManageTagsLayersTool` | 8+3+9=20 |  **167%** — 大幅超越 |
+| `EventSkills` | 10 | `ManageEventTool` | 8 |  **80%** |
+| `ModelSkills` | 10 | `ManageModelImportTool` | 10 |  **100%** — 完全覆盖 |
+| `OptimizationSkills` | 10 | `OptimizationTool` | 10 |  **100%** — 完全覆盖 |
+| `PackageSkills` | 11 | `ManagePackageTool` | 9 |  **82%** |
+| `PhysicsSkills` | 12 | `ManagePhysicsTool` | 10 |  **83%** — 新增 overlap_test, configure_collision |
+| `SceneSkills` | 10 | `ManageSceneTool` | 15 |  **150%** — 大幅超越 |
+| `ScriptableObjectSkills` | 10 | `ManageScriptableObjectTool` | 10 |  **100%** — 完全覆盖 |
+| `ScriptSkills` | 12 | `ManageScriptTool` | 10 |  **83%** — 新增 analyze, find_references, add_method, add_field |
+| `TerrainSkills` | 10 | `ManageTerrainTool` | 10 |  **100%** — 完全覆盖 |
+| `TextureSkills` | 10 | `ManageTextureImportTool` | 10 |  **100%** — 完全覆盖 |
 
-### ⚠️ 已覆盖但深度不足（14 个分类）
+###  已覆盖但深度不足（14 个分类）
 
 | Unity Skills | Skills数 | AgentCore Tool | Actions数 | 覆盖评估 | 主要缺失 |
 |-------------|----------|----------------|-----------|----------|----------|
-| `AudioSkills` | 10 | `ManageAudioTool` | 7 | ⚠️ **70%** | mixer 创建、clip 搜索 |
-| `CinemachineSkills` | 34 | `ManageCinemachineTool` | 10 | ⚠️ **29%** | FreeLook、StateDriven、ClearShot、Sequencer、扩展、脉冲等高级功能 |
-| `ConsoleSkills` | 10 | `ReadConsoleTool` | 5 | ⚠️ **50%** | 缺少 debug 系统信息 |
-| `GameObjectSkills` | 18 | `ManageGameObjectTool` | 12 | ⚠️ **67%** | 部分 batch 操作 |
-| `LightSkills` | 10 | `ManageLightingTool` | 6 | ⚠️ **60%** | probe 管理 |
-| `MaterialSkills` | 21 | `ManageMaterialTool` | 11 | ⚠️ **52%** | 细粒度属性 batch 设置 |
-| `NavMeshSkills` | 10 | `ManageNavMeshTool` | 6 | ⚠️ **60%** | calculate_path、sample_position |
-| `PerceptionSkills` | 18 | `SceneAnalysisTool` | 10 | ⚠️ **56%** | 场景 Diff、契约验证 |
-| `PrefabSkills` | 11 | `ManagePrefabTool` | 6 | ⚠️ **55%** | create_variant、find_instances |
-| `ProBuilderSkills` | 22 | `ManageProBuilderTool` | 10 | ⚠️ **45%** | 挤出、倒角、UV 投影等高级建模 |
-| `ProfilerSkills` | 10 | `ManageProfilerTool` | 5 | ⚠️ **50%** | 细粒度内存分析 |
-| `ProjectSkills` | 11 | `ManageBuildTool` | 6 | ⚠️ **55%** | 部分项目设置 |
-| `ShaderSkills` | 11 | `ManageShaderTool` | 8 | ⚠️ **73%** | create、delete |
-| `SmartSkills` | 10 | `SmartOperationsTool` | 7 | ⚠️ **70%** | 部分高级操作 |
-| `TestSkills` | 11 | `ManageTestTool` | 4 | ⚠️ **36%** | cancel、create_test_fixture |
-| `TimelineSkills` | 12 | `ManageTimelineTool` | 9 | ⚠️ **75%** | Signal 轨道、高级 clip 管理 |
-| `UISkills` | 26 | `ManageUITool` | 9 | ⚠️ **35%** | layout、align、distribute、anchor 预设 |
+| `AudioSkills` | 10 | `ManageAudioTool` | 7 |  **70%** | mixer 创建、clip 搜索 |
+| `CinemachineSkills` | 34 | `ManageCinemachineTool` | 10 |  **29%** | FreeLook、StateDriven、ClearShot、Sequencer、扩展、脉冲等高级功能 |
+| `ConsoleSkills` | 10 | `ReadConsoleTool` | 5 |  **50%** | 缺少 debug 系统信息 |
+| `GameObjectSkills` | 18 | `ManageGameObjectTool` | 12 |  **67%** | 部分 batch 操作 |
+| `LightSkills` | 10 | `ManageLightingTool` | 6 |  **60%** | probe 管理 |
+| `MaterialSkills` | 21 | `ManageMaterialTool` | 11 |  **52%** | 细粒度属性 batch 设置 |
+| `NavMeshSkills` | 10 | `ManageNavMeshTool` | 6 |  **60%** | calculate_path、sample_position |
+| `PerceptionSkills` | 18 | `SceneAnalysisTool` | 10 |  **56%** | 场景 Diff、契约验证 |
+| `PrefabSkills` | 11 | `ManagePrefabTool` | 6 |  **55%** | create_variant、find_instances |
+| `ProBuilderSkills` | 22 | `ManageProBuilderTool` | 10 |  **45%** | 挤出、倒角、UV 投影等高级建模 |
+| `ProfilerSkills` | 10 | `ManageProfilerTool` | 5 |  **50%** | 细粒度内存分析 |
+| `ProjectSkills` | 11 | `ManageBuildTool` | 6 |  **55%** | 部分项目设置 |
+| `ShaderSkills` | 11 | `ManageShaderTool` | 8 |  **73%** | create、delete |
+| `SmartSkills` | 10 | `SmartOperationsTool` | 7 |  **70%** | 部分高级操作 |
+| `TestSkills` | 11 | `ManageTestTool` | 4 |  **36%** | cancel、create_test_fixture |
+| `TimelineSkills` | 12 | `ManageTimelineTool` | 9 |  **75%** | Signal 轨道、高级 clip 管理 |
+| `UISkills` | 26 | `ManageUITool` | 9 |  **35%** | layout、align、distribute、anchor 预设 |
 
-### ❌ 完全缺失的分类（5 个）
+###  完全缺失的分类（5 个）
 
 | Unity Skills | Skills数 | 重要性 | 说明 |
 |-------------|----------|--------|------|
@@ -89,7 +89,7 @@
 
 **缺失分类合计**: 90 个 skills (占 Unity Skills 总数的 16%)
 
-### 🆕 AgentCore 独有能力（Unity Skills 没有的）
+###  AgentCore 独有能力（Unity Skills 没有的）
 
 | AgentCore Tool | Actions数 | 说明 |
 |---------------|-----------|------|

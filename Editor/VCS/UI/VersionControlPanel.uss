@@ -1,0 +1,341 @@
+/* ========================================
+   Version Control Panel Styles
+   Palette aligned with Chat / Knowledge / Memory UI
+   ======================================== */
+
+.version-control-panel {
+    flex-grow: 1;
+    padding: 16px;
+    background-color: #2b2b2b;
+}
+
+/* Panel Header */
+.version-control-panel .panel-header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom-width: 1px;
+    border-bottom-color: #3a3a3a;
+}
+
+.version-control-panel .panel-title {
+    font-size: 16px;
+    -unity-font-style: bold;
+    color: #d4d4d4;
+}
+
+/* Message Container */
+.version-control-panel .message-container {
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    background-color: #252525;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #3a3a3a;
+    color: #d4d4d4;
+}
+
+/* Section Styles */
+.vcs-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background-color: #333333;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #3f3f3f;
+}
+
+.vcs-section-header {
+    font-size: 11px;
+    -unity-font-style: bold;
+    color: #888888;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom-width: 1px;
+    border-bottom-color: #3f3f3f;
+    letter-spacing: 0.5px;
+}
+
+.vcs-section-content {
+    padding-top: 4px;
+}
+
+/* Info Labels */
+.vcs-info-label {
+    font-size: 12px;
+    color: #cccccc;
+    margin-bottom: 4px;
+    padding: 3px 5px;
+}
+
+.vcs-summary-label {
+    font-size: 12px;
+    color: #d4d4d4;
+    margin-bottom: 8px;
+    padding: 3px 5px;
+    -unity-font-style: bold;
+}
+
+/* Lists */
+.vcs-list {
+    max-height: 300px;
+    min-height: 120px;
+    overflow: hidden;
+}
+
+.vcs-status-scroll-view {
+    flex-shrink: 1;
+}
+
+.vcs-status-scroll-view .unity-scroll-view__content-container {
+    flex-grow: 0;
+}
+
+/* Status Item */
+.vcs-status-item {
+    padding: 4px 5px;
+    margin-bottom: 2px;
+    min-height: 22px;
+    border-radius: 4px;
+    color: #cccccc;
+}
+
+.vcs-status-item:hover {
+    background-color: #3c3c3c;
+}
+
+.vcs-status-item:hover .unity-label {
+    color: #ffffff;
+}
+
+.vcs-status-item.selected {
+    background-color: #2d5a8e;
+    border-left-width: 2px;
+    border-left-color: #4a86c8;
+}
+
+.vcs-status-item.selected:hover {
+    background-color: #3a6fa8;
+}
+
+/* Status Badge */
+.vcs-status-badge {
+    width: 22px;
+    height: 18px;
+    margin-right: 10px;
+    padding: 2px;
+    border-radius: 3px;
+    font-size: 11px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    color: #f0f0f0;
+    flex-shrink: 0;
+}
+
+.vcs-status-badge.state-modified {
+    background-color: #4a86c8;
+}
+
+.vcs-status-badge.state-added {
+    background-color: #4a8c5f;
+}
+
+.vcs-status-badge.state-deleted {
+    background-color: #c84a4a;
+}
+
+.vcs-status-badge.state-renamed {
+    background-color: #8a6f3a;
+}
+
+.vcs-status-badge.state-copied {
+    background-color: #5f5f8a;
+}
+
+.vcs-status-badge.state-untracked {
+    background-color: #666666;
+}
+
+.vcs-status-badge.state-ignored {
+    background-color: #555555;
+}
+
+.vcs-status-badge.state-conflicted {
+    background-color: #b87828;
+}
+
+.vcs-status-badge.state-missing {
+    background-color: #8a4a6a;
+}
+
+/* Commit Item */
+.vcs-commit-item {
+    margin-bottom: 8px;
+    padding: 8px;
+    background-color: #2a2a2a;
+    border-radius: 4px;
+    border-left-width: 3px;
+    border-left-color: #4a86c8;
+}
+
+.vcs-commit-item:hover {
+    background-color: #333333;
+}
+
+/* Buttons */
+.vcs-button {
+    padding: 6px 12px;
+    margin: 2px;
+    background-color: #444444;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #555555;
+    color: #cccccc;
+    font-size: 11px;
+}
+
+.vcs-button:hover {
+    background-color: #4a4a4a;
+    border-color: #666666;
+}
+
+.vcs-button:active {
+    background-color: #3c3c3c;
+}
+
+.vcs-button:disabled {
+    opacity: 0.5;
+    color: #888888;
+}
+
+/* ========================================
+   Operations Section Styles
+   ======================================== */
+
+/* Button Row */
+.vcs-button-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    margin-bottom: 4px;
+}
+
+/* Operation Buttons */
+.vcs-operation-button {
+    padding: 6px 14px;
+    margin: 3px;
+    background-color: #444444;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #555555;
+    color: #cccccc;
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.vcs-operation-button:hover {
+    background-color: #505050;
+    border-color: #666666;
+    color: #ffffff;
+}
+
+.vcs-operation-button:active {
+    background-color: #3a3a3a;
+}
+
+.vcs-operation-button:disabled {
+    opacity: 0.4;
+    color: #888888;
+}
+
+/* Primary Button (Commit/Submit) */
+.vcs-primary-button {
+    background-color: #2d5a8e;
+    border-color: #3a6fa8;
+    color: #e0e0e0;
+}
+
+.vcs-primary-button:hover {
+    background-color: #3a6fa8;
+    border-color: #4a86c8;
+    color: #ffffff;
+}
+
+.vcs-primary-button:active {
+    background-color: #234a7a;
+}
+
+/* Danger Button (Revert) */
+.vcs-danger-button {
+    padding: 6px 14px;
+    margin: 3px;
+    background-color: #5a2020;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #7a3030;
+    color: #e08080;
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.vcs-danger-button:hover {
+    background-color: #7a2a2a;
+    border-color: #aa4040;
+    color: #ffaaaa;
+}
+
+.vcs-danger-button:active {
+    background-color: #3a1515;
+}
+
+.vcs-danger-button:disabled {
+    opacity: 0.4;
+    color: #888888;
+}
+
+/* Commit Input */
+.vcs-commit-row {
+    margin-bottom: 8px;
+}
+
+.vcs-commit-input {
+    min-height: 40px;
+}
+
+.vcs-commit-input > .unity-text-field__input {
+    background-color: #2a2a2a;
+    border-color: #555555;
+    border-radius: 4px;
+    color: #d4d4d4;
+    padding: 6px;
+    font-size: 12px;
+    white-space: normal;
+}
+
+.vcs-commit-input > .unity-text-field__input:focus {
+    border-color: #4a86c8;
+}
+
+/* Branch Input */
+.vcs-branch-row {
+    margin-bottom: 8px;
+}
+
+.vcs-branch-input {
+    flex-grow: 1;
+}
+
+.vcs-branch-input > .unity-text-field__input {
+    background-color: #2a2a2a;
+    border-color: #555555;
+    border-radius: 4px;
+    color: #d4d4d4;
+    padding: 4px 6px;
+    font-size: 12px;
+}
+
+.vcs-branch-input > .unity-text-field__input:focus {
+    border-color: #4a86c8;
+}

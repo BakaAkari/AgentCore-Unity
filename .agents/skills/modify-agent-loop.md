@@ -1,11 +1,11 @@
-# Skill: 修改 AgentLoop 核心
+﻿# Skill: 修改 AgentLoop 核心
 
 > 当需要修改 `AgentLoop.cs`（系统核心）时，加载此 Skill。
 > AgentLoop 是整个 AgentCore 的心脏，修改需要极度谨慎。
 
 ---
 
-## 风险等级：🔴 高
+## 风险等级： 高
 
 AgentLoop 的修改可能影响：
 - 消息处理循环
@@ -75,11 +75,11 @@ TryResumeAfterReload()
 ### 规则 1: 事件驱动，不直接操作 UI
 
 ```csharp
-// ✅ 正确 — 通过事件通知
+//  正确 — 通过事件通知
 EmitEvent(AgentEvent.StateChanged(AgentState.Streaming));
 EmitEvent(AgentEvent.StreamToken(token, messageId));
 
-// ❌ 错误 — 直接操作 UI
+//  错误 — 直接操作 UI
 chatWindow.AddMessage(...);  // 禁止！
 ```
 
@@ -90,10 +90,10 @@ chatWindow.AddMessage(...);  // 禁止！
 ### 规则 3: 状态变更必须通过 SetState
 
 ```csharp
-// ✅ 正确
+//  正确
 SetState(AgentState.ExecutingTool);
 
-// ❌ 错误
+//  错误
 _state = AgentState.ExecutingTool;  // 不会触发事件
 ```
 
@@ -109,14 +109,14 @@ _state = AgentState.ExecutingTool;  // 不会触发事件
 ### 规则 5: 错误不吞没
 
 ```csharp
-// ✅ 正确 — 捕获后通知
+//  正确 — 捕获后通知
 catch (Exception ex)
 {
     EmitEvent(AgentEvent.ErrorEvent($"Tool execution failed: {ex.Message}"));
     SetState(AgentState.Error);
 }
 
-// ❌ 错误 — 吞没异常
+//  错误 — 吞没异常
 catch (Exception ex)
 {
     Debug.LogError(ex);  // 仅日志，UI 不知道出错了

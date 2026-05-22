@@ -1,26 +1,27 @@
-# AgentCore 计划文档导航
+﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-05-13 | **当前版本**: v0.4.8
+> **最后更新**: 2026-05-22 | **当前版本**: v0.6.1
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
 ---
 
-## 📚 活跃文档（当前开发指导）
+##  活跃文档（当前开发指导）
 
 | 文档 | 用途 | 状态 |
 |------|------|------|
-| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 5-7 的开发路线图和任务清单 | ✅ 活跃维护（v0.4.8） |
-| [**ARCHITECTURE.md**](ARCHITECTURE.md) | **系统架构总览** — 核心设计决策、架构图、模块职责 | ✅ 活跃维护（v0.4.8） |
-| [**ai-coding-assistants-analysis.md**](ai-coding-assistants-analysis.md) | AI 编码助手生态分析 — Cursor/Cline/Windsurf 等工具对比 | 📊 参考文档 |
+| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6-7 的开发路线图和任务清单 |  活跃维护（v0.6.1） |
+| [**ARCHITECTURE.md**](ARCHITECTURE.md) | **系统架构总览** — 核心设计决策、架构图、模块职责 |  活跃维护 |
+| [**ai-coding-assistants-analysis.md**](ai-coding-assistants-analysis.md) | AI 编码助手生态分析 — Cursor/Cline/Windsurf 等工具对比 |  参考文档 |
+| [**teamcity-svn-unity-build-quality-plan.md**](teamcity-svn-unity-build-quality-plan.md) | Unity + SVN + TeamCity 大型项目构建质量治理方案草案 |  外部客户方案草案，持续迭代 |
 
 ---
 
-## 📦 归档文档（历史参考）
+##  归档文档（历史参考）
 
 已完成的计划文档已移至 [`_archive/`](_archive/) 目录，按类型分类：
 
-### 🏗️ Phase 计划（已完成）
+###  Phase 计划（已完成）
 
 所有 Phase 1-4 的详细实施计划已归档至 [`_archive/phases/`](_archive/phases/)：
 
@@ -32,7 +33,7 @@
 | [phase3-plan.md](_archive/phases/phase3-plan.md) | v0.3.1 | Phase 3: 能记忆 — Memory、Session、Mem0/LightRAG |
 | [phase4-plan.md](_archive/phases/phase4-plan.md) | v0.3.2~v0.3.7 | Phase 4: 更好用 — UX 打磨、快捷键、工具管理 |
 
-### 🔧 重构计划（已完成）
+###  重构计划（已完成）
 
 稳定性优先阶段的重构计划已归档至 [`_archive/refactoring/`](_archive/refactoring/)：
 
@@ -42,8 +43,10 @@
 | [json-schema-validation-plan.md](_archive/refactoring/json-schema-validation-plan.md) | v0.4.4 | JSON Schema 参数预校验 — ToolParameterValidator |
 | [agentloop-split-plan.md](_archive/refactoring/agentloop-split-plan.md) | v0.4.5 | AgentLoop partial 拆分 — 9 个文件 |
 | [chatwindow-split-plan.md](_archive/refactoring/chatwindow-split-plan.md) | v0.4.6 | ChatWindow partial 拆分 — 9 个文件 |
+| [vcs-optional-component-refactor-plan.md](_archive/refactoring/vcs-optional-component-refactor-plan.md) | v0.6.0 | VCS 可选组件化 — define-gated 内置组件 |
+| [settings-page-architecture-refactor-plan.md](_archive/refactoring/settings-page-architecture-refactor-plan.md) | v0.6.1 | Settings 页面架构重构 — Settings shell + section registry |
 
-### ✨ 功能计划（已完成）
+###  功能计划（已完成）
 
 已落地的功能设计文档已归档至 [`_archive/features/`](_archive/features/)：
 
@@ -53,8 +56,12 @@
 | [memory-panel-ui-plan.md](_archive/features/memory-panel-ui-plan.md) | v0.4.2 | MemoryPanel UI — 记忆可视化管理 |
 | [file-change-tracking-plan.md](_archive/features/file-change-tracking-plan.md) | v0.4.x | 文件变更追踪 — FileChangeTracker |
 | [agentcore-workspace-hub-execution-plan.md](_archive/features/agentcore-workspace-hub-execution-plan.md) | v0.4.x | 单主窗口 Hub 架构 — Chat/Knowledge/Memory 模块 |
+| [context-compression-system-plan.md](_archive/features/context-compression-system-plan.md) | v0.5.0 | 上下文压缩系统设计 — 工具结果压缩、对话压缩、预算管理 |
+| [context-compression-implementation.md](_archive/features/context-compression-implementation.md) | v0.5.0 | 上下文压缩实施文档 — 开发执行手册 |
+| [context-visualization-plan.md](_archive/features/context-visualization-plan.md) | v0.5.2 | 上下文压缩可视化 — ContextUsagePanel 设计 |
+| [version-control-integration-plan.md](_archive/features/version-control-integration-plan.md) | v0.5.4~v0.5.5 | 版本控制集成 — Git/SVN/Perforce 查询与操作 |
 
-### 🔍 技术分析（参考文档）
+###  技术分析（参考文档）
 
 技术选型和架构分析文档已归档至 [`_archive/analysis/`](_archive/analysis/)：
 
@@ -63,10 +70,11 @@
 | [domain-reload-resilience.md](_archive/analysis/domain-reload-resilience.md) | 机制分析 | Domain Reload 恢复方案 — DomainReloadState 设计背景 |
 | [mem0-vs-openmemory-analysis.md](_archive/analysis/mem0-vs-openmemory-analysis.md) | 技术选型 | mem0 Server vs OpenMemory MCP 部署对比 |
 | [mem0-settings-optimization.md](_archive/analysis/mem0-settings-optimization.md) | UX 优化 | Memory Service 设置界面优化方案 |
+| [context-compression-llm-analysis.md](_archive/analysis/context-compression-llm-analysis.md) | 技术选型 | 上下文压缩 LLM 分离式/统一式选型分析 |
 
 ---
 
-## 🎯 文档使用指南
+##  文档使用指南
 
 ### 对于开发者
 
@@ -89,7 +97,7 @@
 
 ---
 
-## 📖 相关文档
+##  相关文档
 
 - [**AGENTS.md**](../AGENTS.md) — LLM 开发规范（编码规则、工具开发、流程管理）
 - [**CHANGELOG.md**](../CHANGELOG.md) — 版本变更日志

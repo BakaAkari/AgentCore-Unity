@@ -226,9 +226,9 @@ namespace AgentCore.Editor.Session
         {
             return role switch
             {
-                "user" => "\U0001F464 用户",
-                "assistant" => "\U0001F916 助手",
-                "system" => "\U00002699 系统",
+                "user" => "用户",
+                "assistant" => "助手",
+                "system" => "系统",
                 _ => role
             };
         }

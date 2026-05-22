@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Core;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
 using AgentCore.Editor.UI.Components;
@@ -117,17 +118,14 @@ namespace AgentCore.Editor.UI
         /// <summary>Chat 面板</summary>
         private VisualElement _chatPanel;
 
-        /// <summary>Knowledge 面板容器（UXML 中的 #knowledge-panel）</summary>
-        private VisualElement _knowledgePanel;
+        /// <summary>动态扩展面板宿主容器</summary>
+        private VisualElement _extensionPanelHost;
 
-        /// <summary>Knowledge Base Panel 组件（Phase Hub-2）</summary>
-        private KnowledgeBasePanel _knowledgeBasePanel;
+        /// <summary>Hub 模块面板字典</summary>
+        private readonly Dictionary<string, VisualElement> _hubPanels = new Dictionary<string, VisualElement>();
 
-        /// <summary>Memory 面板容器</summary>
-        private VisualElement _memoryPanel;
-
-        /// <summary>Memory Panel 组件</summary>
-        private MemoryPanel _memoryPanelComponent;
+        /// <summary>Hub 扩展贡献字典</summary>
+        private readonly Dictionary<string, IAgentCorePanelContribution> _hubPanelContributions = new Dictionary<string, IAgentCorePanelContribution>();
 
         /// <summary>新建会话按钮</summary>
         private Button _newSessionButton;
@@ -236,30 +234,16 @@ namespace AgentCore.Editor.UI
             // 3.5 查询 Hub 导航与面板 UI 元素引用
             _contextSidebar = rootVisualElement.Q<VisualElement>("context-sidebar");
             _chatPanel = rootVisualElement.Q<VisualElement>("chat-panel");
-            _knowledgePanel = rootVisualElement.Q<VisualElement>("knowledge-panel");
-            _memoryPanel = rootVisualElement.Q<VisualElement>("memory-panel");
+            _extensionPanelHost = rootVisualElement.Q<VisualElement>("extension-panel-host");
             _newSessionButton = rootVisualElement.Q<Button>("new-session-button");
             _sessionListScrollView = rootVisualElement.Q<ScrollView>("session-list-scroll");
             _sessionListContainer = rootVisualElement.Q<VisualElement>("session-list-container");
 
-            // 3.6 初始化 KnowledgeBasePanel 并插入到 #knowledge-panel 容器
-            if (_knowledgePanel != null)
-            {
-                _knowledgeBasePanel = new KnowledgeBasePanel();
-                _knowledgeBasePanel.OnAskAgentRequested += OnKnowledgeAskAgentRequested;
-                _knowledgePanel.Add(_knowledgeBasePanel);
-            }
-
-            // 3.6.5 初始化 MemoryPanel 并插入到 #memory-panel 容器
-            if (_memoryPanel != null)
-            {
-                _memoryPanel.Clear();
-                _memoryPanelComponent = new MemoryPanel();
-                _memoryPanel.Add(_memoryPanelComponent);
-            }
+            // 3.6 初始化 Hub 动态扩展面板
+            InitializeHubPanels();
 
             // 3.7 创建 Hub Rail 并插入到 main-body 首位
-            _hubRail = new HubRail();
+            _hubRail = new HubRail(CreateHubModuleDefinitions(), ChatModuleId);
             var mainBody = rootVisualElement.Q<VisualElement>("main-body");
             mainBody?.Insert(0, _hubRail);
 
@@ -287,7 +271,7 @@ namespace AgentCore.Editor.UI
 
             // 6.5 初始化 Hub 模块面板可见性
             _sidebarExpanded = EditorPrefs.GetBool(SidebarExpandedKey, true);
-            SwitchToModule(_hubRail.ActiveModule);
+            SwitchToModule(_hubRail.ActiveModuleId);
 
             // 6.7 Phase 4.5: 创建文件变更汇总面板并插入到 input-area 之前
             _fileChangeSummaryPanel = new FileChangeSummaryPanel();
@@ -367,20 +351,7 @@ namespace AgentCore.Editor.UI
             _messageListManager?.DetachScrollView();
             _messageListManager = null;
 
-            // 释放 KnowledgeBasePanel 资源
-            if (_knowledgeBasePanel != null)
-            {
-                _knowledgeBasePanel.OnAskAgentRequested -= OnKnowledgeAskAgentRequested;
-                _knowledgeBasePanel.Dispose();
-                _knowledgeBasePanel = null;
-            }
-
-            // 释放 MemoryPanel 资源
-            if (_memoryPanelComponent != null)
-            {
-                _memoryPanelComponent.Dispose();
-                _memoryPanelComponent = null;
-            }
+            DisposeHubPanels();
 
             _messageBubbles.Clear();
             _activeToolCards.Clear();

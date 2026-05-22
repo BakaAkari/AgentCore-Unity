@@ -55,7 +55,8 @@ com.agentcore.unity/
 ├── AGENTS.md                       # 本文件 — LLM 开发规范
 ├── CHANGELOG.md                    # 版本变更日志
 ├── Editor/                         # 所有源代码（Editor-only）
-│   ├── AgentCore.Editor.asmdef     # 程序集定义
+│   ├── AgentCore.Editor.asmdef     # 主程序集定义
+│   ├── Extensions/                 # 扩展宿主与可选组件管理
 │   ├── Bootstrap/                  # 启动引导系统
 │   │   └── Resources/              #   内嵌资源 (SOUL.md, TOOLS.md.template 等)
 │   ├── Config/                     # 配置系统 (Settings, SecureKeyStorage 等)
@@ -69,6 +70,7 @@ com.agentcore.unity/
 │   │   └── FileSystem/             #   文件系统工具（预留）
 │   ├── UI/                         # 用户界面
 │   │   └── Components/             #   UI 组件
+│   ├── VCS/                        # 内置可选 VCS 组件（受 AGENTCORE_VCS 控制）
 │   └── Utils/                      # 通用工具
 └── plans/                          # 设计文档（仅参考）
 ```
@@ -102,6 +104,10 @@ com.agentcore.unity/
 | 新的原生工具 | `Editor/Tools/Native/<Category>/` |
 | 新的云端工具 | `Editor/Tools/Cloud/` |
 | 新的云端客户端 | `Editor/Tools/Cloud/` |
+| 可选组件 | `Editor/<ComponentName>/` + 独立 Editor asmdef |
+| 可选组件工具 | `Editor/<ComponentName>/Tools/` |
+| 可选组件 UI | `Editor/<ComponentName>/UI/` |
+| 可选组件配置 | `Editor/<ComponentName>/Config/` |
 | 核心逻辑 | `Editor/Core/` |
 | LLM 相关 | `Editor/LLM/` |
 | UI 组件 | `Editor/UI/Components/` |
@@ -166,6 +172,33 @@ ChatWindow.CreateGUI()
 
 > 要了解 `InterruptPhase` 的所有枚举值，请阅读 `Editor/Core/DomainReloadState.cs`。
 > 要了解 `AgentState` 的所有状态，请阅读 `Editor/Core/MessageTypes.cs`。
+
+---
+
+## 3.4 Optional Components 扩展机制
+
+AgentCore 支持内置可选组件模式：组件源码随包分发，但通过独立 Editor asmdef 与 scripting define 控制是否参与编译。
+
+**当前模式**:
+- 主程序集 `AgentCore.Editor` 提供 `Editor/Extensions/` 宿主接口与动态发现。
+- 可选组件使用独立 asmdef，例如 `AgentCore.VCS.Editor`。
+- 可选组件 asmdef 必须引用 `AgentCore.Editor`，主程序集不得反向引用可选组件程序集。
+- 可选组件通过 contribution 接入 Hub / Settings，不允许主窗口或主设置页强类型引用组件类型。
+- 可选组件工具仍使用 `[AgentTool]` + `IAgentTool`，只在组件程序集被编译后由 `ToolAutoDiscovery` 注册。
+
+**VCS 组件约定**:
+- 启用 define: `AGENTCORE_VCS`
+- 程序集: `AgentCore.VCS.Editor`
+- 目录: `Editor/VCS/`
+- 命名空间: `AgentCore.Editor.Components.VCS.*`
+
+新增可选组件时必须遵守：
+1. 新建独立 Editor asmdef，并用明确的 define constraint 控制编译。
+2. 在主 Settings 中只通过 `OptionalComponentManager` 暴露启用/禁用入口。
+3. Hub 入口通过 `IAgentCorePanelContribution` 动态贡献。
+4. 设置 UI 通过 `IAgentCoreSettingsContribution` 动态贡献。
+5. 主程序集不得出现任何组件类型强引用。
+6. 禁用组件后，`ToolAutoDiscovery` 必须重建 `ToolRegistry`，不得残留旧工具实例。
 
 ---
 
@@ -296,6 +329,7 @@ ToolAutoDiscovery.DiscoverAndRegisterAll()
 - 工具类不能是 abstract 或 generic
 - 一个类只能有一个 `[AgentTool]` 特性
 - 工具名称（Name）必须全局唯一
+- `ToolAutoDiscovery` 每次发现前会重建 `ToolRegistry`，以保证可选组件启用/禁用后的工具列表与当前已编译程序集一致
 
 > 详细实现请阅读 `Editor/Tools/Infrastructure/ToolAutoDiscovery.cs`。
 
@@ -471,37 +505,37 @@ Bootstrap 加载顺序是固定的：`SOUL → TOOLS → PROJECT → MEMORY → 
 Unity 2022.3 支持 C# 9.0，但以下特性应**谨慎使用或避免**：
 
 ```
-✅ 可用: record types, pattern matching, nullable reference types, 
+ 可用: record types, pattern matching, nullable reference types, 
          target-typed new, init-only setters
-⚠️ 谨慎: global using (可能影响 asmdef 隔离)
-❌ 不可用: C# 10+ 特性 (file-scoped namespaces 在某些 Unity 版本不稳定)
+ 谨慎: global using (可能影响 asmdef 隔离)
+ 不可用: C# 10+ 特性 (file-scoped namespaces 在某些 Unity 版本不稳定)
 ```
 
 ### 7.4 异步编程规范
 
 ```csharp
-// ✅ 正确 — async 方法传递 CancellationToken
+//  正确 — async 方法传递 CancellationToken
 public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
 {
     var result = await client.QueryAsync(query, ct);
     return ToolResponse.OkWithData(result).ToToolResult(0);
 }
 
-// ✅ 正确 — Native 工具同步执行，包装为 Task
+//  正确 — Native 工具同步执行，包装为 Task
 public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
 {
     var response = HandleSync(parameters);
     return Task.FromResult(response.ToToolResult(0));
 }
 
-// ❌ 错误 — 不要用 .Result 或 .Wait() 阻塞
+//  错误 — 不要用 .Result 或 .Wait() 阻塞
 public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
 {
     var result = client.QueryAsync(query, ct).Result;  // 死锁风险！
     ...
 }
 
-// ❌ 错误 — 不要忽略 CancellationToken
+//  错误 — 不要忽略 CancellationToken
 public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken ct)
 {
     var result = await client.QueryAsync(query);  // 缺少 ct！
@@ -568,7 +602,22 @@ public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken
 1. 在 `AgentCoreSettings` 中添加字段（带合理默认值）
 2. 递增 `CurrentVersion`（基于实际代码中的当前值）
 3. 在 `MigrateSettings()` 中添加迁移逻辑
-4. 在 `AgentCoreSettingsProvider` 中添加 UI
+4. 在对应 `IAgentCoreSettingsSection` 中添加 UI，不得直接修改 `AgentCoreSettingsProvider` 绘制业务设置
+
+### 10.1 Settings 页面开发规则
+
+AgentCore Project Settings 采用 shell + section registry 架构。修改设置页时必须遵守：
+
+- **Provider 只做外壳** — `AgentCoreSettingsProvider` 只能负责初始化 `AgentCoreSettingsContext`、刷新 `AgentCoreSettingsRegistry`、绘制左侧导航、分发当前 section；禁止新增业务设置 UI、业务 async action 或 section 私有状态字段。
+- **设置项必须有归属** — 新增设置项必须归属到一个 `IAgentCoreSettingsSection`，或先新增明确的 section；不得新增无归属的顶层 foldout / card。
+- **Section 元数据稳定** — 新增 section 必须定义稳定 `Id`、`Title`、`Description`、`Category`、`Order`，并通过 `AgentCoreSettingsRegistry` 注册。
+- **UI 状态集中管理** — foldout、异步运行标记、异步结果等临时状态必须存放在 `AgentCoreSettingsState`，不得回到 Provider 字段。
+- **共享 UI Helper** — API key 行、状态文本、卡片、说明文本等通用 IMGUI 片段优先复用 `AgentCoreSettingsUi`，避免各 section 重复实现。
+- **连接型设置统一模式** — LLM、mem0、LightRAG、Compression LLM 以及后续云服务应使用 Enabled / Endpoint / API Key / Test Connection / Result / Advanced Options 的一致交互结构。
+- **Optional Components 职责边界** — 组件启用/禁用归 `ExtensionsSettingsSection` 管理；descriptor 必须位于主程序集可编译代码中，不能强引用被 define gate 的组件程序集类型。
+- **Extension Settings 兼容约束** — 当前扩展设置通过 `IAgentCoreSettingsContribution` 挂载在 Extensions section；新增扩展设置不得绕过 section shell 直接修改 Provider。未来引入 TargetSectionId / TargetComponentId V2 接口时，必须迁移到明确挂载点，禁止恢复“Extension Settings 垃圾桶”。
+- **Tools 只控制暴露** — `ToolsSettingsSection` 只控制 LLM 可见工具、category disable 和 individual tool disable，不负责 optional component 编译/启用。
+- **Provider 行数约束** — Provider 应保持 200-300 行左右；如果新增功能导致 Provider 增长，应拆分到 section/service/helper。
 
 ---
 
