@@ -229,6 +229,52 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return result;
         }
 
+        public async Task<VcsSyncStatus> GetSyncStatusAsync(CancellationToken ct = default)
+        {
+            var result = new VcsSyncStatus();
+
+            try
+            {
+                var statusTask = GetStatusAsync(ct);
+                var remoteTask = VcsCommandExecutor.ExecuteAsync(
+                    "svn", "status -u -q", _workingDirectory, timeoutSeconds: 120, ct: ct);
+
+                await Task.WhenAll(statusTask, remoteTask);
+
+                var localStatus = await statusTask;
+                var remoteStatus = await remoteTask;
+
+                if (!remoteStatus.Success)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = remoteStatus.ErrorMessage;
+                    return result;
+                }
+
+                result.Success = true;
+                result.RawOutput = remoteStatus.Output;
+                result.HasLocalChanges = localStatus.Success && localStatus.Files.Count > 0;
+                result.LocalChangeCount = localStatus.Success ? localStatus.Files.Count : 0;
+                result.RemoteChangedFiles = ParseSvnRemoteChangedFiles(remoteStatus.Output);
+                result.RemoteChangeCount = result.RemoteChangedFiles.Count;
+                result.HasRemoteChanges = result.RemoteChangeCount > 0;
+                result.HasConflicts = localStatus.Success && localStatus.Files.Any(f => f.State == VcsFileState.Conflicted);
+                result.ConflictedFiles = localStatus.Success
+                    ? localStatus.Files.Where(f => f.State == VcsFileState.Conflicted).Select(f => f.FilePath).ToList()
+                    : new List<string>();
+                result.Summary = result.HasRemoteChanges
+                    ? $"Remote has {result.RemoteChangeCount} pending update(s)."
+                    : "Working copy is up to date with remote.";
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to check SVN remote status: {ex.Message}";
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// 获取 SVN 工作副本详细信息 (svn info --xml)
         /// </summary>
@@ -266,7 +312,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         public async Task<VcsOperationResult> StageFilesAsync(List<string> filePaths, CancellationToken ct = default)
         {
-            var result = new VcsOperationResult();
+            var result = new VcsOperationResult
+            {
+                OperationName = "SVN Stage Files"
+            };
 
             try
             {
@@ -274,37 +323,77 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 {
                     result.Success = false;
                     result.ErrorMessage = "At least one file path is required.";
+                    result.LogLines.Add(result.ErrorMessage);
                     return result;
                 }
 
                 var allOutput = new List<string>();
                 var affectedFiles = new List<string>();
+                var statusResult = await GetStatusAsync(ct);
+                var stateByPath = statusResult.Files
+                    .GroupBy(f => f.FilePath)
+                    .ToDictionary(g => g.Key, g => g.First().State);
+
+                result.LogLines.Add($"Preparing {filePaths.Count} SVN path(s) for commit.");
 
                 foreach (var filePath in filePaths)
                 {
+                    stateByPath.TryGetValue(filePath, out var state);
+                    var shouldDelete = state == VcsFileState.Missing;
+                    var shouldAdd = state == VcsFileState.Untracked;
+
+                    if (!shouldDelete && !shouldAdd)
+                    {
+                        affectedFiles.Add(filePath);
+                        result.LogLines.Add($"No schedule command needed: {filePath} ({state}).");
+                        continue;
+                    }
+
+                    var arguments = shouldDelete
+                        ? $"delete --force \"{filePath}\""
+                        : $"add --parents --force \"{filePath}\"";
+                    var commandLine = $"svn {arguments}";
+
+                    if (string.IsNullOrEmpty(result.CommandLine))
+                        result.CommandLine = commandLine;
+
+                    result.LogLines.Add($"Run: {commandLine}");
+
                     var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                        "svn", $"add \"{filePath}\"", _workingDirectory, ct: ct);
+                        "svn", arguments, _workingDirectory, ct: ct);
+
+                    var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
+                        .Where(s => !string.IsNullOrWhiteSpace(s)));
+
+                    if (!string.IsNullOrWhiteSpace(commandOutput))
+                        allOutput.Add($"$ {commandLine}\n{commandOutput.Trim()}");
+                    else
+                        allOutput.Add($"$ {commandLine}");
 
                     if (cmdResult.Success)
                     {
-                        allOutput.Add(cmdResult.Output);
                         affectedFiles.Add(filePath);
+                        result.LogLines.Add($"Success: {filePath} ({(shouldDelete ? "scheduled delete" : "scheduled add")})");
                     }
                     else
                     {
-                        allOutput.Add($"Failed: {filePath} - {cmdResult.ErrorMessage}");
+                        result.LogLines.Add($"Failed: {filePath} - {cmdResult.ErrorMessage}");
                     }
                 }
 
                 result.Success = affectedFiles.Count > 0;
-                result.Message = $"Added {affectedFiles.Count} of {filePaths.Count} file(s) to version control.";
+                result.Message = $"Prepared {affectedFiles.Count} of {filePaths.Count} file(s) for SVN commit.";
                 result.AffectedFiles = affectedFiles;
                 result.RawOutput = string.Join("\n", allOutput);
+
+                if (!result.Success)
+                    result.ErrorMessage = "No SVN files were prepared for commit. Check the operation log for command output.";
             }
             catch (Exception ex)
             {
                 result.Success = false;
-                result.ErrorMessage = $"Failed to add files: {ex.Message}";
+                result.ErrorMessage = $"Failed to prepare SVN files: {ex.Message}";
+                result.LogLines.Add(result.ErrorMessage);
             }
 
             return result;
@@ -318,7 +407,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         public async Task<VcsOperationResult> CommitAsync(string message, CancellationToken ct = default)
         {
-            var result = new VcsOperationResult();
+            var result = new VcsOperationResult
+            {
+                OperationName = "SVN Commit"
+            };
 
             try
             {
@@ -326,28 +418,68 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 {
                     result.Success = false;
                     result.ErrorMessage = "Commit message is required.";
+                    result.LogLines.Add(result.ErrorMessage);
                     return result;
                 }
 
+                var statusResult = await GetStatusAsync(ct);
+                var missingFiles = statusResult.Files
+                    .Where(f => f.State == VcsFileState.Missing)
+                    .Select(f => f.FilePath)
+                    .ToList();
+
+                if (missingFiles.Count > 0)
+                {
+                    result.LogLines.Add($"Detected {missingFiles.Count} missing SVN file(s). Scheduling delete before commit.");
+                    var deleteResult = await StageFilesAsync(missingFiles, ct);
+                    result.LogLines.AddRange(deleteResult.LogLines);
+                    if (!string.IsNullOrWhiteSpace(deleteResult.RawOutput))
+                        result.RawOutput = deleteResult.RawOutput;
+
+                    if (!deleteResult.Success)
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = deleteResult.ErrorMessage ?? "Failed to schedule missing SVN files for deletion.";
+                        result.Message = result.ErrorMessage;
+                        return result;
+                    }
+                }
+
                 var escapedMessage = message.Replace("\"", "\\\"");
+                var arguments = $"commit -m \"{escapedMessage}\"";
+                result.CommandLine = $"svn {arguments}";
+                result.LogLines.Add($"Run: {result.CommandLine}");
+
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", $"commit -m \"{escapedMessage}\"", _workingDirectory, ct: ct);
+                    "svn", arguments, _workingDirectory, timeoutSeconds: 120, ct: ct);
+
+                var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
+                    .Where(s => !string.IsNullOrWhiteSpace(s)));
 
                 if (!cmdResult.Success)
                 {
                     result.Success = false;
                     result.ErrorMessage = cmdResult.ErrorMessage;
+                    result.Message = string.IsNullOrWhiteSpace(cmdResult.ErrorMessage)
+                        ? "SVN commit failed. Check Unity Console or SVN credentials."
+                        : cmdResult.ErrorMessage.Trim();
+                    result.RawOutput = string.Join("\n", new[] { result.RawOutput, commandOutput }
+                        .Where(s => !string.IsNullOrWhiteSpace(s)));
+                    result.LogLines.Add($"Failed: {result.Message}");
                     return result;
                 }
 
                 result.Success = true;
                 result.Message = $"Committed with message: {message}";
-                result.RawOutput = cmdResult.Output;
+                result.RawOutput = string.Join("\n", new[] { result.RawOutput, commandOutput }
+                    .Where(s => !string.IsNullOrWhiteSpace(s)));
+                result.LogLines.Add("Success: SVN commit completed.");
             }
             catch (Exception ex)
             {
                 result.Success = false;
                 result.ErrorMessage = $"Failed to commit: {ex.Message}";
+                result.LogLines.Add(result.ErrorMessage);
             }
 
             return result;
@@ -398,23 +530,29 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", "update", _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "svn", "update --accept postpone", _workingDirectory, timeoutSeconds: 120, ct: ct);
+
+                result.RawOutput = cmdResult.Output;
+                result.ConflictedFiles = ParseSvnUpdateConflicts(cmdResult.Output);
 
                 if (!cmdResult.Success)
                 {
                     result.Success = false;
                     result.ErrorMessage = cmdResult.ErrorMessage;
+                    result.Message = string.IsNullOrEmpty(cmdResult.ErrorMessage) ? "Update failed." : cmdResult.ErrorMessage;
                     return result;
                 }
 
                 result.Success = true;
-                result.Message = "Update completed successfully.";
-                result.RawOutput = cmdResult.Output;
+                result.Message = result.ConflictedFiles.Count > 0
+                    ? $"Update completed with {result.ConflictedFiles.Count} conflict(s). Resolve conflicts before continuing."
+                    : "Update completed successfully.";
             }
             catch (Exception ex)
             {
                 result.Success = false;
                 result.ErrorMessage = $"Failed to update: {ex.Message}";
+                result.Message = result.ErrorMessage;
             }
 
             return result;
@@ -552,6 +690,52 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 UnityEngine.Debug.LogWarning($"Failed to parse SVN remote info: {ex.Message}");
             }
+        }
+
+        private List<string> ParseSvnRemoteChangedFiles(string output)
+        {
+            var files = new List<string>();
+
+            if (string.IsNullOrEmpty(output))
+                return files;
+
+            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                if (!line.Contains("*"))
+                    continue;
+
+                var trimmed = line.Trim();
+                var starIndex = trimmed.IndexOf('*');
+                if (starIndex < 0)
+                    continue;
+
+                var filePath = trimmed.Substring(starIndex + 1).Trim();
+                if (!string.IsNullOrEmpty(filePath))
+                    files.Add(filePath);
+            }
+
+            return files;
+        }
+
+        private List<string> ParseSvnUpdateConflicts(string output)
+        {
+            var files = new List<string>();
+
+            if (string.IsNullOrEmpty(output))
+                return files;
+
+            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var trimmed = line.TrimEnd();
+                if (trimmed.Length > 2 && trimmed[0] == 'C' && char.IsWhiteSpace(trimmed[1]))
+                {
+                    files.Add(trimmed.Substring(2).Trim());
+                }
+            }
+
+            return files;
         }
 
         private List<VcsBlameLine> ParseSvnBlame(string output)

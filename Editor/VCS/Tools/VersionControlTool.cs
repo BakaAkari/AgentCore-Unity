@@ -32,6 +32,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""get_remote"",
                         ""get_tags"",
                         ""get_blame"",
+                        ""get_sync_status"",
                         ""get_commit_info"",
                         ""get_client_info"",
                         ""get_changelist"",
@@ -52,7 +53,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""revert_svn"",
                         ""add_files""
                     ],
-                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_diff, get_remote, get_tags, get_blame, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (require confirmed=true): stage_files, unstage_files, commit, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files (SVN).""
+                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (require confirmed=true): stage_files, unstage_files, commit, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files (SVN).""
                 },
                 ""file_path"": {
                     ""type"": ""string"",
@@ -141,6 +142,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     "get_remote" => await HandleGetRemote(cancellationToken),
                     "get_tags" => await HandleGetTags(cancellationToken),
                     "get_blame" => await HandleGetBlame(parameters, cancellationToken),
+                    "get_sync_status" => await HandleGetSyncStatus(cancellationToken),
                     "get_commit_info" => await HandleGetCommitInfo(parameters, cancellationToken),
                     "get_client_info" => await HandleGetClientInfo(cancellationToken),
                     "get_changelist" => await HandleGetChangelist(parameters, cancellationToken),
@@ -167,7 +169,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     "revert_svn" => await HandleRevertFiles(parameters, cancellationToken),
                     "add_files" => await HandleStageFiles(parameters, cancellationToken),
 
-                    _ => ToolResponse.Fail($"Unknown action: {action}. Valid actions: detect_vcs, get_status, get_branch, get_log, get_diff, get_remote, get_tags, get_blame, get_commit_info, get_client_info, get_changelist, get_info, stage_files, unstage_files, commit, create_branch, switch_branch, stash, stash_pop, checkout_files, revert_files, submit, sync, update, commit_svn, revert_svn, add_files")
+                    _ => ToolResponse.Fail($"Unknown action: {action}. Valid actions: detect_vcs, get_status, get_branch, get_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info, get_changelist, get_info, stage_files, unstage_files, commit, create_branch, switch_branch, stash, stash_pop, checkout_files, revert_files, submit, sync, update, commit_svn, revert_svn, add_files")
                 };
             }
             catch (Exception ex)
@@ -411,6 +413,34 @@ namespace AgentCore.Editor.Components.VCS.Tools
             };
 
             return ToolResponse.OkWithData(data, $"Found {tags.Count} tag(s)/label(s).");
+        }
+
+        private async Task<ToolResponse> HandleGetSyncStatus(CancellationToken ct)
+        {
+            var adapter = GetAdapter();
+            if (adapter == null)
+                return ToolResponse.Fail("No version control system detected or command not available.");
+
+            var result = await adapter.GetSyncStatusAsync(ct);
+            if (!result.Success)
+                return ToolResponse.Fail($"Failed to get sync status: {result.ErrorMessage}");
+
+            var data = new
+            {
+                vcs_type = adapter.VcsType.ToString(),
+                has_remote_changes = result.HasRemoteChanges,
+                has_local_changes = result.HasLocalChanges,
+                has_conflicts = result.HasConflicts,
+                remote_change_count = result.RemoteChangeCount,
+                local_change_count = result.LocalChangeCount,
+                ahead_count = result.AheadCount,
+                behind_count = result.BehindCount,
+                remote_changed_files = result.RemoteChangedFiles,
+                conflicted_files = result.ConflictedFiles,
+                summary = result.Summary
+            };
+
+            return ToolResponse.OkWithData(data, result.Summary ?? "Retrieved VCS sync status.");
         }
 
         private async Task<ToolResponse> HandleGetBlame(JObject parameters, CancellationToken ct)
@@ -825,6 +855,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 vcs_type = adapter.VcsType.ToString(),
                 message = result.Message,
+                conflicted_files = result.ConflictedFiles,
                 raw_output = result.RawOutput?.Length > 500
                     ? result.RawOutput.Substring(0, 500) + "..."
                     : result.RawOutput

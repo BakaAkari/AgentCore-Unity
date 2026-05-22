@@ -29,15 +29,28 @@ namespace AgentCore.Editor.Components.VCS.UI
         private const string DangerButtonClassName = "vcs-danger-button";
         private const string ButtonRowClassName = "vcs-button-row";
 
+        private const int MaxCommitMessageLines = 3;
+        private const int MaxCommitMessageCharacters = 360;
+        private const int InitialCommitDisplayCount = 10;
+        private const int CommitLoadBatchSize = 20;
+        private const int MaxCommitQueryCount = 500;
+
         private Label _vcsTypeLabel;
         private Label _branchLabel;
         private Label _revisionLabel;
         private Label _statusSummaryLabel;
         private VisualElement _statusList;
         private VisualElement _commitList;
+        private Label _commitHistorySummaryLabel;
+        private Button _loadOlderCommitsButton;
+        private Button _collapseCommitsButton;
         private Button _refreshButton;
         private Button _viewDiffButton;
         private VisualElement _messageContainer;
+        private VisualElement _syncStatusBanner;
+        private Label _syncStatusLabel;
+        private Button _checkRemoteButton;
+        private Button _updateRemoteButton;
 
         // 操作按钮
         private VisualElement _operationsSection;
@@ -63,6 +76,9 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Dictionary<string, VisualElement> _statusItemByPath = new Dictionary<string, VisualElement>();
         private Dictionary<string, Toggle> _statusToggleByPath = new Dictionary<string, Toggle>();
         private int _lastSelectedFileIndex = -1;
+        private List<VcsCommit> _loadedCommits = new List<VcsCommit>();
+        private int _visibleCommitCount = InitialCommitDisplayCount;
+        private bool _isLoadingMoreCommits;
 
         private IVcsAdapter _adapter;
         private VcsType _currentVcsType = VcsType.None;
@@ -71,6 +87,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         public VersionControlPanel()
         {
             AddToClassList(UssClassName);
+            VcsRemoteStatusMonitor.StatusChanged += UpdateSyncStatusBanner;
             BuildUI();
             if (VcsSettings.AutoRefreshOnOpen)
             {
@@ -92,7 +109,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             title.AddToClassList("panel-title");
             header.Add(title);
 
-            _refreshButton = new Button(OnRefreshClicked) { text = "⟳ Refresh" };
+            _refreshButton = new Button(OnRefreshClicked) { text = "Refresh" };
             _refreshButton.AddToClassList(ButtonClassName);
             header.Add(_refreshButton);
 
@@ -107,17 +124,26 @@ namespace AgentCore.Editor.Components.VCS.UI
             // VCS 信息区域
             var infoSection = CreateSection("Repository Info");
 
+            var infoRow = new VisualElement();
+            infoRow.AddToClassList("vcs-info-row");
+
             _vcsTypeLabel = new Label("Detecting...");
             _vcsTypeLabel.AddToClassList("vcs-info-label");
-            infoSection.Add(_vcsTypeLabel);
+            _vcsTypeLabel.AddToClassList("vcs-info-type");
+            infoRow.Add(_vcsTypeLabel);
 
             _branchLabel = new Label("Branch: -");
             _branchLabel.AddToClassList("vcs-info-label");
-            infoSection.Add(_branchLabel);
+            _branchLabel.AddToClassList("vcs-info-branch");
+            infoRow.Add(_branchLabel);
 
             _revisionLabel = new Label("Revision: -");
             _revisionLabel.AddToClassList("vcs-info-label");
-            infoSection.Add(_revisionLabel);
+            _revisionLabel.AddToClassList("vcs-info-revision");
+            infoRow.Add(_revisionLabel);
+
+            infoSection.Add(infoRow);
+            infoSection.Add(BuildSyncStatusBanner());
 
             Add(infoSection);
 
@@ -156,9 +182,15 @@ namespace AgentCore.Editor.Components.VCS.UI
             // 提交历史区域
             var historySection = CreateSection("Recent Commits");
 
-            _commitList = new VisualElement();
-            _commitList.AddToClassList("vcs-list");
-            historySection.Add(_commitList);
+            _commitHistorySummaryLabel = new Label("No commit history loaded");
+            _commitHistorySummaryLabel.AddToClassList("vcs-commit-summary-label");
+            historySection.Add(_commitHistorySummaryLabel);
+
+            var commitScrollView = new ScrollView(ScrollViewMode.Vertical);
+            commitScrollView.AddToClassList("vcs-list");
+            commitScrollView.AddToClassList("vcs-commit-scroll-view");
+            _commitList = commitScrollView.contentContainer;
+            historySection.Add(commitScrollView);
 
             Add(historySection);
         }
@@ -177,6 +209,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _commitMessageField.multiline = true;
             _commitMessageField.style.minHeight = 40;
             _commitMessageField.style.flexGrow = 1;
+            _commitMessageField.RegisterValueChangedCallback(_ => UpdateOperationButtonStates());
             commitRow.Add(_commitMessageField);
 
             parent.Add(commitRow);
@@ -195,7 +228,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _unstageAllButton.tooltip = "Unstage all staged files";
             buttonRow.Add(_unstageAllButton);
 
-            _commitButton = new Button(OnCommitClicked) { text = " Commit" };
+            _commitButton = new Button(OnCommitClicked) { text = "Commit" };
             _commitButton.AddToClassList(OperationButtonClassName);
             _commitButton.AddToClassList("vcs-primary-button");
             _commitButton.tooltip = "Commit staged changes with the message above";
@@ -207,12 +240,12 @@ namespace AgentCore.Editor.Components.VCS.UI
             var buttonRow2 = new VisualElement();
             buttonRow2.AddToClassList(ButtonRowClassName);
 
-            _syncButton = new Button(OnSyncClicked) { text = " Sync/Pull" };
+            _syncButton = new Button(OnSyncClicked) { text = "Sync/Pull" };
             _syncButton.AddToClassList(OperationButtonClassName);
             _syncButton.tooltip = "Pull/Sync latest changes from remote";
             buttonRow2.Add(_syncButton);
 
-            _revertButton = new Button(OnRevertAllClicked) { text = "⟲ Revert All" };
+            _revertButton = new Button(OnRevertAllClicked) { text = "Revert All" };
             _revertButton.AddToClassList(DangerButtonClassName);
             _revertButton.tooltip = "Revert all local changes (DESTRUCTIVE)";
             buttonRow2.Add(_revertButton);
@@ -240,12 +273,12 @@ namespace AgentCore.Editor.Components.VCS.UI
             var buttonRow = new VisualElement();
             buttonRow.AddToClassList(ButtonRowClassName);
 
-            _createBranchButton = new Button(OnCreateBranchClicked) { text = "⑂ Create Branch" };
+            _createBranchButton = new Button(OnCreateBranchClicked) { text = "Create Branch" };
             _createBranchButton.AddToClassList(OperationButtonClassName);
             _createBranchButton.tooltip = "Create a new branch with the name above";
             buttonRow.Add(_createBranchButton);
 
-            _switchBranchButton = new Button(OnSwitchBranchClicked) { text = "⇄ Switch Branch" };
+            _switchBranchButton = new Button(OnSwitchBranchClicked) { text = "Switch Branch" };
             _switchBranchButton.AddToClassList(OperationButtonClassName);
             _switchBranchButton.tooltip = "Switch to the branch named above";
             buttonRow.Add(_switchBranchButton);
@@ -256,17 +289,43 @@ namespace AgentCore.Editor.Components.VCS.UI
             var stashRow = new VisualElement();
             stashRow.AddToClassList(ButtonRowClassName);
 
-            _stashButton = new Button(OnStashClicked) { text = " Stash" };
+            _stashButton = new Button(OnStashClicked) { text = "Stash" };
             _stashButton.AddToClassList(OperationButtonClassName);
             _stashButton.tooltip = "Stash current changes";
             stashRow.Add(_stashButton);
 
-            _stashPopButton = new Button(OnStashPopClicked) { text = " Stash Pop" };
+            _stashPopButton = new Button(OnStashPopClicked) { text = "Stash Pop" };
             _stashPopButton.AddToClassList(OperationButtonClassName);
             _stashPopButton.tooltip = "Pop the most recent stash";
             stashRow.Add(_stashPopButton);
 
             parent.Add(stashRow);
+        }
+
+        private VisualElement BuildSyncStatusBanner()
+        {
+            _syncStatusBanner = new VisualElement();
+            _syncStatusBanner.AddToClassList("vcs-sync-banner");
+            _syncStatusBanner.style.display = DisplayStyle.None;
+
+            _syncStatusLabel = new Label("Remote status has not been checked.");
+            _syncStatusLabel.AddToClassList("vcs-sync-banner-label");
+            _syncStatusBanner.Add(_syncStatusLabel);
+
+            var buttonRow = new VisualElement();
+            buttonRow.AddToClassList("vcs-sync-banner-actions");
+
+            _checkRemoteButton = new Button(OnCheckRemoteClicked) { text = "Check Remote" };
+            _checkRemoteButton.AddToClassList(ButtonClassName);
+            buttonRow.Add(_checkRemoteButton);
+
+            _updateRemoteButton = new Button(OnUpdateRemoteClicked) { text = "Update" };
+            _updateRemoteButton.AddToClassList(ButtonClassName);
+            _updateRemoteButton.AddToClassList("vcs-sync-update-button");
+            buttonRow.Add(_updateRemoteButton);
+
+            _syncStatusBanner.Add(buttonRow);
+            return _syncStatusBanner;
         }
 
         private VisualElement CreateSection(string title)
@@ -337,11 +396,11 @@ namespace AgentCore.Editor.Components.VCS.UI
                     _stageAllButton.tooltip = "Open all files for edit (p4 edit)";
                     _unstageAllButton.text = "Revert Unchanged";
                     _unstageAllButton.tooltip = "Revert files that haven't been modified";
-                    _commitButton.text = " Submit";
+                    _commitButton.text = "Submit";
                     _commitButton.tooltip = "Submit a changelist with the description above";
-                    _syncButton.text = " Sync";
+                    _syncButton.text = "Sync";
                     _syncButton.tooltip = "Sync workspace to latest (p4 sync)";
-                    _revertButton.text = "⟲ Revert All";
+                    _revertButton.text = "Revert All";
                     _revertButton.tooltip = "Revert all opened files (p4 revert)";
                     break;
 
@@ -350,11 +409,11 @@ namespace AgentCore.Editor.Components.VCS.UI
                     _stageAllButton.tooltip = "Add all unversioned files (svn add)";
                     _unstageAllButton.text = "Revert";
                     _unstageAllButton.tooltip = "Revert local modifications (svn revert)";
-                    _commitButton.text = " Commit";
+                    _commitButton.text = "Commit";
                     _commitButton.tooltip = "Commit changes with the message above (svn commit)";
-                    _syncButton.text = " Update";
+                    _syncButton.text = "Update";
                     _syncButton.tooltip = "Update working copy (svn update)";
-                    _revertButton.text = "⟲ Revert All";
+                    _revertButton.text = "Revert All";
                     _revertButton.tooltip = "Revert all local changes (svn revert)";
                     break;
 
@@ -389,12 +448,17 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _cts = new CancellationTokenSource();
                 var ct = _cts.Token;
 
+                _visibleCommitCount = InitialCommitDisplayCount;
+
                 // 并行获取所有数据
                 var branchTask = _adapter.GetBranchInfoAsync(ct);
                 var statusTask = _adapter.GetStatusAsync(ct);
-                var logTask = _adapter.GetLogAsync(VcsSettings.MaxCommitEntries, ct);
+                var logTask = _adapter.GetLogAsync(GetCommitQueryCount(), ct);
+                var syncStatusTask = VcsSettings.CheckRemoteStatusOnRefresh
+                    ? VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, ct)
+                    : Task.FromResult(VcsRemoteStatusMonitor.LastStatus);
 
-                await Task.WhenAll(branchTask, statusTask, logTask);
+                await Task.WhenAll(branchTask, statusTask, logTask, syncStatusTask);
 
                 if (ct.IsCancellationRequested)
                     return;
@@ -404,7 +468,9 @@ namespace AgentCore.Editor.Components.VCS.UI
                 if (branchInfo.Success)
                 {
                     _branchLabel.text = $"Branch: {branchInfo.CurrentBranch ?? "unknown"}";
+                    _branchLabel.tooltip = branchInfo.CurrentBranch ?? "unknown";
                     _revisionLabel.text = $"Revision: {branchInfo.CurrentRevision ?? "unknown"}";
+                    _revisionLabel.tooltip = branchInfo.CurrentRevision ?? "unknown";
                 }
 
                 // 更新状态列表
@@ -420,6 +486,8 @@ namespace AgentCore.Editor.Components.VCS.UI
                 // 更新提交历史
                 var commits = await logTask;
                 UpdateCommitList(commits);
+
+                UpdateSyncStatusBanner(await syncStatusTask);
             }
             catch (OperationCanceledException)
             {
@@ -663,10 +731,18 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private void UpdateCommitList(List<VcsCommit> commits)
         {
+            _loadedCommits = commits ?? new List<VcsCommit>();
+            _visibleCommitCount = Mathf.Clamp(_visibleCommitCount, InitialCommitDisplayCount, Mathf.Max(InitialCommitDisplayCount, _loadedCommits.Count));
+            RenderCommitList();
+        }
+
+        private void RenderCommitList()
+        {
             _commitList.Clear();
 
-            if (commits == null || commits.Count == 0)
+            if (_loadedCommits == null || _loadedCommits.Count == 0)
             {
+                _commitHistorySummaryLabel.text = "No commit history available";
                 var noCommits = new Label("No commit history available");
                 noCommits.style.color = new Color(0.6f, 0.6f, 0.6f);
                 noCommits.style.paddingTop = 5;
@@ -674,59 +750,185 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
             }
 
-            foreach (var commit in commits.Take(10)) // 显示最近10条
+            var visibleCount = Mathf.Min(_visibleCommitCount, _loadedCommits.Count);
+            var hiddenLoadedCount = Mathf.Max(0, _loadedCommits.Count - visibleCount);
+            _commitHistorySummaryLabel.text = hiddenLoadedCount > 0
+                ? $"Showing latest {visibleCount} of {_loadedCommits.Count} loaded commits. {hiddenLoadedCount} older loaded commits are collapsed."
+                : $"Showing {_loadedCommits.Count} loaded commits.";
+
+            foreach (var commit in _loadedCommits.Take(visibleCount))
             {
                 var item = CreateCommitItem(commit);
                 _commitList.Add(item);
             }
+
+            _commitList.Add(CreateCommitHistoryControls(visibleCount, hiddenLoadedCount));
+        }
+
+        private VisualElement CreateCommitHistoryControls(int visibleCount, int hiddenLoadedCount)
+        {
+            var controls = new VisualElement();
+            controls.AddToClassList("vcs-commit-history-controls");
+
+            _loadOlderCommitsButton = new Button(OnLoadOlderCommitsClicked)
+            {
+                text = BuildLoadOlderCommitsText(visibleCount, hiddenLoadedCount)
+            };
+            _loadOlderCommitsButton.AddToClassList(ButtonClassName);
+            _loadOlderCommitsButton.AddToClassList("vcs-commit-load-button");
+            _loadOlderCommitsButton.SetEnabled(!_isLoadingMoreCommits && _loadedCommits.Count < MaxCommitQueryCount);
+            controls.Add(_loadOlderCommitsButton);
+
+            if (visibleCount > InitialCommitDisplayCount)
+            {
+                _collapseCommitsButton = new Button(OnCollapseCommitsClicked) { text = "Collapse Older Commits" };
+                _collapseCommitsButton.AddToClassList(ButtonClassName);
+                _collapseCommitsButton.AddToClassList("vcs-commit-collapse-button");
+                controls.Add(_collapseCommitsButton);
+            }
+            else
+            {
+                _collapseCommitsButton = null;
+            }
+
+            return controls;
+        }
+
+        private string BuildLoadOlderCommitsText(int visibleCount, int hiddenLoadedCount)
+        {
+            if (_isLoadingMoreCommits)
+                return "Loading older commits...";
+
+            if (hiddenLoadedCount > 0)
+                return $"Load {Mathf.Min(CommitLoadBatchSize, hiddenLoadedCount)} older loaded commits";
+
+            if (_loadedCommits.Count >= MaxCommitQueryCount)
+                return $"Loaded maximum {MaxCommitQueryCount} commits";
+
+            return $"Load {CommitLoadBatchSize} older commits";
+        }
+
+        private async void OnLoadOlderCommitsClicked()
+        {
+            if (_adapter == null || _isLoadingMoreCommits)
+                return;
+
+            var hiddenLoadedCount = Mathf.Max(0, _loadedCommits.Count - _visibleCommitCount);
+            if (hiddenLoadedCount > 0)
+            {
+                _visibleCommitCount = Mathf.Min(_visibleCommitCount + CommitLoadBatchSize, _loadedCommits.Count);
+                RenderCommitList();
+                return;
+            }
+
+            if (_loadedCommits.Count >= MaxCommitQueryCount)
+                return;
+
+            _isLoadingMoreCommits = true;
+            RenderCommitList();
+
+            try
+            {
+                var queryCount = Mathf.Min(MaxCommitQueryCount, Mathf.Max(GetCommitQueryCount() + CommitLoadBatchSize, _loadedCommits.Count + CommitLoadBatchSize));
+                var commits = await _adapter.GetLogAsync(queryCount, CancellationToken.None);
+                _loadedCommits = commits ?? _loadedCommits;
+                _visibleCommitCount = Mathf.Min(_visibleCommitCount + CommitLoadBatchSize, _loadedCommits.Count);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage($"Failed to load older commits: {ex.Message}", true);
+            }
+            finally
+            {
+                _isLoadingMoreCommits = false;
+                RenderCommitList();
+            }
+        }
+
+        private void OnCollapseCommitsClicked()
+        {
+            _visibleCommitCount = InitialCommitDisplayCount;
+            RenderCommitList();
+        }
+
+        private int GetCommitQueryCount()
+        {
+            var configuredCount = Mathf.Max(VcsSettings.MaxCommitEntries, InitialCommitDisplayCount);
+            return Mathf.Min(MaxCommitQueryCount, Mathf.Max(configuredCount, _visibleCommitCount));
         }
 
         private VisualElement CreateCommitItem(VcsCommit commit)
         {
             var item = new VisualElement();
             item.AddToClassList(CommitItemClassName);
-            item.style.marginBottom = 8;
-            item.style.paddingLeft = 5;
-            item.style.paddingRight = 5;
-            item.style.paddingTop = 5;
-            item.style.paddingBottom = 5;
-            item.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.3f);
-            item.style.borderBottomLeftRadius = 3;
-            item.style.borderBottomRightRadius = 3;
-            item.style.borderTopLeftRadius = 3;
-            item.style.borderTopRightRadius = 3;
 
-            // 第一行：版本号和作者
+            var fullRevision = string.IsNullOrWhiteSpace(commit.Revision) ? "unknown" : commit.Revision.Trim();
+            var fullAuthor = string.IsNullOrWhiteSpace(commit.Author) ? "unknown" : commit.Author.Trim();
+            var fullDate = string.IsNullOrWhiteSpace(commit.Date) ? "unknown date" : commit.Date.Trim();
+            var fullMessage = NormalizeCommitMessage(commit.Message);
+            var previewMessage = BuildCommitMessagePreview(fullMessage);
+            var tooltip = $"Rev: {fullRevision}\nAuthor: {fullAuthor}\nDate: {fullDate}\n\n{fullMessage}";
+            item.tooltip = tooltip;
+
             var header = new VisualElement();
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.justifyContent = Justify.SpaceBetween;
+            header.AddToClassList("vcs-commit-header");
 
-            var revision = new Label($"Rev: {commit.Revision}");
-            revision.style.unityFontStyleAndWeight = FontStyle.Bold;
-            revision.style.color = new Color(0.4f, 0.8f, 1.0f);
+            var revision = new Label($"Rev: {fullRevision}");
+            revision.AddToClassList("vcs-commit-revision");
+            revision.tooltip = fullRevision;
             header.Add(revision);
 
-            var author = new Label(commit.Author);
-            author.style.color = new Color(0.8f, 0.8f, 0.8f);
+            var author = new Label(fullAuthor);
+            author.AddToClassList("vcs-commit-author");
+            author.tooltip = fullAuthor;
             header.Add(author);
 
             item.Add(header);
 
-            // 第二行：日期
-            var date = new Label(commit.Date);
-            date.style.fontSize = 10;
-            date.style.color = new Color(0.6f, 0.6f, 0.6f);
-            date.style.marginTop = 2;
+            var date = new Label(fullDate);
+            date.AddToClassList("vcs-commit-date");
+            date.tooltip = fullDate;
             item.Add(date);
 
-            // 第三行：提交消息
-            var message = new Label(commit.Message);
-            message.style.whiteSpace = WhiteSpace.Normal;
-            message.style.marginTop = 4;
-            message.style.color = new Color(0.9f, 0.9f, 0.9f);
+            var message = new Label(previewMessage);
+            message.AddToClassList("vcs-commit-message");
+            message.tooltip = fullMessage;
             item.Add(message);
 
             return item;
+        }
+
+        private string NormalizeCommitMessage(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+                return "(no commit message)";
+
+            var normalized = message.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+            return string.IsNullOrWhiteSpace(normalized) ? "(no commit message)" : normalized;
+        }
+
+        private string BuildCommitMessagePreview(string message)
+        {
+            var normalized = NormalizeCommitMessage(message);
+            var lines = normalized.Split(new[] { '\n' }, StringSplitOptions.None)
+                .Select(line => line.TrimEnd())
+                .ToList();
+
+            var truncated = false;
+            if (lines.Count > MaxCommitMessageLines)
+            {
+                lines = lines.Take(MaxCommitMessageLines).ToList();
+                truncated = true;
+            }
+
+            var preview = string.Join("\n", lines);
+            if (preview.Length > MaxCommitMessageCharacters)
+            {
+                preview = preview.Substring(0, MaxCommitMessageCharacters).TrimEnd();
+                truncated = true;
+            }
+
+            return truncated ? $"{preview}..." : preview;
         }
 
         #region Operation Event Handlers
@@ -745,10 +947,12 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
             }
 
+            LogVcsOperation("Stage", $"Preparing {filesToStage.Count} file(s).");
             SetOperationButtonsEnabled(false);
             try
             {
                 var result = await _adapter.StageFilesAsync(filesToStage, CancellationToken.None);
+                LogVcsResult("Stage", result);
                 if (result.Success)
                 {
                     ShowMessage($"Staged {filesToStage.Count} file(s) successfully.", false);
@@ -756,7 +960,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 }
                 else
                 {
-                    ShowMessage($"Stage failed: {result.Message}", true);
+                    ShowMessage($"Stage failed: {GetOperationFailureMessage(result)}", true);
                 }
             }
             catch (Exception ex)
@@ -783,10 +987,12 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
             }
 
+            LogVcsOperation("Unstage", $"Preparing {filesToUnstage.Count} file(s).");
             SetOperationButtonsEnabled(false);
             try
             {
                 var result = await _adapter.UnstageFilesAsync(filesToUnstage, CancellationToken.None);
+                LogVcsResult("Unstage", result);
                 if (result.Success)
                 {
                     ShowMessage($"Unstaged {filesToUnstage.Count} file(s) successfully.", false);
@@ -794,7 +1000,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 }
                 else
                 {
-                    ShowMessage($"Unstage failed: {result.Message}", true);
+                    ShowMessage($"Unstage failed: {GetOperationFailureMessage(result)}", true);
                 }
             }
             catch (Exception ex)
@@ -809,7 +1015,11 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private async void OnCommitClicked()
         {
-            if (_adapter == null) return;
+            if (_adapter == null)
+            {
+                ShowMessage("Commit failed: no version control adapter is active. Click Refresh to detect the repository.", true);
+                return;
+            }
 
             var message = _commitMessageField?.value;
             if (string.IsNullOrWhiteSpace(message))
@@ -818,19 +1028,39 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
             }
 
+            if (_currentFiles == null || _currentFiles.Count == 0)
+            {
+                ShowMessage("Commit skipped: no working copy changes were detected. Click Refresh and verify Working Copy Status.", true);
+                return;
+            }
+
+            if (_currentVcsType == VcsType.Svn)
+            {
+                var confirmMessage = $"This will run SVN commit for the current working copy with this message:\n\n{message.Trim()}\n\nUnversioned files must be added first with Add Unversioned.";
+                if (!EditorUtility.DisplayDialog("SVN Commit", confirmMessage, "Commit", "Cancel"))
+                    return;
+            }
+
+            ShowMessage($"Committing via {_currentVcsType} command line...", false);
+            LogVcsOperation("Commit", $"Starting {_currentVcsType} commit. Local changed files: {_currentFiles.Count}.");
             SetOperationButtonsEnabled(false);
             try
             {
                 var result = await _adapter.CommitAsync(message, CancellationToken.None);
+                LogVcsResult("Commit", result);
                 if (result.Success)
                 {
-                    ShowMessage($"Committed successfully: {result.Message}", false);
+                    var outputSuffix = string.IsNullOrWhiteSpace(result.RawOutput) ? string.Empty : $"\n\n{result.RawOutput.Trim()}";
+                    ShowMessage($"Committed successfully: {result.Message}{outputSuffix}", false);
                     _commitMessageField.value = "";
                     await RefreshAllData();
                 }
                 else
                 {
-                    ShowMessage($"Commit failed: {result.Message}", true);
+                    var failureReason = !string.IsNullOrWhiteSpace(result.ErrorMessage)
+                        ? result.ErrorMessage
+                        : result.Message ?? "Unknown error";
+                    ShowMessage($"Commit failed: {failureReason}", true);
                 }
             }
             catch (Exception ex)
@@ -845,20 +1075,63 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private async void OnSyncClicked()
         {
-            if (_adapter == null) return;
+            await RunSyncWithConfirmationAsync(null);
+        }
 
-            SetOperationButtonsEnabled(false);
+        private async void OnCheckRemoteClicked()
+        {
+            if (_adapter == null)
+                return;
+
+            _checkRemoteButton.SetEnabled(false);
             try
             {
-                var result = await _adapter.SyncAsync(CancellationToken.None);
+                UpdateSyncStatusBanner(new VcsSyncStatus { Success = true, Summary = "Checking remote status..." });
+                var status = await VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, CancellationToken.None);
+                UpdateSyncStatusBanner(status);
+            }
+            finally
+            {
+                _checkRemoteButton.SetEnabled(true);
+            }
+        }
+
+        private async void OnUpdateRemoteClicked()
+        {
+            await RunSyncWithConfirmationAsync(VcsRemoteStatusMonitor.LastStatus);
+        }
+
+        private async Task RunSyncWithConfirmationAsync(VcsSyncStatus status)
+        {
+            if (_adapter == null) return;
+
+            if (status != null && status.HasRemoteChanges)
+            {
+                var message = $"{status.Summary}\n\nThis will run the VCS update/sync command. Local conflicts are not auto-resolved.";
+                if (!EditorUtility.DisplayDialog("Version Control Update", message, "Update", "Cancel"))
+                    return;
+            }
+
+            SetOperationButtonsEnabled(false);
+            _checkRemoteButton?.SetEnabled(false);
+            _updateRemoteButton?.SetEnabled(false);
+            try
+            {
+                LogVcsOperation("Sync", "Starting VCS update/sync command.");
+                var result = await VcsRemoteStatusMonitor.SyncAsync(CancellationToken.None);
+                LogVcsResult("Sync", result);
                 if (result.Success)
                 {
-                    ShowMessage($"Sync completed: {result.Message}", false);
+                    var conflictSuffix = result.ConflictedFiles.Count > 0
+                        ? $" Conflicts: {string.Join(", ", result.ConflictedFiles.Take(5))}"
+                        : string.Empty;
+                    ShowMessage($"Sync completed: {result.Message}{conflictSuffix}", false);
                     await RefreshAllData();
                 }
                 else
                 {
-                    ShowMessage($"Sync failed: {result.Message}", true);
+                    ShowMessage($"Sync failed: {result.Message ?? result.ErrorMessage}", true);
+                    UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
                 }
             }
             catch (Exception ex)
@@ -868,6 +1141,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             finally
             {
                 SetOperationButtonsEnabled(true);
+                _checkRemoteButton?.SetEnabled(true);
+                _updateRemoteButton?.SetEnabled(VcsRemoteStatusMonitor.LastStatus?.HasRemoteChanges == true);
             }
         }
 
@@ -906,7 +1181,9 @@ namespace AgentCore.Editor.Components.VCS.UI
             SetOperationButtonsEnabled(false);
             try
             {
+                LogVcsOperation("Revert", $"Reverting {filesToRevert.Count} file(s).");
                 var result = await _adapter.RevertFilesAsync(filesToRevert, CancellationToken.None);
+                LogVcsResult("Revert", result);
                 if (result.Success)
                 {
                     ShowMessage($"Reverted {filesToRevert.Count} file(s) successfully.", false);
@@ -914,7 +1191,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 }
                 else
                 {
-                    ShowMessage($"Revert failed: {result.Message}", true);
+                    ShowMessage($"Revert failed: {GetOperationFailureMessage(result)}", true);
                 }
             }
             catch (Exception ex)
@@ -941,7 +1218,9 @@ namespace AgentCore.Editor.Components.VCS.UI
             SetOperationButtonsEnabled(false);
             try
             {
+                LogVcsOperation("Create Branch", $"Creating branch '{branchName}'.");
                 var result = await gitAdapter.CreateBranchAsync(branchName, CancellationToken.None);
+                LogVcsResult("Create Branch", result);
                 if (result.Success)
                 {
                     ShowMessage($"Branch '{branchName}' created successfully.", false);
@@ -977,7 +1256,9 @@ namespace AgentCore.Editor.Components.VCS.UI
             SetOperationButtonsEnabled(false);
             try
             {
+                LogVcsOperation("Switch Branch", $"Switching to branch '{branchName}'.");
                 var result = await gitAdapter.SwitchBranchAsync(branchName, CancellationToken.None);
+                LogVcsResult("Switch Branch", result);
                 if (result.Success)
                 {
                     ShowMessage($"Switched to branch '{branchName}'.", false);
@@ -1006,7 +1287,9 @@ namespace AgentCore.Editor.Components.VCS.UI
             SetOperationButtonsEnabled(false);
             try
             {
+                LogVcsOperation("Stash", "Stashing current changes.");
                 var result = await gitAdapter.StashAsync(null, CancellationToken.None);
+                LogVcsResult("Stash", result);
                 if (result.Success)
                 {
                     ShowMessage("Changes stashed successfully.", false);
@@ -1034,7 +1317,9 @@ namespace AgentCore.Editor.Components.VCS.UI
             SetOperationButtonsEnabled(false);
             try
             {
+                LogVcsOperation("Stash Pop", "Popping latest stash.");
                 var result = await gitAdapter.StashPopAsync(CancellationToken.None);
+                LogVcsResult("Stash Pop", result);
                 if (result.Success)
                 {
                     ShowMessage("Stash popped successfully.", false);
@@ -1116,6 +1401,70 @@ namespace AgentCore.Editor.Components.VCS.UI
             _stashPopButton?.SetEnabled(enabled);
         }
 
+        private string GetOperationFailureMessage(VcsOperationResult result)
+        {
+            if (result == null)
+                return "Unknown error";
+
+            if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+                return result.ErrorMessage.Trim();
+
+            if (!string.IsNullOrWhiteSpace(result.Message))
+                return result.Message.Trim();
+
+            if (!string.IsNullOrWhiteSpace(result.RawOutput))
+                return result.RawOutput.Trim();
+
+            return "Unknown error";
+        }
+
+        private void LogVcsOperation(string operation, string message)
+        {
+            Debug.Log($"[Version Control][{_currentVcsType}][{operation}] {message}");
+        }
+
+        private void LogVcsResult(string operation, VcsOperationResult result)
+        {
+            if (result == null)
+            {
+                Debug.LogWarning($"[Version Control][{_currentVcsType}][{operation}] No operation result returned.");
+                return;
+            }
+
+            var details = new List<string>
+            {
+                $"Operation: {result.OperationName ?? operation}",
+                $"Success: {result.Success}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(result.CommandLine))
+                details.Add($"Command: {result.CommandLine}");
+
+            if (!string.IsNullOrWhiteSpace(result.Message))
+                details.Add($"Message: {result.Message}");
+
+            if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+                details.Add($"Error: {result.ErrorMessage.Trim()}");
+
+            if (result.AffectedFiles != null && result.AffectedFiles.Count > 0)
+                details.Add($"AffectedFiles: {string.Join(", ", result.AffectedFiles)}");
+
+            if (result.ConflictedFiles != null && result.ConflictedFiles.Count > 0)
+                details.Add($"ConflictedFiles: {string.Join(", ", result.ConflictedFiles)}");
+
+            if (result.LogLines != null && result.LogLines.Count > 0)
+                details.Add($"Log:\n{string.Join("\n", result.LogLines)}");
+
+            if (!string.IsNullOrWhiteSpace(result.RawOutput))
+                details.Add($"RawOutput:\n{result.RawOutput.Trim()}");
+
+            var logText = $"[Version Control][{_currentVcsType}][{operation}]\n{string.Join("\n", details)}";
+            if (result.Success)
+                Debug.Log(logText);
+            else
+                Debug.LogWarning(logText);
+        }
+
         private void ShowMessage(string message, bool isError)
         {
             _messageContainer.Clear();
@@ -1141,6 +1490,44 @@ namespace AgentCore.Editor.Components.VCS.UI
         private void HideMessage()
         {
             _messageContainer.style.display = DisplayStyle.None;
+        }
+
+        private void UpdateSyncStatusBanner(VcsSyncStatus status)
+        {
+            if (_syncStatusBanner == null || _syncStatusLabel == null)
+                return;
+
+            if (status == null)
+            {
+                _syncStatusBanner.style.display = DisplayStyle.None;
+                return;
+            }
+
+            _syncStatusBanner.style.display = DisplayStyle.Flex;
+            _syncStatusBanner.RemoveFromClassList("has-remote-changes");
+            _syncStatusBanner.RemoveFromClassList("is-clean");
+            _syncStatusBanner.RemoveFromClassList("has-error");
+
+            if (!status.Success)
+            {
+                _syncStatusBanner.AddToClassList("has-error");
+                _syncStatusLabel.text = $"Remote check failed: {status.ErrorMessage}";
+                _updateRemoteButton?.SetEnabled(false);
+                return;
+            }
+
+            if (status.HasRemoteChanges)
+            {
+                _syncStatusBanner.AddToClassList("has-remote-changes");
+                _syncStatusLabel.text = status.Summary;
+                _updateRemoteButton?.SetEnabled(true);
+            }
+            else
+            {
+                _syncStatusBanner.AddToClassList("is-clean");
+                _syncStatusLabel.text = status.Summary ?? "Working copy is up to date.";
+                _updateRemoteButton?.SetEnabled(false);
+            }
         }
 
         private string GetStateBadge(VcsFileState state)
@@ -1202,6 +1589,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         public void Dispose()
         {
+            VcsRemoteStatusMonitor.StatusChanged -= UpdateSyncStatusBanner;
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;

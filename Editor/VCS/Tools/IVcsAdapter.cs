@@ -58,6 +58,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// </summary>
         Task<VcsBlameResult> GetBlameAsync(string filePath, CancellationToken ct = default);
 
+        /// <summary>
+        /// 获取本地工作区与远端的同步状态。
+        /// Git: fetch + rev-list, SVN: svn status -u -q, Perforce: p4 sync -n
+        /// </summary>
+        Task<VcsSyncStatus> GetSyncStatusAsync(CancellationToken ct = default);
+
         // ===== Phase 2: 操作类（需要确认） =====
 
         /// <summary>
@@ -193,15 +199,39 @@ namespace AgentCore.Editor.Components.VCS.Tools
     }
 
     /// <summary>
+    /// 远端同步状态。
+    /// </summary>
+    public class VcsSyncStatus
+    {
+        public bool Success { get; set; }
+        public string ErrorMessage { get; set; }
+        public bool HasRemoteChanges { get; set; }
+        public bool HasLocalChanges { get; set; }
+        public bool HasConflicts { get; set; }
+        public int RemoteChangeCount { get; set; }
+        public int LocalChangeCount { get; set; }
+        public int BehindCount { get; set; }
+        public int AheadCount { get; set; }
+        public List<string> RemoteChangedFiles { get; set; } = new List<string>();
+        public List<string> ConflictedFiles { get; set; } = new List<string>();
+        public string Summary { get; set; }
+        public string RawOutput { get; set; }
+    }
+
+    /// <summary>
     /// VCS 操作结果（Phase 2 操作类）
     /// </summary>
     public class VcsOperationResult
     {
         public bool Success { get; set; }
+        public string OperationName { get; set; }
+        public string CommandLine { get; set; }
         public string ErrorMessage { get; set; }
         public string Message { get; set; }
         public string RawOutput { get; set; }
+        public List<string> LogLines { get; set; } = new List<string>();
         public List<string> AffectedFiles { get; set; } = new List<string>();
+        public List<string> ConflictedFiles { get; set; } = new List<string>();
     }
 
     /// <summary>

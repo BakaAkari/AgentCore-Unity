@@ -216,6 +216,51 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return result;
         }
 
+        public async Task<VcsSyncStatus> GetSyncStatusAsync(CancellationToken ct = default)
+        {
+            var result = new VcsSyncStatus();
+
+            try
+            {
+                var statusTask = GetStatusAsync(ct);
+                var previewTask = VcsCommandExecutor.ExecuteAsync(
+                    "p4", "sync -n", _workingDirectory, timeoutSeconds: 120, ct: ct);
+
+                await Task.WhenAll(statusTask, previewTask);
+
+                var localStatus = await statusTask;
+                var previewResult = await previewTask;
+                if (!previewResult.Success)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = previewResult.ErrorMessage;
+                    return result;
+                }
+
+                result.Success = true;
+                result.RawOutput = previewResult.Output;
+                result.HasLocalChanges = localStatus.Success && localStatus.Files.Count > 0;
+                result.LocalChangeCount = localStatus.Success ? localStatus.Files.Count : 0;
+                result.HasConflicts = localStatus.Success && localStatus.Files.Any(f => f.State == VcsFileState.Conflicted);
+                result.ConflictedFiles = localStatus.Success
+                    ? localStatus.Files.Where(f => f.State == VcsFileState.Conflicted).Select(f => f.FilePath).ToList()
+                    : new List<string>();
+                result.RemoteChangedFiles = ParsePerforcePreviewSyncFiles(previewResult.Output);
+                result.RemoteChangeCount = result.RemoteChangedFiles.Count;
+                result.HasRemoteChanges = result.RemoteChangeCount > 0;
+                result.Summary = result.HasRemoteChanges
+                    ? $"Depot has {result.RemoteChangeCount} pending file update(s)."
+                    : "Workspace is up to date with depot.";
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to check Perforce sync status: {ex.Message}";
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// 获取 Perforce 客户端详细信息 (p4 client -o)
         /// </summary>
@@ -474,6 +519,24 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         // ===== 解析方法 =====
+
+        private List<string> ParsePerforcePreviewSyncFiles(string output)
+        {
+            var files = new List<string>();
+
+            if (string.IsNullOrEmpty(output))
+                return files;
+
+            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var match = Regex.Match(line, "^(//[^#]+)#");
+                if (match.Success)
+                    files.Add(match.Groups[1].Value);
+            }
+
+            return files;
+        }
 
         private List<VcsFileStatus> ParsePerforceStatus(string openedOutput, string diffOutput)
         {

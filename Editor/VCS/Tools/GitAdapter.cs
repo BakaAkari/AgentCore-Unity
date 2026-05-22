@@ -236,6 +236,66 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return result;
         }
 
+        public async Task<VcsSyncStatus> GetSyncStatusAsync(CancellationToken ct = default)
+        {
+            var result = new VcsSyncStatus();
+
+            try
+            {
+                var statusTask = GetStatusAsync(ct);
+                var fetchTask = VcsCommandExecutor.ExecuteAsync(
+                    "git", "fetch --quiet", _workingDirectory, timeoutSeconds: 60, ct: ct);
+
+                await Task.WhenAll(statusTask, fetchTask);
+
+                var localStatus = await statusTask;
+                var fetchResult = await fetchTask;
+                if (!fetchResult.Success)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = fetchResult.ErrorMessage;
+                    return result;
+                }
+
+                var revListResult = await VcsCommandExecutor.ExecuteAsync(
+                    "git", "rev-list --left-right --count HEAD...@{upstream}", _workingDirectory, timeoutSeconds: 30, ct: ct);
+
+                result.Success = true;
+                result.RawOutput = string.Join("\n", new[] { fetchResult.Output, revListResult.Output });
+                result.HasLocalChanges = localStatus.Success && localStatus.Files.Count > 0;
+                result.LocalChangeCount = localStatus.Success ? localStatus.Files.Count : 0;
+                result.HasConflicts = localStatus.Success && localStatus.Files.Any(f => f.State == VcsFileState.Conflicted);
+                result.ConflictedFiles = localStatus.Success
+                    ? localStatus.Files.Where(f => f.State == VcsFileState.Conflicted).Select(f => f.FilePath).ToList()
+                    : new List<string>();
+
+                if (revListResult.Success && !string.IsNullOrWhiteSpace(revListResult.Output))
+                {
+                    var parts = revListResult.Output.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2)
+                    {
+                        int.TryParse(parts[0], out var ahead);
+                        int.TryParse(parts[1], out var behind);
+                        result.AheadCount = ahead;
+                        result.BehindCount = behind;
+                        result.RemoteChangeCount = behind;
+                        result.HasRemoteChanges = behind > 0;
+                    }
+                }
+
+                result.Summary = result.HasRemoteChanges
+                    ? $"Remote has {result.BehindCount} commit(s) to pull."
+                    : "Branch is up to date with upstream.";
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to check Git remote status: {ex.Message}";
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// 获取指定提交的详细信息 (git show)
         /// </summary>

@@ -37,10 +37,23 @@ namespace AgentCore.Editor.Components.VCS.Config
             var autoRefreshOnOpen = EditorGUILayout.ToggleLeft("Refresh repository state when opening VCS panel", VcsSettings.AutoRefreshOnOpen);
             var maxCommitEntries = EditorGUILayout.IntSlider("Default commit entries", VcsSettings.MaxCommitEntries, 1, 100);
 
-            if (EditorGUI.EndChangeCheck())
+            EditorGUILayout.Space(6f);
+            EditorGUILayout.LabelField("Remote Update Detection", EditorStyles.boldLabel);
+            var checkRemoteOnRefresh = EditorGUILayout.ToggleLeft("Check remote status when refreshing VCS panel", VcsSettings.CheckRemoteStatusOnRefresh);
+            var sceneViewBannerEnabled = EditorGUILayout.ToggleLeft("Show SceneView top banner when remote updates are available", VcsSettings.SceneViewUpdateBannerEnabled);
+            var periodicCheckEnabled = EditorGUILayout.ToggleLeft("Check remote status periodically in the editor", VcsSettings.PeriodicRemoteStatusCheckEnabled);
+            using (new EditorGUI.DisabledScope(!periodicCheckEnabled))
             {
-                VcsSettings.AutoRefreshOnOpen = autoRefreshOnOpen;
-                VcsSettings.MaxCommitEntries = maxCommitEntries;
+                var intervalMinutes = EditorGUILayout.IntSlider("Remote check interval (minutes)", VcsSettings.RemoteStatusCheckIntervalMinutes, 1, 120);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    VcsSettings.AutoRefreshOnOpen = autoRefreshOnOpen;
+                    VcsSettings.MaxCommitEntries = maxCommitEntries;
+                    VcsSettings.CheckRemoteStatusOnRefresh = checkRemoteOnRefresh;
+                    VcsSettings.SceneViewUpdateBannerEnabled = sceneViewBannerEnabled;
+                    VcsSettings.PeriodicRemoteStatusCheckEnabled = periodicCheckEnabled;
+                    VcsSettings.RemoteStatusCheckIntervalMinutes = intervalMinutes;
+                }
             }
         }
     }
