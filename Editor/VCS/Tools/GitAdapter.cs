@@ -704,6 +704,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     _ => VcsFileState.Modified
                 };
 
+                if (state == VcsFileState.Ignored)
+                    continue;
+
                 files.Add(new VcsFileStatus
                 {
                     FilePath = filePath,

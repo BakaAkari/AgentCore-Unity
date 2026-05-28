@@ -384,6 +384,34 @@
     margin-bottom: 4px;
 }
 
+.vcs-commit-row {
+    flex-direction: row;
+    align-items: stretch;
+}
+
+.vcs-commit-input {
+    flex-grow: 1;
+    flex-shrink: 1;
+    margin-right: 8px;
+}
+
+.vcs-generate-message-button {
+    min-width: 132px;
+    align-self: flex-start;
+}
+
+.vcs-main-operation-row {
+    justify-content: flex-end;
+}
+
+.vcs-main-operation-row .vcs-operation-button {
+    min-width: 96px;
+}
+
+.vcs-main-operation-row .vcs-primary-button {
+    min-width: 120px;
+}
+
 /* Operation Buttons */
 .vcs-operation-button {
     padding: 6px 14px;

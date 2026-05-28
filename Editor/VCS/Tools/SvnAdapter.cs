@@ -590,6 +590,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         _ => VcsFileState.Unmodified
                     };
 
+                    if (state == VcsFileState.Unmodified || state == VcsFileState.Ignored)
+                        continue;
+
                     files.Add(new VcsFileStatus
                     {
                         FilePath = path,

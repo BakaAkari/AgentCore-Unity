@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,7 +40,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Label _branchLabel;
         private Label _revisionLabel;
         private Label _statusSummaryLabel;
-        private VisualElement _statusList;
+        private TreeView _statusTreeView;
         private VisualElement _commitList;
         private Label _commitHistorySummaryLabel;
         private Button _loadOlderCommitsButton;
@@ -52,30 +53,14 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Button _checkRemoteButton;
         private Button _updateRemoteButton;
 
-        // 操作按钮
-        private VisualElement _operationsSection;
-        private Button _stageAllButton;
-        private Button _unstageAllButton;
-        private Button _commitButton;
-        private Button _syncButton;
-        private Button _revertButton;
-        private TextField _commitMessageField;
+        // Operations 区域已移除 - 所有操作通过右键菜单调用外部工具
 
-        // Git 特有按钮
-        private VisualElement _gitOperationsSection;
-        private Button _createBranchButton;
-        private Button _switchBranchButton;
-        private Button _stashButton;
-        private Button _stashPopButton;
-        private TextField _branchNameField;
-
-        // 选中的文件
-        private HashSet<string> _selectedFiles = new HashSet<string>();
+        // TreeView 数据
+        private List<VcsTreeNode> _treeRoots = new List<VcsTreeNode>();
+        private Dictionary<int, VcsTreeNode> _nodeById = new Dictionary<int, VcsTreeNode>();
+        private HashSet<int> _selectedNodeIds = new HashSet<int>();
         private List<VcsFileStatus> _currentFiles = new List<VcsFileStatus>();
-        private List<string> _displayedFilePaths = new List<string>();
-        private Dictionary<string, VisualElement> _statusItemByPath = new Dictionary<string, VisualElement>();
-        private Dictionary<string, Toggle> _statusToggleByPath = new Dictionary<string, Toggle>();
-        private int _lastSelectedFileIndex = -1;
+        
         private List<VcsCommit> _loadedCommits = new List<VcsCommit>();
         private int _visibleCommitCount = InitialCommitDisplayCount;
         private bool _isLoadingMoreCommits;
@@ -83,6 +68,13 @@ namespace AgentCore.Editor.Components.VCS.UI
         private IVcsAdapter _adapter;
         private VcsType _currentVcsType = VcsType.None;
         private CancellationTokenSource _cts;
+
+        private enum IgnoreTarget
+        {
+            File,
+            Folder,
+            Extension
+        }
 
         public VersionControlPanel()
         {
@@ -147,17 +139,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             Add(infoSection);
 
-            // 操作区域
-            _operationsSection = CreateSection("Operations");
-            BuildOperationsUI(_operationsSection);
-            _operationsSection.style.display = DisplayStyle.None;
-            Add(_operationsSection);
-
-            // Git 特有操作区域
-            _gitOperationsSection = CreateSection("Git Operations");
-            BuildGitOperationsUI(_gitOperationsSection);
-            _gitOperationsSection.style.display = DisplayStyle.None;
-            Add(_gitOperationsSection);
+            // Operations 区域已移除 - 所有操作通过右键菜单调用外部工具
 
             // 工作区状态区域
             var statusSection = CreateSection("Working Copy Status");
@@ -171,11 +153,25 @@ namespace AgentCore.Editor.Components.VCS.UI
             _viewDiffButton.SetEnabled(false);
             statusSection.Add(_viewDiffButton);
 
-            var statusScrollView = new ScrollView(ScrollViewMode.Vertical);
-            statusScrollView.AddToClassList("vcs-list");
-            statusScrollView.AddToClassList("vcs-status-scroll-view");
-            _statusList = statusScrollView.contentContainer;
-            statusSection.Add(statusScrollView);
+            // 创建 TreeView
+            _statusTreeView = new TreeView();
+            _statusTreeView.AddToClassList("vcs-tree-view");
+            _statusTreeView.AddToClassList("vcs-status-tree-view");
+            _statusTreeView.style.flexGrow = 1;
+            _statusTreeView.style.minHeight = 200;
+            
+            // 设置 TreeView 的 makeItem 和 bindItem 回调
+            _statusTreeView.makeItem = MakeTreeItem;
+            _statusTreeView.bindItem = BindTreeItem;
+            _statusTreeView.unbindItem = UnbindTreeItem;
+            
+            // 设置选择模式为多选
+            _statusTreeView.selectionType = SelectionType.Multiple;
+            
+            // 注册选择变化事件
+            _statusTreeView.selectedIndicesChanged += OnTreeSelectionChanged;
+            
+            statusSection.Add(_statusTreeView);
 
             Add(statusSection);
 
@@ -193,113 +189,6 @@ namespace AgentCore.Editor.Components.VCS.UI
             historySection.Add(commitScrollView);
 
             Add(historySection);
-        }
-
-        /// <summary>
-        /// 构建通用操作 UI（Stage, Unstage, Commit, Sync, Revert）
-        /// </summary>
-        private void BuildOperationsUI(VisualElement parent)
-        {
-            // 提交消息输入
-            var commitRow = new VisualElement();
-            commitRow.AddToClassList("vcs-commit-row");
-
-            _commitMessageField = new TextField("Commit Message");
-            _commitMessageField.AddToClassList("vcs-commit-input");
-            _commitMessageField.multiline = true;
-            _commitMessageField.style.minHeight = 40;
-            _commitMessageField.style.flexGrow = 1;
-            _commitMessageField.RegisterValueChangedCallback(_ => UpdateOperationButtonStates());
-            commitRow.Add(_commitMessageField);
-
-            parent.Add(commitRow);
-
-            // 操作按钮行
-            var buttonRow = new VisualElement();
-            buttonRow.AddToClassList(ButtonRowClassName);
-
-            _stageAllButton = new Button(OnStageAllClicked) { text = "Stage All" };
-            _stageAllButton.AddToClassList(OperationButtonClassName);
-            _stageAllButton.tooltip = "Stage all modified files for commit";
-            buttonRow.Add(_stageAllButton);
-
-            _unstageAllButton = new Button(OnUnstageAllClicked) { text = "Unstage All" };
-            _unstageAllButton.AddToClassList(OperationButtonClassName);
-            _unstageAllButton.tooltip = "Unstage all staged files";
-            buttonRow.Add(_unstageAllButton);
-
-            _commitButton = new Button(OnCommitClicked) { text = "Commit" };
-            _commitButton.AddToClassList(OperationButtonClassName);
-            _commitButton.AddToClassList("vcs-primary-button");
-            _commitButton.tooltip = "Commit staged changes with the message above";
-            buttonRow.Add(_commitButton);
-
-            parent.Add(buttonRow);
-
-            // 第二行按钮
-            var buttonRow2 = new VisualElement();
-            buttonRow2.AddToClassList(ButtonRowClassName);
-
-            _syncButton = new Button(OnSyncClicked) { text = "Sync/Pull" };
-            _syncButton.AddToClassList(OperationButtonClassName);
-            _syncButton.tooltip = "Pull/Sync latest changes from remote";
-            buttonRow2.Add(_syncButton);
-
-            _revertButton = new Button(OnRevertAllClicked) { text = "Revert All" };
-            _revertButton.AddToClassList(DangerButtonClassName);
-            _revertButton.tooltip = "Revert all local changes (DESTRUCTIVE)";
-            buttonRow2.Add(_revertButton);
-
-            parent.Add(buttonRow2);
-        }
-
-        /// <summary>
-        /// 构建 Git 特有操作 UI
-        /// </summary>
-        private void BuildGitOperationsUI(VisualElement parent)
-        {
-            // 分支名输入
-            var branchRow = new VisualElement();
-            branchRow.AddToClassList("vcs-branch-row");
-
-            _branchNameField = new TextField("Branch Name");
-            _branchNameField.AddToClassList("vcs-branch-input");
-            _branchNameField.style.flexGrow = 1;
-            branchRow.Add(_branchNameField);
-
-            parent.Add(branchRow);
-
-            // Git 操作按钮
-            var buttonRow = new VisualElement();
-            buttonRow.AddToClassList(ButtonRowClassName);
-
-            _createBranchButton = new Button(OnCreateBranchClicked) { text = "Create Branch" };
-            _createBranchButton.AddToClassList(OperationButtonClassName);
-            _createBranchButton.tooltip = "Create a new branch with the name above";
-            buttonRow.Add(_createBranchButton);
-
-            _switchBranchButton = new Button(OnSwitchBranchClicked) { text = "Switch Branch" };
-            _switchBranchButton.AddToClassList(OperationButtonClassName);
-            _switchBranchButton.tooltip = "Switch to the branch named above";
-            buttonRow.Add(_switchBranchButton);
-
-            parent.Add(buttonRow);
-
-            // Stash 按钮行
-            var stashRow = new VisualElement();
-            stashRow.AddToClassList(ButtonRowClassName);
-
-            _stashButton = new Button(OnStashClicked) { text = "Stash" };
-            _stashButton.AddToClassList(OperationButtonClassName);
-            _stashButton.tooltip = "Stash current changes";
-            stashRow.Add(_stashButton);
-
-            _stashPopButton = new Button(OnStashPopClicked) { text = "Stash Pop" };
-            _stashPopButton.AddToClassList(OperationButtonClassName);
-            _stashPopButton.tooltip = "Pop the most recent stash";
-            stashRow.Add(_stashPopButton);
-
-            parent.Add(stashRow);
         }
 
         private VisualElement BuildSyncStatusBanner()
@@ -369,58 +258,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             _vcsTypeLabel.text = $"Type: {_currentVcsType}";
 
-            // 显示操作区域
-            _operationsSection.style.display = DisplayStyle.Flex;
-
-            // Git 特有操作仅在 Git 模式下显示
-            if (_currentVcsType == VcsType.Git)
-            {
-                _gitOperationsSection.style.display = DisplayStyle.Flex;
-            }
-
-            // 根据 VCS 类型调整按钮文本
-            UpdateButtonLabelsForVcsType();
-
             RefreshAllData();
-        }
-
-        /// <summary>
-        /// 根据 VCS 类型调整按钮标签
-        /// </summary>
-        private void UpdateButtonLabelsForVcsType()
-        {
-            switch (_currentVcsType)
-            {
-                case VcsType.Perforce:
-                    _stageAllButton.text = "Edit/Add All";
-                    _stageAllButton.tooltip = "Open all files for edit (p4 edit)";
-                    _unstageAllButton.text = "Revert Unchanged";
-                    _unstageAllButton.tooltip = "Revert files that haven't been modified";
-                    _commitButton.text = "Submit";
-                    _commitButton.tooltip = "Submit a changelist with the description above";
-                    _syncButton.text = "Sync";
-                    _syncButton.tooltip = "Sync workspace to latest (p4 sync)";
-                    _revertButton.text = "Revert All";
-                    _revertButton.tooltip = "Revert all opened files (p4 revert)";
-                    break;
-
-                case VcsType.Svn:
-                    _stageAllButton.text = "Add Unversioned";
-                    _stageAllButton.tooltip = "Add all unversioned files (svn add)";
-                    _unstageAllButton.text = "Revert";
-                    _unstageAllButton.tooltip = "Revert local modifications (svn revert)";
-                    _commitButton.text = "Commit";
-                    _commitButton.tooltip = "Commit changes with the message above (svn commit)";
-                    _syncButton.text = "Update";
-                    _syncButton.tooltip = "Update working copy (svn update)";
-                    _revertButton.text = "Revert All";
-                    _revertButton.tooltip = "Revert all local changes (svn revert)";
-                    break;
-
-                default: // Git
-                    // 默认标签已在 BuildOperationsUI 中设置
-                    break;
-            }
         }
 
         private async void OnRefreshClicked()
@@ -480,7 +318,6 @@ namespace AgentCore.Editor.Components.VCS.UI
                     _currentFiles = statusResult.Files ?? new List<VcsFileStatus>();
                     UpdateStatusList(_currentFiles);
                     _viewDiffButton.SetEnabled(_currentFiles.Count > 0);
-                    UpdateOperationButtonStates();
                 }
 
                 // 更新提交历史
@@ -504,36 +341,18 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
-        /// <summary>
-        /// 根据当前文件状态更新操作按钮的启用状态
-        /// </summary>
-        private void UpdateOperationButtonStates()
-        {
-            bool hasChanges = _currentFiles.Count > 0;
-            _stageAllButton.SetEnabled(hasChanges);
-            _revertButton.SetEnabled(hasChanges);
-
-            // Commit 按钮需要有消息
-            bool hasMessage = !string.IsNullOrWhiteSpace(_commitMessageField?.value);
-            _commitButton.SetEnabled(hasChanges && hasMessage);
-        }
-
         private void UpdateStatusList(List<VcsFileStatus> files)
         {
-            _statusList.Clear();
-            _selectedFiles.Clear();
-            _displayedFilePaths.Clear();
-            _statusItemByPath.Clear();
-            _statusToggleByPath.Clear();
-            _lastSelectedFileIndex = -1;
+            _currentFiles = files ?? new List<VcsFileStatus>();
+            _selectedNodeIds.Clear();
+            _nodeById.Clear();
 
             if (files == null || files.Count == 0)
             {
                 _statusSummaryLabel.text = "No changes in working copy";
-                var noChanges = new Label("Working copy is clean");
-                noChanges.style.color = new Color(0.6f, 0.6f, 0.6f);
-                noChanges.style.paddingTop = 5;
-                _statusList.Add(noChanges);
+                _treeRoots = new List<VcsTreeNode>();
+                _statusTreeView.SetRootItems(new List<TreeViewItemData<VcsTreeNode>>());
+                _statusTreeView.Rebuild();
                 return;
             }
 
@@ -543,190 +362,764 @@ namespace AgentCore.Editor.Components.VCS.UI
                 .ToList();
             _statusSummaryLabel.text = string.Join(", ", summary);
 
-            // 按状态分组显示
-            var grouped = files.GroupBy(f => f.State).OrderBy(g => g.Key.ToString());
+            // 构建树结构
+            _treeRoots = VcsTreeBuilder.BuildTree(files);
 
-            foreach (var group in grouped)
+            // 构建 ID 映射
+            BuildNodeIdMap(_treeRoots);
+
+            // 转换为 TreeViewItemData
+            var treeItems = ConvertToTreeViewItems(_treeRoots);
+
+            // 设置 TreeView 数据
+            _statusTreeView.SetRootItems(treeItems);
+            _statusTreeView.Rebuild();
+        }
+
+        /// <summary>
+        /// 构建节点 ID 映射表
+        /// </summary>
+        private void BuildNodeIdMap(List<VcsTreeNode> roots)
+        {
+            foreach (var root in roots)
             {
-                var groupHeader = new Label($"{group.Key} ({group.Count()})");
-                groupHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
-                groupHeader.style.marginTop = 5;
-                groupHeader.style.marginBottom = 2;
-                _statusList.Add(groupHeader);
-
-                foreach (var file in group)
-                {
-                    _displayedFilePaths.Add(file.FilePath);
-                    var item = CreateStatusItem(file);
-                    _statusList.Add(item);
-                }
+                BuildNodeIdMapRecursive(root);
             }
         }
 
-        private VisualElement CreateStatusItem(VcsFileStatus file)
+        private void BuildNodeIdMapRecursive(VcsTreeNode node)
         {
-            var item = new VisualElement();
-            item.AddToClassList(StatusItemClassName);
-            item.style.flexDirection = FlexDirection.Row;
-            item.style.alignItems = Align.Center;
-            item.style.paddingLeft = 10;
-            item.style.paddingTop = 4;
-            item.style.paddingBottom = 4;
-            item.style.minHeight = 22;
-            item.userData = file.FilePath;
-
-            item.RegisterCallback<MouseDownEvent>(evt =>
+            _nodeById[node.Id] = node;
+            foreach (var child in node.Children)
             {
-                if (evt.button == 1)
-                {
-                    if (!_selectedFiles.Contains(file.FilePath))
-                    {
-                        _selectedFiles.Clear();
-                        _selectedFiles.Add(file.FilePath);
-                        _lastSelectedFileIndex = GetDisplayedFileIndex(file.FilePath);
-                        RefreshStatusSelectionVisuals();
-                    }
-                    return;
-                }
+                BuildNodeIdMapRecursive(child);
+            }
+        }
 
-                if (evt.button != 0)
-                    return;
-
-                HandleStatusItemClicked(file.FilePath, evt.shiftKey, evt.ctrlKey || evt.commandKey);
-                evt.StopPropagation();
-            });
-
-            item.AddManipulator(new ContextualMenuManipulator(evt => BuildStatusItemContextMenu(evt, file)));
-
-            // 复选框用于选择文件
-            var toggle = new Toggle();
-            toggle.style.marginRight = 6;
-            toggle.style.flexShrink = 0;
-            toggle.RegisterCallback<MouseDownEvent>(evt => evt.StopPropagation());
-            toggle.RegisterValueChangedCallback(evt =>
+        /// <summary>
+        /// 将 VcsTreeNode 转换为 TreeViewItemData
+        /// </summary>
+        private List<TreeViewItemData<VcsTreeNode>> ConvertToTreeViewItems(List<VcsTreeNode> nodes)
+        {
+            var items = new List<TreeViewItemData<VcsTreeNode>>();
+            foreach (var node in nodes)
             {
-                SetFileSelected(file.FilePath, evt.newValue);
-                _lastSelectedFileIndex = GetDisplayedFileIndex(file.FilePath);
-                RefreshStatusSelectionVisuals();
-            });
-            item.Add(toggle);
+                items.Add(ConvertNodeToTreeViewItem(node));
+            }
+            return items;
+        }
 
-            var badge = new Label(GetStateBadge(file.State));
+        private TreeViewItemData<VcsTreeNode> ConvertNodeToTreeViewItem(VcsTreeNode node)
+        {
+            if (node.Children.Count == 0)
+            {
+                // 叶子节点
+                return new TreeViewItemData<VcsTreeNode>(node.Id, node);
+            }
+            else
+            {
+                // 有子节点的节点
+                var children = ConvertToTreeViewItems(node.Children);
+                return new TreeViewItemData<VcsTreeNode>(node.Id, node, children);
+            }
+        }
+
+        #region TreeView Item Rendering
+
+        /// <summary>
+        /// 创建 TreeView 项的 UI 模板
+        /// </summary>
+        private VisualElement MakeTreeItem()
+        {
+            var container = new VisualElement();
+            container.AddToClassList("vcs-tree-item");
+            container.style.flexDirection = FlexDirection.Row;
+            container.style.alignItems = Align.Center;
+            container.style.paddingLeft = 4;
+            container.style.paddingTop = 2;
+            container.style.paddingBottom = 2;
+            container.style.minHeight = 20;
+
+            // 图标
+            var icon = new Label();
+            icon.name = "icon";
+            icon.style.marginRight = 4;
+            icon.style.minWidth = 16;
+            container.Add(icon);
+
+            // 名称
+            var nameLabel = new Label();
+            nameLabel.name = "name";
+            nameLabel.style.flexGrow = 1;
+            nameLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+            container.Add(nameLabel);
+
+            // 状态徽章
+            var badge = new Label();
+            badge.name = "badge";
             badge.AddToClassList(StatusBadgeClassName);
-            badge.AddToClassList($"state-{file.State.ToString().ToLowerInvariant()}");
-            badge.style.flexShrink = 0;
-            item.Add(badge);
+            badge.style.marginLeft = 4;
+            container.Add(badge);
 
-            var path = new Label(file.FilePath);
-            path.style.flexGrow = 1;
-            path.style.flexShrink = 1;
-            path.style.unityTextAlign = TextAnchor.MiddleLeft;
-            path.style.overflow = Overflow.Hidden;
-            path.style.textOverflow = TextOverflow.Ellipsis;
-            item.Add(path);
+            // TreeView 使用虚拟化 item，直接监听右键并使用 GenericMenu 弹出菜单，避免 TreeView 内部吞掉 ContextualMenuPopulateEvent。
+            container.RegisterCallback<MouseDownEvent>(OnTreeItemMouseDown, TrickleDown.TrickleDown);
 
-            _statusItemByPath[file.FilePath] = item;
-            _statusToggleByPath[file.FilePath] = toggle;
-
-            return item;
+            return container;
         }
 
-        private void BuildStatusItemContextMenu(ContextualMenuPopulateEvent evt, VcsFileStatus file)
+        /// <summary>
+        /// 绑定数据到 TreeView 项
+        /// </summary>
+        private void BindTreeItem(VisualElement element, int index)
         {
-            evt.menu.AppendAction($"Show Differences: {file.FilePath}", _ => OnViewDiffForFileClicked(file.FilePath));
-            evt.menu.AppendSeparator();
-            evt.menu.AppendAction($"Revert: {file.FilePath}", _ => OnRevertSingleFileClicked(file.FilePath), DropdownMenuAction.AlwaysEnabled);
-        }
-
-        private async void OnViewDiffForFileClicked(string filePath)
-        {
-            if (string.IsNullOrWhiteSpace(filePath))
+            var itemData = _statusTreeView.GetItemDataForIndex<VcsTreeNode>(index);
+            if (itemData == null)
                 return;
 
-            _selectedFiles.Clear();
-            _selectedFiles.Add(filePath);
-            _lastSelectedFileIndex = GetDisplayedFileIndex(filePath);
-            RefreshStatusSelectionVisuals();
-            await ShowDiffAsync(filePath);
-        }
+            var node = itemData;
+            var icon = element.Q<Label>("icon");
+            var nameLabel = element.Q<Label>("name");
+            var badge = element.Q<Label>("badge");
 
-        private async void OnRevertSingleFileClicked(string filePath)
-        {
-            if (string.IsNullOrWhiteSpace(filePath))
-                return;
-
-            _selectedFiles.Clear();
-            _selectedFiles.Add(filePath);
-            _lastSelectedFileIndex = GetDisplayedFileIndex(filePath);
-            RefreshStatusSelectionVisuals();
-            await RevertFilesAsync(new List<string> { filePath }, $"Revert '{filePath}'?", $"This will discard local changes in:\n\n{filePath}\n\nThis action cannot be undone.", "Revert");
-        }
-
-        private void HandleStatusItemClicked(string filePath, bool shiftPressed, bool ctrlPressed)
-        {
-            int clickedIndex = GetDisplayedFileIndex(filePath);
-            if (clickedIndex < 0)
-                return;
-
-            if (shiftPressed && _lastSelectedFileIndex >= 0)
+            if (node.IsDirectory)
             {
-                if (!ctrlPressed)
-                    _selectedFiles.Clear();
-
-                int start = Mathf.Min(_lastSelectedFileIndex, clickedIndex);
-                int end = Mathf.Max(_lastSelectedFileIndex, clickedIndex);
-                for (int i = start; i <= end; i++)
+                // 目录节点 - Unity TreeView 自带展开/折叠箭头，不需要额外图标
+                icon.text = "";
+                nameLabel.text = node.Name;
+                badge.text = $"{node.ChangeCount}";
+                badge.style.display = DisplayStyle.Flex;
+                badge.style.backgroundColor = new Color(0.3f, 0.5f, 0.7f, 0.8f);
+            }
+            else
+            {
+                // 文件节点 - 不需要图标，TreeView 会自动处理缩进
+                icon.text = "";
+                nameLabel.text = node.Name;
+                
+                if (node.FileStatus != null)
                 {
-                    _selectedFiles.Add(_displayedFilePaths[i]);
+                    badge.text = GetStateBadge(node.FileStatus.State);
+                    badge.style.display = DisplayStyle.Flex;
+                    badge.style.backgroundColor = GetStateColor(node.FileStatus.State);
+                }
+                else
+                {
+                    badge.style.display = DisplayStyle.None;
                 }
             }
-            else if (ctrlPressed)
+
+            // 存储节点 ID 到元素的 userData，供右键菜单使用
+            element.userData = node.Id;
+        }
+
+        /// <summary>
+        /// 解绑 TreeView 项
+        /// </summary>
+        private void UnbindTreeItem(VisualElement element, int index)
+        {
+            // 清理 userData
+            element.userData = null;
+        }
+
+        /// <summary>
+        /// 处理 TreeView item 右键点击，直接使用 UnityEditor.GenericMenu 弹出菜单，避免 TreeView 内部事件吞掉 ContextualMenuPopulateEvent。
+        /// </summary>
+        private void OnTreeItemMouseDown(MouseDownEvent evt)
+        {
+            if (evt.button != 1)
+                return;
+
+            var target = evt.currentTarget as VisualElement;
+            if (target == null || !(target.userData is int nodeId))
+                return;
+
+            if (!_nodeById.TryGetValue(nodeId, out var clickedNode))
+                return;
+
+            ShowTreeItemGenericMenu(clickedNode);
+            evt.StopImmediatePropagation();
+            evt.PreventDefault();
+        }
+
+        /// <summary>
+        /// 使用 GenericMenu 构建并显示 TreeView item 右键菜单。
+        /// </summary>
+        private void ShowTreeItemGenericMenu(VcsTreeNode clickedNode)
+        {
+            var selectedNodes = _selectedNodeIds
+                .Where(id => _nodeById.ContainsKey(id))
+                .Select(id => _nodeById[id])
+                .ToList();
+
+            if (!_selectedNodeIds.Contains(clickedNode.Id))
             {
-                ToggleFileSelection(filePath);
-                _lastSelectedFileIndex = clickedIndex;
+                selectedNodes = new List<VcsTreeNode> { clickedNode };
+            }
+
+            var menu = new GenericMenu();
+            var hasFiles = selectedNodes.Any(n => !n.IsDirectory);
+            var hasDirs = selectedNodes.Any(n => n.IsDirectory);
+            var isSingleFile = selectedNodes.Count == 1 && !selectedNodes[0].IsDirectory;
+            var isSingleDir = selectedNodes.Count == 1 && selectedNodes[0].IsDirectory;
+
+            if (isSingleFile)
+            {
+                PopulateFileGenericMenu(menu, selectedNodes[0].FileStatus);
+            }
+            else if (isSingleDir)
+            {
+                PopulateDirectoryGenericMenu(menu, selectedNodes[0]);
+            }
+            else if (hasFiles && !hasDirs)
+            {
+                var filePaths = selectedNodes.Select(n => n.FullPath).ToList();
+                menu.AddItem(new GUIContent($"Selection/Revert Selected Files ({filePaths.Count})"), false, () => OnRevertMultipleFilesClicked(filePaths));
+                menu.AddItem(new GUIContent("Selection/Clear Selection"), false, () => _statusTreeView.ClearSelection());
+            }
+            else if (hasDirs && !hasFiles)
+            {
+                menu.AddItem(new GUIContent($"Selection/Clear Selection ({selectedNodes.Count} directories)"), false, () => _statusTreeView.ClearSelection());
             }
             else
             {
-                bool isOnlySelected = _selectedFiles.Count == 1 && _selectedFiles.Contains(filePath);
-                _selectedFiles.Clear();
-                if (!isOnlySelected)
-                    _selectedFiles.Add(filePath);
-
-                _lastSelectedFileIndex = clickedIndex;
+                var fileCount = selectedNodes.Count(n => !n.IsDirectory);
+                var dirCount = selectedNodes.Count(n => n.IsDirectory);
+                menu.AddItem(new GUIContent($"Selection/Clear Selection ({fileCount} files, {dirCount} directories)"), false, () => _statusTreeView.ClearSelection());
             }
 
-            RefreshStatusSelectionVisuals();
+            menu.ShowAsContext();
         }
 
-        private void ToggleFileSelection(string filePath)
+        /// <summary>
+        /// 填充单文件 GenericMenu 菜单项。
+        /// </summary>
+        private void PopulateFileGenericMenu(GenericMenu menu, VcsFileStatus file)
         {
-            if (!_selectedFiles.Remove(filePath))
-                _selectedFiles.Add(filePath);
+            if (file == null)
+                return;
+
+            var path = file.FilePath;
+            var canStage = file.State == VcsFileState.Untracked
+                || file.State == VcsFileState.Modified
+                || file.State == VcsFileState.Missing
+                || file.State == VcsFileState.Deleted;
+            var canDiff = file.State != VcsFileState.Untracked && file.State != VcsFileState.Ignored;
+            var canRevert = file.State != VcsFileState.Untracked && file.State != VcsFileState.Ignored;
+            var canIgnore = file.State == VcsFileState.Untracked || file.State == VcsFileState.Ignored;
+            var canResolve = file.State == VcsFileState.Conflicted;
+            var supportsExternalTools = SupportsExternalFileTool("any");
+
+            AddMenuItem(menu, "View/Show Differences", canDiff && supportsExternalTools, () => OnViewDiffForFileClicked(path));
+            AddMenuItem(menu, "View/Show File Log", supportsExternalTools, () => OnShowFileLogClicked(path));
+            AddMenuItem(menu, "View/Blame / Annotate", file.State != VcsFileState.Untracked && supportsExternalTools, () => OnShowBlameClicked(path));
+            menu.AddItem(new GUIContent("View/Show File Info"), false, () => OnShowFileInfoClicked(file));
+            menu.AddSeparator("View/");
+
+            AddMenuItem(menu, "Version Control/Add or Track File", canStage && supportsExternalTools, () => OnStageSingleFileClicked(path));
+            AddMenuItem(menu, "Version Control/Revert File", canRevert && supportsExternalTools, () => OnRevertSingleFileClicked(path));
+            AddMenuItem(menu, "Version Control/Mark Resolved", canResolve && supportsExternalTools, () => OnMarkResolvedClicked(path));
+            menu.AddSeparator("Version Control/");
+
+            AddMenuItem(menu, "Commit/Commit This File", supportsExternalTools, () => OnCommitSingleFileClicked(path));
+            menu.AddSeparator("Commit/");
+
+            AddMenuItem(menu, "Ignore/Ignore This File", canIgnore, () => OnIgnoreFileClicked(path));
+            AddMenuItem(menu, "Ignore/Ignore This Folder", canIgnore, () => OnIgnoreFolderClicked(path));
+            AddMenuItem(menu, "Ignore/Ignore Same Extension", canIgnore && !string.IsNullOrWhiteSpace(Path.GetExtension(path)), () => OnIgnoreExtensionClicked(path));
+            menu.AddSeparator("Ignore/");
+
+            menu.AddItem(new GUIContent("File/Copy Relative Path"), false, () => CopyRelativePath(path));
+            menu.AddItem(new GUIContent("File/Reveal In Explorer"), false, () => RevealInExplorer(path));
+            AddMenuItem(menu, "File/Ping In Unity Project", IsUnityAssetPath(path), () => PingInUnityProject(path));
+            AddMenuItem(menu, "File/Delete From Working Copy", file.State == VcsFileState.Untracked || file.State == VcsFileState.Added, () => OnDeleteFromWorkingCopyClicked(path));
         }
 
-        private void SetFileSelected(string filePath, bool selected)
+        /// <summary>
+        /// 填充单目录 GenericMenu 菜单项。
+        /// </summary>
+        private void PopulateDirectoryGenericMenu(GenericMenu menu, VcsTreeNode dirNode)
         {
-            if (selected)
-                _selectedFiles.Add(filePath);
+            var dirPath = dirNode.FullPath;
+            var supportsExternalTools = SupportsExternalFileTool("any");
+
+            AddMenuItem(menu, "Directory/Commit This Directory", supportsExternalTools, () => OnCommitDirectoryClicked(dirPath));
+            AddMenuItem(menu, "Directory/Update This Directory", supportsExternalTools, () => OnUpdateDirectoryClicked(dirPath));
+            AddMenuItem(menu, "Directory/Show Directory Log", supportsExternalTools, () => OnShowDirectoryLogClicked(dirPath));
+            AddMenuItem(menu, "Directory/Show Directory Diff", supportsExternalTools, () => OnShowDirectoryDiffClicked(dirPath));
+            AddMenuItem(menu, "Directory/Revert This Directory", supportsExternalTools, () => OnRevertDirectoryClicked(dirPath));
+            menu.AddSeparator("Directory/");
+
+            menu.AddItem(new GUIContent("File/Copy Relative Path"), false, () => CopyRelativePath(dirPath));
+            menu.AddItem(new GUIContent("File/Reveal In Explorer"), false, () => RevealInExplorer(dirPath));
+        }
+
+        /// <summary>
+        /// 向 GenericMenu 添加可禁用菜单项。
+        /// </summary>
+        private void AddMenuItem(GenericMenu menu, string path, bool enabled, GenericMenu.MenuFunction action)
+        {
+            if (enabled)
+                menu.AddItem(new GUIContent(path), false, action);
             else
-                _selectedFiles.Remove(filePath);
+                menu.AddDisabledItem(new GUIContent(path));
         }
 
-        private int GetDisplayedFileIndex(string filePath)
+        /// <summary>
+        /// TreeView 选择变化事件处理
+        /// </summary>
+        private void OnTreeSelectionChanged(IEnumerable<int> selectedIndices)
         {
-            return _displayedFilePaths.IndexOf(filePath);
-        }
-
-        private void RefreshStatusSelectionVisuals()
-        {
-            foreach (var pair in _statusItemByPath)
+            _selectedNodeIds.Clear();
+            foreach (var index in selectedIndices)
             {
-                bool selected = _selectedFiles.Contains(pair.Key);
-                pair.Value.EnableInClassList("selected", selected);
-
-                if (_statusToggleByPath.TryGetValue(pair.Key, out var toggle))
-                    toggle.SetValueWithoutNotify(selected);
+                var itemData = _statusTreeView.GetItemDataForIndex<VcsTreeNode>(index);
+                if (itemData != null)
+                {
+                    _selectedNodeIds.Add(itemData.Id);
+                }
             }
+        }
+        /// <summary>
+        /// 获取当前 TreeView 中选中的文件路径列表（不包括目录）
+        /// </summary>
+        private List<string> GetSelectedFilePaths()
+        {
+            var selectedNodes = _selectedNodeIds
+                .Where(id => _nodeById.ContainsKey(id))
+                .Select(id => _nodeById[id])
+                .Where(node => !node.IsDirectory)
+                .ToList();
+            
+            return selectedNodes.Select(n => n.FullPath).ToList();
+        }
+
+        /// <summary>
+        /// 检查指定文件是否在 TreeView 选中项中
+        /// </summary>
+        private bool IsFileSelected(string filePath)
+        {
+            return GetSelectedFilePaths().Contains(filePath);
+        }
+
+        /// <summary>
+        /// 获取状态对应的颜色
+        /// </summary>
+        private Color GetStateColor(VcsFileState state)
+        {
+            switch (state)
+            {
+                case VcsFileState.Modified:
+                    return new Color(0.8f, 0.6f, 0.2f, 0.8f); // 橙色
+                case VcsFileState.Added:
+                    return new Color(0.2f, 0.8f, 0.2f, 0.8f); // 绿色
+                case VcsFileState.Deleted:
+                case VcsFileState.Missing:
+                    return new Color(0.8f, 0.2f, 0.2f, 0.8f); // 红色
+                case VcsFileState.Conflicted:
+                    return new Color(0.9f, 0.1f, 0.1f, 0.9f); // 深红色
+                case VcsFileState.Untracked:
+                    return new Color(0.5f, 0.5f, 0.5f, 0.8f); // 灰色
+                case VcsFileState.Ignored:
+                    return new Color(0.4f, 0.4f, 0.4f, 0.6f); // 深灰色
+                default:
+                    return new Color(0.3f, 0.3f, 0.3f, 0.8f);
+            }
+        }
+
+        #endregion
+
+        private void OnViewDiffForFileClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // Selection handled by TreeView
+            
+            // 尝试使用外部工具打开 Diff
+            if (TryOpenExternalDiff(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Diff");
+        }
+
+        private void OnRevertSingleFileClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // Selection handled by TreeView
+            
+            // 尝试使用外部工具 Revert
+            if (TryOpenExternalRevert(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Revert");
+        }
+
+        private void OnStageSingleFileClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // Selection handled by TreeView
+            
+            // 尝试使用外部工具添加文件
+            if (TryOpenExternalAdd(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Add");
+        }
+
+        private void OnUnstageSingleFileClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // Selection handled by TreeView
+            
+            // 对于 SVN，Unstage 实际上是删除已添加的文件（保留本地副本）
+            // 使用 TortoiseSVN 的 remove 命令
+            if (TryOpenExternalRemove(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Unstage");
+        }
+
+
+        private void OnCommitSingleFileClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // Selection handled by TreeView
+            
+            // 尝试使用外部工具提交单个文件
+            if (TryOpenExternalCommitFile(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Commit File");
+        }
+
+        private void OnShowFileLogClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // 尝试使用外部工具打开 Log
+            if (TryOpenExternalLog(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Log");
+        }
+
+        private void OnShowBlameClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // 尝试使用外部工具打开 Blame
+            if (TryOpenExternalBlame(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Blame");
+        }
+
+        private void OnShowFileInfoClicked(VcsFileStatus file)
+        {
+            var details = new List<string>
+            {
+                $"Path: {file.FilePath}",
+                $"State: {file.State}",
+                $"Description: {file.StateDescription}",
+                $"Selected: {IsFileSelected(file.FilePath)}",
+                $"VCS: {_currentVcsType}",
+                $"Root: {VcsDetector.GetVcsRootPath()}"
+            };
+
+            Debug.Log($"[Version Control][{_currentVcsType}][File Info]\n{string.Join("\n", details)}");
+            ShowMessage($"File info for '{file.FilePath}' logged to Console.", false);
+        }
+
+        private void OnMarkResolvedClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            // 尝试使用外部工具 Resolve
+            if (TryOpenExternalResolve(filePath))
+                return;
+            
+            // 外部工具不可用时显示提示
+            ShowExternalToolUnavailable("Resolve");
+        }
+
+        private async void OnIgnoreFileClicked(string filePath)
+        {
+            await IgnorePathAsync(filePath, IgnoreTarget.File);
+        }
+
+        private async void OnIgnoreFolderClicked(string filePath)
+        {
+            await IgnorePathAsync(filePath, IgnoreTarget.Folder);
+        }
+
+        private async void OnIgnoreExtensionClicked(string filePath)
+        {
+            await IgnorePathAsync(filePath, IgnoreTarget.Extension);
+        }
+
+        private async void OnDeleteFromWorkingCopyClicked(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            var absolutePath = GetAbsolutePath(filePath);
+            var confirmed = EditorUtility.DisplayDialog("Delete From Working Copy", $"Delete this path from disk?\n\n{filePath}\n\nVersioned files should be reverted or scheduled delete through VCS actions.", "Delete", "Cancel");
+            if (!confirmed)
+                return;
+
+            try
+            {
+                if (Directory.Exists(absolutePath))
+                    Directory.Delete(absolutePath, true);
+                else if (File.Exists(absolutePath))
+                    File.Delete(absolutePath);
+                else
+                    ShowMessage($"Path does not exist: {filePath}", true);
+
+                AssetDatabase.Refresh();
+                ShowMessage($"Deleted '{filePath}' from working copy.", false);
+                await RefreshAllData();
+            }
+            catch (Exception ex)
+            {
+                ShowMessage($"Delete failed: {ex.Message}", true);
+            }
+        }
+
+
+        private async Task RunFileCommandAsync(string operation, string command, string arguments, string filePath, bool refreshAfterSuccess = false)
+        {
+            try
+            {
+                LogVcsOperation(operation, $"Running {command} {arguments}");
+                var result = await VcsCommandExecutor.ExecuteAsync(command, arguments, VcsDetector.GetVcsRootPath(), ct: CancellationToken.None);
+                var output = string.Join("\n", new[] { result.Output, result.Error }.Where(text => !string.IsNullOrWhiteSpace(text))).Trim();
+
+                if (result.Success)
+                {
+                    Debug.Log($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\n{output}");
+                    ShowMessage($"{operation} for '{filePath}' logged to Console.", false);
+                    if (refreshAfterSuccess)
+                        await RefreshAllData();
+                }
+                else
+                {
+                    Debug.LogWarning($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\nError: {result.ErrorMessage}\n{output}");
+                    ShowMessage($"{operation} failed: {result.ErrorMessage}", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowMessage($"{operation} failed: {ex.Message}", true);
+            }
+        }
+
+        private async Task IgnorePathAsync(string filePath, IgnoreTarget target)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            var pattern = BuildIgnorePattern(filePath, target);
+            if (string.IsNullOrWhiteSpace(pattern))
+            {
+                ShowMessage($"Cannot build ignore pattern for '{filePath}'.", true);
+                return;
+            }
+
+            var confirmed = EditorUtility.DisplayDialog("Ignore Path", $"Add this ignore rule?\n\n{pattern}\n\nSource: {filePath}", "Ignore", "Cancel");
+            if (!confirmed)
+                return;
+
+            try
+            {
+                if (_currentVcsType == VcsType.Svn)
+                    await IgnoreWithSvnAsync(filePath, pattern, target);
+                else if (_currentVcsType == VcsType.Git)
+                    IgnoreWithGit(pattern);
+                else
+                    ShowMessage("Ignore rules are currently supported for SVN and Git only.", true);
+            }
+            catch (Exception ex)
+            {
+                ShowMessage($"Ignore failed: {ex.Message}", true);
+            }
+        }
+
+        private string BuildIgnorePattern(string filePath, IgnoreTarget target)
+        {
+            var normalized = filePath.Replace('\\', '/').Trim('/');
+            switch (target)
+            {
+                case IgnoreTarget.File:
+                    return _currentVcsType == VcsType.Git ? normalized : Path.GetFileName(normalized);
+                case IgnoreTarget.Folder:
+                    var folderPath = GetIgnoreFolderPath(normalized);
+                    return _currentVcsType == VcsType.Git ? folderPath : Path.GetFileName(folderPath);
+                case IgnoreTarget.Extension:
+                    var extension = Path.GetExtension(normalized);
+                    return string.IsNullOrWhiteSpace(extension) ? null : $"*{extension}";
+                default:
+                    return null;
+            }
+        }
+
+        private string GetIgnoreFolderPath(string filePath)
+        {
+            var normalized = filePath.Replace('\\', '/').Trim('/');
+            if (Directory.Exists(GetAbsolutePath(normalized)))
+                return normalized;
+
+            var parent = Path.GetDirectoryName(normalized)?.Replace('\\', '/');
+            return string.IsNullOrWhiteSpace(parent) ? normalized : parent;
+        }
+
+        private async Task IgnoreWithSvnAsync(string filePath, string pattern, IgnoreTarget target)
+        {
+            var propertyTarget = GetSvnIgnorePropertyTarget(filePath, target);
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var existingResult = await ExecuteSvnWithCleanupRetryAsync("Read SVN Ignore", $"propget svn:ignore \"{propertyTarget}\"", rootPath);
+            var existingPatterns = (existingResult.Output ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .ToList();
+
+            if (!existingPatterns.Contains(pattern))
+                existingPatterns.Add(pattern);
+
+            var tempFile = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(tempFile, string.Join(Environment.NewLine, existingPatterns) + Environment.NewLine);
+                var result = await ExecuteSvnWithCleanupRetryAsync("Set SVN Ignore", $"propset svn:ignore -F \"{tempFile}\" \"{propertyTarget}\"", rootPath);
+                if (!result.Success)
+                {
+                    ShowMessage($"SVN ignore failed: {BuildSvnFailureMessage(result)}", true);
+                    return;
+                }
+
+                ShowMessage($"Added SVN ignore rule '{pattern}' on '{propertyTarget}'.", false);
+                await RefreshAllData();
+            }
+            finally
+            {
+                try { File.Delete(tempFile); } catch { /* ignore cleanup */ }
+            }
+        }
+
+        private async Task<CommandResult> ExecuteSvnWithCleanupRetryAsync(string operation, string arguments, string rootPath)
+        {
+            var result = await VcsCommandExecutor.ExecuteAsync("svn", arguments, rootPath, ct: CancellationToken.None);
+            if (!IsSvnWorkingCopyLocked(result))
+                return result;
+
+            LogVcsOperation(operation, "SVN working copy is locked. Running svn cleanup and retrying once.");
+            var cleanupResult = await VcsCommandExecutor.ExecuteAsync("svn", "cleanup", rootPath, ct: CancellationToken.None);
+            if (!cleanupResult.Success)
+            {
+                Debug.LogWarning($"[Version Control][{_currentVcsType}][{operation}] SVN cleanup failed.\nCommand: svn cleanup\nError: {cleanupResult.ErrorMessage}\n{cleanupResult.Output}\n{cleanupResult.Error}");
+                return cleanupResult;
+            }
+
+            return await VcsCommandExecutor.ExecuteAsync("svn", arguments, rootPath, ct: CancellationToken.None);
+        }
+
+        private bool IsSvnWorkingCopyLocked(CommandResult result)
+        {
+            if (result == null)
+                return false;
+
+            var combined = $"{result.ErrorMessage}\n{result.Output}\n{result.Error}";
+            return combined.IndexOf("E155004", StringComparison.OrdinalIgnoreCase) >= 0
+                || combined.IndexOf("working copy", StringComparison.OrdinalIgnoreCase) >= 0 && combined.IndexOf("locked", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private string BuildSvnFailureMessage(CommandResult result)
+        {
+            if (IsSvnWorkingCopyLocked(result))
+                return $"{result.ErrorMessage} Please run svn cleanup on the working copy root and retry.";
+
+            return result.ErrorMessage;
+        }
+
+        private void IgnoreWithGit(string pattern)
+        {
+            var gitignorePath = Path.Combine(VcsDetector.GetVcsRootPath(), ".gitignore");
+            var lines = File.Exists(gitignorePath)
+                ? File.ReadAllLines(gitignorePath).ToList()
+                : new List<string>();
+
+            if (!lines.Contains(pattern))
+                lines.Add(pattern);
+
+            File.WriteAllLines(gitignorePath, lines);
+            AssetDatabase.Refresh();
+            ShowMessage($"Added Git ignore rule '{pattern}' to .gitignore.", false);
+        }
+
+        private string GetSvnIgnorePropertyTarget(string filePath, IgnoreTarget target)
+        {
+            var normalized = filePath.Replace('\\', '/').Trim('/');
+            var parent = target == IgnoreTarget.Folder
+                ? Path.GetDirectoryName(GetIgnoreFolderPath(normalized))
+                : Path.GetDirectoryName(normalized);
+
+            return string.IsNullOrWhiteSpace(parent) ? "." : parent.Replace('\\', '/');
+        }
+
+        private string GetAbsolutePath(string filePath)
+        {
+            var normalized = filePath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+            return Path.GetFullPath(Path.Combine(VcsDetector.GetVcsRootPath(), normalized));
+        }
+
+        private bool IsUnityAssetPath(string filePath)
+        {
+            return !string.IsNullOrWhiteSpace(filePath) && filePath.Replace('\\', '/').StartsWith("Assets/", StringComparison.Ordinal);
+        }
+
+        private void CopyRelativePath(string filePath)
+        {
+            EditorGUIUtility.systemCopyBuffer = filePath ?? string.Empty;
+            ShowMessage($"Copied path: {filePath}", false);
+        }
+
+        private void RevealInExplorer(string filePath)
+        {
+            var absolutePath = GetAbsolutePath(filePath);
+            EditorUtility.RevealInFinder(File.Exists(absolutePath) || Directory.Exists(absolutePath) ? absolutePath : Path.GetDirectoryName(absolutePath));
+        }
+
+        private void PingInUnityProject(string filePath)
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(filePath);
+            if (asset == null)
+            {
+                ShowMessage($"Unity asset not found: {filePath}", true);
+                return;
+            }
+
+            EditorGUIUtility.PingObject(asset);
+            Selection.activeObject = asset;
         }
 
         private void UpdateCommitList(List<VcsCommit> commits)
@@ -937,22 +1330,29 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             if (_adapter == null) return;
 
-            var filesToStage = _selectedFiles.Count > 0
-                ? _selectedFiles.ToList()
+            var selectedFiles = GetSelectedFilePaths();
+            var filesToStage = selectedFiles.Count > 0
+                ? selectedFiles
                 : _currentFiles.Select(f => f.FilePath).ToList();
 
-            if (filesToStage.Count == 0)
+            await StageFilesAsync(filesToStage, selectedFiles.Count > 0 ? "Stage Selected" : "Stage All");
+        }
+
+        private async Task StageFilesAsync(List<string> filesToStage, string operationName)
+        {
+            if (_adapter == null) return;
+
+            if (filesToStage == null || filesToStage.Count == 0)
             {
                 ShowMessage("No files to stage.", false);
                 return;
             }
 
-            LogVcsOperation("Stage", $"Preparing {filesToStage.Count} file(s).");
-            SetOperationButtonsEnabled(false);
+            LogVcsOperation(operationName, $"Preparing {filesToStage.Count} file(s).");
             try
             {
                 var result = await _adapter.StageFilesAsync(filesToStage, CancellationToken.None);
-                LogVcsResult("Stage", result);
+                LogVcsResult(operationName, result);
                 if (result.Success)
                 {
                     ShowMessage($"Staged {filesToStage.Count} file(s) successfully.", false);
@@ -967,32 +1367,35 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 ShowMessage($"Error staging files: {ex.Message}", true);
             }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
-            }
         }
 
         private async void OnUnstageAllClicked()
         {
             if (_adapter == null) return;
 
-            var filesToUnstage = _selectedFiles.Count > 0
-                ? _selectedFiles.ToList()
+            var selectedFiles = GetSelectedFilePaths();
+            var filesToUnstage = selectedFiles.Count > 0
+                ? selectedFiles
                 : _currentFiles.Select(f => f.FilePath).ToList();
 
-            if (filesToUnstage.Count == 0)
+            await UnstageFilesAsync(filesToUnstage, selectedFiles.Count > 0 ? "Unstage Selected" : "Unstage All");
+        }
+
+        private async Task UnstageFilesAsync(List<string> filesToUnstage, string operationName)
+        {
+            if (_adapter == null) return;
+
+            if (filesToUnstage == null || filesToUnstage.Count == 0)
             {
                 ShowMessage("No files to unstage.", false);
                 return;
             }
 
-            LogVcsOperation("Unstage", $"Preparing {filesToUnstage.Count} file(s).");
-            SetOperationButtonsEnabled(false);
+            LogVcsOperation(operationName, $"Preparing {filesToUnstage.Count} file(s).");
             try
             {
                 var result = await _adapter.UnstageFilesAsync(filesToUnstage, CancellationToken.None);
-                LogVcsResult("Unstage", result);
+                LogVcsResult(operationName, result);
                 if (result.Success)
                 {
                     ShowMessage($"Unstaged {filesToUnstage.Count} file(s) successfully.", false);
@@ -1007,75 +1410,240 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 ShowMessage($"Error unstaging files: {ex.Message}", true);
             }
-            finally
+        }
+
+        // Operations 按钮事件处理方法已移除 - 所有操作通过右键菜单调用外部工具
+        // Git 特有操作方法已移除 - Git 操作通过外部工具或命令行处理
+
+        private bool TryOpenExternalCommitWindow(string message)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            switch (_currentVcsType)
             {
-                SetOperationButtonsEnabled(true);
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:commit /path:\"{rootPath}\" /logmsg:\"{EscapeExternalArgument(message)}\"", rootPath, "TortoiseSVN commit window");
+                case VcsType.Git:
+                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI commit window");
+                case VcsType.Perforce:
+                    return TryStartExternalProcess("p4v", $"-cmd submit \"{rootPath}\"", rootPath, "P4V submit window");
+                default:
+                    return false;
             }
         }
 
-        private async void OnCommitClicked()
+        private bool TryOpenExternalUpdateWindow()
         {
-            if (_adapter == null)
+            var rootPath = VcsDetector.GetVcsRootPath();
+            switch (_currentVcsType)
             {
-                ShowMessage("Commit failed: no version control adapter is active. Click Refresh to detect the repository.", true);
-                return;
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:update /path:\"{rootPath}\"", rootPath, "TortoiseSVN update window");
+                case VcsType.Git:
+                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
+                case VcsType.Perforce:
+                    return TryStartExternalProcess("p4v", $"-cmd sync \"{rootPath}\"", rootPath, "P4V sync window");
+                default:
+                    return false;
             }
+        }
 
-            var message = _commitMessageField?.value;
-            if (string.IsNullOrWhiteSpace(message))
+        private bool TryOpenExternalCleanupWindow()
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            switch (_currentVcsType)
             {
-                ShowMessage("Please enter a commit message.", true);
-                return;
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:cleanup /path:\"{rootPath}\"", rootPath, "TortoiseSVN cleanup options dialog");
+                case VcsType.Git:
+                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
+                case VcsType.Perforce:
+                    return TryStartExternalProcess("p4v", $"-cmd reconcile \"{rootPath}\"", rootPath, "P4V reconcile window");
+                default:
+                    return false;
             }
+        }
 
-            if (_currentFiles == null || _currentFiles.Count == 0)
-            {
-                ShowMessage("Commit skipped: no working copy changes were detected. Click Refresh and verify Working Copy Status.", true);
-                return;
-            }
-
-            if (_currentVcsType == VcsType.Svn)
-            {
-                var confirmMessage = $"This will run SVN commit for the current working copy with this message:\n\n{message.Trim()}\n\nUnversioned files must be added first with Add Unversioned.";
-                if (!EditorUtility.DisplayDialog("SVN Commit", confirmMessage, "Commit", "Cancel"))
-                    return;
-            }
-
-            ShowMessage($"Committing via {_currentVcsType} command line...", false);
-            LogVcsOperation("Commit", $"Starting {_currentVcsType} commit. Local changed files: {_currentFiles.Count}.");
-            SetOperationButtonsEnabled(false);
+        private bool TryStartExternalProcess(string fileName, string arguments, string workingDirectory, string displayName)
+        {
             try
             {
-                var result = await _adapter.CommitAsync(message, CancellationToken.None);
-                LogVcsResult("Commit", result);
-                if (result.Success)
+                if (string.IsNullOrWhiteSpace(workingDirectory))
+                    return false;
+
+                var startInfo = new System.Diagnostics.ProcessStartInfo
                 {
-                    var outputSuffix = string.IsNullOrWhiteSpace(result.RawOutput) ? string.Empty : $"\n\n{result.RawOutput.Trim()}";
-                    ShowMessage($"Committed successfully: {result.Message}{outputSuffix}", false);
-                    _commitMessageField.value = "";
-                    await RefreshAllData();
-                }
-                else
-                {
-                    var failureReason = !string.IsNullOrWhiteSpace(result.ErrorMessage)
-                        ? result.ErrorMessage
-                        : result.Message ?? "Unknown error";
-                    ShowMessage($"Commit failed: {failureReason}", true);
-                }
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = true,
+                    WorkingDirectory = workingDirectory
+                };
+                System.Diagnostics.Process.Start(startInfo);
+                ShowMessage($"Opened {displayName}.", false);
+                LogVcsOperation("Open External Tool", $"Opened {displayName}: {fileName} {arguments}");
+                return true;
             }
             catch (Exception ex)
             {
-                ShowMessage($"Error committing: {ex.Message}", true);
-            }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
+                Debug.LogWarning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open {displayName}. Command: {fileName} {arguments}. Error: {ex.Message}");
+                return false;
             }
         }
 
-        private async void OnSyncClicked()
+        private string EscapeExternalArgument(string value)
         {
-            await RunSyncWithConfirmationAsync(null);
+            return (value ?? string.Empty).Replace("\"", "\\\"");
+        }
+
+        private void ShowExternalToolUnavailable(string operation)
+        {
+            ShowMessage($"{operation} requires an external {_currentVcsType} client. Please install or configure the corresponding desktop VCS tool.", true);
+        }
+
+        // ===== 文件级外部工具调用方法 =====
+
+        private bool TryOpenExternalDiff(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:diff /path:\"{absolutePath}\"", rootPath, "TortoiseSVN diff window");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false; // Git GUI 和 P4V 不支持单文件 diff 窗口
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryOpenExternalLog(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:log /path:\"{absolutePath}\"", rootPath, "TortoiseSVN log window");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryOpenExternalBlame(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:blame /path:\"{absolutePath}\"", rootPath, "TortoiseSVN blame window");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryOpenExternalAdd(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:add /path:\"{absolutePath}\"", rootPath, "TortoiseSVN add dialog");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryOpenExternalRevert(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:revert /path:\"{absolutePath}\"", rootPath, "TortoiseSVN revert dialog");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryOpenExternalResolve(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:resolve /path:\"{absolutePath}\"", rootPath, "TortoiseSVN resolve dialog");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryOpenExternalRemove(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:remove /path:\"{absolutePath}\"", rootPath, "TortoiseSVN remove dialog");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryOpenExternalCommitFile(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+            
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe",
+                        $"/command:commit /path:\"{absolutePath}\"",
+                        rootPath,
+                        "TortoiseSVN commit window");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private bool SupportsExternalFileTool(string operation)
+        {
+            // 目前只有 SVN/TortoiseSVN 支持完整的文件级外部工具
+            return _currentVcsType == VcsType.Svn;
         }
 
         private async void OnCheckRemoteClicked()
@@ -1096,71 +1664,57 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
-        private async void OnUpdateRemoteClicked()
+        private void OnUpdateRemoteClicked()
         {
-            await RunSyncWithConfirmationAsync(VcsRemoteStatusMonitor.LastStatus);
-        }
+            if (_adapter == null || _currentVcsType == VcsType.None)
+            {
+                ShowMessage("Update failed: no version control adapter is active. Click Refresh to detect the repository.", true);
+                return;
+            }
 
-        private async Task RunSyncWithConfirmationAsync(VcsSyncStatus status)
-        {
-            if (_adapter == null) return;
-
+            var status = VcsRemoteStatusMonitor.LastStatus;
             if (status != null && status.HasRemoteChanges)
             {
-                var message = $"{status.Summary}\n\nThis will run the VCS update/sync command. Local conflicts are not auto-resolved.";
-                if (!EditorUtility.DisplayDialog("Version Control Update", message, "Update", "Cancel"))
+                var message = $"{status.Summary}\n\nThis will open the corresponding external VCS update/sync window. Local conflicts are not auto-resolved in Unity.";
+                if (!EditorUtility.DisplayDialog("Version Control Update", message, "Open Update Window", "Cancel"))
                     return;
             }
 
-            SetOperationButtonsEnabled(false);
-            _checkRemoteButton?.SetEnabled(false);
-            _updateRemoteButton?.SetEnabled(false);
-            try
-            {
-                LogVcsOperation("Sync", "Starting VCS update/sync command.");
-                var result = await VcsRemoteStatusMonitor.SyncAsync(CancellationToken.None);
-                LogVcsResult("Sync", result);
-                if (result.Success)
-                {
-                    var conflictSuffix = result.ConflictedFiles.Count > 0
-                        ? $" Conflicts: {string.Join(", ", result.ConflictedFiles.Take(5))}"
-                        : string.Empty;
-                    ShowMessage($"Sync completed: {result.Message}{conflictSuffix}", false);
-                    await RefreshAllData();
-                }
-                else
-                {
-                    ShowMessage($"Sync failed: {result.Message ?? result.ErrorMessage}", true);
-                    UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowMessage($"Error syncing: {ex.Message}", true);
-            }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
-                _checkRemoteButton?.SetEnabled(true);
-                _updateRemoteButton?.SetEnabled(VcsRemoteStatusMonitor.LastStatus?.HasRemoteChanges == true);
-            }
+            if (TryOpenExternalUpdateWindow())
+                return;
+
+            ShowExternalToolUnavailable("Update");
+        }
+
+        private async void OnRevertMultipleFilesClicked(List<string> filePaths)
+        {
+            if (filePaths == null || filePaths.Count == 0)
+                return;
+
+            await RevertFilesAsync(
+                filePaths,
+                $"Revert {filePaths.Count} Selected File(s)?",
+                $"This will discard local changes in the selected {filePaths.Count} file(s).\n\nThis action cannot be undone.",
+                "Revert Selected");
         }
 
         private async void OnRevertAllClicked()
         {
-            if (_adapter == null) return;
+            if (_adapter == null)
+                return;
 
-            var filesToRevert = _selectedFiles.Count > 0
-                ? _selectedFiles.ToList()
-                : _currentFiles.Select(f => f.FilePath).ToList();
+            var filesToRevert = _currentFiles?.Select(f => f.FilePath).ToList();
+            if (filesToRevert == null || filesToRevert.Count == 0)
+            {
+                ShowMessage("No files to revert.", false);
+                return;
+            }
 
             await RevertFilesAsync(
                 filesToRevert,
-                _selectedFiles.Count > 0 ? $"Revert {filesToRevert.Count} Selected File(s)?" : "Revert All Changes?",
-                _selectedFiles.Count > 0
-                    ? $"This will discard local changes in the selected {filesToRevert.Count} file(s).\n\nThis action cannot be undone."
-                    : "This will discard ALL local changes in the working copy.\n\nThis action cannot be undone.",
-                _selectedFiles.Count > 0 ? "Revert Selected" : "Revert All");
+                "Revert All Changes?",
+                "This will discard ALL local changes in the working copy.\n\nThis action cannot be undone.",
+                "Revert All");
         }
 
         private async Task RevertFilesAsync(List<string> filesToRevert, string title, string message, string okButton)
@@ -1178,7 +1732,6 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (!confirmed)
                 return;
 
-            SetOperationButtonsEnabled(false);
             try
             {
                 LogVcsOperation("Revert", $"Reverting {filesToRevert.Count} file(s).");
@@ -1198,146 +1751,6 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 ShowMessage($"Error reverting: {ex.Message}", true);
             }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
-            }
-        }
-
-        private async void OnCreateBranchClicked()
-        {
-            if (!(_adapter is GitAdapter gitAdapter)) return;
-
-            var branchName = _branchNameField?.value;
-            if (string.IsNullOrWhiteSpace(branchName))
-            {
-                ShowMessage("Please enter a branch name.", true);
-                return;
-            }
-
-            SetOperationButtonsEnabled(false);
-            try
-            {
-                LogVcsOperation("Create Branch", $"Creating branch '{branchName}'.");
-                var result = await gitAdapter.CreateBranchAsync(branchName, CancellationToken.None);
-                LogVcsResult("Create Branch", result);
-                if (result.Success)
-                {
-                    ShowMessage($"Branch '{branchName}' created successfully.", false);
-                    _branchNameField.value = "";
-                    await RefreshAllData();
-                }
-                else
-                {
-                    ShowMessage($"Create branch failed: {result.Message}", true);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowMessage($"Error creating branch: {ex.Message}", true);
-            }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
-            }
-        }
-
-        private async void OnSwitchBranchClicked()
-        {
-            if (!(_adapter is GitAdapter gitAdapter)) return;
-
-            var branchName = _branchNameField?.value;
-            if (string.IsNullOrWhiteSpace(branchName))
-            {
-                ShowMessage("Please enter a branch name to switch to.", true);
-                return;
-            }
-
-            SetOperationButtonsEnabled(false);
-            try
-            {
-                LogVcsOperation("Switch Branch", $"Switching to branch '{branchName}'.");
-                var result = await gitAdapter.SwitchBranchAsync(branchName, CancellationToken.None);
-                LogVcsResult("Switch Branch", result);
-                if (result.Success)
-                {
-                    ShowMessage($"Switched to branch '{branchName}'.", false);
-                    _branchNameField.value = "";
-                    await RefreshAllData();
-                }
-                else
-                {
-                    ShowMessage($"Switch branch failed: {result.Message}", true);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowMessage($"Error switching branch: {ex.Message}", true);
-            }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
-            }
-        }
-
-        private async void OnStashClicked()
-        {
-            if (!(_adapter is GitAdapter gitAdapter)) return;
-
-            SetOperationButtonsEnabled(false);
-            try
-            {
-                LogVcsOperation("Stash", "Stashing current changes.");
-                var result = await gitAdapter.StashAsync(null, CancellationToken.None);
-                LogVcsResult("Stash", result);
-                if (result.Success)
-                {
-                    ShowMessage("Changes stashed successfully.", false);
-                    await RefreshAllData();
-                }
-                else
-                {
-                    ShowMessage($"Stash failed: {result.Message}", true);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowMessage($"Error stashing: {ex.Message}", true);
-            }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
-            }
-        }
-
-        private async void OnStashPopClicked()
-        {
-            if (!(_adapter is GitAdapter gitAdapter)) return;
-
-            SetOperationButtonsEnabled(false);
-            try
-            {
-                LogVcsOperation("Stash Pop", "Popping latest stash.");
-                var result = await gitAdapter.StashPopAsync(CancellationToken.None);
-                LogVcsResult("Stash Pop", result);
-                if (result.Success)
-                {
-                    ShowMessage("Stash popped successfully.", false);
-                    await RefreshAllData();
-                }
-                else
-                {
-                    ShowMessage($"Stash pop failed: {result.Message}", true);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowMessage($"Error popping stash: {ex.Message}", true);
-            }
-            finally
-            {
-                SetOperationButtonsEnabled(true);
-            }
         }
 
         #endregion
@@ -1346,7 +1759,8 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private async void OnViewDiffClicked()
         {
-            string filePath = _selectedFiles.Count == 1 ? _selectedFiles.First() : null;
+            var selectedFiles = GetSelectedFilePaths();
+            string filePath = selectedFiles.Count == 1 ? selectedFiles.First() : null;
             await ShowDiffAsync(filePath);
         }
 
@@ -1384,22 +1798,6 @@ namespace AgentCore.Editor.Components.VCS.UI
         #endregion
 
         #region UI Helpers
-
-        /// <summary>
-        /// 启用/禁用所有操作按钮
-        /// </summary>
-        private void SetOperationButtonsEnabled(bool enabled)
-        {
-            _stageAllButton?.SetEnabled(enabled);
-            _unstageAllButton?.SetEnabled(enabled);
-            _commitButton?.SetEnabled(enabled);
-            _syncButton?.SetEnabled(enabled);
-            _revertButton?.SetEnabled(enabled);
-            _createBranchButton?.SetEnabled(enabled);
-            _switchBranchButton?.SetEnabled(enabled);
-            _stashButton?.SetEnabled(enabled);
-            _stashPopButton?.SetEnabled(enabled);
-        }
 
         private string GetOperationFailureMessage(VcsOperationResult result)
         {
@@ -1545,6 +1943,81 @@ namespace AgentCore.Editor.Components.VCS.UI
                 VcsFileState.Missing => "!",
                 _ => " "
             };
+        }
+
+        #endregion
+
+        #region Directory Support
+
+        /// <summary>
+        /// 从文件列表中提取所有有修改的目录及其文件数量
+        /// </summary>
+
+        /// <summary>
+        /// 对目录执行 Commit 操作
+        /// </summary>
+        private void OnCommitDirectoryClicked(string directoryPath)
+        {
+            if (!TryOpenExternalDirectoryOperation("commit", directoryPath))
+                ShowExternalToolUnavailable("Commit Folder");
+        }
+
+        /// <summary>
+        /// 对目录执行 Update 操作
+        /// </summary>
+        private void OnUpdateDirectoryClicked(string directoryPath)
+        {
+            if (!TryOpenExternalDirectoryOperation("update", directoryPath))
+                ShowExternalToolUnavailable("Update Folder");
+        }
+
+        /// <summary>
+        /// 显示目录的 Log
+        /// </summary>
+        private void OnShowDirectoryLogClicked(string directoryPath)
+        {
+            if (!TryOpenExternalDirectoryOperation("log", directoryPath))
+                ShowExternalToolUnavailable("Folder Log");
+        }
+
+        /// <summary>
+        /// 显示目录的 Diff
+        /// </summary>
+        private void OnShowDirectoryDiffClicked(string directoryPath)
+        {
+            if (!TryOpenExternalDirectoryOperation("diff", directoryPath))
+                ShowExternalToolUnavailable("Folder Diff");
+        }
+
+        /// <summary>
+        /// 对目录执行 Revert 操作
+        /// </summary>
+        private void OnRevertDirectoryClicked(string directoryPath)
+        {
+            if (!TryOpenExternalDirectoryOperation("revert", directoryPath))
+                ShowExternalToolUnavailable("Revert Folder");
+        }
+
+        /// <summary>
+        /// 尝试对目录执行外部工具操作
+        /// </summary>
+        private bool TryOpenExternalDirectoryOperation(string command, string directoryPath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = Path.GetFullPath(directoryPath);
+
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe",
+                        $"/command:{command} /path:\"{absolutePath}\"",
+                        rootPath, $"TortoiseSVN {command} window");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false; // 暂不支持
+                default:
+                    return false;
+            }
         }
 
         #endregion
