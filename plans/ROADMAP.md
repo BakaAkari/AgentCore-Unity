@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.6.1 | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.6.1）
+> **版本**: v0.7.0 | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.7.0）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 >
 > **与现有计划的关系**:
@@ -37,14 +37,14 @@
 | `[x]` | 已完成 |
 | `[!]` | 阻塞/暂停（依赖外部条件或用户决策） |
 
-### 0.3 当前项目快照 (v0.6.1)
+### 0.3 当前项目快照 (v0.7.0)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.6.1 (2026-05-22) |
+| **版本** | 0.7.0 (2026-05-28) |
 | **工具数量** | 以 `ToolAutoDiscovery` 当前已编译程序集发现结果为准；VCS 工具默认不编译，启用 `AGENTCORE_VCS` 后注册 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
-| **UI 框架** | UI Toolkit 动态 Hub 架构 (Chat/Knowledge/Memory + 可选组件 contribution)；Project Settings 使用 Settings shell + section registry |
+| **UI 框架** | UI Toolkit 动态 Hub 架构 (Chat/Knowledge/Memory + 可选组件 contribution)；Project Settings 使用 Dashboard + 4 Pages 顶部 Tab 导航 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
 | **测试覆盖** | 5 个测试文件，90+ test cases (ToolResponse, JsonHelper, TokenCounter, ToolHelpers, SchemaValidation) |
 | **归档参考** | `_archive/Unity-Skills/` 含 554 个 skills 可供迁移 |
@@ -205,6 +205,7 @@ v0.5.4 — 版本控制集成 Phase 1（VCS 检测 + 只读查询 + VersionContr
 v0.5.5 — 版本控制集成 Phase 2（写操作 + 确认机制 + 26 个 actions 完整实现）[DONE]
 v0.6.0 — VCS 可选组件化（Optional Components + 动态 Hub/Settings contribution）[DONE]
 v0.6.1 — Settings 页面架构重构（Settings shell + section registry + Provider 业务逻辑清理）[DONE]
+v0.7.0 — Settings UI 重构为 Dashboard + 4 Pages（顶部 Tab 导航，VCS 独立卡片，Maintenance 操作）[DONE]
 v0.6.2 — 代码库索引 Phase 1（文件级索引 + 符号检索）
 v0.6.3 — 代码库索引 Phase 2（语义搜索 + 依赖图构建）
 v0.6.4 — 规则系统与智能推荐（.agentcore/rules.md + SmartToolRecommender + 响应式建议）
@@ -217,6 +218,7 @@ v0.6.5 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
 - v0.5.5 → 版本控制集成 Phase 2（写操作 + 确认机制）
 - v0.6.0 → Optional Components 平台能力落地，VCS 改为默认禁用可选组件
 - v0.6.1 → Settings 页面架构重构，Provider shell 化并固化 section 开发规则
+- v0.7.0 → Settings UI 从左侧 11 Section 导航改为 Dashboard + 4 Pages 顶部 Tab，VCS 设置提升为独立卡片
 - v0.6.2+ → 原计划顺延
 
 ### 3.6 技术栈选型（基于竞品分析）

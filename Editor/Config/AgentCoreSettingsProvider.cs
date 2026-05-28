@@ -1,7 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Linq;
 using AgentCore.Editor.Config.Settings;
+using AgentCore.Editor.Config.Settings.Pages;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -9,15 +9,25 @@ using UnityEngine.UIElements;
 namespace AgentCore.Editor.Config
 {
     /// <summary>
-    /// Provides the AgentCore Project Settings shell.
+    /// Provides the AgentCore Project Settings hub with top-tab navigation.
     /// </summary>
     public class AgentCoreSettingsProvider : SettingsProvider
     {
         private AgentCoreSettingsContext _settingsContext;
-        private IReadOnlyList<IAgentCoreSettingsSection> _settingsSections;
+        private readonly IAgentCoreSettingsPage[] _pages;
 
         private AgentCoreSettingsProvider(string path, SettingsScope scope)
-            : base(path, scope) { }
+            : base(path, scope)
+        {
+            _pages = new IAgentCoreSettingsPage[]
+            {
+                new DashboardSettingsPage(),
+                new ModelAgentSettingsPage(),
+                new ContextMemorySettingsPage(),
+                new ToolsExtensionsSettingsPage(),
+                new UiDiagnosticsSettingsPage(),
+            };
+        }
 
         /// <summary>
         /// Creates the AgentCore Project Settings provider.
@@ -46,7 +56,7 @@ namespace AgentCore.Editor.Config
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("AgentCore Settings", EditorStyles.boldLabel);
-            _settingsContext.Ui.DrawHelpText("Configure AgentCore through modular settings sections. Built-in features and optional components are mounted through the same settings shell.");
+            _settingsContext.Ui.DrawHelpText("Configure AgentCore through modular settings pages.");
             EditorGUILayout.Space(8);
 
             DrawSettingsShell();
@@ -55,8 +65,11 @@ namespace AgentCore.Editor.Config
         private void InitializeSettingsShell()
         {
             _settingsContext = AgentCoreSettingsContext.Create();
-            AgentCoreSettingsRegistry.Refresh();
-            _settingsSections = AgentCoreSettingsRegistry.Sections;
+
+            var selectedId = _settingsContext.State.SelectedSectionId;
+            var firstPage = _pages.FirstOrDefault(p => p.Id == selectedId) ?? _pages[0];
+            _settingsContext.State.SelectedSectionId = firstPage.Id;
+            firstPage.OnActivate(_settingsContext);
         }
 
         private void EnsureSettingsShell()
@@ -65,84 +78,45 @@ namespace AgentCore.Editor.Config
             {
                 InitializeSettingsShell();
             }
-
-            if (_settingsSections == null || _settingsSections.Count == 0)
-            {
-                AgentCoreSettingsRegistry.Refresh();
-                _settingsSections = AgentCoreSettingsRegistry.Sections;
-            }
         }
 
         private void DrawSettingsShell()
         {
-            var visibleSections = _settingsSections
-                .Where(section => section != null && section.IsVisible(_settingsContext))
-                .OrderBy(section => section.Order)
-                .ThenBy(section => section.Id, StringComparer.Ordinal)
-                .ToList();
-
-            if (visibleSections.Count == 0)
-            {
-                EditorGUILayout.HelpBox("No AgentCore settings sections are available.", MessageType.Warning);
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(_settingsContext.State.SelectedSectionId) ||
-                visibleSections.All(section => section.Id != _settingsContext.State.SelectedSectionId))
-            {
-                SelectSettingsSection(visibleSections[0].Id);
-            }
-
-            EditorGUILayout.BeginHorizontal();
-            DrawSettingsNavigation(visibleSections);
-            GUILayout.Space(12);
-            DrawSelectedSettingsSection(visibleSections);
-            EditorGUILayout.EndHorizontal();
+            DrawPageTabs();
+            EditorGUILayout.Space(8);
+            DrawSelectedPage();
         }
 
-        private void DrawSettingsNavigation(IReadOnlyList<IAgentCoreSettingsSection> visibleSections)
+        private void DrawPageTabs()
         {
-            EditorGUILayout.BeginVertical(GUILayout.Width(210));
+            EditorGUILayout.BeginHorizontal();
 
-            var currentCategory = string.Empty;
-            foreach (var section in visibleSections)
+            foreach (var page in _pages)
             {
-                var category = string.IsNullOrWhiteSpace(section.Category) ? "General" : section.Category;
-                if (!string.Equals(currentCategory, category, StringComparison.Ordinal))
-                {
-                    if (!string.IsNullOrEmpty(currentCategory))
-                    {
-                        EditorGUILayout.Space(6);
-                    }
-
-                    currentCategory = category;
-                    EditorGUILayout.LabelField(currentCategory, EditorStyles.miniBoldLabel);
-                }
-
-                var isSelected = _settingsContext.State.SelectedSectionId == section.Id;
+                var isSelected = _settingsContext.State.SelectedSectionId == page.Id;
                 var previousColor = GUI.backgroundColor;
+
                 if (isSelected)
                 {
                     GUI.backgroundColor = new Color(0.35f, 0.55f, 0.9f, 1f);
                 }
 
-                if (GUILayout.Button(section.Title, EditorStyles.miniButton, GUILayout.Height(24)))
+                if (GUILayout.Button(page.Title, EditorStyles.miniButton, GUILayout.Height(26), GUILayout.MinWidth(100)))
                 {
-                    SelectSettingsSection(section.Id);
+                    SelectPage(page.Id);
                 }
 
                 GUI.backgroundColor = previousColor;
             }
 
             GUILayout.FlexibleSpace();
-            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
         }
 
-        private void DrawSelectedSettingsSection(IReadOnlyList<IAgentCoreSettingsSection> visibleSections)
+        private void DrawSelectedPage()
         {
-            var selected = visibleSections.FirstOrDefault(section => section.Id == _settingsContext.State.SelectedSectionId) ?? visibleSections[0];
+            var selected = _pages.FirstOrDefault(p => p.Id == _settingsContext.State.SelectedSectionId) ?? _pages[0];
 
-            EditorGUILayout.BeginVertical();
             _settingsContext.Ui.DrawSectionTitle(selected.Title, selected.Description);
 
             try
@@ -151,24 +125,22 @@ namespace AgentCore.Editor.Config
             }
             catch (Exception ex)
             {
-                EditorGUILayout.HelpBox($"Failed to draw settings section '{selected.Id}': {ex.Message}", MessageType.Error);
+                EditorGUILayout.HelpBox($"Failed to draw settings page '{selected.Id}': {ex.Message}", MessageType.Error);
             }
-
-            EditorGUILayout.EndVertical();
         }
 
-        private void SelectSettingsSection(string sectionId)
+        private void SelectPage(string pageId)
         {
-            if (_settingsContext == null || _settingsContext.State.SelectedSectionId == sectionId)
+            if (_settingsContext == null || _settingsContext.State.SelectedSectionId == pageId)
                 return;
 
-            var previousSection = AgentCoreSettingsRegistry.GetSection(_settingsContext.State.SelectedSectionId);
-            previousSection?.OnDeactivate(_settingsContext);
+            var previousPage = _pages.FirstOrDefault(p => p.Id == _settingsContext.State.SelectedSectionId);
+            previousPage?.OnDeactivate(_settingsContext);
 
-            _settingsContext.State.SelectedSectionId = sectionId;
+            _settingsContext.State.SelectedSectionId = pageId;
 
-            var nextSection = AgentCoreSettingsRegistry.GetSection(sectionId);
-            nextSection?.OnActivate(_settingsContext);
+            var nextPage = _pages.FirstOrDefault(p => p.Id == pageId);
+            nextPage?.OnActivate(_settingsContext);
         }
     }
 

@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 6;
+        private const int CurrentVersion = 7;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -277,6 +277,51 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v5→v6: context compression settings initialized");
             }
 
+            // v6 -> v7: Settings UI 重构为 Dashboard + 4 Pages（无数据迁移，仅标记版本）
+            if (settingsVersion < 7)
+            {
+                Debug.Log("[AgentCore] Settings migrated v6→v7: settings UI restructured to Dashboard + 4 Pages");
+            }
+
+            settingsVersion = CurrentVersion;
+            Save(true);
+        }
+
+        /// <summary>
+        /// 重置所有设置为默认值。
+        /// </summary>
+        public void ResetToDefaults()
+        {
+            llmEndpoint = "http://localhost:4000/v1";
+            llmModel = "claude-sonnet-4-5";
+            temperature = 0.7f;
+            maxTokens = 16000;
+            maxToolCallRounds = 50;
+            maxContextTokens = 0;
+            reserveResponseTokens = 8000;
+            autoCompileCheck = true;
+            autoConsoleCapture = true;
+            fallbackRoutingEnabled = true;
+            maxConsecutiveErrors = 5;
+            bootstrapEnabled = true;
+            autoProjectContext = true;
+            mem0Enabled = false;
+            mem0Endpoint = "http://localhost:8765";
+            autoMemoryEnabled = true;
+            autoMemoryMinTurns = 3;
+            lightragEnabled = false;
+            lightragEndpoint = "http://localhost:9621";
+            disabledToolCategories = new List<string>();
+            disabledTools = new List<string>();
+            compressionEnabled = true;
+            useSeparateCompressionLLM = false;
+            compressionLLMEndpoint = "";
+            compressionLLMModel = "claude-3-haiku-20240307";
+            toolResultCompressionThreshold = 1000;
+            toolResultTargetTokens = 200;
+            conversationCompressionTrigger = 0.7f;
+            streamingEnabled = true;
+            showToolCallDetails = true;
             settingsVersion = CurrentVersion;
             Save(true);
         }

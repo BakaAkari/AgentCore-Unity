@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-28
+
+### Added
+- **Settings UI 重构为 Dashboard + 4 Pages**
+  - 新增 `IAgentCoreSettingsPage` 接口，与旧 `IAgentCoreSettingsSection` 独立，避免耦合。
+  - 新增 `DashboardSettingsPage` — 状态总览（LLM / Memory / Knowledge / VCS 徽章）、Quick Actions、Package Info。
+  - 新增 `ModelAgentSettingsPage` — Model Connection（Endpoint / API Key / Model / Fetch / Test）、Generation（Temperature / Max Tokens）、Agent Runtime（Max Tool Rounds / Fallback Routing）、Self Correction（Auto Compile / Auto Console / Max Consecutive Errors）。
+  - 新增 `ContextMemorySettingsPage` — Context Sources（Bootstrap + User Files）、Context Budget + Compression 双列卡片、Memory Service（mem0）+ Knowledge Base（LightRAG）双列卡片、Separate Compression LLM foldout。
+  - 新增 `ToolsExtensionsSettingsPage` — Capability Overview、Tool Visibility（Presets + Category/Individual toggles）、Optional Components、Version Control 独立卡片、Extension Settings contribution 支持。
+  - 新增 `UiDiagnosticsSettingsPage` — Chat UI（Streaming / Show Tool Details）、Diagnostics（Test LLM / mem0 / LightRAG / Refresh Registry / Open Logs）、Maintenance（Reset Settings / Clear Secure Keys / Open MEMORY.md / USER.md）。
+  - 新增 `AgentCoreSettings.ResetToDefaults()` 方法，支持一键恢复所有设置为默认值。
+
+### Changed
+- **`AgentCoreSettingsProvider` 重写** — 从左侧导航 + Section dispatch 改为顶部 Tab 导航 + Page dispatch，仅保留 shell 职责。
+- **旧 Section 系统退役** — 保留 `Editor/Config/Settings/Sections/` 目录代码短期不动，但 Provider 不再引用。旧 `AgentCoreSettingsRegistry` 和 `IAgentCoreSettingsSection` 进入维护模式。
+- **VCS 设置提升为独立卡片** — Version Control 设置从 Extension Settings contribution foldout 提升为 Tools & Extensions 页面的一级卡片。
+- **Agent 参数平铺化** — `maxToolCallRounds` 和 `maxConsecutiveErrors` 从 Advanced Limits foldout 提升为一级字段。
+
+### Fixed
+- 无行为修复（纯 UI 重构）。
+
 ## [0.6.1] - 2026-05-22
 
 ### Added
