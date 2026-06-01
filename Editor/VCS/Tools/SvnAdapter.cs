@@ -36,7 +36,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                // 使用 XML 输出格式便于解析
+                // 使用 XML 输出格式便于解析，保持与 SVN 客户端默认 status 输出一致
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
                     "svn", "status --xml", _workingDirectory, ct: ct);
 
@@ -95,8 +95,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
+                // 使用 -r HEAD:1 确保从远程服务器获取最新的 commit 列表
+                // 不指定 revision 范围时，svn log 默认从 working copy 的 BASE revision 开始
+                // 这会导致看不到比本地 BASE 更新的远程 commit
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", $"log --limit {maxCount} --xml", _workingDirectory, ct: ct);
+                    "svn", $"log -r HEAD:1 --limit {maxCount} --xml", _workingDirectory,
+                    timeoutSeconds: 60, ct: ct);
 
                 if (!cmdResult.Success)
                     return commits;

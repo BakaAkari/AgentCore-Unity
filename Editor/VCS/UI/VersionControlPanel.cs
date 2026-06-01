@@ -40,12 +40,13 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Label _branchLabel;
         private Label _revisionLabel;
         private Label _statusSummaryLabel;
-        private TreeView _statusTreeView;
+        private ScrollView _statusScrollView;
         private VisualElement _commitList;
         private Label _commitHistorySummaryLabel;
         private Button _loadOlderCommitsButton;
         private Button _collapseCommitsButton;
         private Button _refreshButton;
+        private Button _refreshCommitsButton;
         private Button _viewDiffButton;
         private VisualElement _messageContainer;
         private VisualElement _syncStatusBanner;
@@ -55,10 +56,11 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         // Operations 区域已移除 - 所有操作通过右键菜单调用外部工具
 
-        // TreeView 数据
-        private List<VcsTreeNode> _treeRoots = new List<VcsTreeNode>();
-        private Dictionary<int, VcsTreeNode> _nodeById = new Dictionary<int, VcsTreeNode>();
-        private HashSet<int> _selectedNodeIds = new HashSet<int>();
+        // Working Copy Status 扁平列表数据
+        private readonly HashSet<string> _selectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, VisualElement> _statusItemByPath = new Dictionary<string, VisualElement>(StringComparer.OrdinalIgnoreCase);
+        private List<string> _displayedFilePaths = new List<string>();
+        private int _lastSelectedFileIndex = -1;
         private List<VcsFileStatus> _currentFiles = new List<VcsFileStatus>();
         
         private List<VcsCommit> _loadedCommits = new List<VcsCommit>();
@@ -68,6 +70,11 @@ namespace AgentCore.Editor.Components.VCS.UI
         private IVcsAdapter _adapter;
         private VcsType _currentVcsType = VcsType.None;
         private CancellationTokenSource _cts;
+
+        // 后台静默轮询 commit 列表
+        private DateTime _lastCommitPollUtc = DateTime.MinValue;
+        private bool _isBackgroundPolling;
+        private bool _isPanelActive;
 
         private enum IgnoreTarget
         {
@@ -80,6 +87,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             AddToClassList(UssClassName);
             VcsRemoteStatusMonitor.StatusChanged += UpdateSyncStatusBanner;
+            EditorApplication.update += OnEditorUpdatePollCommits;
+            _isPanelActive = true;
             BuildUI();
             if (VcsSettings.AutoRefreshOnOpen)
             {
@@ -93,6 +102,12 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private void BuildUI()
         {
+            var mainScrollView = new ScrollView(ScrollViewMode.Vertical);
+            mainScrollView.AddToClassList("vcs-main-scroll-view");
+            mainScrollView.style.flexGrow = 1;
+            mainScrollView.style.flexShrink = 1;
+            Add(mainScrollView);
+
             // 标题栏
             var header = new VisualElement();
             header.AddToClassList("panel-header");
@@ -105,13 +120,13 @@ namespace AgentCore.Editor.Components.VCS.UI
             _refreshButton.AddToClassList(ButtonClassName);
             header.Add(_refreshButton);
 
-            Add(header);
+            mainScrollView.Add(header);
 
             // 消息容器
             _messageContainer = new VisualElement();
             _messageContainer.AddToClassList("message-container");
             _messageContainer.style.display = DisplayStyle.None;
-            Add(_messageContainer);
+            mainScrollView.Add(_messageContainer);
 
             // VCS 信息区域
             var infoSection = CreateSection("Repository Info");
@@ -137,7 +152,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             infoSection.Add(infoRow);
             infoSection.Add(BuildSyncStatusBanner());
 
-            Add(infoSection);
+            mainScrollView.Add(infoSection);
 
             // Operations 区域已移除 - 所有操作通过右键菜单调用外部工具
 
@@ -153,42 +168,53 @@ namespace AgentCore.Editor.Components.VCS.UI
             _viewDiffButton.SetEnabled(false);
             statusSection.Add(_viewDiffButton);
 
-            // 创建 TreeView
-            _statusTreeView = new TreeView();
-            _statusTreeView.AddToClassList("vcs-tree-view");
-            _statusTreeView.AddToClassList("vcs-status-tree-view");
-            _statusTreeView.style.flexGrow = 1;
-            _statusTreeView.style.minHeight = 200;
-            
-            // 设置 TreeView 的 makeItem 和 bindItem 回调
-            _statusTreeView.makeItem = MakeTreeItem;
-            _statusTreeView.bindItem = BindTreeItem;
-            _statusTreeView.unbindItem = UnbindTreeItem;
-            
-            // 设置选择模式为多选
-            _statusTreeView.selectionType = SelectionType.Multiple;
-            
-            // 注册选择变化事件
-            _statusTreeView.selectedIndicesChanged += OnTreeSelectionChanged;
-            
-            statusSection.Add(_statusTreeView);
+            // SVN 风格扁平状态列表：直接显示状态 + 完整相对路径，避免目录折叠隐藏文件状态。
+            _statusScrollView = new ScrollView(ScrollViewMode.Vertical);
+            _statusScrollView.AddToClassList("vcs-list");
+            _statusScrollView.AddToClassList("vcs-status-scroll-view");
+            _statusScrollView.style.flexGrow = 1;
+            _statusScrollView.style.minHeight = 96;
+            statusSection.Add(_statusScrollView);
 
-            Add(statusSection);
+            mainScrollView.Add(statusSection);
 
             // 提交历史区域
-            var historySection = CreateSection("Recent Commits");
+            var historySection = new VisualElement();
+            historySection.AddToClassList(SectionClassName);
+
+            // 自定义 header 行：标题 + 刷新按钮
+            var historyHeaderRow = new VisualElement();
+            historyHeaderRow.AddToClassList("vcs-section-header-row");
+
+            var historyHeaderLabel = new Label("Recent Commits");
+            historyHeaderLabel.AddToClassList(HeaderClassName);
+            historyHeaderLabel.style.marginBottom = 0;
+            historyHeaderLabel.style.paddingBottom = 0;
+            historyHeaderLabel.style.borderBottomWidth = 0;
+            historyHeaderLabel.style.flexGrow = 1;
+            historyHeaderRow.Add(historyHeaderLabel);
+
+            _refreshCommitsButton = new Button(OnRefreshCommitsClicked) { text = "↻ Refresh" };
+            _refreshCommitsButton.AddToClassList("vcs-refresh-commits-button");
+            historyHeaderRow.Add(_refreshCommitsButton);
+
+            historySection.Add(historyHeaderRow);
+
+            var historyContent = new VisualElement();
+            historyContent.AddToClassList(ContentClassName);
+            historySection.Add(historyContent);
 
             _commitHistorySummaryLabel = new Label("No commit history loaded");
             _commitHistorySummaryLabel.AddToClassList("vcs-commit-summary-label");
-            historySection.Add(_commitHistorySummaryLabel);
+            historyContent.Add(_commitHistorySummaryLabel);
 
             var commitScrollView = new ScrollView(ScrollViewMode.Vertical);
             commitScrollView.AddToClassList("vcs-list");
             commitScrollView.AddToClassList("vcs-commit-scroll-view");
             _commitList = commitScrollView.contentContainer;
-            historySection.Add(commitScrollView);
+            historyContent.Add(commitScrollView);
 
-            Add(historySection);
+            mainScrollView.Add(historySection);
         }
 
         private VisualElement BuildSyncStatusBanner()
@@ -272,6 +298,38 @@ namespace AgentCore.Editor.Components.VCS.UI
             await RefreshAllData();
         }
 
+        /// <summary>
+        /// 手动刷新 Recent Commits 列表，获取最新的 svn log / git log 并更新显示
+        /// </summary>
+        private async void OnRefreshCommitsClicked()
+        {
+            if (_adapter == null || _currentVcsType == VcsType.None)
+            {
+                ShowMessage("No VCS detected. Please click Refresh to detect repository first.", true);
+                return;
+            }
+
+            _refreshCommitsButton.SetEnabled(false);
+            _refreshCommitsButton.text = "↻ Loading...";
+
+            try
+            {
+                var queryCount = GetCommitQueryCount();
+                var commits = await _adapter.GetLogAsync(queryCount, _cts?.Token ?? CancellationToken.None);
+                UpdateCommitList(commits);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                ShowMessage($"Failed to refresh commits: {ex.Message}", true);
+            }
+            finally
+            {
+                _refreshCommitsButton.SetEnabled(true);
+                _refreshCommitsButton.text = "↻ Refresh";
+            }
+        }
+
         private async Task RefreshAllData()
         {
             if (_adapter == null)
@@ -343,251 +401,208 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private void UpdateStatusList(List<VcsFileStatus> files)
         {
-            _currentFiles = files ?? new List<VcsFileStatus>();
-            _selectedNodeIds.Clear();
-            _nodeById.Clear();
+            _currentFiles = SortStatusFiles(files ?? new List<VcsFileStatus>());
+            _selectedFiles.Clear();
+            _statusItemByPath.Clear();
+            _displayedFilePaths = _currentFiles.Select(f => f.FilePath).ToList();
+            _lastSelectedFileIndex = -1;
 
-            if (files == null || files.Count == 0)
+            _statusScrollView.contentContainer.Clear();
+
+            if (_currentFiles.Count == 0)
             {
                 _statusSummaryLabel.text = "No changes in working copy";
-                _treeRoots = new List<VcsTreeNode>();
-                _statusTreeView.SetRootItems(new List<TreeViewItemData<VcsTreeNode>>());
-                _statusTreeView.Rebuild();
                 return;
             }
 
-            // 统计各状态数量
-            var summary = files.GroupBy(f => f.State)
+            var summary = _currentFiles
+                .GroupBy(f => f.State)
+                .OrderBy(g => GetStateSortOrder(g.Key))
                 .Select(g => $"{g.Count()} {g.Key}")
                 .ToList();
             _statusSummaryLabel.text = string.Join(", ", summary);
 
-            // 构建树结构
-            _treeRoots = VcsTreeBuilder.BuildTree(files);
-
-            // 构建 ID 映射
-            BuildNodeIdMap(_treeRoots);
-
-            // 转换为 TreeViewItemData
-            var treeItems = ConvertToTreeViewItems(_treeRoots);
-
-            // 设置 TreeView 数据
-            _statusTreeView.SetRootItems(treeItems);
-            _statusTreeView.Rebuild();
-        }
-
-        /// <summary>
-        /// 构建节点 ID 映射表
-        /// </summary>
-        private void BuildNodeIdMap(List<VcsTreeNode> roots)
-        {
-            foreach (var root in roots)
+            foreach (var file in _currentFiles)
             {
-                BuildNodeIdMapRecursive(root);
-            }
-        }
-
-        private void BuildNodeIdMapRecursive(VcsTreeNode node)
-        {
-            _nodeById[node.Id] = node;
-            foreach (var child in node.Children)
-            {
-                BuildNodeIdMapRecursive(child);
+                var item = CreateStatusItem(file);
+                _statusScrollView.contentContainer.Add(item);
+                _statusItemByPath[file.FilePath] = item;
             }
         }
 
         /// <summary>
-        /// 将 VcsTreeNode 转换为 TreeViewItemData
+        /// 按 SVN status 的阅读习惯排序：完整相对路径优先，等价于按目录结构展开后的扁平列表。
         /// </summary>
-        private List<TreeViewItemData<VcsTreeNode>> ConvertToTreeViewItems(List<VcsTreeNode> nodes)
+        private List<VcsFileStatus> SortStatusFiles(List<VcsFileStatus> files)
         {
-            var items = new List<TreeViewItemData<VcsTreeNode>>();
-            foreach (var node in nodes)
-            {
-                items.Add(ConvertNodeToTreeViewItem(node));
-            }
-            return items;
-        }
-
-        private TreeViewItemData<VcsTreeNode> ConvertNodeToTreeViewItem(VcsTreeNode node)
-        {
-            if (node.Children.Count == 0)
-            {
-                // 叶子节点
-                return new TreeViewItemData<VcsTreeNode>(node.Id, node);
-            }
-            else
-            {
-                // 有子节点的节点
-                var children = ConvertToTreeViewItems(node.Children);
-                return new TreeViewItemData<VcsTreeNode>(node.Id, node, children);
-            }
-        }
-
-        #region TreeView Item Rendering
-
-        /// <summary>
-        /// 创建 TreeView 项的 UI 模板
-        /// </summary>
-        private VisualElement MakeTreeItem()
-        {
-            var container = new VisualElement();
-            container.AddToClassList("vcs-tree-item");
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.alignItems = Align.Center;
-            container.style.paddingLeft = 4;
-            container.style.paddingTop = 2;
-            container.style.paddingBottom = 2;
-            container.style.minHeight = 20;
-
-            // 图标
-            var icon = new Label();
-            icon.name = "icon";
-            icon.style.marginRight = 4;
-            icon.style.minWidth = 16;
-            container.Add(icon);
-
-            // 名称
-            var nameLabel = new Label();
-            nameLabel.name = "name";
-            nameLabel.style.flexGrow = 1;
-            nameLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
-            container.Add(nameLabel);
-
-            // 状态徽章
-            var badge = new Label();
-            badge.name = "badge";
-            badge.AddToClassList(StatusBadgeClassName);
-            badge.style.marginLeft = 4;
-            container.Add(badge);
-
-            // TreeView 使用虚拟化 item，直接监听右键并使用 GenericMenu 弹出菜单，避免 TreeView 内部吞掉 ContextualMenuPopulateEvent。
-            container.RegisterCallback<MouseDownEvent>(OnTreeItemMouseDown, TrickleDown.TrickleDown);
-
-            return container;
-        }
-
-        /// <summary>
-        /// 绑定数据到 TreeView 项
-        /// </summary>
-        private void BindTreeItem(VisualElement element, int index)
-        {
-            var itemData = _statusTreeView.GetItemDataForIndex<VcsTreeNode>(index);
-            if (itemData == null)
-                return;
-
-            var node = itemData;
-            var icon = element.Q<Label>("icon");
-            var nameLabel = element.Q<Label>("name");
-            var badge = element.Q<Label>("badge");
-
-            if (node.IsDirectory)
-            {
-                // 目录节点 - Unity TreeView 自带展开/折叠箭头，不需要额外图标
-                icon.text = "";
-                nameLabel.text = node.Name;
-                badge.text = $"{node.ChangeCount}";
-                badge.style.display = DisplayStyle.Flex;
-                badge.style.backgroundColor = new Color(0.3f, 0.5f, 0.7f, 0.8f);
-            }
-            else
-            {
-                // 文件节点 - 不需要图标，TreeView 会自动处理缩进
-                icon.text = "";
-                nameLabel.text = node.Name;
-                
-                if (node.FileStatus != null)
-                {
-                    badge.text = GetStateBadge(node.FileStatus.State);
-                    badge.style.display = DisplayStyle.Flex;
-                    badge.style.backgroundColor = GetStateColor(node.FileStatus.State);
-                }
-                else
-                {
-                    badge.style.display = DisplayStyle.None;
-                }
-            }
-
-            // 存储节点 ID 到元素的 userData，供右键菜单使用
-            element.userData = node.Id;
-        }
-
-        /// <summary>
-        /// 解绑 TreeView 项
-        /// </summary>
-        private void UnbindTreeItem(VisualElement element, int index)
-        {
-            // 清理 userData
-            element.userData = null;
-        }
-
-        /// <summary>
-        /// 处理 TreeView item 右键点击，直接使用 UnityEditor.GenericMenu 弹出菜单，避免 TreeView 内部事件吞掉 ContextualMenuPopulateEvent。
-        /// </summary>
-        private void OnTreeItemMouseDown(MouseDownEvent evt)
-        {
-            if (evt.button != 1)
-                return;
-
-            var target = evt.currentTarget as VisualElement;
-            if (target == null || !(target.userData is int nodeId))
-                return;
-
-            if (!_nodeById.TryGetValue(nodeId, out var clickedNode))
-                return;
-
-            ShowTreeItemGenericMenu(clickedNode);
-            evt.StopImmediatePropagation();
-            evt.PreventDefault();
-        }
-
-        /// <summary>
-        /// 使用 GenericMenu 构建并显示 TreeView item 右键菜单。
-        /// </summary>
-        private void ShowTreeItemGenericMenu(VcsTreeNode clickedNode)
-        {
-            var selectedNodes = _selectedNodeIds
-                .Where(id => _nodeById.ContainsKey(id))
-                .Select(id => _nodeById[id])
+            return files
+                .Where(f => f != null && !string.IsNullOrWhiteSpace(f.FilePath))
+                .OrderBy(f => NormalizeStatusPath(f.FilePath), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(f => GetStateSortOrder(f.State))
                 .ToList();
+        }
 
-            if (!_selectedNodeIds.Contains(clickedNode.Id))
+        /// <summary>
+        /// 规范化状态路径，保证 Windows 与 SVN 输出路径都按统一分隔符排序和比较。
+        /// </summary>
+        private string NormalizeStatusPath(string path)
+        {
+            return (path ?? string.Empty).Replace('\\', '/').Trim('/');
+        }
+
+        /// <summary>
+        /// 创建 SVN 风格状态行：状态字符始终在左侧可见，右侧显示完整相对路径。
+        /// </summary>
+        private VisualElement CreateStatusItem(VcsFileStatus file)
+        {
+            var item = new VisualElement();
+            item.AddToClassList(StatusItemClassName);
+            item.style.flexDirection = FlexDirection.Row;
+            item.style.alignItems = Align.Center;
+            item.style.flexShrink = 0;
+            item.userData = file.FilePath;
+            item.tooltip = $"{file.State}: {file.FilePath}";
+
+            var badge = new Label(GetStateBadge(file.State));
+            badge.AddToClassList(StatusBadgeClassName);
+            badge.style.backgroundColor = GetStateColor(file.State);
+            badge.tooltip = file.StateDescription ?? file.State.ToString();
+            item.Add(badge);
+
+            var pathLabel = new Label(NormalizeStatusPath(file.FilePath));
+            pathLabel.AddToClassList("vcs-status-path-label");
+            pathLabel.style.flexGrow = 1;
+            pathLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+            pathLabel.style.whiteSpace = WhiteSpace.NoWrap;
+            pathLabel.style.overflow = Overflow.Hidden;
+            pathLabel.style.textOverflow = TextOverflow.Ellipsis;
+            pathLabel.tooltip = file.FilePath;
+            item.Add(pathLabel);
+
+            item.RegisterCallback<MouseDownEvent>(OnStatusItemMouseDown, TrickleDown.TrickleDown);
+            return item;
+        }
+
+        /// <summary>
+        /// 处理扁平状态行点击：左键选择，右键弹出文件操作菜单。
+        /// </summary>
+        private void OnStatusItemMouseDown(MouseDownEvent evt)
+        {
+            var target = evt.currentTarget as VisualElement;
+            if (target == null || !(target.userData is string filePath) || string.IsNullOrWhiteSpace(filePath))
+                return;
+
+            if (evt.button == 0)
             {
-                selectedNodes = new List<VcsTreeNode> { clickedNode };
+                HandleStatusItemSelection(filePath, evt.ctrlKey || evt.commandKey, evt.shiftKey);
+                evt.StopImmediatePropagation();
+                evt.PreventDefault();
+                return;
             }
+
+            if (evt.button == 1)
+            {
+                if (!_selectedFiles.Contains(filePath))
+                    SelectSingleStatusFile(filePath);
+
+                ShowStatusItemGenericMenu(filePath);
+                evt.StopImmediatePropagation();
+                evt.PreventDefault();
+            }
+        }
+
+        /// <summary>
+        /// 处理单选、多选和范围选择。
+        /// </summary>
+        private void HandleStatusItemSelection(string filePath, bool additive, bool range)
+        {
+            var index = _displayedFilePaths.FindIndex(p => string.Equals(p, filePath, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+                return;
+
+            if (range && _lastSelectedFileIndex >= 0)
+            {
+                if (!additive)
+                    _selectedFiles.Clear();
+
+                var start = Math.Min(_lastSelectedFileIndex, index);
+                var end = Math.Max(_lastSelectedFileIndex, index);
+                for (var i = start; i <= end; i++)
+                    _selectedFiles.Add(_displayedFilePaths[i]);
+            }
+            else if (additive)
+            {
+                if (!_selectedFiles.Add(filePath))
+                    _selectedFiles.Remove(filePath);
+                _lastSelectedFileIndex = index;
+            }
+            else
+            {
+                _selectedFiles.Clear();
+                _selectedFiles.Add(filePath);
+                _lastSelectedFileIndex = index;
+            }
+
+            RefreshStatusSelectionVisuals();
+        }
+
+        /// <summary>
+        /// 单选一个状态文件。
+        /// </summary>
+        private void SelectSingleStatusFile(string filePath)
+        {
+            _selectedFiles.Clear();
+            _selectedFiles.Add(filePath);
+            _lastSelectedFileIndex = _displayedFilePaths.FindIndex(p => string.Equals(p, filePath, StringComparison.OrdinalIgnoreCase));
+            RefreshStatusSelectionVisuals();
+        }
+
+        /// <summary>
+        /// 刷新扁平列表选中态样式。
+        /// </summary>
+        private void RefreshStatusSelectionVisuals()
+        {
+            foreach (var pair in _statusItemByPath)
+            {
+                if (_selectedFiles.Contains(pair.Key))
+                    pair.Value.AddToClassList("selected");
+                else
+                    pair.Value.RemoveFromClassList("selected");
+            }
+        }
+
+        /// <summary>
+        /// 使用 GenericMenu 构建并显示扁平状态行右键菜单。
+        /// </summary>
+        private void ShowStatusItemGenericMenu(string clickedPath)
+        {
+            var selectedFiles = GetSelectedFilePaths();
+            if (!selectedFiles.Contains(clickedPath, StringComparer.OrdinalIgnoreCase))
+                selectedFiles = new List<string> { clickedPath };
 
             var menu = new GenericMenu();
-            var hasFiles = selectedNodes.Any(n => !n.IsDirectory);
-            var hasDirs = selectedNodes.Any(n => n.IsDirectory);
-            var isSingleFile = selectedNodes.Count == 1 && !selectedNodes[0].IsDirectory;
-            var isSingleDir = selectedNodes.Count == 1 && selectedNodes[0].IsDirectory;
-
-            if (isSingleFile)
+            if (selectedFiles.Count == 1)
             {
-                PopulateFileGenericMenu(menu, selectedNodes[0].FileStatus);
-            }
-            else if (isSingleDir)
-            {
-                PopulateDirectoryGenericMenu(menu, selectedNodes[0]);
-            }
-            else if (hasFiles && !hasDirs)
-            {
-                var filePaths = selectedNodes.Select(n => n.FullPath).ToList();
-                menu.AddItem(new GUIContent($"Selection/Revert Selected Files ({filePaths.Count})"), false, () => OnRevertMultipleFilesClicked(filePaths));
-                menu.AddItem(new GUIContent("Selection/Clear Selection"), false, () => _statusTreeView.ClearSelection());
-            }
-            else if (hasDirs && !hasFiles)
-            {
-                menu.AddItem(new GUIContent($"Selection/Clear Selection ({selectedNodes.Count} directories)"), false, () => _statusTreeView.ClearSelection());
+                var file = _currentFiles.FirstOrDefault(f => string.Equals(f.FilePath, selectedFiles[0], StringComparison.OrdinalIgnoreCase));
+                PopulateFileGenericMenu(menu, file);
             }
             else
             {
-                var fileCount = selectedNodes.Count(n => !n.IsDirectory);
-                var dirCount = selectedNodes.Count(n => n.IsDirectory);
-                menu.AddItem(new GUIContent($"Selection/Clear Selection ({fileCount} files, {dirCount} directories)"), false, () => _statusTreeView.ClearSelection());
+                menu.AddItem(new GUIContent($"Selection/Revert Selected Files ({selectedFiles.Count})"), false, () => OnRevertMultipleFilesClicked(selectedFiles));
+                menu.AddItem(new GUIContent("Selection/Clear Selection"), false, ClearStatusSelection);
             }
 
             menu.ShowAsContext();
+        }
+
+        /// <summary>
+        /// 清空 Working Copy Status 选中项。
+        /// </summary>
+        private void ClearStatusSelection()
+        {
+            _selectedFiles.Clear();
+            _lastSelectedFileIndex = -1;
+            RefreshStatusSelectionVisuals();
         }
 
         /// <summary>
@@ -635,25 +650,6 @@ namespace AgentCore.Editor.Components.VCS.UI
         }
 
         /// <summary>
-        /// 填充单目录 GenericMenu 菜单项。
-        /// </summary>
-        private void PopulateDirectoryGenericMenu(GenericMenu menu, VcsTreeNode dirNode)
-        {
-            var dirPath = dirNode.FullPath;
-            var supportsExternalTools = SupportsExternalFileTool("any");
-
-            AddMenuItem(menu, "Directory/Commit This Directory", supportsExternalTools, () => OnCommitDirectoryClicked(dirPath));
-            AddMenuItem(menu, "Directory/Update This Directory", supportsExternalTools, () => OnUpdateDirectoryClicked(dirPath));
-            AddMenuItem(menu, "Directory/Show Directory Log", supportsExternalTools, () => OnShowDirectoryLogClicked(dirPath));
-            AddMenuItem(menu, "Directory/Show Directory Diff", supportsExternalTools, () => OnShowDirectoryDiffClicked(dirPath));
-            AddMenuItem(menu, "Directory/Revert This Directory", supportsExternalTools, () => OnRevertDirectoryClicked(dirPath));
-            menu.AddSeparator("Directory/");
-
-            menu.AddItem(new GUIContent("File/Copy Relative Path"), false, () => CopyRelativePath(dirPath));
-            menu.AddItem(new GUIContent("File/Reveal In Explorer"), false, () => RevealInExplorer(dirPath));
-        }
-
-        /// <summary>
         /// 向 GenericMenu 添加可禁用菜单项。
         /// </summary>
         private void AddMenuItem(GenericMenu menu, string path, bool enabled, GenericMenu.MenuFunction action)
@@ -665,75 +661,84 @@ namespace AgentCore.Editor.Components.VCS.UI
         }
 
         /// <summary>
-        /// TreeView 选择变化事件处理
-        /// </summary>
-        private void OnTreeSelectionChanged(IEnumerable<int> selectedIndices)
-        {
-            _selectedNodeIds.Clear();
-            foreach (var index in selectedIndices)
-            {
-                var itemData = _statusTreeView.GetItemDataForIndex<VcsTreeNode>(index);
-                if (itemData != null)
-                {
-                    _selectedNodeIds.Add(itemData.Id);
-                }
-            }
-        }
-        /// <summary>
-        /// 获取当前 TreeView 中选中的文件路径列表（不包括目录）
+        /// 获取当前扁平状态列表中选中的文件路径。
         /// </summary>
         private List<string> GetSelectedFilePaths()
         {
-            var selectedNodes = _selectedNodeIds
-                .Where(id => _nodeById.ContainsKey(id))
-                .Select(id => _nodeById[id])
-                .Where(node => !node.IsDirectory)
+            return _displayedFilePaths
+                .Where(path => _selectedFiles.Contains(path))
                 .ToList();
-            
-            return selectedNodes.Select(n => n.FullPath).ToList();
         }
 
         /// <summary>
-        /// 检查指定文件是否在 TreeView 选中项中
+        /// 检查指定文件是否在扁平状态列表选中项中。
         /// </summary>
         private bool IsFileSelected(string filePath)
         {
-            return GetSelectedFilePaths().Contains(filePath);
+            return _selectedFiles.Contains(filePath);
         }
 
         /// <summary>
-        /// 获取状态对应的颜色
+        /// 获取状态在摘要中的排序权重。
+        /// </summary>
+        private int GetStateSortOrder(VcsFileState state)
+        {
+            switch (state)
+            {
+                case VcsFileState.Conflicted:
+                    return 0;
+                case VcsFileState.Missing:
+                    return 1;
+                case VcsFileState.Deleted:
+                    return 2;
+                case VcsFileState.Modified:
+                    return 3;
+                case VcsFileState.Added:
+                    return 4;
+                case VcsFileState.Renamed:
+                    return 5;
+                case VcsFileState.Copied:
+                    return 6;
+                case VcsFileState.Untracked:
+                    return 7;
+                case VcsFileState.Ignored:
+                    return 8;
+                default:
+                    return 99;
+            }
+        }
+
+        /// <summary>
+        /// 获取状态对应的颜色。
         /// </summary>
         private Color GetStateColor(VcsFileState state)
         {
             switch (state)
             {
                 case VcsFileState.Modified:
-                    return new Color(0.8f, 0.6f, 0.2f, 0.8f); // 橙色
+                    return new Color(0.8f, 0.6f, 0.2f, 0.8f);
                 case VcsFileState.Added:
-                    return new Color(0.2f, 0.8f, 0.2f, 0.8f); // 绿色
+                    return new Color(0.2f, 0.8f, 0.2f, 0.8f);
                 case VcsFileState.Deleted:
                 case VcsFileState.Missing:
-                    return new Color(0.8f, 0.2f, 0.2f, 0.8f); // 红色
+                    return new Color(0.8f, 0.2f, 0.2f, 0.8f);
                 case VcsFileState.Conflicted:
-                    return new Color(0.9f, 0.1f, 0.1f, 0.9f); // 深红色
+                    return new Color(0.9f, 0.1f, 0.1f, 0.9f);
                 case VcsFileState.Untracked:
-                    return new Color(0.5f, 0.5f, 0.5f, 0.8f); // 灰色
+                    return new Color(0.5f, 0.5f, 0.5f, 0.8f);
                 case VcsFileState.Ignored:
-                    return new Color(0.4f, 0.4f, 0.4f, 0.6f); // 深灰色
+                    return new Color(0.4f, 0.4f, 0.4f, 0.6f);
                 default:
                     return new Color(0.3f, 0.3f, 0.3f, 0.8f);
             }
         }
-
-        #endregion
 
         private void OnViewDiffForFileClicked(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by TreeView
+            // Selection handled by Working Copy Status list
             
             // 尝试使用外部工具打开 Diff
             if (TryOpenExternalDiff(filePath))
@@ -748,7 +753,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by TreeView
+            // Selection handled by Working Copy Status list
             
             // 尝试使用外部工具 Revert
             if (TryOpenExternalRevert(filePath))
@@ -763,7 +768,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by TreeView
+            // Selection handled by Working Copy Status list
             
             // 尝试使用外部工具添加文件
             if (TryOpenExternalAdd(filePath))
@@ -778,7 +783,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by TreeView
+            // Selection handled by Working Copy Status list
             
             // 对于 SVN，Unstage 实际上是删除已添加的文件（保留本地副本）
             // 使用 TortoiseSVN 的 remove 命令
@@ -795,7 +800,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by TreeView
+            // Selection handled by Working Copy Status list
             
             // 尝试使用外部工具提交单个文件
             if (TryOpenExternalCommitFile(filePath))
@@ -1126,6 +1131,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             _loadedCommits = commits ?? new List<VcsCommit>();
             _visibleCommitCount = Mathf.Clamp(_visibleCommitCount, InitialCommitDisplayCount, Mathf.Max(InitialCommitDisplayCount, _loadedCommits.Count));
+            _lastCommitPollUtc = DateTime.UtcNow;
             RenderCommitList();
         }
 
@@ -1947,81 +1953,6 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         #endregion
 
-        #region Directory Support
-
-        /// <summary>
-        /// 从文件列表中提取所有有修改的目录及其文件数量
-        /// </summary>
-
-        /// <summary>
-        /// 对目录执行 Commit 操作
-        /// </summary>
-        private void OnCommitDirectoryClicked(string directoryPath)
-        {
-            if (!TryOpenExternalDirectoryOperation("commit", directoryPath))
-                ShowExternalToolUnavailable("Commit Folder");
-        }
-
-        /// <summary>
-        /// 对目录执行 Update 操作
-        /// </summary>
-        private void OnUpdateDirectoryClicked(string directoryPath)
-        {
-            if (!TryOpenExternalDirectoryOperation("update", directoryPath))
-                ShowExternalToolUnavailable("Update Folder");
-        }
-
-        /// <summary>
-        /// 显示目录的 Log
-        /// </summary>
-        private void OnShowDirectoryLogClicked(string directoryPath)
-        {
-            if (!TryOpenExternalDirectoryOperation("log", directoryPath))
-                ShowExternalToolUnavailable("Folder Log");
-        }
-
-        /// <summary>
-        /// 显示目录的 Diff
-        /// </summary>
-        private void OnShowDirectoryDiffClicked(string directoryPath)
-        {
-            if (!TryOpenExternalDirectoryOperation("diff", directoryPath))
-                ShowExternalToolUnavailable("Folder Diff");
-        }
-
-        /// <summary>
-        /// 对目录执行 Revert 操作
-        /// </summary>
-        private void OnRevertDirectoryClicked(string directoryPath)
-        {
-            if (!TryOpenExternalDirectoryOperation("revert", directoryPath))
-                ShowExternalToolUnavailable("Revert Folder");
-        }
-
-        /// <summary>
-        /// 尝试对目录执行外部工具操作
-        /// </summary>
-        private bool TryOpenExternalDirectoryOperation(string command, string directoryPath)
-        {
-            var rootPath = VcsDetector.GetVcsRootPath();
-            var absolutePath = Path.GetFullPath(directoryPath);
-
-            switch (_currentVcsType)
-            {
-                case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe",
-                        $"/command:{command} /path:\"{absolutePath}\"",
-                        rootPath, $"TortoiseSVN {command} window");
-                case VcsType.Git:
-                case VcsType.Perforce:
-                    return false; // 暂不支持
-                default:
-                    return false;
-            }
-        }
-
-        #endregion
-
         #region Lifecycle
 
         private IVcsAdapter CreateAdapter(VcsType vcsType, string rootPath)
@@ -2040,6 +1971,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         public void OnActivated()
         {
+            _isPanelActive = true;
+
             if (!VcsSettings.AutoRefreshOnOpen)
                 return;
 
@@ -2054,6 +1987,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         public void OnDeactivated()
         {
+            _isPanelActive = false;
             _cts?.Cancel();
         }
 
@@ -2062,10 +1996,81 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         public void Dispose()
         {
+            _isPanelActive = false;
+            EditorApplication.update -= OnEditorUpdatePollCommits;
             VcsRemoteStatusMonitor.StatusChanged -= UpdateSyncStatusBanner;
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;
+        }
+
+        /// <summary>
+        /// EditorApplication.update 回调 — 周期性静默轮询 commit 列表。
+        /// 完全不阻断用户操作：不禁用按钮、不显示 loading、不改变滚动位置。
+        /// </summary>
+        private void OnEditorUpdatePollCommits()
+        {
+            if (!_isPanelActive)
+                return;
+
+            if (!VcsSettings.AutoRefreshCommitListEnabled)
+                return;
+
+            if (_adapter == null || _currentVcsType == VcsType.None)
+                return;
+
+            if (_isBackgroundPolling || _isLoadingMoreCommits)
+                return;
+
+            var interval = TimeSpan.FromSeconds(VcsSettings.CommitListRefreshIntervalSeconds);
+            if (DateTime.UtcNow - _lastCommitPollUtc < interval)
+                return;
+
+            _ = PollCommitListSilentlyAsync();
+        }
+
+        /// <summary>
+        /// 静默拉取最新 commit 列表，仅在检测到新提交时更新 UI。
+        /// 不触发任何 loading 指示器，不改变用户当前的滚动位置或选择状态。
+        /// </summary>
+        private async Task PollCommitListSilentlyAsync()
+        {
+            _isBackgroundPolling = true;
+            _lastCommitPollUtc = DateTime.UtcNow;
+
+            try
+            {
+                var queryCount = GetCommitQueryCount();
+                var freshCommits = await _adapter.GetLogAsync(queryCount, CancellationToken.None);
+
+                if (freshCommits == null || freshCommits.Count == 0)
+                    return;
+
+                // 对比最新 revision — 只有真正有新提交时才更新 UI
+                var currentLatestRevision = _loadedCommits.Count > 0 ? _loadedCommits[0].Revision : null;
+                var freshLatestRevision = freshCommits[0].Revision;
+
+                if (string.Equals(currentLatestRevision, freshLatestRevision, StringComparison.Ordinal))
+                    return; // 没有新提交，跳过 UI 更新
+
+                // 有新提交 — 静默更新列表（保持当前可见数量不变）
+                var previousVisibleCount = _visibleCommitCount;
+                _loadedCommits = freshCommits;
+                _visibleCommitCount = previousVisibleCount;
+                RenderCommitList();
+            }
+            catch (OperationCanceledException)
+            {
+                // 忽略取消
+            }
+            catch (Exception)
+            {
+                // 静默失败 — 后台轮询不应打扰用户
+            }
+            finally
+            {
+                _isBackgroundPolling = false;
+            }
         }
 
         #endregion

@@ -13,6 +13,8 @@ namespace AgentCore.Editor.Components.VCS.Config
         private const string SceneViewUpdateBannerEnabledKey = "AgentCore.VCS.SceneViewUpdateBannerEnabled";
         private const string PeriodicRemoteStatusCheckEnabledKey = "AgentCore.VCS.PeriodicRemoteStatusCheckEnabled";
         private const string RemoteStatusCheckIntervalMinutesKey = "AgentCore.VCS.RemoteStatusCheckIntervalMinutes";
+        private const string AutoRefreshCommitListEnabledKey = "AgentCore.VCS.AutoRefreshCommitListEnabled";
+        private const string CommitListRefreshIntervalSecondsKey = "AgentCore.VCS.CommitListRefreshIntervalSeconds";
 
         /// <summary>
         /// Gets or sets whether the Version Control panel should refresh when opened.
@@ -66,6 +68,26 @@ namespace AgentCore.Editor.Components.VCS.Config
         {
             get => EditorPrefs.GetInt(RemoteStatusCheckIntervalMinutesKey, 15);
             set => EditorPrefs.SetInt(RemoteStatusCheckIntervalMinutesKey, value < 1 ? 1 : value);
+        }
+
+        /// <summary>
+        /// Gets or sets whether the commit list should be refreshed automatically in the background.
+        /// When enabled, the panel silently polls for new commits without interrupting the user.
+        /// </summary>
+        public static bool AutoRefreshCommitListEnabled
+        {
+            get => EditorPrefs.GetBool(AutoRefreshCommitListEnabledKey, true);
+            set => EditorPrefs.SetBool(AutoRefreshCommitListEnabledKey, value);
+        }
+
+        /// <summary>
+        /// Gets or sets the interval in seconds for automatic commit list refresh.
+        /// Default is 30 seconds. Minimum is 10 seconds to avoid excessive VCS queries.
+        /// </summary>
+        public static int CommitListRefreshIntervalSeconds
+        {
+            get => EditorPrefs.GetInt(CommitListRefreshIntervalSecondsKey, 30);
+            set => EditorPrefs.SetInt(CommitListRefreshIntervalSecondsKey, value < 10 ? 10 : value);
         }
     }
 }
