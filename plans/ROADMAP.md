@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.7.0 | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.7.0）
+> **版本**: v0.8.0 | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.8.0）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 >
 > **与现有计划的关系**:
@@ -37,15 +37,16 @@
 | `[x]` | 已完成 |
 | `[!]` | 阻塞/暂停（依赖外部条件或用户决策） |
 
-### 0.3 当前项目快照 (v0.7.0)
+### 0.3 当前项目快照 (v0.8.0)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.7.0 (2026-05-28) |
+| **版本** | 0.8.0 (2026-06-02) |
 | **工具数量** | 以 `ToolAutoDiscovery` 当前已编译程序集发现结果为准；VCS 工具默认不编译，启用 `AGENTCORE_VCS` 后注册 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
 | **UI 框架** | UI Toolkit 动态 Hub 架构 (Chat/Knowledge/Memory + 可选组件 contribution)；Project Settings 使用 Dashboard + 4 Pages 顶部 Tab 导航 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
+| **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单 + Cleanup 按钮；Chat 工具新增 8 个 action（get_file_log/cleanup/commit_files/resolve_files/ignore_*/remove_files） |
 | **测试覆盖** | 5 个测试文件，90+ test cases (ToolResponse, JsonHelper, TokenCounter, ToolHelpers, SchemaValidation) |
 | **归档参考** | `_archive/Unity-Skills/` 含 554 个 skills 可供迁移 |
 

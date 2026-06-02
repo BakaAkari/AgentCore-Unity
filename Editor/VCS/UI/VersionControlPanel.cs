@@ -46,6 +46,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Button _loadOlderCommitsButton;
         private Button _collapseCommitsButton;
         private Button _refreshButton;
+        private Button _cleanupButton;
         private Button _refreshCommitsButton;
         private Button _viewDiffButton;
         private VisualElement _messageContainer;
@@ -116,9 +117,19 @@ namespace AgentCore.Editor.Components.VCS.UI
             title.AddToClassList("panel-title");
             header.Add(title);
 
+            var headerActions = new VisualElement();
+            headerActions.AddToClassList("vcs-header-actions");
+
+            _cleanupButton = new Button(OnCleanupProjectClicked) { text = "Cleanup" };
+            _cleanupButton.AddToClassList(ButtonClassName);
+            _cleanupButton.tooltip = "Open the external VCS cleanup tool for the whole project working copy.";
+            headerActions.Add(_cleanupButton);
+
             _refreshButton = new Button(OnRefreshClicked) { text = "Refresh" };
             _refreshButton.AddToClassList(ButtonClassName);
-            header.Add(_refreshButton);
+            headerActions.Add(_refreshButton);
+
+            header.Add(headerActions);
 
             mainScrollView.Add(header);
 
@@ -268,6 +279,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _vcsTypeLabel.text = "No VCS detected";
                 ShowMessage("No version control system detected in this project.", true);
                 _refreshButton.SetEnabled(false);
+                _cleanupButton.SetEnabled(false);
                 return;
             }
 
@@ -279,10 +291,13 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _vcsTypeLabel.text = $"{_currentVcsType} (command not available)";
                 ShowMessage($"{_currentVcsType} detected but command-line tool is not available. Please install {_currentVcsType} CLI.", true);
                 _refreshButton.SetEnabled(false);
+                _cleanupButton.SetEnabled(false);
                 return;
             }
 
             _vcsTypeLabel.text = $"Type: {_currentVcsType}";
+            _refreshButton.SetEnabled(true);
+            _cleanupButton.SetEnabled(true);
 
             RefreshAllData();
         }
@@ -296,6 +311,36 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
 
             await RefreshAllData();
+        }
+
+        private void OnCleanupProjectClicked()
+        {
+            if (_adapter == null || _currentVcsType == VcsType.None)
+            {
+                ShowMessage("Cleanup failed: no version control adapter is active. Click Refresh to detect the repository first.", true);
+                return;
+            }
+
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                ShowMessage("Cleanup is blocked while Unity is compiling or importing assets. Please wait until Unity is idle.", true);
+                return;
+            }
+
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var confirmed = EditorUtility.DisplayDialog(
+                "Cleanup Project Working Copy?",
+                $"This will open the external {_currentVcsType} cleanup tool for the whole project working copy.\n\nRoot:\n{rootPath}\n\nUse this when the working copy is locked, interrupted, or needs metadata cleanup.",
+                "Open Cleanup",
+                "Cancel");
+
+            if (!confirmed)
+                return;
+
+            if (TryOpenExternalCleanupWindow())
+                return;
+
+            ShowExternalToolUnavailable("Cleanup Project");
         }
 
         /// <summary>
@@ -336,6 +381,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
 
             _refreshButton.SetEnabled(false);
+            _cleanupButton.SetEnabled(false);
             HideMessage();
 
             try
@@ -396,6 +442,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             finally
             {
                 _refreshButton.SetEnabled(true);
+                _cleanupButton.SetEnabled(_adapter != null && _currentVcsType != VcsType.None);
             }
         }
 
@@ -588,8 +635,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
             else
             {
-                menu.AddItem(new GUIContent($"Selection/Revert Selected Files ({selectedFiles.Count})"), false, () => OnRevertMultipleFilesClicked(selectedFiles));
-                menu.AddItem(new GUIContent("Selection/Clear Selection"), false, ClearStatusSelection);
+                var files = GetSelectedStatusFiles(selectedFiles);
+                PopulateSelectionGenericMenu(menu, files);
             }
 
             menu.ShowAsContext();
@@ -614,39 +661,113 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
 
             var path = file.FilePath;
-            var canStage = file.State == VcsFileState.Untracked
-                || file.State == VcsFileState.Modified
-                || file.State == VcsFileState.Missing
-                || file.State == VcsFileState.Deleted;
-            var canDiff = file.State != VcsFileState.Untracked && file.State != VcsFileState.Ignored;
-            var canRevert = file.State != VcsFileState.Untracked && file.State != VcsFileState.Ignored;
-            var canIgnore = file.State == VcsFileState.Untracked || file.State == VcsFileState.Ignored;
-            var canResolve = file.State == VcsFileState.Conflicted;
             var supportsExternalTools = SupportsExternalFileTool("any");
 
-            AddMenuItem(menu, "View/Show Differences", canDiff && supportsExternalTools, () => OnViewDiffForFileClicked(path));
+            AddMenuItem(menu, "View/Show Differences", CanDiff(file) && supportsExternalTools, () => OnViewDiffForFileClicked(path));
             AddMenuItem(menu, "View/Show File Log", supportsExternalTools, () => OnShowFileLogClicked(path));
             AddMenuItem(menu, "View/Blame / Annotate", file.State != VcsFileState.Untracked && supportsExternalTools, () => OnShowBlameClicked(path));
             menu.AddItem(new GUIContent("View/Show File Info"), false, () => OnShowFileInfoClicked(file));
             menu.AddSeparator("View/");
 
-            AddMenuItem(menu, "Version Control/Add or Track File", canStage && supportsExternalTools, () => OnStageSingleFileClicked(path));
-            AddMenuItem(menu, "Version Control/Revert File", canRevert && supportsExternalTools, () => OnRevertSingleFileClicked(path));
-            AddMenuItem(menu, "Version Control/Mark Resolved", canResolve && supportsExternalTools, () => OnMarkResolvedClicked(path));
+            AddMenuItem(menu, "Version Control/Add or Track File", CanStage(file) && supportsExternalTools, () => OnStageSingleFileClicked(path));
+            AddMenuItem(menu, "Version Control/Revert File", CanRevert(file) && supportsExternalTools, () => OnRevertSingleFileClicked(path));
+            AddMenuItem(menu, "Version Control/Mark Resolved", CanResolve(file) && supportsExternalTools, () => OnMarkResolvedClicked(path));
             menu.AddSeparator("Version Control/");
 
             AddMenuItem(menu, "Commit/Commit This File", supportsExternalTools, () => OnCommitSingleFileClicked(path));
             menu.AddSeparator("Commit/");
 
-            AddMenuItem(menu, "Ignore/Ignore This File", canIgnore, () => OnIgnoreFileClicked(path));
-            AddMenuItem(menu, "Ignore/Ignore This Folder", canIgnore, () => OnIgnoreFolderClicked(path));
-            AddMenuItem(menu, "Ignore/Ignore Same Extension", canIgnore && !string.IsNullOrWhiteSpace(Path.GetExtension(path)), () => OnIgnoreExtensionClicked(path));
+            AddMenuItem(menu, "Ignore/Ignore This File", CanIgnore(file), () => OnIgnoreFileClicked(path));
+            AddMenuItem(menu, "Ignore/Ignore This Folder", CanIgnore(file), () => OnIgnoreFolderClicked(path));
+            AddMenuItem(menu, "Ignore/Ignore Same Extension", CanIgnore(file) && !string.IsNullOrWhiteSpace(Path.GetExtension(path)), () => OnIgnoreExtensionClicked(path));
             menu.AddSeparator("Ignore/");
 
             menu.AddItem(new GUIContent("File/Copy Relative Path"), false, () => CopyRelativePath(path));
             menu.AddItem(new GUIContent("File/Reveal In Explorer"), false, () => RevealInExplorer(path));
             AddMenuItem(menu, "File/Ping In Unity Project", IsUnityAssetPath(path), () => PingInUnityProject(path));
             AddMenuItem(menu, "File/Delete From Working Copy", file.State == VcsFileState.Untracked || file.State == VcsFileState.Added, () => OnDeleteFromWorkingCopyClicked(path));
+        }
+
+        /// <summary>
+        /// 填充多选 GenericMenu 菜单项，避免多选时只剩清除选择和还原入口。
+        /// </summary>
+        private void PopulateSelectionGenericMenu(GenericMenu menu, List<VcsFileStatus> files)
+        {
+            var selectedCount = files?.Count ?? 0;
+            if (selectedCount == 0)
+            {
+                menu.AddDisabledItem(new GUIContent("Selection/No Valid Files Selected"));
+                return;
+            }
+
+            var supportsExternalTools = SupportsExternalFileTool("any");
+            var selectedPaths = files.Select(f => f.FilePath).ToList();
+            var stageablePaths = files.Where(CanStage).Select(f => f.FilePath).ToList();
+            var revertablePaths = files.Where(CanRevert).Select(f => f.FilePath).ToList();
+            var committablePaths = files.Where(f => f.State != VcsFileState.Ignored).Select(f => f.FilePath).ToList();
+            var conflictedPaths = files.Where(CanResolve).Select(f => f.FilePath).ToList();
+            var unityAssetPaths = selectedPaths.Where(IsUnityAssetPath).ToList();
+
+            AddMenuItem(menu, $"Selection/Show Selected File Info ({selectedCount})", true, () => OnShowSelectedFilesInfoClicked(files));
+            menu.AddItem(new GUIContent("Selection/Clear Selection"), false, ClearStatusSelection);
+            menu.AddSeparator("Selection/");
+
+            AddMenuItem(menu, "View/Show Working Copy Diff", _adapter != null, OnViewDiffClicked);
+            menu.AddSeparator("View/");
+
+            AddMenuItem(menu, $"Version Control/Add or Track Selected Files ({stageablePaths.Count})", stageablePaths.Count > 0 && supportsExternalTools, () => OnStageMultipleFilesClicked(stageablePaths));
+            AddMenuItem(menu, $"Version Control/Revert Selected Files ({revertablePaths.Count})", revertablePaths.Count > 0, () => OnRevertMultipleFilesClicked(revertablePaths));
+            AddMenuItem(menu, $"Version Control/Mark Selected Resolved ({conflictedPaths.Count})", conflictedPaths.Count > 0 && supportsExternalTools, () => OnResolveMultipleFilesClicked(conflictedPaths));
+            menu.AddSeparator("Version Control/");
+
+            AddMenuItem(menu, $"Commit/Commit Selected Files ({committablePaths.Count})", committablePaths.Count > 0 && supportsExternalTools, () => OnCommitMultipleFilesClicked(committablePaths));
+            menu.AddSeparator("Commit/");
+
+            AddMenuItem(menu, "File/Copy Selected Relative Paths", selectedPaths.Count > 0, () => CopyRelativePaths(selectedPaths));
+            AddMenuItem(menu, $"File/Ping First Unity Asset ({unityAssetPaths.Count})", unityAssetPaths.Count > 0, () => PingInUnityProject(unityAssetPaths[0]));
+        }
+
+        /// <summary>
+        /// 根据路径列表获取当前状态对象，保持列表显示顺序。
+        /// </summary>
+        private List<VcsFileStatus> GetSelectedStatusFiles(List<string> selectedPaths)
+        {
+            if (selectedPaths == null || selectedPaths.Count == 0)
+                return new List<VcsFileStatus>();
+
+            var selected = new HashSet<string>(selectedPaths, StringComparer.OrdinalIgnoreCase);
+            return _currentFiles
+                .Where(f => f != null && selected.Contains(f.FilePath))
+                .ToList();
+        }
+
+        private bool CanStage(VcsFileStatus file)
+        {
+            return file != null
+                && (file.State == VcsFileState.Untracked
+                    || file.State == VcsFileState.Modified
+                    || file.State == VcsFileState.Missing
+                    || file.State == VcsFileState.Deleted);
+        }
+
+        private bool CanDiff(VcsFileStatus file)
+        {
+            return file != null && file.State != VcsFileState.Untracked && file.State != VcsFileState.Ignored;
+        }
+
+        private bool CanRevert(VcsFileStatus file)
+        {
+            return file != null && file.State != VcsFileState.Untracked && file.State != VcsFileState.Ignored;
+        }
+
+        private bool CanIgnore(VcsFileStatus file)
+        {
+            return file != null && (file.State == VcsFileState.Untracked || file.State == VcsFileState.Ignored);
+        }
+
+        private bool CanResolve(VcsFileStatus file)
+        {
+            return file != null && file.State == VcsFileState.Conflicted;
         }
 
         /// <summary>
@@ -810,6 +931,17 @@ namespace AgentCore.Editor.Components.VCS.UI
             ShowExternalToolUnavailable("Commit File");
         }
 
+        private void OnCommitMultipleFilesClicked(List<string> filePaths)
+        {
+            if (filePaths == null || filePaths.Count == 0)
+                return;
+
+            if (TryOpenExternalCommitFiles(filePaths))
+                return;
+
+            ShowExternalToolUnavailable("Commit Selected Files");
+        }
+
         private void OnShowFileLogClicked(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath))
@@ -852,6 +984,16 @@ namespace AgentCore.Editor.Components.VCS.UI
             ShowMessage($"File info for '{file.FilePath}' logged to Console.", false);
         }
 
+        private void OnShowSelectedFilesInfoClicked(List<VcsFileStatus> files)
+        {
+            if (files == null || files.Count == 0)
+                return;
+
+            var details = files.Select(file => $"{file.State}: {file.FilePath}").ToList();
+            Debug.Log($"[Version Control][{_currentVcsType}][Selected Files Info]\n{string.Join("\n", details)}");
+            ShowMessage($"Selected file info for {files.Count} file(s) logged to Console.", false);
+        }
+
         private void OnMarkResolvedClicked(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath))
@@ -863,6 +1005,21 @@ namespace AgentCore.Editor.Components.VCS.UI
             
             // 外部工具不可用时显示提示
             ShowExternalToolUnavailable("Resolve");
+        }
+
+        private void OnResolveMultipleFilesClicked(List<string> filePaths)
+        {
+            if (filePaths == null || filePaths.Count == 0)
+                return;
+
+            foreach (var filePath in filePaths)
+            {
+                if (!TryOpenExternalResolve(filePath))
+                {
+                    ShowExternalToolUnavailable("Resolve Selected Files");
+                    return;
+                }
+            }
         }
 
         private async void OnIgnoreFileClicked(string filePath)
@@ -1106,6 +1263,15 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             EditorGUIUtility.systemCopyBuffer = filePath ?? string.Empty;
             ShowMessage($"Copied path: {filePath}", false);
+        }
+
+        private void CopyRelativePaths(List<string> filePaths)
+        {
+            if (filePaths == null || filePaths.Count == 0)
+                return;
+
+            EditorGUIUtility.systemCopyBuffer = string.Join(Environment.NewLine, filePaths);
+            ShowMessage($"Copied {filePaths.Count} selected path(s).", false);
         }
 
         private void RevealInExplorer(string filePath)
@@ -1646,6 +1812,35 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
+        private bool TryOpenExternalCommitFiles(List<string> filePaths)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            if (filePaths == null || filePaths.Count == 0)
+                return false;
+
+            var absolutePaths = filePaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(GetAbsolutePath)
+                .ToList();
+
+            if (absolutePaths.Count == 0)
+                return false;
+
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    return TryStartExternalProcess("TortoiseProc.exe",
+                        $"/command:commit /path:\"{string.Join("*", absolutePaths)}\"",
+                        rootPath,
+                        "TortoiseSVN commit window");
+                case VcsType.Git:
+                case VcsType.Perforce:
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
         private bool SupportsExternalFileTool(string operation)
         {
             // 目前只有 SVN/TortoiseSVN 支持完整的文件级外部工具
@@ -1690,6 +1885,11 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
 
             ShowExternalToolUnavailable("Update");
+        }
+
+        private async void OnStageMultipleFilesClicked(List<string> filePaths)
+        {
+            await StageFilesAsync(filePaths, "Add or Track Selected");
         }
 
         private async void OnRevertMultipleFilesClicked(List<string> filePaths)

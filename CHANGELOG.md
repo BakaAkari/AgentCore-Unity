@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-02
+
+### Added
+- **VCS Working Copy Status 扁平列表重构**
+  - 将 Working Copy Status 从 TreeView 改为 SVN 风格扁平列表，每行显示状态徽章 + 相对路径，视觉更清晰。
+  - 支持单选、Ctrl 多选、Shift 范围选，选中行高亮。
+  - 右键菜单根据文件状态动态显示可用操作（Add / Revert / Resolve / Commit / View Diff / Show Log / Blame / Copy Path 等）。
+  - 多选时右键菜单聚合为批量操作（Commit Selected / Revert Selected / Stage Selected / Copy Paths 等）。
+- **VCS 面板顶部 Cleanup Project 按钮**
+  - 新增 "Cleanup Project" 按钮，支持一键触发 SVN cleanup / Git gc / P4 reconcile。
+  - 编译或资产导入期间自动禁用按钮，防止误操作。
+  - 优先尝试打开外部工具（TortoiseSVN / SourceTree 等），不可用时回退到内置命令行执行。
+- **VCS Chat 工具能力大幅扩展（`version_control` tool）**
+  - 新增 `get_file_log` action — 查询单个文件的提交历史（SVN `svn log`、Git `git log --follow`、P4 `p4 filelog`）。
+  - 新增 `cleanup` action — 清理工作副本锁定/临时文件（SVN `svn cleanup`、Git `git gc --auto`、P4 `p4 reconcile`）。
+  - 新增 `commit_files` action — 提交指定文件列表（支持 SVN / Git / P4，需 `confirmed=true` 二次确认）。
+  - 新增 `resolve_files` action — 标记冲突文件为已解决（SVN `svn resolve --accept working`、Git `git add`、P4 `p4 resolve`，需确认）。
+  - 新增 `ignore_file` action — 将指定文件加入忽略规则（SVN `svn:ignore` property、Git `.gitignore`，需确认）。
+  - 新增 `ignore_folder` action — 将指定目录加入忽略规则（需确认）。
+  - 新增 `ignore_extension` action — 将指定文件扩展名加入忽略规则（需确认）。
+  - 新增 `remove_files` action — 从版本控制中删除文件（SVN `svn delete`、Git `git rm`、P4 `p4 delete`，需确认）。
+  - 所有写操作统一使用 `confirmed=true` 二次确认机制，防止 Agent 误操作。
+
+### Changed
+- **VCS 面板布局优化** — 修复小窗口高度下各区块压缩/溢出问题，状态列表区域改为 `flex-grow` 自适应，避免内容被截断。
+- **`version_control` tool `RequiresMainThread`** — 由 `false` 改为 `true`，因 `cleanup` action 需要访问 `EditorApplication.isCompiling`。
+
 ## [0.7.0] - 2026-05-28
 
 ### Added

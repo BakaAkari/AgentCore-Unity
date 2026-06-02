@@ -35,6 +35,13 @@
     font-size: 16px;
     -unity-font-style: bold;
     color: #d4d4d4;
+    flex-grow: 1;
+}
+
+.version-control-panel .vcs-header-actions {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
 }
 
 /* Message Container */
