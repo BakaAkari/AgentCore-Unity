@@ -87,51 +87,46 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.Space(8);
 
-            // ── Generation + Agent Runtime (two-column) ──
-            EditorGUILayout.BeginHorizontal();
-
-            // Generation
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinWidth(240));
-            EditorGUILayout.LabelField("Generation", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
-
-            settings.temperature = EditorGUILayout.Slider(
-                new GUIContent("Temperature", "Sampling temperature (0.0–2.0)"),
-                settings.temperature, 0f, 2f);
-
-            settings.maxTokens = EditorGUILayout.IntField(
-                new GUIContent("Max Tokens", "Maximum output tokens per response"),
-                settings.maxTokens);
-            settings.maxTokens = Mathf.Clamp(settings.maxTokens, 1, 128000);
-
-            if (EditorGUI.EndChangeCheck())
+            // ── Generation ──
+            context.Ui.DrawCard("Generation", null, () =>
             {
-                settings.SaveSettings();
-            }
-            EditorGUILayout.EndVertical();
+                EditorGUI.BeginChangeCheck();
 
-            GUILayout.Space(8);
+                settings.temperature = EditorGUILayout.Slider(
+                    new GUIContent("Temperature", "Sampling temperature (0.0–2.0)"),
+                    settings.temperature, 0f, 2f);
 
-            // Agent Runtime
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinWidth(240));
-            EditorGUILayout.LabelField("Agent Runtime", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
+                settings.maxTokens = EditorGUILayout.IntField(
+                    new GUIContent("Max Tokens", "Maximum output tokens per response"),
+                    settings.maxTokens);
+                settings.maxTokens = Mathf.Clamp(settings.maxTokens, 1, 128000);
 
-            settings.maxToolCallRounds = EditorGUILayout.IntSlider(
-                new GUIContent("Max Tool Rounds", "Maximum tool-call rounds to prevent infinite loops"),
-                settings.maxToolCallRounds, 1, 50);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    settings.SaveSettings();
+                }
+            });
 
-            settings.fallbackRoutingEnabled = EditorGUILayout.Toggle(
-                new GUIContent("Fallback Routing", "Enable failure-recovery strategy routing"),
-                settings.fallbackRoutingEnabled);
+            EditorGUILayout.Space(8);
 
-            if (EditorGUI.EndChangeCheck())
+            // ── Agent Runtime ──
+            context.Ui.DrawCard("Agent Runtime", null, () =>
             {
-                settings.SaveSettings();
-            }
-            EditorGUILayout.EndVertical();
+                EditorGUI.BeginChangeCheck();
 
-            EditorGUILayout.EndHorizontal();
+                settings.maxToolCallRounds = EditorGUILayout.IntSlider(
+                    new GUIContent("Max Tool Rounds", "Maximum tool-call rounds to prevent infinite loops"),
+                    settings.maxToolCallRounds, 1, 50);
+
+                settings.fallbackRoutingEnabled = EditorGUILayout.Toggle(
+                    new GUIContent("Fallback Routing", "Enable failure-recovery strategy routing"),
+                    settings.fallbackRoutingEnabled);
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    settings.SaveSettings();
+                }
+            });
 
             EditorGUILayout.Space(8);
 

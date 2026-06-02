@@ -64,66 +64,61 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.Space(8);
 
-            // ── Context Budget + Compression (two-column) ──
-            EditorGUILayout.BeginHorizontal();
-
-            // Context Budget
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinWidth(240));
-            EditorGUILayout.LabelField("Context Budget", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
-
-            settings.maxContextTokens = EditorGUILayout.IntField(
-                new GUIContent("Max Context Tokens", "Context window token limit (0 = auto-infer from model name)"),
-                settings.maxContextTokens);
-            settings.maxContextTokens = Mathf.Max(settings.maxContextTokens, 0);
-
-            settings.reserveResponseTokens = EditorGUILayout.IntField(
-                new GUIContent("Reserve Response Tokens", "Tokens reserved for the AI response"),
-                settings.reserveResponseTokens);
-            settings.reserveResponseTokens = Mathf.Clamp(settings.reserveResponseTokens, 500, 16000);
-
-            if (EditorGUI.EndChangeCheck())
+            // ── Context Budget ──
+            context.Ui.DrawCard("Context Budget", null, () =>
             {
-                settings.SaveSettings();
-            }
-            EditorGUILayout.EndVertical();
+                EditorGUI.BeginChangeCheck();
 
-            GUILayout.Space(8);
+                settings.maxContextTokens = EditorGUILayout.IntField(
+                    new GUIContent("Max Context Tokens", "Context window token limit (0 = auto-infer from model name)"),
+                    settings.maxContextTokens);
+                settings.maxContextTokens = Mathf.Max(settings.maxContextTokens, 0);
 
-            // Compression
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinWidth(240));
-            EditorGUILayout.LabelField("Compression", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
+                settings.reserveResponseTokens = EditorGUILayout.IntField(
+                    new GUIContent("Reserve Response Tokens", "Tokens reserved for the AI response"),
+                    settings.reserveResponseTokens);
+                settings.reserveResponseTokens = Mathf.Clamp(settings.reserveResponseTokens, 500, 16000);
 
-            settings.compressionEnabled = EditorGUILayout.Toggle(
-                new GUIContent("Enable Compression", "Compress tool results and conversation history instead of truncating"),
-                settings.compressionEnabled);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    settings.SaveSettings();
+                }
+            });
 
-            EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Tool Result", EditorStyles.miniLabel);
+            EditorGUILayout.Space(8);
 
-            settings.toolResultCompressionThreshold = EditorGUILayout.IntField(
-                new GUIContent("Threshold", "Tool results exceeding this token count are compressed"),
-                settings.toolResultCompressionThreshold);
-
-            settings.toolResultTargetTokens = EditorGUILayout.IntField(
-                new GUIContent("Target", "Target token count after compression"),
-                settings.toolResultTargetTokens);
-
-            EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Conversation", EditorStyles.miniLabel);
-
-            settings.conversationCompressionTrigger = EditorGUILayout.Slider(
-                new GUIContent("Trigger Ratio", "Trigger conversation compression when context usage exceeds this ratio (0.3–0.95)"),
-                settings.conversationCompressionTrigger, 0.3f, 0.95f);
-
-            if (EditorGUI.EndChangeCheck())
+            // ── Compression ──
+            context.Ui.DrawCard("Compression", null, () =>
             {
-                settings.SaveSettings();
-            }
-            EditorGUILayout.EndVertical();
+                EditorGUI.BeginChangeCheck();
 
-            EditorGUILayout.EndHorizontal();
+                settings.compressionEnabled = EditorGUILayout.Toggle(
+                    new GUIContent("Enable Compression", "Compress tool results and conversation history instead of truncating"),
+                    settings.compressionEnabled);
+
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("Tool Result", EditorStyles.miniLabel);
+
+                settings.toolResultCompressionThreshold = EditorGUILayout.IntField(
+                    new GUIContent("Threshold", "Tool results exceeding this token count are compressed"),
+                    settings.toolResultCompressionThreshold);
+
+                settings.toolResultTargetTokens = EditorGUILayout.IntField(
+                    new GUIContent("Target", "Target token count after compression"),
+                    settings.toolResultTargetTokens);
+
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("Conversation", EditorStyles.miniLabel);
+
+                settings.conversationCompressionTrigger = EditorGUILayout.Slider(
+                    new GUIContent("Trigger Ratio", "Trigger conversation compression when context usage exceeds this ratio (0.3–0.95)"),
+                    settings.conversationCompressionTrigger, 0.3f, 0.95f);
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    settings.SaveSettings();
+                }
+            });
 
             EditorGUILayout.Space(8);
 
@@ -170,101 +165,96 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.Space(8);
 
-            // ── Memory Service + Knowledge Base (two-column) ──
-            EditorGUILayout.BeginHorizontal();
-
-            // Memory Service
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinWidth(240));
-            EditorGUILayout.LabelField("Memory Service", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
-
-            settings.mem0Enabled = EditorGUILayout.Toggle(
-                new GUIContent("Enabled", "Enable mem0 memory service"),
-                settings.mem0Enabled);
-
-            settings.mem0Endpoint = EditorGUILayout.TextField(
-                new GUIContent("Endpoint", "mem0 service URL"),
-                settings.mem0Endpoint);
-
-            context.Ui.DrawApiKeyRow(
-                "API Key",
-                "mem0 service API key",
-                context.State.StringValues[Mem0ApiKeyDisplayKey],
-                "Set mem0 API Key",
-                "Enter your mem0 API Key:",
-                newKey =>
-                {
-                    SecureKeyStorage.SetMem0ApiKey(newKey);
-                    context.State.StringValues[Mem0ApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
-                },
-                () =>
-                {
-                    SecureKeyStorage.SetMem0ApiKey(string.Empty);
-                    context.State.StringValues[Mem0ApiKeyDisplayKey] = "(not set)";
-                });
-
-            GUI.enabled = false;
-            EditorGUILayout.TextField(
-                new GUIContent("User ID", "Auto-generated unique user identifier for memory isolation"),
-                settings.EffectiveUserId);
-            GUI.enabled = true;
-
-            EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Auto Memory", EditorStyles.miniLabel);
-
-            settings.autoMemoryEnabled = EditorGUILayout.Toggle(
-                new GUIContent("Enabled", "Automatically extract key information to mem0 at session end"),
-                settings.autoMemoryEnabled);
-
-            settings.autoMemoryMinTurns = EditorGUILayout.IntSlider(
-                new GUIContent("Min Turns", "Minimum user turns before triggering auto-memory"),
-                settings.autoMemoryMinTurns, 1, 20);
-
-            if (EditorGUI.EndChangeCheck())
+            // ── Memory Service ──
+            context.Ui.DrawCard("Memory Service", "mem0 persistent memory service for cross-session knowledge.", () =>
             {
-                settings.SaveSettings();
-            }
-            EditorGUILayout.EndVertical();
+                EditorGUI.BeginChangeCheck();
 
-            GUILayout.Space(8);
+                settings.mem0Enabled = EditorGUILayout.Toggle(
+                    new GUIContent("Enabled", "Enable mem0 memory service"),
+                    settings.mem0Enabled);
 
-            // Knowledge Base
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinWidth(240));
-            EditorGUILayout.LabelField("Knowledge Base", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
+                settings.mem0Endpoint = EditorGUILayout.TextField(
+                    new GUIContent("Endpoint", "mem0 service URL"),
+                    settings.mem0Endpoint);
 
-            settings.lightragEnabled = EditorGUILayout.Toggle(
-                new GUIContent("Enabled", "Enable LightRAG knowledge base"),
-                settings.lightragEnabled);
+                context.Ui.DrawApiKeyRow(
+                    "API Key",
+                    "mem0 service API key",
+                    context.State.StringValues[Mem0ApiKeyDisplayKey],
+                    "Set mem0 API Key",
+                    "Enter your mem0 API Key:",
+                    newKey =>
+                    {
+                        SecureKeyStorage.SetMem0ApiKey(newKey);
+                        context.State.StringValues[Mem0ApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
+                    },
+                    () =>
+                    {
+                        SecureKeyStorage.SetMem0ApiKey(string.Empty);
+                        context.State.StringValues[Mem0ApiKeyDisplayKey] = "(not set)";
+                    });
 
-            settings.lightragEndpoint = EditorGUILayout.TextField(
-                new GUIContent("Endpoint", "LightRAG service URL"),
-                settings.lightragEndpoint);
+                GUI.enabled = false;
+                EditorGUILayout.TextField(
+                    new GUIContent("User ID", "Auto-generated unique user identifier for memory isolation"),
+                    settings.EffectiveUserId);
+                GUI.enabled = true;
 
-            context.Ui.DrawApiKeyRow(
-                "API Key",
-                "LightRAG service API key",
-                context.State.StringValues[LightRagApiKeyDisplayKey],
-                "Set LightRAG API Key",
-                "Enter your LightRAG API Key:",
-                newKey =>
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("Auto Memory", EditorStyles.miniLabel);
+
+                settings.autoMemoryEnabled = EditorGUILayout.Toggle(
+                    new GUIContent("Enabled", "Automatically extract key information to mem0 at session end"),
+                    settings.autoMemoryEnabled);
+
+                settings.autoMemoryMinTurns = EditorGUILayout.IntSlider(
+                    new GUIContent("Min Turns", "Minimum user turns before triggering auto-memory"),
+                    settings.autoMemoryMinTurns, 1, 20);
+
+                if (EditorGUI.EndChangeCheck())
                 {
-                    SecureKeyStorage.SetLightRAGApiKey(newKey);
-                    context.State.StringValues[LightRagApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
-                },
-                () =>
-                {
-                    SecureKeyStorage.SetLightRAGApiKey(string.Empty);
-                    context.State.StringValues[LightRagApiKeyDisplayKey] = "(not set)";
-                });
+                    settings.SaveSettings();
+                }
+            });
 
-            if (EditorGUI.EndChangeCheck())
+            EditorGUILayout.Space(8);
+
+            // ── Knowledge Base ──
+            context.Ui.DrawCard("Knowledge Base", "LightRAG knowledge base for project-specific retrieval.", () =>
             {
-                settings.SaveSettings();
-            }
-            EditorGUILayout.EndVertical();
+                EditorGUI.BeginChangeCheck();
 
-            EditorGUILayout.EndHorizontal();
+                settings.lightragEnabled = EditorGUILayout.Toggle(
+                    new GUIContent("Enabled", "Enable LightRAG knowledge base"),
+                    settings.lightragEnabled);
+
+                settings.lightragEndpoint = EditorGUILayout.TextField(
+                    new GUIContent("Endpoint", "LightRAG service URL"),
+                    settings.lightragEndpoint);
+
+                context.Ui.DrawApiKeyRow(
+                    "API Key",
+                    "LightRAG service API key",
+                    context.State.StringValues[LightRagApiKeyDisplayKey],
+                    "Set LightRAG API Key",
+                    "Enter your LightRAG API Key:",
+                    newKey =>
+                    {
+                        SecureKeyStorage.SetLightRAGApiKey(newKey);
+                        context.State.StringValues[LightRagApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
+                    },
+                    () =>
+                    {
+                        SecureKeyStorage.SetLightRAGApiKey(string.Empty);
+                        context.State.StringValues[LightRagApiKeyDisplayKey] = "(not set)";
+                    });
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    settings.SaveSettings();
+                }
+            });
         }
 
         // ── User Files ──
