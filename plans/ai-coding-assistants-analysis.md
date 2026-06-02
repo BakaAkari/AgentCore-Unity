@@ -1,7 +1,9 @@
 ﻿# AI 编码助手竞品分析：Cline、Roo Code、Cursor 与 AgentCore 对比
 
-> **文档状态**: 调研分析 | **日期**: 2026-05-13  
+> **文档状态**: 调研分析 | **日期**: 2026-05-13
 > **目标**: 分析主流 AI 编码助手的架构、能力和设计模式，为 AgentCore Phase 6 提供方向参考
+>
+> **企业级适配说明（2026-06-02）**: 本文档是竞品调研参考，不是当前代码索引实施方案。文中早期提到的 `Assets/` / `Assets/Scripts/` 扫描路径仅代表标准 Unity 项目示例；当前 AgentCore 企业基准已调整为 **SVN 工作副本根 = WorkspaceRoot**、**Unity 工程目录 = UnityRoot 子根**、地图/模式/工具/资源/插件目录 = WorkspaceRoot 下的 Scope Root。代码索引实施必须以 [`codebase-indexing-phase1-plan.md`](codebase-indexing-phase1-plan.md) 为准。
 
 ---
 
@@ -97,12 +99,13 @@ AgentCore:      Unity Editor 插件 + AgentLoop + 工具系统
 - Package 依赖 (UPM)
 ```
 
-**推荐实现路径**:
-1. **Phase 1 — 文件级索引** (v0.5.0)
-   - 扫描 `Assets/` 和 `Packages/` 目录
+**推荐实现路径（历史建议，已被 v0.9.0 WorkspaceRoot 方案替代）**:
+1. **Phase 1 — 文件级索引**（早期设想）
+   - 早期只扫描 `Assets/` 和 `Packages/` 的建议已不再作为实施基准
+   - 当前应扫描 SVN WorkspaceRoot 下已启用的 UnityRoot 与 Scope Root
    - 提取 C# 文件的类名、命名空间、方法签名
    - 使用 Roslyn 进行 AST 解析
-   - 存储到 SQLite 本地数据库
+   - 存储到 SQLite 或兼容本地索引后端
 
 2. **Phase 2 — 语义搜索** (v0.5.1)
    - 集成 LightRAG 或独立向量数据库
@@ -487,7 +490,8 @@ Phase 6.3 — 代码审查与质量分析 (v0.5.3)
 ### 6.1 短期行动（v0.5.0 - 1 个月）
 
 1. **代码库索引 MVP**
-   - 扫描 `Assets/Scripts/` 下所有 `.cs` 文件
+   - 早期 `Assets/Scripts/` 扫描建议已被 SVN WorkspaceRoot + Scope Root 方案替代
+   - 扫描 WorkspaceRoot 下已启用 Scope Root 中的 `.cs` 文件
    - 提取类名、命名空间、方法签名
    - 存储到 SQLite 数据库
    - 新增工具 `search_codebase` action

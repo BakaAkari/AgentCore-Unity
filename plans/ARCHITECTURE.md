@@ -4,6 +4,8 @@
 >
 > AgentCore Unity 是一个 Unity Editor 内嵌的 AI Agent 插件，
 > 通过 Chat 窗口与 LLM 交互，使用自研原生工具系统操作 Unity Editor。
+>
+> **企业级适配说明（2026-06-02）**: 本文档是 v0.4.8 时期的系统架构参考，文中的标准 Unity 项目结构、`Assets/` 示例和 Unity 项目根示例只描述当时实现现状。当前企业级规划已确认 **SVN 工作副本根 = AgentCore WorkspaceRoot**，**Unity 工程目录 = WorkspaceRoot 下的 UnityRoot 子根**；涉及代码索引、VCS、RAG、Memory、文件工具和路径安全边界时，必须优先参照 [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md)、[`codebase-indexing-phase1-plan.md`](codebase-indexing-phase1-plan.md) 和 [`enterprise-agentcore-implementation-audit.md`](enterprise-agentcore-implementation-audit.md)。
 
 ---
 

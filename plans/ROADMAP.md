@@ -4,6 +4,7 @@
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 >
 > **与现有计划的关系**:
+> - `enterprise-unity-workflow-requirements.md` → 作为大型商业 Unity 项目适配的上游需求基准；后续代码索引、VCS、RAG、Memory、工具系统、Settings 等功能设计均需参照该文件重评估。
 > - `rag-feature-completion-plan.md` → 纳入本路线图的 **Phase 5.2 (RAG 补齐)**
 > - `agentcore-workspace-hub-execution-plan.md` → Hub 骨架部分已实施，剩余 MemoryPanel 等内容纳入 **Phase 6.2**
 > - **代码事实优先**: 当本文件与实际源码不一致时，以 `Editor/` 下当前代码为准，并立即修正文档状态。
@@ -37,7 +38,24 @@
 | `[x]` | 已完成 |
 | `[!]` | 阻塞/暂停（依赖外部条件或用户决策） |
 
-### 0.3 当前项目快照 (v0.8.0)
+### 0.3 企业级 Unity 项目适配基准
+
+自 2026-06-02 起，AgentCore 后续功能设计需按 `enterprise-unity-workflow-requirements.md` 中记录的大型商业 Unity 项目场景进行校准。已确认的基础设计规则是：
+
+> **SVN 工作副本根 = AgentCore WorkspaceRoot；Unity 工程目录 = WorkspaceRoot 下的 UnityRoot 子根；地图、模式、工具、资源、插件等目录 = WorkspaceRoot 下的 Scope Root。**
+
+核心上下文模型为：
+
+- **WorkspaceRoot** — 当前 SVN 分线工作副本根，是文件、索引、RAG、Memory、Session、VCS 和工具安全策略的默认边界。
+- **UnityRoot** — WorkspaceRoot 下的 Unity 工程子目录，是 AssetDatabase、Scene、Prefab、BuildSettings 和 Unity 原生工具的边界。
+- **Scope** — 地图、模式、资源包、公共模块、UI、文案、工具、引擎、插件、生成代码等业务上下文。
+- **Root** — WorkspaceRoot 下的实际文件系统子目录；WorkspaceRoot 外部 Root 只作为显式授权例外。
+- **Role** — 可编辑项目代码、公共代码、Workspace 内资源目录、商业插件、自制插件、引擎代码、工具代码、生成代码、只读引用等安全策略。
+- **Branch** — SVN/Git/P4 分线或工作副本版本信息；当前企业基线以 SVN WorkspaceRoot 为主。
+
+凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
+
+### 0.4 当前项目快照 (v0.8.0)
 
 | 维度 | 状态 |
 |------|------|
@@ -169,21 +187,21 @@ v0.4.7 — 文档状态校准（plans/ 全量审计 + ROADMAP 修正 + ADR-3）
 
 ### 3.2 P0 — 代码库索引与理解（提升为高优先级）
 
-> **优先级提升原因**: 代码库理解是 Agent 自主能力的基础，比手动模式切换更重要。
+> **优先级提升原因**: 代码库理解是 Agent 自主能力的基础，比手动模式切换更重要。当前实现前必须遵循 `codebase-indexing-phase1-plan.md` v1.2：以 SVN WorkspaceRoot 为索引上下文根，UnityRoot 仅作为 Unity 工程子根。
 
 | # | 任务 | 说明 | 关联计划 | 状态 |
 |---|------|------|---------|------|
-| 6.2.1 | **文件级索引** | 使用 Roslyn 解析 C# 文件，提取类名、命名空间、方法签名；存储到 SQLite | Codebase-1 | [ ] |
-| 6.2.2 | **符号检索** | 支持按类名、方法名、字段名搜索；支持模糊匹配和正则表达式 | Codebase-2 | [ ] |
-| 6.2.3 | **语义搜索** | 集成 LightRAG 进行代码片段嵌入；支持自然语言查询："找到所有处理网络请求的脚本" | Codebase-3 | [ ] |
-| 6.2.4 | **依赖图构建** | 分析类型引用、程序集边界、Unity 特殊引用（Scene/Prefab/Addressables） | Codebase-4 | [ ] |
+| 6.2.1 | **文件级索引** | 使用 Roslyn 解析 WorkspaceRoot 下启用的 Scope Root C# 文件，提取类名、命名空间、方法签名；存储到 SQLite 或兼容本地后端 | Codebase-1 | [ ] |
+| 6.2.2 | **符号检索** | 支持按类名、方法名、字段名搜索；支持 Scope/Root/Role/Branch 过滤、模糊匹配和正则表达式 | Codebase-2 | [ ] |
+| 6.2.3 | **语义搜索** | 集成 LightRAG 进行代码片段嵌入；支持限定当前 WorkspaceRoot、Branch、Scope 的自然语言查询 | Codebase-3 | [ ] |
+| 6.2.4 | **依赖图构建** | 分析类型引用、程序集边界、Unity 特殊引用、Workspace 子 Root、地图/模式和资源包依赖 | Codebase-4 | [ ] |
 
 ### 3.3 P1 — 规则系统与智能推荐（中优先级）
 
 | # | 任务 | 说明 | 关联计划 | 状态 |
 |---|------|------|---------|------|
-| 6.3.1 | **.agentcore/rules.md 支持** | 读取项目根目录的规则文件（编码规范、架构约定、测试要求） | Rules-1 | [ ] |
-| 6.3.2 | **规则自动注入** | 规则内容自动添加到 System Prompt；支持多文件规则（按模块拆分） | Rules-2 | [ ] |
+| 6.3.1 | **.agentcore/rules.md 支持** | 优先读取 WorkspaceRoot 下的规则文件（编码规范、架构约定、测试要求），并兼容 UnityRoot 局部规则 | Rules-1 | [ ] |
+| 6.3.2 | **规则自动注入** | 规则内容自动添加到 System Prompt；支持按 WorkspaceRoot、Scope、Root 分层注入 | Rules-2 | [ ] |
 | 6.3.3 | **SmartToolRecommender** | 基于对话上下文和当前任务推荐可用工具；UI 显示推荐理由 | Smart-1 | [ ] |
 | 6.3.4 | **响应式建议** | LLM 响应末尾附带"下一步建议"（如"是否需要运行测试？"） | Smart-2 | [ ] |
 
@@ -419,13 +437,17 @@ v0.6.0 → Phase 7.1 (UPM 发布)
 ### 7.4 文档状态索引
 
 > **重要更新（2026-05-13）**: 历史文档已归档至 [`_archive/`](_archive/) 目录，详见 [`README.md`](README.md)。
+> **重要更新（2026-06-02）**: 企业级 Unity 项目适配已确认以 SVN 工作副本根作为 AgentCore WorkspaceRoot；当前实现与后续计划必须优先参照 `enterprise-unity-workflow-requirements.md`、`codebase-indexing-phase1-plan.md` 和 `enterprise-agentcore-implementation-audit.md`。
 
 | 文档 | 当前状态 | 位置 |
 |------|----------|------|
 | [`README.md`](README.md) |  文档导航 | `plans/` 顶层 |
 | [`ROADMAP.md`](ROADMAP.md) |  主导方向文档 | `plans/` 顶层 |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) |  架构参考 | `plans/` 顶层 |
-| [`ai-coding-assistants-analysis.md`](ai-coding-assistants-analysis.md) |  参考文档 | `plans/` 顶层 |
+| [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md) |  企业级 Unity 项目适配需求基准，WorkspaceRoot 规则上游依据 | `plans/` 顶层 |
+| [`codebase-indexing-phase1-plan.md`](codebase-indexing-phase1-plan.md) |  v0.9.0 代码索引 Phase 1 设计，已按 SVN WorkspaceRoot 校准 | `plans/` 顶层 |
+| [`enterprise-agentcore-implementation-audit.md`](enterprise-agentcore-implementation-audit.md) |  已实现功能企业级适配审计，指出 WorkspaceRoot-aware 改造缺口 | `plans/` 顶层 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) |  架构参考；其中标准 Unity 项目示例需按企业基准解释 | `plans/` 顶层 |
+| [`ai-coding-assistants-analysis.md`](ai-coding-assistants-analysis.md) |  参考文档；其中 `Assets/` 示例不作为当前企业基准 | `plans/` 顶层 |
 | [`teamcity-svn-unity-build-quality-plan.md`](teamcity-svn-unity-build-quality-plan.md) |  外部客户方案草案，持续迭代 | `plans/` 顶层 |
 | **Phase 计划** |  历史归档 | [`_archive/phases/`](_archive/phases/) |
 | **重构计划** |  历史归档，含 VCS 可选组件化与 Settings 架构重构 | [`_archive/refactoring/`](_archive/refactoring/) |
@@ -441,15 +463,15 @@ v0.6.0 → Phase 7.1 (UPM 发布)
 
 ## 8. 下一步行动建议
 
-当前（v0.6.1）最推荐的三个切入点：
+当前最推荐的三个切入点：
 
 | 推荐度 | 任务 | 原因 |
 |--------|------|------|
-|  | **6.2.1 文件级索引** | 代码库理解是 Agent 自主能力的基础，优先级最高 |
-|  | **6.2.2 符号检索** | 配合文件级索引，提供精确的代码导航能力 |
-|  | **6.3.1 .agentcore/rules.md 支持** | 让 Agent 理解项目特定规则，增强情境感知 |
+|  | **WorkspaceRoot / UnityRoot / Scope 基础设施** | 先建立 SVN WorkspaceRoot 作为 AgentCore 全局边界，避免索引、VCS、RAG、Memory 和工具系统继续基于 UnityRoot-only 假设返工 |
+|  | **6.2.1 文件级索引** | 代码库理解是 Agent 自主能力的基础，但必须按 WorkspaceRoot + Scope Root schema 实现 |
+|  | **6.2.2 符号检索** | 配合文件级索引，提供可按 Scope/Root/Role/Branch 过滤的精确代码导航能力 |
 
-**Phase 5 已完成**，当前进入 **Phase 6 — 智能化与体验**。
+**Phase 5 已完成**，当前进入 **Phase 6 — 智能化与体验**。进入 v0.9.0 实现前，应先完成企业级 WorkspaceRoot 设计对齐。
 
 **v0.5.4 完成内容**：
 - 版本控制集成 Phase 1（只读查询）

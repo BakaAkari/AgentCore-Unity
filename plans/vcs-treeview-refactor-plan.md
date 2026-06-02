@@ -2,33 +2,41 @@
 
 ## 1. 目标
 
-将 VCS Panel 的 Working Copy Status 从当前的"目录列表 + 文件列表"分离结构改造为**树形嵌套结构**，使用 Unity UI Toolkit 的 TreeView。
+> **企业级适配校准（2026-06-02）**: 本文档原始示例以标准 Unity `Assets/` 路径展示 TreeView 结构。当前 AgentCore 企业基准已调整为 **SVN 工作副本根 = WorkspaceRoot**，**Unity 工程目录 = UnityRoot 子根**，地图、模式、工具、资源包和插件目录是 WorkspaceRoot 下的 Scope Root。因此，后续实现 VCS Panel TreeView 时，所有 VCS 路径必须默认采用 WorkspaceRoot-relative 路径，并优先按 Scope Root 分组；`Assets/` 示例仅表示 `unity/Assets/` 这一 UnityRoot 子树，不代表全局边界。
+
+将 VCS Panel 的 Working Copy Status 从当前的"目录列表 + 文件列表"分离结构改造为**树形嵌套结构**，使用 Unity UI Toolkit 的 TreeView。企业级实现目标不是仅展示 Unity `Assets/`，而是展示当前 SVN WorkspaceRoot 下所有授权 Scope Root 的工作副本状态。
 
 ### 当前结构
 ```
 Directories (3)
-  ├─ Assets/Scripts (5 files)
-  ├─ Assets/Prefabs (2 files)
-  └─ Assets/Scenes (1 file)
+  ├─ unity/Assets/Scripts (5 files)
+  ├─ gamemodes/Battle (4 files)
+  └─ tools/BuildPipeline (2 files)
 
-Files (8)
-  ├─ Assets/Scripts/Player.cs [Modified]
-  ├─ Assets/Scripts/Enemy.cs [Added]
+Files (11)
+  ├─ unity/Assets/Scripts/Player.cs [Modified]
+  ├─ gamemodes/Battle/BattleMode.cs [Added]
+  ├─ tools/BuildPipeline/BuildConfig.cs [Modified]
   └─ ...
 ```
 
 ### 目标结构
 ```
-Working Copy Status (8 files)
-  ├─ 📁 Assets/
-  │   ├─ 📁 Scripts/
-  │   │   ├─ 📄 Player.cs [Modified]
-  │   │   ├─ 📄 Enemy.cs [Added]
-  │   │   └─ 📄 GameManager.cs [Modified]
-  │   ├─ 📁 Prefabs/
-  │   │   └─ 📄 Bullet.prefab [Modified]
-  │   └─ 📁 Scenes/
-  │       └─ 📄 MainScene.unity [Modified]
+Working Copy Status — svn/project/branch WorkspaceRoot (11 files)
+  ├─ 📁 unity/
+  │   └─ 📁 Assets/
+  │       ├─ 📁 Scripts/
+  │       │   ├─ 📄 Player.cs [Modified]
+  │       │   ├─ 📄 Enemy.cs [Added]
+  │       │   └─ 📄 GameManager.cs [Modified]
+  │       └─ 📁 Scenes/
+  │           └─ 📄 MainScene.unity [Modified]
+  ├─ 📁 gamemodes/
+  │   └─ 📁 Battle/
+  │       └─ 📄 BattleMode.cs [Added]
+  └─ 📁 tools/
+      └─ 📁 BuildPipeline/
+          └─ 📄 BuildConfig.cs [Modified]
 ```
 
 ---
@@ -60,7 +68,7 @@ public class VcsTreeNode
 
 ### 2.2 树构建算法
 
-从扁平的 `List<VcsFileStatus>` 构建树形结构：
+从扁平的 `List<VcsFileStatus>` 构建树形结构。企业级 WorkspaceRoot 版本中，`VcsFileStatus.FilePath` 应为 WorkspaceRoot-relative 路径；如底层适配器返回 UnityRoot-relative 或绝对路径，必须先在 VCS WorkspaceContext 层归一化后再进入 TreeView：
 
 ```csharp
 private VcsTreeNode BuildTree(List<VcsFileStatus> files)

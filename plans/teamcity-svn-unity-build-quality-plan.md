@@ -3,6 +3,8 @@
 > 本文档用于持续迭代客户当前大型 Unity 游戏项目的构建质量问题、错误收束策略、CI 验证策略与责任定位方案。
 >
 > 当前约束：不调整现有 SVN 分支开发模式。团队已经适应当前分支流程，因此本文档不以“改变分支模型”为前提，而是在现有 SVN 分支 + TeamCity 打包 + Lark Bot 通知体系上增量改造。
+>
+> **AgentCore WorkspaceRoot 对齐说明（2026-06-02）**: 本文档属于外部客户构建质量治理草案，文中的 `Assets/...` 路径是 CI 规则示例，不代表 AgentCore 的全局能力边界。AgentCore 当前企业级插件规划必须以 **SVN 工作副本根 = WorkspaceRoot** 为默认边界，并把 Unity 工程目录视为 WorkspaceRoot 下的 UnityRoot 子根；CI 规则后续接入 AgentCore 时应改为 WorkspaceRoot-relative，并支持 `unity/Assets/...`、`gamemodes/...`、`tools/...` 等 Scope Root。
 
 ---
 
