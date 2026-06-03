@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-06-03
+
+### Changed
+- **Bootstrap 链重构：MEMORY.md / USER.md → PROJECT.md / SOUL.ext.md**
+  - 移除旧的 `MEMORY.md`（记忆文件）和 `USER.md`（用户偏好文件）加载逻辑，统一合并为 `PROJECT.md`（用户可编辑层）。
+  - 新增 `SOUL.ext.md` 支持 — 追加模式扩展 SOUL.md 行为约束，不替换核心 SOUL；建议提交到 VCS。
+  - 新增 `SKELETON.md` 加载支持 — 从 `Library/AgentCore/workspace-skeleton.md` 读取代码库骨架（由代码索引功能生成，不提交 VCS）。
+  - `BootstrapContext` 字段更新：移除 `Memory`、`User`，新增 `SoulExtension`、`Workspace`、`Skeleton`。
+  - `BootstrapLoader.GenerateUserFileTemplate()` 集中化 — 原散落在 4 个 UI 文件中的模板生成逻辑统一到 `BootstrapLoader` 公共静态方法。
+  - 新增 `Editor/Bootstrap/Resources/PROJECT.md.template` — 包含 `## Project Conventions`（团队约定）和 `## Personal Preferences`（个人偏好）两个 section。
+  - Settings 页面中"User Files"卡片更名为"Project Files"，按钮更新为 PROJECT.md / SOUL.ext.md。
+
+### Removed
+- **`MEMORY.md` 和 `USER.md` 文件支持已移除** — 如有现存文件，内容请迁移至 `PROJECT.md`（`## Personal Preferences` section）。
+
 ## [0.8.0] - 2026-06-02
 
 ### Added

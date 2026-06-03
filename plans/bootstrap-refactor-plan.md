@@ -1,8 +1,8 @@
 # Bootstrap 链路重构设计方案
 
-**版本**: v1.0  
-**状态**: 待实现  
-**目标版本**: v0.9.x（与代码库索引功能同期或之后）  
+**版本**: v1.0
+**状态**: 已实现
+**目标版本**: v0.9.x（与代码库索引功能同期或之后）
 **关联文档**: [codebase-indexing-phase1-plan.md](codebase-indexing-phase1-plan.md)
 
 ---
@@ -109,7 +109,8 @@ SOUL.md + [SOUL.ext.md] (用户追加，可选，项目特定行为规则扩展)
   建议提交到 VCS（Git/SVN/Perforce）以便团队共享。
   
   个人偏好（Personal Preferences section）可选择不提交：
-  将个人偏好内容移至 AgentCore/USER.md（不提交到 VCS）
+  在 .gitignore / .p4ignore / svn:ignore 中排除此文件，
+  或仅将 Project Conventions section 的内容提交。
 -->
 
 ## Project Conventions
