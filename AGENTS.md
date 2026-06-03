@@ -448,7 +448,7 @@ bool flag = JsonHelper.GetBool(jobj, "key", false);
 
 ### 6.2 Bootstrap 系统修改规则
 
-Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自动) → PROJECT.md(用户) → [SKELETON]`
+Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自动) → PROJECT.md(用户)`
 
 > 修改前先阅读 `Editor/Bootstrap/BootstrapLoader.cs` 了解完整加载逻辑。
 
@@ -461,14 +461,12 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 | 2 | `TOOLS.md` | 自动生成 | 自动 | 从 TOOLS.md.template + ToolRegistry 生成 |
 | 3 | `PROJECT.md` | 自动收集 | 自动 | ProjectContextCollector 收集，不含敏感信息 |
 | 3+ | `PROJECT.md`（用户） | 用户创建 | 用户可编辑 | 项目约定 + 个人偏好，建议 VCS 提交 |
-| 4 | `SKELETON.md` | 自动生成（可选） | 自动 | 代码库骨架，来自代码索引功能，不提交 VCS |
 
 **关键规则**：
 - **SOUL.md 不可变** — 禁止在代码中修改 SOUL.md 的加载逻辑使其可被用户替换；用户扩展只能通过 SOUL.ext.md 追加
 - **MEMORY.md / USER.md 已废弃** — 这两个文件已被 PROJECT.md（用户层）取代，代码中不得再引用或加载这两个文件名
 - **TOOLS.md.template** — 工具使用指南，新增工具后应更新此文件
 - **ProjectContextCollector** — 自动收集项目信息，不要收集敏感信息（API Key、用户路径等）
-- **SKELETON.md** — 由代码索引功能生成，存放在 `Library/AgentCore/`，不提交 VCS，超过 token 预算时自动截断
 
 > 详细设计见 `plans/bootstrap-refactor-plan.md`。
 

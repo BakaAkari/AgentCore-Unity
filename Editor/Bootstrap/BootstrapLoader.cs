@@ -19,7 +19,6 @@ namespace AgentCore.Editor.Bootstrap
     /// 2. TOOLS.md — 工具使用指南（从模板生成）
     /// 3. PROJECT.md — 项目上下文（自动收集）
     /// 3+. PROJECT.md（用户） — 项目约定与个人偏好（用户可编辑，建议 VCS 提交）
-    /// 4. SKELETON.md — 代码库骨架（自动生成，可选，不提交 VCS）
     /// </summary>
     public class BootstrapLoader
     {
@@ -28,12 +27,6 @@ namespace AgentCore.Editor.Bootstrap
         /// </summary>
         private static readonly string ResourcesPath = Path.Combine(
             "Packages", "com.agentcore.unity", "Editor", "Bootstrap", "Resources");
-
-        /// <summary>
-        /// 代码骨架文件的路径（相对于 Unity 项目根目录）。
-        /// </summary>
-        private static readonly string SkeletonRelativePath = Path.Combine(
-            "Library", "AgentCore", "workspace-skeleton.md");
 
         /// <summary>
         /// 加载所有 Bootstrap Files 并返回上下文对象。
@@ -89,21 +82,13 @@ namespace AgentCore.Editor.Bootstrap
                 Debug.Log($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
             }
 
-            // 4. SKELETON.md — 代码库骨架（可选，来自代码索引功能）
-            context.Skeleton = LoadSkeletonFile();
-            if (!string.IsNullOrEmpty(context.Skeleton))
-            {
-                Debug.Log($"[AgentCore] Loaded SKELETON.md ({context.Skeleton.Length} chars)");
-            }
-
             var tokenEstimate = context.EstimateTokenCount();
             Debug.Log($"[AgentCore] Bootstrap loaded: ~{tokenEstimate} tokens " +
                       $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
                       $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
                       $"TOOLS={!string.IsNullOrEmpty(context.Tools)}, " +
                       $"PROJECT={!string.IsNullOrEmpty(context.Project)}, " +
-                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)}, " +
-                      $"SKELETON={!string.IsNullOrEmpty(context.Skeleton)})");
+                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)})");
 
             return context;
         }
@@ -385,31 +370,6 @@ namespace AgentCore.Editor.Bootstrap
             catch (Exception ex)
             {
                 Debug.LogWarning($"[AgentCore] Failed to load {fileName}: {ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// 加载代码库骨架文件（来自代码索引功能，可选）。
-        /// 文件路径：Library/AgentCore/workspace-skeleton.md（不提交 VCS）
-        /// </summary>
-        private string LoadSkeletonFile()
-        {
-            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
-            if (projectRoot == null) return null;
-
-            var skeletonPath = Path.Combine(projectRoot, SkeletonRelativePath);
-            if (!File.Exists(skeletonPath)) return null;
-
-            try
-            {
-                var content = File.ReadAllText(skeletonPath);
-                if (string.IsNullOrWhiteSpace(content)) return null;
-                return content;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[AgentCore] Failed to load skeleton file: {ex.Message}");
                 return null;
             }
         }

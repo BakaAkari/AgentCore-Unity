@@ -1,10 +1,10 @@
 # AgentCore 代码库索引功能 Phase 1 设计文档
 
-> **版本**: v1.3
+> **版本**: v1.4
 > **目标版本**: v0.9.1（依赖 v0.9.0 P0 Workspace 基础设施完成）
 > **制定日期**: 2026-06-02
 > **修订日期**: 2026-06-03
-> **状态**: v1.3 已按"完全本地化、放弃向量数据库"决策校准，待实现
+> **状态**: v1.4 已按"完全本地化单层架构、放弃骨架文档"决策校准，待实现
 > **对应 ROADMAP**: Phase 6 § 3.2 任务 6.2.1 + 6.2.2
 > **上游需求基准**: [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md)
 > **⚠️ 前置条件**: 本文档所有实现依赖 **v0.9.0 P0 Workspace 基础设施**完成。实现前请先阅读并确认 [`workspace-foundation-v0.9.0-p0-plan.md`](workspace-foundation-v0.9.0-p0-plan.md)。
@@ -13,15 +13,23 @@
 
 ## 0. 修订历史
 
+### v1.4 修订摘要（2026-06-03）
+
+基于用户确认的架构决策，对 v1.3 方案进行以下关键调整：
+
+1. **完全放弃骨架文档（Layer 0）**：`workspace-skeleton.md` 方案废弃，不生成、不注入 Bootstrap。原因：`search_code` 工具按需检索比静态骨架文档更精准、更省 token，骨架文档会随代码变化快速过时。
+2. **单层本地架构**：只保留 SQLite 符号索引（Layer 1）一层，去掉 Layer 0 骨架文档层。
+3. **Bootstrap 链简化**：Bootstrap 加载顺序从 `SOUL → TOOLS → PROJECT(auto) → PROJECT.md(user) → [SKELETON]` 简化为 `SOUL → TOOLS → PROJECT(auto) → PROJECT.md(user)`，`BootstrapContext.Skeleton` 属性和 `BootstrapLoader.LoadSkeletonFile()` 已从代码中删除。
+
 ### v1.3 修订摘要（2026-06-03）
 
 基于用户确认的架构决策，对 v1.2 方案进行以下关键调整：
 
 1. **完全放弃向量数据库**：移除 Phase 2 语义搜索规划，不引入任何向量数据库依赖（包括 LightRAG 代码索引用途）。
-2. **两层本地架构**：只保留 `.md` 骨架文档（Layer 0）+ SQLite 符号索引（Layer 1）两层。
-3. **骨架文档本地化**：`workspace-skeleton.md` 只在本地 `Library/AgentCore/` 保存，**不提交 VCS**，避免频繁更新和版本冲突。
-4. **骨架生成方式**：规则扫描自动生成（不调用 LLM），用户可在 Chat 中让 LLM 优化调整内容。
-5. **骨架内容定位**：高层架构概览（目录结构 + 关键类/模块说明 + Scope 归属），控制在几百行以内，适合注入 System Prompt。
+2. ~~**两层本地架构**~~：~~只保留 `.md` 骨架文档（Layer 0）+ SQLite 符号索引（Layer 1）两层。~~ → **已被 v1.4 进一步调整为单层架构（仅 Layer 1）**
+3. ~~**骨架文档本地化**~~：~~`workspace-skeleton.md` 只在本地 `Library/AgentCore/` 保存，**不提交 VCS**，避免频繁更新和版本冲突。~~ → **已废弃**
+4. ~~**骨架生成方式**~~：~~规则扫描自动生成（不调用 LLM），用户可在 Chat 中让 LLM 优化调整内容。~~ → **已废弃**
+5. ~~**骨架内容定位**~~：~~高层架构概览（目录结构 + 关键类/模块说明 + Scope 归属），控制在几百行以内，适合注入 System Prompt。~~ → **已废弃**
 6. **SQLite 索引本地化**：`codebase.db` 只在本地 `Library/AgentCore/Indexing/` 保存，**不提交 VCS**。
 
 ### v1.2 修订摘要（2026-06-02）
@@ -94,6 +102,7 @@ Phase 1 必做：
 
 Phase 1 暂不做：
 
+- ❌ **骨架文档 / workspace-skeleton.md（永久废弃）**：不生成骨架文档，不注入 Bootstrap。`search_code` 工具按需检索更优，骨架文档随代码变化快速过时。
 - ❌ **向量数据库 / 语义搜索（永久放弃）**：不引入任何向量数据库依赖，不做自然语言代码查询。LightRAG 仅用于文档知识库，不用于代码索引。
 - ❌ Roslyn Semantic Model 级别类型引用分析。
 - ❌ 完整依赖图构建。
@@ -103,7 +112,7 @@ Phase 1 暂不做：
 - ❌ 资源包插件深度绑定，仅预留 Adapter 接口读取元数据。
 - ❌ 自动修改商业插件、引擎代码或 Generated 代码。
 - ❌ 默认支持 WorkspaceRoot 外部的任意目录；如有例外必须显式授权。
-- ❌ 将 `workspace-skeleton.md` 或 `codebase.db` 提交到 VCS（所有索引文件只在本地 `Library/AgentCore/` 保存）。
+- ❌ 将 `codebase.db` 提交到 VCS（所有索引文件只在本地 `Library/AgentCore/` 保存）。
 
 ### 1.4 核心原则
 
@@ -209,24 +218,21 @@ D:/svn/project/branches/release-x/plugins/DOTween          -> Plugin:DOTween rea
 
 ## 3. 技术栈与依赖
 
-### 3.0 两层本地架构（v1.3 核心决策）
+### 3.0 单层本地架构（v1.4 核心决策）
 
-AgentCore 代码索引采用**完全本地化的两层架构**，零外部服务依赖：
+AgentCore 代码索引采用**完全本地化的单层架构**，零外部服务依赖：
 
 ```
-Layer 0: workspace-skeleton.md（项目骨架文档）
-  存储: {UnityRoot}/Library/AgentCore/workspace-skeleton.md
-  生成: 规则扫描自动生成，不调用 LLM
-  内容: 目录结构 + 关键类/模块说明 + Scope 归属，控制在几百行以内
-  用途: Bootstrap 注入 System Prompt，让 LLM 快速理解项目高层结构
-  更新: 用户手动触发 / 在 Chat 中让 LLM 优化调整
-  VCS:  不提交，只在本地保存
+~~Layer 0: workspace-skeleton.md（已废弃）~~
+  废弃原因: search_code 工具按需检索比静态骨架文档更精准、更省 token；
+            骨架文档随代码变化快速过时，维护成本高；
+            Bootstrap 注入静态文档会占用宝贵的 System Prompt token 预算。
 
 Layer 1: codebase.db（SQLite 符号索引）
   存储: {UnityRoot}/Library/AgentCore/Indexing/{workspaceHash}/codebase.db
   生成: Roslyn 语法解析，后台异步执行
   内容: 完整符号表（类、方法、字段、属性、命名空间）+ Scope/Role/Branch 元数据
-  用途: search_code 工具精确符号检索，支持多维过滤
+  用途: search_code 工具精确符号检索，支持多维过滤；Agent 按需查询，不占 System Prompt
   更新: 初始化时全量索引 + 文件变更后增量索引
   VCS:  不提交，只在本地保存
 ```
@@ -582,8 +588,8 @@ namespace AgentCore.Editor.Components.Indexing.Models
 |---|---|
 | `resolve_workspace` | 获取当前 WorkspaceRoot、UnityRoot、fingerprint、VCS、root 摘要 |
 | `list_roots` | 列出当前索引根目录和 Scope |
-| `generate_skeleton` | 规则扫描生成 workspace-skeleton.md，写入本地 Library/AgentCore/（不调用 LLM） |
-| `get_skeleton` | 读取当前骨架文档内容 |
+| ~~`generate_skeleton`~~ | ~~规则扫描生成 workspace-skeleton.md，写入本地 Library/AgentCore/（不调用 LLM）~~ **已废弃（v1.4）** |
+| ~~`get_skeleton`~~ | ~~读取当前骨架文档内容~~ **已废弃（v1.4）** |
 | `index_full` | 全量索引所有 enabled roots |
 | `index_scope` | 只索引指定 Scope 或 Root |
 | `index_incremental` | 增量索引 |
@@ -874,7 +880,7 @@ plans/ROADMAP.md
 | # | 任务 | 修订说明 | 状态 |
 |---|---|---|---|
 | 6.2.0 | WorkspaceRoot / UnityRoot / Scope 基础设施 | WorkspaceContext 数据模型 + Resolver + Settings 页面 | [ ] |
-| 6.2.0.1 | 项目骨架文档（workspace-skeleton.md） | 规则扫描生成，本地保存，Bootstrap 注入，**不提交 VCS** | [ ] |
+| ~~6.2.0.1~~ | ~~项目骨架文档（workspace-skeleton.md）~~ | ~~规则扫描生成，本地保存，Bootstrap 注入，**不提交 VCS**~~ → **已废弃（v1.4）**：骨架文档方案放弃，`search_code` 按需检索更优 | [DEPRECATED] |
 | 6.2.1 | 文件级索引 | SVN WorkspaceRoot + UnityRoot 分离 + Workspace 子 Root + Scope 建模 + C# 符号提取 + SQLite 本地存储 | [ ] |
 | 6.2.2 | 符号检索 | Scope/Root/Role/Branch 过滤 + 模糊匹配 + 正则搜索 | [ ] |
 | ~~6.2.3~~ | ~~语义搜索~~ | **已废弃**：放弃向量数据库，不做代码语义搜索 | [DEPRECATED] |
@@ -946,17 +952,28 @@ plans/ROADMAP.md
 
 ---
 
-## 16. 骨架文档（Layer 0）详细设计
+## ~~16. 骨架文档（Layer 0）详细设计~~（已废弃 — v1.4）
 
-### 16.1 生成目标
+> **⚠️ 本章节已废弃（v1.4 决策）**
+>
+> 骨架文档（`workspace-skeleton.md`）方案已永久放弃。原因：
+> - `search_code` 工具按需检索比静态骨架文档更精准、更省 token
+> - 骨架文档随代码变化快速过时，维护成本高
+> - 静态注入 Bootstrap 会占用固定 token 预算，即使内容不相关
+>
+> **替代方案**：Agent 通过 `search_code` 工具的 `search_symbol`、`get_file_symbols`、`list_namespaces` 等 action 按需检索代码符号。
+>
+> 以下内容仅作历史参考，**不得实现**。
 
-`workspace-skeleton.md` 是一份**高层架构概览文档**，面向 LLM 注入 System Prompt。
+### ~~16.1 生成目标~~
 
-设计约束：
-- 总行数控制在 **200–500 行**（超出时按优先级截断）
-- 纯规则扫描生成，**不调用 LLM**
-- 生成耗时目标 < 2 秒（大型项目 < 5 秒）
-- 用户可在 Chat 中让 LLM 优化内容，手动保存覆盖
+~~`workspace-skeleton.md` 是一份**高层架构概览文档**，面向 LLM 注入 System Prompt。~~
+
+~~设计约束：~~
+- ~~总行数控制在 **200–500 行**（超出时按优先级截断）~~
+- ~~纯规则扫描生成，**不调用 LLM**~~
+- ~~生成耗时目标 < 2 秒（大型项目 < 5 秒）~~
+- ~~用户可在 Chat 中让 LLM 优化内容，手动保存覆盖~~
 
 ### 16.2 输出文件格式
 
@@ -1174,14 +1191,14 @@ SOUL → TOOLS → PROJECT → [SKELETON] → MEMORY → USER
 - 骨架文档存在但过期：注入内容 + 末尾附注 `> ⚠️ 骨架文档已超过 24 小时，建议在 Chat 中运行 search_code generate_skeleton 更新`
 - 骨架文档不存在：注入单行提示 `> 项目骨架文档尚未生成。可运行 search_code generate_skeleton 生成。`
 
-### 16.6 `search_code` 新增 Action
+### ~~16.6 `search_code` 新增 Action~~（已废弃）
 
-在 §6.2 Actions 表中补充：
+~~在 §6.2 Actions 表中补充：~~
 
-| Action | 说明 |
+| ~~Action~~ | ~~说明~~ |
 |---|---|
-| `generate_skeleton` | 规则扫描生成 workspace-skeleton.md，写入本地 Library/AgentCore/ |
-| `get_skeleton` | 读取当前骨架文档内容 |
+| ~~`generate_skeleton`~~ | ~~规则扫描生成 workspace-skeleton.md，写入本地 Library/AgentCore/~~ **已废弃** |
+| ~~`get_skeleton`~~ | ~~读取当前骨架文档内容~~ **已废弃** |
 
 ---
 
@@ -1364,9 +1381,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
 - **决策 4**：数据库按 workspace fingerprint 隔离。
 - **决策 5**：Phase 1 不深度解析美术资产、文案表和 Unity 资产引用。
 - **决策 6**：多 VCS Root 不作为 v0.9.0 默认基线；仅保留 Extra Authorized Root / future extension 设计余量。
-- **决策 7（v1.3 新增）**：**完全放弃向量数据库**。代码索引只使用两层本地架构：`.md` 骨架文档（Layer 0）+ SQLite 符号索引（Layer 1）。LightRAG 仅保留用于文档知识库，不用于代码索引。
-- **决策 8（v1.3 新增）**：**所有索引文件只在本地保存，不提交 VCS**。`workspace-skeleton.md` 和 `codebase.db` 均存储在 `Library/AgentCore/` 下，Unity 默认已将 `Library/` 排除在 VCS 之外。
-- **决策 9（v1.3 新增）**：**骨架文档由规则扫描自动生成，不调用 LLM**。用户可在 Chat 中让 LLM 优化调整骨架内容，骨架控制在几百行以内，适合注入 System Prompt。
+- **决策 7（v1.3 新增，v1.4 修订）**：**完全放弃向量数据库**。代码索引只使用单层本地架构：SQLite 符号索引（Layer 1）。~~`.md` 骨架文档（Layer 0）已废弃（v1.4）~~。LightRAG 仅保留用于文档知识库，不用于代码索引。
+- **决策 8（v1.3 新增，v1.4 修订）**：**所有索引文件只在本地保存，不提交 VCS**。~~`workspace-skeleton.md` 和~~ `codebase.db` 存储在 `Library/AgentCore/` 下，Unity 默认已将 `Library/` 排除在 VCS 之外。
+- ~~**决策 9（v1.3 新增）**：**骨架文档由规则扫描自动生成，不调用 LLM**。用户可在 Chat 中让 LLM 优化调整骨架内容，骨架控制在几百行以内，适合注入 System Prompt。~~ → **已废弃（v1.4）**：骨架文档方案整体放弃，`search_code` 按需检索替代。
 
 ---
 

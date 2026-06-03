@@ -62,7 +62,7 @@
 | **版本** | 0.8.2 (2026-06-03) |
 | **工具数量** | 以 `ToolAutoDiscovery` 当前已编译程序集发现结果为准；VCS 工具默认不编译，启用 `AGENTCORE_VCS` 后注册 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
-| **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) → [SKELETON] — 已重构，MEMORY.md/USER.md 已移除 |
+| **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已重构，MEMORY.md/USER.md/SKELETON.md 已移除 |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md；SOUL.md §13 定义主动读写时机 |
 | **UI 框架** | UI Toolkit 动态 Hub 架构 (Chat/Knowledge/Memory + 可选组件 contribution)；Project Settings 使用 Dashboard + 4 Pages 顶部 Tab 导航 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
@@ -193,12 +193,12 @@ v0.4.7 — 文档状态校准（plans/ 全量审计 + ROADMAP 修正 + ADR-3）
 >
 > **⚠️ 前置条件**: 6.2.1 及后续任务依赖 **6.2.0 WorkspaceRoot / UnityRoot / Scope 基础设施**完成。详见 [`workspace-foundation-v0.9.0-p0-plan.md`](workspace-foundation-v0.9.0-p0-plan.md)。
 >
-> **架构决策（v1.3）**: 采用**完全本地化两层架构**，放弃向量数据库。Layer 0：`.md` 骨架文档（规则扫描生成，本地保存，Bootstrap 注入）；Layer 1：SQLite 符号索引（Roslyn 解析，后台异步，本地保存）。所有索引文件存储在 `Library/AgentCore/` 下，**不提交 VCS**。
+> **架构决策（v1.4）**: 采用**完全本地化单层架构**，放弃向量数据库，放弃骨架文档。Layer 1：SQLite 符号索引（Roslyn 解析，后台异步，本地保存）。所有索引文件存储在 `Library/AgentCore/` 下，**不提交 VCS**。`search_code` 工具提供精确符号检索，替代骨架文档注入方式。
 
 | # | 任务 | 说明 | 关联计划 | 状态 |
 |---|------|------|---------|------|
-| 6.2.0 | **WorkspaceRoot / UnityRoot / Scope 基础设施（P0）** | 建立 WorkspaceContext 数据模型、WorkspaceRootResolver、UnityRootResolver、ScopeRootResolver、RolePolicyResolver、SvnWorkspaceInfoResolver、WorkspaceFingerprintBuilder、WorkspaceContextService、WorkspaceConfigStorage 与 WorkspaceSettingsPage；作为 6.2.0.1+ 的前置条件 | Workspace-P0 | [ ] |
-| 6.2.0.1 | **项目骨架文档（Layer 0）** | 规则扫描生成 `Library/AgentCore/workspace-skeleton.md`；**本地保存，不提交 VCS**；Bootstrap 注入 System Prompt；用户可在 Chat 中让 LLM 优化调整内容；控制在几百行以内 | Workspace-P1 | [ ] |
+| 6.2.0 | **WorkspaceRoot / UnityRoot / Scope 基础设施（P0）** | 建立 WorkspaceContext 数据模型、WorkspaceRootResolver、UnityRootResolver、ScopeRootResolver、RolePolicyResolver、SvnWorkspaceInfoResolver、WorkspaceFingerprintBuilder、WorkspaceContextService、WorkspaceConfigStorage 与 WorkspaceSettingsPage；作为 6.2.1+ 的前置条件 | Workspace-P0 | [ ] |
+| ~~6.2.0.1~~ | ~~**项目骨架文档（Layer 0）**~~ | **已废弃（2026-06-03）**：骨架文档方案放弃，不生成 `workspace-skeleton.md`，不注入 Bootstrap。Agent 通过 `search_code` 工具按需检索符号，比静态骨架文档更精准、更省 token。 | ~~Workspace-P1~~ | [DEPRECATED] |
 | 6.2.1 | **文件级索引（Layer 1）** | 使用 Roslyn 解析 WorkspaceRoot 下启用的 Scope Root C# 文件，提取类名、命名空间、方法签名；存储到 SQLite 本地后端；**不提交 VCS** | Codebase-1 | [ ] |
 | 6.2.2 | **符号检索** | 支持按类名、方法名、字段名搜索；支持 Scope/Root/Role/Branch 过滤、模糊匹配和正则表达式 | Codebase-2 | [ ] |
 | ~~6.2.3~~ | ~~**语义搜索**~~ | **已废弃**：放弃向量数据库，不做代码语义搜索。LightRAG 仅保留用于文档知识库 | ~~Codebase-3~~ | [DEPRECATED] |
@@ -234,8 +234,7 @@ v0.6.0 — VCS 可选组件化（Optional Components + 动态 Hub/Settings contr
 v0.6.1 — Settings 页面架构重构（Settings shell + section registry + Provider 业务逻辑清理）[DONE]
 v0.7.0 — Settings UI 重构为 Dashboard + 4 Pages（顶部 Tab 导航，VCS 独立卡片，Maintenance 操作）[DONE]
 v0.9.0 — WorkspaceRoot / UnityRoot / Scope 基础设施 P0（WorkspaceContext + Resolver + Settings 页面，详见 workspace-foundation-v0.9.0-p0-plan.md）
-v0.9.0-P1 — 项目骨架文档 Layer 0（规则扫描生成 Library/AgentCore/workspace-skeleton.md，本地保存不提交 VCS，Bootstrap 注入 System Prompt）
-v0.9.1 — 代码库索引 Phase 1（文件级索引 + 符号检索，SQLite 本地存储，依赖 v0.9.0 WorkspaceContext）
+v0.9.1 — 代码库索引 Phase 1（文件级索引 + 符号检索，SQLite 本地存储，依赖 v0.9.0 WorkspaceContext；骨架文档已废弃）
 v0.9.2 — 代码库索引 Phase 2（依赖图构建；语义搜索已废弃）
 v0.6.4 — 规则系统与智能推荐（.agentcore/rules.md + SmartToolRecommender + 响应式建议）
 v0.6.5 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
@@ -250,14 +249,14 @@ v0.6.5 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
 - v0.7.0 → Settings UI 从左侧 11 Section 导航改为 Dashboard + 4 Pages 顶部 Tab，VCS 设置提升为独立卡片
 - v0.6.2+ → 原计划顺延
 - ~~6.2.3 语义搜索~~ → **废弃（2026-06-03）**：放弃向量数据库依赖，代码索引采用完全本地化两层架构（.md 骨架 + SQLite），不做代码语义搜索；LightRAG 仅保留用于文档知识库
-- 6.2.0.1 骨架文档 → **调整（2026-06-03）**：本地保存不提交 VCS，规则扫描自动生成，用户可在 Chat 中让 LLM 优化
+- 6.2.0.1 骨架文档 → **废弃（2026-06-03）**：骨架文档方案完全放弃，不生成 `workspace-skeleton.md`，不注入 Bootstrap；Agent 通过 `search_code` 工具按需检索符号，比静态骨架文档更精准、更省 token
 
 ### 3.6 技术栈选型（基于竞品分析）
 
 | 模块 | 推荐技术 | 理由 | 替代方案 |
 |------|---------|------|---------|
 | **AST 解析** | Roslyn (Microsoft.CodeAnalysis) | C# 官方编译器 API，Unity 已内置 | 手动正则解析（不推荐） |
-| **骨架文档** | 规则扫描生成 `.md` | 零依赖、本地生成、适合注入 System Prompt、不提交 VCS | LLM 生成（用户可在 Chat 中手动优化） |
+| ~~**骨架文档**~~ | ~~规则扫描生成 `.md`~~ | **已废弃**：骨架文档方案放弃，`search_code` 工具按需检索更优 | — |
 | **本地索引** | SQLite (System.Data.SQLite) | 轻量、零配置、完全离线、不提交 VCS | JSONL 降级方案（SQLite DLL 加载失败时） |
 | **向量数据库** | ~~代码索引用途已废弃~~ | 代码索引采用完全本地化两层架构，不引入向量数据库；LightRAG 仅保留用于文档知识库 | — |
 | **上下文压缩** | LLM 摘要 (Claude Haiku) | 成本低、速度快、质量高 | 规则压缩（效果差） |

@@ -12,7 +12,6 @@ namespace AgentCore.Editor.Bootstrap
     /// 2. TOOLS.md — 工具使用指南（自动生成）
     /// 3. PROJECT.md — 项目上下文（自动收集）
     /// 3+. Workspace — PROJECT.md 用户内容（用户可编辑，建议 VCS 提交）
-    /// 4. SKELETON.md — 代码库骨架（自动生成，可选，来自代码索引功能）
     /// </summary>
     public class BootstrapContext
     {
@@ -43,14 +42,8 @@ namespace AgentCore.Editor.Bootstrap
         public string Workspace { get; set; }
 
         /// <summary>
-        /// SKELETON.md — 代码库骨架（自动生成，可选，来自代码索引功能）
-        /// 存放于 Library/AgentCore/workspace-skeleton.md，不提交 VCS
-        /// </summary>
-        public string Skeleton { get; set; }
-
-        /// <summary>
         /// 将所有 Bootstrap 内容编译为单一 System Prompt 字符串。
-        /// 加载顺序：SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) → [SKELETON]
+        /// 加载顺序：SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user)
         /// </summary>
         public string CompileSystemPrompt()
         {
@@ -90,14 +83,6 @@ namespace AgentCore.Editor.Bootstrap
                 sb.AppendLine("\n---\n");
                 sb.AppendLine("## 项目配置（来自 PROJECT.md）\n");
                 sb.AppendLine(Workspace);
-            }
-
-            // 4. SKELETON — 代码库骨架（可选）
-            if (!string.IsNullOrEmpty(Skeleton))
-            {
-                sb.AppendLine("\n---\n");
-                sb.AppendLine("## 代码库骨架（自动生成）\n");
-                sb.AppendLine(Skeleton);
             }
 
             return sb.ToString();
