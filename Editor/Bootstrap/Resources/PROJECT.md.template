@@ -1,0 +1,35 @@
+# AgentCore Project Configuration
+<!--
+  此文件由 AgentCore 生成，供团队维护。
+  建议提交到 VCS（Git/SVN/Perforce）以便团队共享。
+
+  个人偏好（Personal Preferences section）可选择不提交：
+  在 .gitignore / .p4ignore / svn:ignore 中排除此文件，
+  或仅将 Project Conventions section 的内容提交。
+-->
+
+## Project Conventions
+<!--
+  团队约定：命名规范、架构决策、禁止事项、工作流程等。
+  这里的内容会注入到每次对话的 System Prompt 中。
+
+  示例：
+  - 本项目使用 Mirror 网络框架，禁止使用 UNET
+  - 资源管理使用 Addressables，禁止使用 Resources.Load
+  - 命名规范：类名 PascalCase，私有字段 _camelCase
+  - 场景命名：{功能}Scene，如 MainMenuScene、GameplayScene
+-->
+
+
+## Personal Preferences
+<!--
+  个人偏好：回复语言、代码风格偏好、工作习惯等。
+  建议不提交到 VCS（在 .gitignore 中排除此 section 或整个文件）。
+
+  示例：
+  - 请用中文回复，技术术语保留英文原文
+  - 代码注释使用中文
+  - 每次修改前先展示 diff，确认后再执行
+  - 优先使用现有代码模式，不要引入新的依赖
+-->
+

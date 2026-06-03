@@ -11,8 +11,9 @@
 | 文档 | 用途 | 状态 |
 |------|------|------|
 | [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6-7 的开发路线图和任务清单 |  活跃维护；已按 SVN WorkspaceRoot 基准校准 |
+| [**workspace-foundation-v0.9.0-p0-plan.md**](workspace-foundation-v0.9.0-p0-plan.md) | **v0.9.0 P0 Workspace 基础设施实施计划** — WorkspaceContext / WorkspaceRootResolver / ScopeRootResolver / WorkspaceSettingsPage 等前置基础设施 |  **当前最高优先级**；6.2.1 代码索引的前置条件 |
 | [**enterprise-unity-workflow-requirements.md**](enterprise-unity-workflow-requirements.md) | **企业级 Unity 项目适配需求基准** — 记录大规模地图/模式/资源包/SVN 分线工作流 |  当前企业适配上游依据 |
-| [**codebase-indexing-phase1-plan.md**](codebase-indexing-phase1-plan.md) | **v0.9.0 代码索引 Phase 1 设计** — 文件级索引 + 符号检索，本地 SQLite，不依赖外部服务 |  已按 SVN WorkspaceRoot / UnityRoot / Scope Root 校准，待确认 |
+| [**codebase-indexing-phase1-plan.md**](codebase-indexing-phase1-plan.md) | **v0.9.0 代码索引 Phase 1 设计** — 文件级索引 + 符号检索，本地 SQLite，不依赖外部服务 |  已按 SVN WorkspaceRoot / UnityRoot / Scope Root 校准；依赖 workspace-foundation 完成 |
 | [**enterprise-agentcore-implementation-audit.md**](enterprise-agentcore-implementation-audit.md) | **现有实现企业适配审计** — 对照 SVN WorkspaceRoot 模型识别 VCS、RAG、Memory、工具边界缺口 |  当前改造依据 |
 | [**ARCHITECTURE.md**](ARCHITECTURE.md) | **系统架构总览** — 核心设计决策、架构图、模块职责 |  架构参考；其中标准 Unity 项目示例需按企业基准解释 |
 | [**ai-coding-assistants-analysis.md**](ai-coding-assistants-analysis.md) | AI 编码助手生态分析 — Cursor/Cline/Windsurf 等工具对比 |  参考文档；其中 `Assets/` 示例不作为当前企业基准 |

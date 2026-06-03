@@ -1,18 +1,32 @@
 # AgentCore 代码库索引功能 Phase 1 设计文档
 
-> **版本**: v1.2
-> **目标版本**: v0.9.0
+> **版本**: v1.3
+> **目标版本**: v0.9.1（依赖 v0.9.0 P0 Workspace 基础设施完成）
 > **制定日期**: 2026-06-02
-> **修订日期**: 2026-06-02
-> **状态**: 已按“SVN 工作副本根 = AgentCore WorkspaceRoot”校准，待用户确认
+> **修订日期**: 2026-06-03
+> **状态**: v1.3 已按"完全本地化、放弃向量数据库"决策校准，待实现
 > **对应 ROADMAP**: Phase 6 § 3.2 任务 6.2.1 + 6.2.2
 > **上游需求基准**: [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md)
+> **⚠️ 前置条件**: 本文档所有实现依赖 **v0.9.0 P0 Workspace 基础设施**完成。实现前请先阅读并确认 [`workspace-foundation-v0.9.0-p0-plan.md`](workspace-foundation-v0.9.0-p0-plan.md)。
 
 ---
 
-## 0. v1.2 修订摘要
+## 0. 修订历史
 
-v1.1 方案已经从标准 Unity `Assets/` 索引升级为 Workspace-aware 索引，但仍存在一个容易误导实现的表述：把地图/模式资源称为“外部 Root”或“独立资源包工作副本”。根据最新确认，目标项目的基线结构应修正为：
+### v1.3 修订摘要（2026-06-03）
+
+基于用户确认的架构决策，对 v1.2 方案进行以下关键调整：
+
+1. **完全放弃向量数据库**：移除 Phase 2 语义搜索规划，不引入任何向量数据库依赖（包括 LightRAG 代码索引用途）。
+2. **两层本地架构**：只保留 `.md` 骨架文档（Layer 0）+ SQLite 符号索引（Layer 1）两层。
+3. **骨架文档本地化**：`workspace-skeleton.md` 只在本地 `Library/AgentCore/` 保存，**不提交 VCS**，避免频繁更新和版本冲突。
+4. **骨架生成方式**：规则扫描自动生成（不调用 LLM），用户可在 Chat 中让 LLM 优化调整内容。
+5. **骨架内容定位**：高层架构概览（目录结构 + 关键类/模块说明 + Scope 归属），控制在几百行以内，适合注入 System Prompt。
+6. **SQLite 索引本地化**：`codebase.db` 只在本地 `Library/AgentCore/Indexing/` 保存，**不提交 VCS**。
+
+### v1.2 修订摘要（2026-06-02）
+
+v1.1 方案已经从标准 Unity `Assets/` 索引升级为 Workspace-aware 索引，但仍存在一个容易误导实现的表述：把地图/模式资源称为"外部 Root"或"独立资源包工作副本"。根据最新确认，目标项目的基线结构应修正为：
 
 > **AgentCore WorkspaceRoot = SVN 分线工作副本根；UnityRoot = WorkspaceRoot 下的 Unity 工程子目录；地图、模式、工具、资源、插件等目录是 WorkspaceRoot 内的子 Root / Scope Root。**
 
@@ -37,7 +51,7 @@ v1.2 的关键修订：
 
 1. 将 **Workspace** 明确定义为 SVN 工作副本根，而不是 Unity 项目根或任意多外部目录集合。
 2. 新增 **UnityRoot** 概念，用于 Unity Editor / AssetDatabase / Scene / Prefab / BuildSettings 能力。
-3. 将“外部资源包 Root”统一改为 **Workspace 子 Root / Scope Root**；它们通常位于同一个 SVN WorkspaceRoot 内，只是不在 Unity `Assets/` 内。
+3. 将"外部资源包 Root"统一改为 **Workspace 子 Root / Scope Root**；它们通常位于同一个 SVN WorkspaceRoot 内，只是不在 Unity `Assets/` 内。
 4. VCS 设计以识别 SVN WorkspaceRoot 为 P0；多 VCS Root 仅作为未来扩展或例外情况。
 5. Workspace Fingerprint 主要由 WorkspaceRoot、SVN URL/revision、UnityRoot 相对路径、启用的 Scope Root 和配置版本决定。
 6. 资源包系统 Adapter 的定位调整为提供 Scope/Role/Package 元数据，而不是默认提供任意外部根目录。
@@ -58,7 +72,7 @@ v1.2 的关键修订：
 - 使用 SQLite 本地存储索引数据。
 - 支持按符号名称、类型、命名空间、Scope、Root、Role 搜索。
 - 避免不同 SVN 分线、不同 WorkspaceRoot、不同 Scope 配置之间的索引污染。
-- 为后续语义搜索、依赖图、资源引用分析、地图/模式影响范围分析打基础。
+- 为后续依赖图、资源引用分析、地图/模式影响范围分析打基础。
 
 ### 1.2 本阶段做什么
 
@@ -80,7 +94,7 @@ Phase 1 必做：
 
 Phase 1 暂不做：
 
-- ❌ LightRAG 语义搜索。
+- ❌ **向量数据库 / 语义搜索（永久放弃）**：不引入任何向量数据库依赖，不做自然语言代码查询。LightRAG 仅用于文档知识库，不用于代码索引。
 - ❌ Roslyn Semantic Model 级别类型引用分析。
 - ❌ 完整依赖图构建。
 - ❌ Scene / Prefab / Addressables / AssetBundle 深度引用分析。
@@ -89,6 +103,7 @@ Phase 1 暂不做：
 - ❌ 资源包插件深度绑定，仅预留 Adapter 接口读取元数据。
 - ❌ 自动修改商业插件、引擎代码或 Generated 代码。
 - ❌ 默认支持 WorkspaceRoot 外部的任意目录；如有例外必须显式授权。
+- ❌ 将 `workspace-skeleton.md` 或 `codebase.db` 提交到 VCS（所有索引文件只在本地 `Library/AgentCore/` 保存）。
 
 ### 1.4 核心原则
 
@@ -98,7 +113,7 @@ Phase 1 暂不做：
 4. **符号不是业务归属**：找到一个类不够，还要知道它属于地图、模式、公共模块、插件还是引擎。
 5. **搜索默认安全保守**：商业插件、引擎、生成代码可以查，但默认降权或只读标记。
 6. **不绑死业务插件**：AgentCore 提供 Adapter 接口，项目方可接入资源包系统以补充元数据。
-7. **先建拓扑，再做语义**：v0.9.0 重点是 WorkspaceRoot / UnityRoot / Scope / Root 建模，而不是直接追求大而全语义搜索。
+7. **先建拓扑，再扩展**：v0.9.0 重点是 WorkspaceRoot / UnityRoot / Scope / Root 建模，为依赖图、影响范围分析等后续能力打基础。
 
 ---
 
@@ -194,19 +209,47 @@ D:/svn/project/branches/release-x/plugins/DOTween          -> Plugin:DOTween rea
 
 ## 3. 技术栈与依赖
 
+### 3.0 两层本地架构（v1.3 核心决策）
+
+AgentCore 代码索引采用**完全本地化的两层架构**，零外部服务依赖：
+
+```
+Layer 0: workspace-skeleton.md（项目骨架文档）
+  存储: {UnityRoot}/Library/AgentCore/workspace-skeleton.md
+  生成: 规则扫描自动生成，不调用 LLM
+  内容: 目录结构 + 关键类/模块说明 + Scope 归属，控制在几百行以内
+  用途: Bootstrap 注入 System Prompt，让 LLM 快速理解项目高层结构
+  更新: 用户手动触发 / 在 Chat 中让 LLM 优化调整
+  VCS:  不提交，只在本地保存
+
+Layer 1: codebase.db（SQLite 符号索引）
+  存储: {UnityRoot}/Library/AgentCore/Indexing/{workspaceHash}/codebase.db
+  生成: Roslyn 语法解析，后台异步执行
+  内容: 完整符号表（类、方法、字段、属性、命名空间）+ Scope/Role/Branch 元数据
+  用途: search_code 工具精确符号检索，支持多维过滤
+  更新: 初始化时全量索引 + 文件变更后增量索引
+  VCS:  不提交，只在本地保存
+```
+
+> **⚠️ 重要约束**：`Library/AgentCore/` 目录下所有文件均不提交 VCS。
+> 需在 `.gitignore` / `.svnignore` / `.p4ignore` 中添加 `Library/AgentCore/` 排除规则。
+> Unity 默认已将整个 `Library/` 目录排除在 VCS 之外，通常无需额外配置。
+
 ### 3.1 核心技术选型
 
 | 模块 | 技术 | 引入方式 | 备注 |
 |---|---|---|---|
 | C# 解析 | Microsoft.CodeAnalysis.CSharp | 预编译 DLL 或 Unity 可用 Roslyn | 用于语法级符号提取 |
-| 本地数据库 | SQLite | 预编译 DLL 或可替代轻量存储 | v1.2 仍建议 SQLite，但实现前需确认 Unity 跨平台兼容 |
+| 本地数据库 | SQLite | 预编译 DLL 或可替代轻量存储 | 首选 SQLite，实现前需确认 Unity 跨平台兼容 |
+| 骨架文档 | System.IO + 规则扫描 | 内置 | 纯文本生成，零依赖 |
 | 文件扫描 | System.IO | 内置 | 支持 WorkspaceRoot 下多子 Root 与排除规则 |
 | VCS 信息 | 复用/扩展 VCS 组件能力 | 可选组件交互 | 当前 VCS 检测需从 UnityRoot 提升到 SVN WorkspaceRoot |
 | 配置 | AgentCoreSettings + JSON 扩展配置 | 内置 | WorkspaceRoot、UnityRoot、Scope Root 规则建议独立 JSON 保存 |
+| ~~向量数据库~~ | ~~已放弃~~ | — | **永久放弃，不引入任何向量数据库依赖** |
 
 ### 3.2 依赖风险修订
 
-v1.0 直接假设引入 `System.Data.SQLite`。v1.2 修订为：
+v1.0 直接假设引入 `System.Data.SQLite`。v1.3 修订为：
 
 - SQLite 仍是首选。
 - 实现前必须验证 Unity 2021.3+、Windows/macOS 下 DLL 加载方式。
@@ -225,7 +268,7 @@ v1.0 直接假设引入 `System.Data.SQLite`。v1.2 修订为：
 
 ---
 
-## 4. 数据库设计 v1.2
+## 4. 数据库设计 v1.3
 
 ### 4.1 数据库路径
 
@@ -370,7 +413,7 @@ CREATE INDEX IF NOT EXISTS idx_roots_workspace_scope ON index_roots(workspace_id
 
 ---
 
-## 5. 核心类设计 v1.2
+## 5. 核心类设计 v1.3
 
 ### 5.1 目录结构
 
@@ -524,7 +567,7 @@ namespace AgentCore.Editor.Components.Indexing.Models
 
 ---
 
-## 6. search_code 工具 API v1.2
+## 6. search_code 工具 API v1.3
 
 ### 6.1 工具元信息
 
@@ -539,6 +582,8 @@ namespace AgentCore.Editor.Components.Indexing.Models
 |---|---|
 | `resolve_workspace` | 获取当前 WorkspaceRoot、UnityRoot、fingerprint、VCS、root 摘要 |
 | `list_roots` | 列出当前索引根目录和 Scope |
+| `generate_skeleton` | 规则扫描生成 workspace-skeleton.md，写入本地 Library/AgentCore/（不调用 LLM） |
+| `get_skeleton` | 读取当前骨架文档内容 |
 | `index_full` | 全量索引所有 enabled roots |
 | `index_scope` | 只索引指定 Scope 或 Root |
 | `index_incremental` | 增量索引 |
@@ -611,7 +656,7 @@ namespace AgentCore.Editor.Components.Indexing.Models
 
 ---
 
-## 7. Settings 设计 v1.2
+## 7. Settings 设计 v1.3
 
 ### 7.1 基础配置
 
@@ -693,7 +738,7 @@ graph TD
 
 ## 9. 主要隐患与缓解措施
 
-| 隐患 | 影响 | v1.2 缓解 |
+| 隐患 | 影响 | v1.3 缓解 |
 |---|---|---|
 | 硬编码 `Assets/` 导致漏扫 | WorkspaceRoot 下地图/模式/工具目录不可见 | SVN WorkspaceRoot Provider + Workspace Child Root Provider |
 | 把 UnityRoot 误当 WorkspaceRoot | 文件/RAG/VCS 仍只能看到 Unity 工程子目录 | 强制建模 WorkspaceRoot 与 UnityRoot |
@@ -732,7 +777,7 @@ graph TD
 3. 自动分析资源包依赖关系。
 4. Prefab / Scene / Addressables 引用图。
 5. 文案表或配置表业务解析。
-6. 语义搜索。
+6. ~~语义搜索（已永久放弃，不引入向量数据库）~~。
 7. 自动代码审查或影响范围分析。
 8. WorkspaceRoot 外部任意目录支持。
 
@@ -749,6 +794,9 @@ Editor/Indexing/Core/IndexWorkspaceResolver.cs
 Editor/Indexing/Core/UnityRootResolver.cs
 Editor/Indexing/Core/IndexRootResolver.cs
 Editor/Indexing/Core/RoslynSymbolExtractor.cs
+Editor/Indexing/Core/IIndexStore.cs
+Editor/Indexing/Core/SqliteIndexStore.cs
+Editor/Indexing/Core/JsonlIndexStore.cs
 Editor/Indexing/Core/IndexingDatabase.cs
 Editor/Indexing/Core/IndexingProgress.cs
 Editor/Indexing/Core/WorkspaceFingerprintBuilder.cs
@@ -768,6 +816,9 @@ Editor/Indexing/Models/IndexRootRole.cs
 Editor/Indexing/Models/IndexedFile.cs
 Editor/Indexing/Models/SymbolInfo.cs
 Editor/Indexing/Models/IndexingStats.cs
+Editor/Indexing/Skeleton/SkeletonGenerator.cs
+Editor/Indexing/Skeleton/SkeletonSection.cs
+Editor/Indexing/Skeleton/SkeletonBootstrapInjector.cs
 Editor/Indexing/Tools/SearchCodeTool.cs
 Editor/Indexing/UI/IndexingSettingsContribution.cs
 Editor/Indexing/Config/IndexingSettingsData.cs
@@ -818,18 +869,20 @@ plans/ROADMAP.md
 
 ## 13. ROADMAP 更新建议
 
-将 Phase 6 § 3.2 从原始任务描述扩展为：
+将 Phase 6 § 3.2 从原始任务描述更新为（v1.3 调整后）：
 
 | # | 任务 | 修订说明 | 状态 |
 |---|---|---|---|
-| 6.2.1 | 文件级索引 | SVN WorkspaceRoot + UnityRoot 分离 + Workspace 子 Root + Scope 建模 + C# 符号提取 | [>] |
-| 6.2.2 | 符号检索 | Scope/Root/Role/Branch 过滤 + 模糊匹配 + 正则搜索 | [>] |
-| 6.2.3 | 语义搜索 | LightRAG 代码片段嵌入，基于 Scope 限定语义检索 | [ ] |
-| 6.2.4 | 依赖图构建 | 类型引用、asmdef、资源包、地图/模式依赖、Unity 资产引用 | [ ] |
+| 6.2.0 | WorkspaceRoot / UnityRoot / Scope 基础设施 | WorkspaceContext 数据模型 + Resolver + Settings 页面 | [ ] |
+| 6.2.0.1 | 项目骨架文档（workspace-skeleton.md） | 规则扫描生成，本地保存，Bootstrap 注入，**不提交 VCS** | [ ] |
+| 6.2.1 | 文件级索引 | SVN WorkspaceRoot + UnityRoot 分离 + Workspace 子 Root + Scope 建模 + C# 符号提取 + SQLite 本地存储 | [ ] |
+| 6.2.2 | 符号检索 | Scope/Root/Role/Branch 过滤 + 模糊匹配 + 正则搜索 | [ ] |
+| ~~6.2.3~~ | ~~语义搜索~~ | **已废弃**：放弃向量数据库，不做代码语义搜索 | [DEPRECATED] |
+| 6.2.3（调整后） | 依赖图构建 | 类型引用、asmdef、资源包、地图/模式依赖、Unity 资产引用 | [ ] |
 
 ---
 
-## 14. 验收标准 v1.2
+## 14. 验收标准 v1.3
 
 ### Round 1：UnityRoot Happy Path
 
@@ -878,13 +931,13 @@ plans/ROADMAP.md
 - 自动获取 WorkspaceRoot 下已同步/启用资源包路径、类型、地图/模式归属、版本和 SVN 信息。
 - 根据资源包 manifest 自动补充 Scope 和 Root 元数据。
 
-### Phase 2：语义搜索
+### ~~Phase 2：语义搜索~~（已废弃）
 
-- 将代码片段按 Scope 写入 LightRAG。
-- 支持自然语言查询。
-- 支持限定当前地图/模式或资源包语义搜索。
+> **废弃原因（v1.3 决策）**：放弃向量数据库依赖，不引入任何本地或云端向量索引用于代码搜索。
+> LightRAG 仅保留用于文档知识库（`manage_knowledge` 工具），不用于代码索引。
+> 代码搜索能力由 SQLite 精确符号检索（Layer 1）覆盖，不做自然语言代码查询。
 
-### Phase 3：依赖与资源引用
+### Phase 2（调整后）：依赖与资源引用
 
 - Roslyn Semantic Model 分析类型引用。
 - asmdef 边界分析。
@@ -893,7 +946,402 @@ plans/ROADMAP.md
 
 ---
 
-## 16. 当前待确认问题
+## 16. 骨架文档（Layer 0）详细设计
+
+### 16.1 生成目标
+
+`workspace-skeleton.md` 是一份**高层架构概览文档**，面向 LLM 注入 System Prompt。
+
+设计约束：
+- 总行数控制在 **200–500 行**（超出时按优先级截断）
+- 纯规则扫描生成，**不调用 LLM**
+- 生成耗时目标 < 2 秒（大型项目 < 5 秒）
+- 用户可在 Chat 中让 LLM 优化内容，手动保存覆盖
+
+### 16.2 输出文件格式
+
+骨架文档由以下四个 Section 组成：
+
+**Section 1 — 文件头**
+
+```
+# 项目骨架文档
+> 生成时间: 2026-06-03 10:00:00
+> WorkspaceRoot: D:/svn/project/branches/release-x
+> UnityRoot: D:/svn/project/branches/release-x/unity
+> SVN Branch: svn://repo/game/branches/release-x
+> 生成方式: 规则扫描（非 LLM）| 可在 Chat 中让 AI 优化此文件
+```
+
+**Section 2 — 工作区目录结构**
+
+```
+## 工作区结构
+
+WorkspaceRoot/
+├── unity/                    [UnityRoot] Unity 工程主体
+│   ├── Assets/Scripts/       [Project] 主项目代码
+│   ├── Assets/Plugins/       [Plugin] 第三方插件（只读）
+│   └── Packages/             [Package] UPM 包
+├── gamemodes/                [Mode] 玩法模式目录
+│   ├── Battle/               [Mode:Battle]
+│   └── Survival/             [Mode:Survival]
+├── maps/                     [Map] 地图目录
+│   ├── City01/               [Map:City01]
+│   └── Desert02/             [Map:Desert02]
+├── ui/                       [UI] UI 代码
+├── shared/                   [Shared] 公共基础逻辑
+├── tools/                    [Tools] 内部工具
+└── plugins/                  [Plugin] 商业插件（只读）
+```
+
+**Section 3 — Scope 归属表**
+
+```
+## Scope 归属
+
+| Scope | 路径（相对 WorkspaceRoot） | 类型 | 只读 |
+|-------|--------------------------|------|------|
+| Project | unity/Assets/Scripts | Project | 否 |
+| Battle | gamemodes/Battle | Mode | 否 |
+| Survival | gamemodes/Survival | Mode | 否 |
+| City01 | maps/City01 | Map | 否 |
+| UICommon | ui/Common | UI | 否 |
+| Shared | shared | Shared | 否 |
+| Tools | tools | Tools | 否 |
+| DOTween | plugins/DOTween | Plugin | 是 |
+```
+
+**Section 4 — 关键模块摘要（按 Scope）**
+
+```
+## 关键模块（按 Scope）
+
+### [Project] unity/Assets/Scripts
+- `Game.Core` — 游戏核心框架（GameManager, EventBus, ServiceLocator）
+- `Game.Network` — 网络层（NetworkManager, RpcDispatcher）
+- `Game.UI` — UI 框架基类（UIPanel, UIManager）
+
+### [Mode:Battle] gamemodes/Battle
+- `Game.Modes.Battle` — 战斗模式主逻辑（BattleManager, PlayerController）
+- `Game.Modes.Battle.AI` — AI 行为树（BehaviorTree, AIAgent）
+```
+
+**Section 5 — 命名空间索引表**
+
+```
+## 命名空间索引
+
+| 命名空间 | Scope | 文件数 |
+|---------|-------|--------|
+| Game.Core | Project | 12 |
+| Game.Network | Project | 8 |
+| Game.Modes.Battle | Mode:Battle | 23 |
+| Game.Modes.Survival | Mode:Survival | 15 |
+| Game.Maps.City01 | Map:City01 | 7 |
+| Game.Shared | Shared | 18 |
+```
+
+### 16.3 生成规则（SkeletonGenerator）
+
+#### 阶段 1：工作区结构扫描
+
+```
+输入: WorkspaceRoot, 已解析的 IndexRoot 列表
+输出: 目录树文本（最多 3 层深度）
+
+规则:
+1. 从 WorkspaceRoot 开始，列出第一层子目录
+2. 对每个 IndexRoot，标注 [ScopeType:ScopeName] 和只读状态
+3. UnityRoot 下展开 Assets/Scripts、Assets/Plugins、Packages 三个子目录
+4. 超过 20 个子目录时，只显示有 IndexRoot 的目录 + "... (N 个其他目录)"
+5. 不递归展开 Plugin / Generated / Engine 目录内部
+```
+
+#### 阶段 2：Scope 归属表
+
+```
+输入: IndexRoot 列表（含 ScopeType, ScopeName, RelativeToWorkspace, ReadOnly）
+输出: Markdown 表格
+
+规则:
+1. 按 ScopeType 排序：Project > Shared > Mode > Map > UI > Localization > Tools > Engine > Plugin > Generated
+2. 每行一个 IndexRoot
+3. 路径使用相对 WorkspaceRoot 的路径
+4. 超过 30 行时截断，附注"（仅显示前 30 个 Scope，完整列表见 search_code list_roots）"
+```
+
+#### 阶段 3：关键模块提取
+
+```
+输入: 每个 IndexRoot 下的 C# 文件（仅扫描文件名和顶层命名空间，不做完整 Roslyn 解析）
+输出: 按 Scope 分组的模块摘要
+
+规则:
+1. 扫描每个 Root 下的 .cs 文件，提取文件顶部的 namespace 声明（正则匹配，不用 Roslyn）
+2. 按命名空间分组，统计文件数
+3. 对每个命名空间，扫描文件名推断关键类（文件名即类名的 C# 惯例）
+4. 每个 Scope 最多显示 5 个命名空间，每个命名空间最多列 5 个关键类
+5. Plugin / Generated / Engine Scope 默认跳过（只在 Scope 归属表中出现）
+6. 文件数 < 3 的命名空间跳过（避免噪音）
+```
+
+#### 阶段 4：命名空间索引表
+
+```
+输入: 阶段 3 的命名空间统计
+输出: 命名空间 → Scope → 文件数 的 Markdown 表格
+
+规则:
+1. 按文件数降序排列
+2. 最多显示 50 行
+3. 超出时附注"（仅显示文件数最多的 50 个命名空间）"
+```
+
+#### 截断策略
+
+当总行数超过 500 行时，按以下优先级截断：
+1. 保留：工作区结构（必须）
+2. 保留：Scope 归属表（必须）
+3. 截断：关键模块 — 减少每个 Scope 的命名空间数量（5 → 3 → 1）
+4. 截断：命名空间索引表 — 减少行数（50 → 30 → 20）
+5. 最后手段：只保留工作区结构 + Scope 归属表
+
+### 16.4 新增文件
+
+```text
+Editor/Indexing/Skeleton/
+├── SkeletonGenerator.cs          # 骨架文档生成器主类
+├── SkeletonSection.cs            # 各 Section 生成逻辑
+└── SkeletonBootstrapInjector.cs  # Bootstrap 注入适配器
+```
+
+#### `SkeletonGenerator` 接口设计
+
+```csharp
+namespace AgentCore.Editor.Components.Indexing.Skeleton
+{
+    /// <summary>
+    /// 规则扫描生成 workspace-skeleton.md，不调用 LLM。
+    /// 输出路径: {UnityRoot}/Library/AgentCore/workspace-skeleton.md
+    /// </summary>
+    public sealed class SkeletonGenerator
+    {
+        /// <summary>生成骨架文档并写入本地文件。</summary>
+        public Task<SkeletonGenerateResult> GenerateAsync(
+            IndexWorkspace workspace,
+            IReadOnlyList<IndexRoot> roots,
+            CancellationToken ct = default);
+
+        /// <summary>读取已生成的骨架文档内容（用于 Bootstrap 注入）。</summary>
+        public string ReadSkeletonContent(IndexWorkspace workspace);
+
+        /// <summary>骨架文档是否存在且未过期（超过 maxAgeHours 视为过期）。</summary>
+        public bool IsSkeletonFresh(IndexWorkspace workspace, int maxAgeHours = 24);
+    }
+}
+```
+
+#### `SkeletonBootstrapInjector` 接口设计
+
+```csharp
+namespace AgentCore.Editor.Components.Indexing.Skeleton
+{
+    /// <summary>
+    /// 将骨架文档内容注入 Bootstrap System Prompt。
+    /// 在 BootstrapLoader 的 PROJECT 阶段之后、MEMORY 阶段之前注入。
+    /// </summary>
+    public sealed class SkeletonBootstrapInjector
+    {
+        /// <summary>
+        /// 返回注入内容。如果骨架文档不存在或已过期，返回简短提示。
+        /// </summary>
+        public string GetInjectionContent(IndexWorkspace workspace);
+    }
+}
+```
+
+### 16.5 Bootstrap 注入位置
+
+骨架文档在 Bootstrap 加载链中的位置：
+
+```
+SOUL → TOOLS → PROJECT → [SKELETON] → MEMORY → USER
+```
+
+注入规则：
+- 骨架文档存在且新鲜（< 24 小时）：注入完整内容，前缀 `## 项目代码骨架`
+- 骨架文档存在但过期：注入内容 + 末尾附注 `> ⚠️ 骨架文档已超过 24 小时，建议在 Chat 中运行 search_code generate_skeleton 更新`
+- 骨架文档不存在：注入单行提示 `> 项目骨架文档尚未生成。可运行 search_code generate_skeleton 生成。`
+
+### 16.6 `search_code` 新增 Action
+
+在 §6.2 Actions 表中补充：
+
+| Action | 说明 |
+|---|---|
+| `generate_skeleton` | 规则扫描生成 workspace-skeleton.md，写入本地 Library/AgentCore/ |
+| `get_skeleton` | 读取当前骨架文档内容 |
+
+---
+
+## 17. SQLite 索引（Layer 1）详细设计
+
+### 17.1 Roslyn 符号提取规则
+
+#### 提取级别
+
+Phase 1 使用 **Roslyn 语法树（SyntaxTree）**，不使用语义模型（SemanticModel）：
+
+| 符号类型 | 提取方式 | 提取字段 |
+|---------|---------|---------|
+| `class` | `ClassDeclarationSyntax` | name, namespace, accessibility, is_abstract, is_partial, is_static, base_types（文本）, generic_params |
+| `interface` | `InterfaceDeclarationSyntax` | name, namespace, accessibility, is_partial, generic_params |
+| `struct` | `StructDeclarationSyntax` | name, namespace, accessibility, is_partial, generic_params |
+| `enum` | `EnumDeclarationSyntax` | name, namespace, accessibility |
+| `method` | `MethodDeclarationSyntax` | name, return_type（文本）, parameters（文本）, accessibility, is_static, is_abstract, is_virtual, is_override |
+| `property` | `PropertyDeclarationSyntax` | name, type（文本）, accessibility, is_static |
+| `field` | `FieldDeclarationSyntax` | name, type（文本）, accessibility, is_static, is_readonly, is_const |
+| `event` | `EventDeclarationSyntax` / `EventFieldDeclarationSyntax` | name, type（文本）, accessibility |
+| `constructor` | `ConstructorDeclarationSyntax` | parameters（文本）, accessibility |
+| `delegate` | `DelegateDeclarationSyntax` | name, namespace, return_type（文本）, parameters（文本）, accessibility |
+
+> **不提取**：方法体内的局部变量、lambda、匿名类型、using 指令、attribute 参数值。
+
+#### 命名空间解析规则
+
+```
+1. 优先使用 NamespaceDeclarationSyntax / FileScopedNamespaceDeclarationSyntax
+2. 嵌套命名空间拼接：外层.内层
+3. 无命名空间声明时，namespace 字段记录为 "<global>"
+4. partial class 跨文件时，每个文件独立记录（不合并）
+```
+
+#### `declaration_snippet` 生成规则
+
+```
+1. 取符号声明行 ± 2 行（最多 5 行）
+2. 去除方法体（只保留签名行到第一个 { 或 ; ）
+3. 保留 XML 文档注释（/// 行）
+4. 截断超过 200 字符的行
+```
+
+### 17.2 增量索引策略
+
+#### 变更检测
+
+```
+触发时机:
+  - Editor 启动时（如果 Settings.IndexOnEditorStartup = true）
+  - FileSystemWatcher 检测到 .cs 文件变更（防抖 2 秒）
+  - 用户手动触发 search_code index_incremental
+
+变更判断（按优先级）:
+  1. 文件不存在于 indexed_files 表 → 新增
+  2. 文件 last_modified 时间戳变化 → 修改
+  3. 文件 content_hash (MD5) 变化 → 修改（时间戳相同但内容变化的情况）
+  4. indexed_files 中存在但磁盘上不存在 → 删除
+```
+
+#### 增量更新流程
+
+```
+1. 扫描所有 enabled roots 的文件列表（只读文件系统元数据，不解析内容）
+2. 与 indexed_files 表对比，得到 [新增, 修改, 删除] 三个集合
+3. 删除：从 indexed_files 和 symbols 表中删除对应记录（CASCADE）
+4. 修改：删除旧 symbols 记录，重新 Roslyn 解析，插入新 symbols
+5. 新增：Roslyn 解析，插入 indexed_files 和 symbols
+6. 更新 index_metadata 中的 last_incremental_at 和 incremental_stats
+7. 全程在后台线程执行，通过 IndexingProgress 上报进度
+```
+
+#### 全量索引流程
+
+```
+1. 清空当前 workspace 的 indexed_files 和 symbols（保留 workspaces 和 index_roots）
+2. 重新扫描所有 enabled roots
+3. 按 Root 顺序逐个处理（支持取消）
+4. 每处理完一个 Root，提交一次事务（避免长事务锁库）
+5. 完成后更新 index_metadata 中的 last_full_index_at 和 full_index_stats
+```
+
+### 17.3 并发与线程安全
+
+```
+- 所有 SQLite 写操作在单一后台线程（IndexingWorker）上串行执行
+- 读操作（search_code）可在任意线程执行，使用独立 SQLite 连接（WAL 模式）
+- SQLite 开启 WAL（Write-Ahead Logging）模式，允许读写并发
+- 索引进行中时，search_code 仍可正常查询（读取已索引部分）
+- 取消令牌（CancellationToken）在每个文件处理后检查
+```
+
+### 17.4 错误处理策略
+
+| 错误类型 | 处理方式 |
+|---------|---------|
+| 单文件 Roslyn 解析失败 | 记录 `has_errors=1, error_message`，跳过该文件，继续索引 |
+| 文件超过 MaxFileSize | 跳过，记录警告日志 |
+| Root 目录不存在 | 跳过该 Root，记录警告，不中断整体索引 |
+| SQLite 写入失败 | 回滚当前事务，记录错误，尝试继续下一个 Root |
+| 磁盘空间不足 | 中断索引，通过 IndexingProgress 上报错误 |
+| 取消操作 | 提交已完成的事务，保持数据库一致性 |
+
+### 17.5 性能约束
+
+| 指标 | 目标值 | 超出时的降级策略 |
+|------|--------|----------------|
+| 单文件解析时间 | < 50ms | 超过 200ms 记录慢文件警告 |
+| 全量索引（1000 文件） | < 60 秒 | 提供进度条和取消按钮 |
+| 增量索引（10 文件变更） | < 5 秒 | 后台静默执行 |
+| 数据库文件大小（1000 文件） | < 50MB | 超出时提示用户清理或调整 MaxFilesPerRoot |
+| search_code 查询响应 | < 200ms | 超出时记录慢查询日志 |
+
+### 17.6 `IIndexStore` 抽象接口
+
+为应对 SQLite DLL 加载风险，所有数据库操作通过 `IIndexStore` 抽象：
+
+```csharp
+namespace AgentCore.Editor.Components.Indexing.Core
+{
+    /// <summary>
+    /// 索引存储后端抽象。默认实现为 SQLite，降级实现为 JSONL。
+    /// </summary>
+    public interface IIndexStore : IDisposable
+    {
+        // Workspace
+        Task<int> UpsertWorkspaceAsync(IndexWorkspace workspace, CancellationToken ct);
+        Task<IndexWorkspace> GetWorkspaceByFingerprintAsync(string fingerprint, CancellationToken ct);
+
+        // Roots
+        Task<int> UpsertRootAsync(int workspaceId, IndexRoot root, CancellationToken ct);
+        Task<IReadOnlyList<IndexRoot>> GetRootsAsync(int workspaceId, CancellationToken ct);
+
+        // Files
+        Task<int> UpsertFileAsync(int workspaceId, int rootId, IndexedFile file, CancellationToken ct);
+        Task DeleteFileAsync(int fileId, CancellationToken ct);
+        Task<IReadOnlyList<IndexedFile>> GetFilesForRootAsync(int rootId, CancellationToken ct);
+
+        // Symbols
+        Task BulkInsertSymbolsAsync(IEnumerable<SymbolInfo> symbols, CancellationToken ct);
+        Task DeleteSymbolsByFileAsync(int fileId, CancellationToken ct);
+        Task<IReadOnlyList<SymbolInfo>> SearchSymbolsAsync(SearchQuery query, CancellationToken ct);
+
+        // Stats
+        Task<IndexingStats> GetStatsAsync(int workspaceId, CancellationToken ct);
+        Task ClearWorkspaceIndexAsync(int workspaceId, CancellationToken ct);
+    }
+}
+```
+
+降级策略：
+- 启动时尝试加载 SQLite DLL
+- 加载失败时自动切换到 `JsonlIndexStore`（JSONL 文件存储）
+- `JsonlIndexStore` 功能完整但性能较低，适合小型项目或临时使用
+- 用户可在 Settings 中查看当前使用的存储后端
+
+---
+
+## 18. 当前待确认问题
 
 为了进入实现阶段，需要确认：
 
@@ -916,6 +1364,9 @@ plans/ROADMAP.md
 - **决策 4**：数据库按 workspace fingerprint 隔离。
 - **决策 5**：Phase 1 不深度解析美术资产、文案表和 Unity 资产引用。
 - **决策 6**：多 VCS Root 不作为 v0.9.0 默认基线；仅保留 Extra Authorized Root / future extension 设计余量。
+- **决策 7（v1.3 新增）**：**完全放弃向量数据库**。代码索引只使用两层本地架构：`.md` 骨架文档（Layer 0）+ SQLite 符号索引（Layer 1）。LightRAG 仅保留用于文档知识库，不用于代码索引。
+- **决策 8（v1.3 新增）**：**所有索引文件只在本地保存，不提交 VCS**。`workspace-skeleton.md` 和 `codebase.db` 均存储在 `Library/AgentCore/` 下，Unity 默认已将 `Library/` 排除在 VCS 之外。
+- **决策 9（v1.3 新增）**：**骨架文档由规则扫描自动生成，不调用 LLM**。用户可在 Chat 中让 LLM 优化调整骨架内容，骨架控制在几百行以内，适合注入 System Prompt。
 
 ---
 

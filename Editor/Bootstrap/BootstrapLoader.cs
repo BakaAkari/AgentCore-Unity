@@ -14,11 +14,12 @@ namespace AgentCore.Editor.Bootstrap
     /// 负责加载所有 Bootstrap 文件并编译为完整的 System Prompt。
     ///
     /// 加载顺序：
-    /// 1. SOUL.md — 内置角色定义（包内资源）
+    /// 1. SOUL.md — 内置角色定义（包内资源，不可变）
+    /// 1+. SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL）
     /// 2. TOOLS.md — 工具使用指南（从模板生成）
     /// 3. PROJECT.md — 项目上下文（自动收集）
-    /// 4. MEMORY.md — 本地知识文件（用户可编辑，优先项目根目录，其次 AgentCore/ 子目录）
-    /// 5. USER.md — 用户偏好（用户可编辑，优先项目根目录，其次 AgentCore/ 子目录）
+    /// 3+. PROJECT.md（用户） — 项目约定与个人偏好（用户可编辑，建议 VCS 提交）
+    /// 4. SKELETON.md — 代码库骨架（自动生成，可选，不提交 VCS）
     /// </summary>
     public class BootstrapLoader
     {
@@ -27,6 +28,12 @@ namespace AgentCore.Editor.Bootstrap
         /// </summary>
         private static readonly string ResourcesPath = Path.Combine(
             "Packages", "com.agentcore.unity", "Editor", "Bootstrap", "Resources");
+
+        /// <summary>
+        /// 代码骨架文件的路径（相对于 Unity 项目根目录）。
+        /// </summary>
+        private static readonly string SkeletonRelativePath = Path.Combine(
+            "Library", "AgentCore", "workspace-skeleton.md");
 
         /// <summary>
         /// 加载所有 Bootstrap Files 并返回上下文对象。
@@ -43,12 +50,19 @@ namespace AgentCore.Editor.Bootstrap
                 return context;
             }
 
-            // 1. SOUL.md — 内置角色定义
+            // 1. SOUL.md — 内置角色定义（不可变）
             context.Soul = LoadEmbeddedResource("SOUL.md");
             if (string.IsNullOrEmpty(context.Soul))
             {
                 Debug.LogWarning("[AgentCore] SOUL.md not found, using default.");
                 context.Soul = "你是一个 Unity 开发助手。请用中文回复。";
+            }
+
+            // 1+. SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL）
+            context.SoulExtension = LoadUserFile("SOUL.ext.md");
+            if (!string.IsNullOrEmpty(context.SoulExtension))
+            {
+                Debug.Log($"[AgentCore] Loaded SOUL.ext.md ({context.SoulExtension.Length} chars)");
             }
 
             // 2. TOOLS.md — 从模板生成
@@ -68,27 +82,28 @@ namespace AgentCore.Editor.Bootstrap
                 }
             }
 
-            // 4. MEMORY.md — 用户本地知识文件
-            context.Memory = LoadUserFile("MEMORY.md");
-            if (!string.IsNullOrEmpty(context.Memory))
+            // 3+. PROJECT.md（用户） — 项目约定与个人偏好
+            context.Workspace = LoadUserFile("PROJECT.md");
+            if (!string.IsNullOrEmpty(context.Workspace))
             {
-                Debug.Log($"[AgentCore] Loaded MEMORY.md ({context.Memory.Length} chars)");
+                Debug.Log($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
             }
 
-            // 5. USER.md — 用户偏好
-            context.User = LoadUserFile("USER.md");
-            if (!string.IsNullOrEmpty(context.User))
+            // 4. SKELETON.md — 代码库骨架（可选，来自代码索引功能）
+            context.Skeleton = LoadSkeletonFile();
+            if (!string.IsNullOrEmpty(context.Skeleton))
             {
-                Debug.Log($"[AgentCore] Loaded USER.md ({context.User.Length} chars)");
+                Debug.Log($"[AgentCore] Loaded SKELETON.md ({context.Skeleton.Length} chars)");
             }
 
             var tokenEstimate = context.EstimateTokenCount();
             Debug.Log($"[AgentCore] Bootstrap loaded: ~{tokenEstimate} tokens " +
                       $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
+                      $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
                       $"TOOLS={!string.IsNullOrEmpty(context.Tools)}, " +
                       $"PROJECT={!string.IsNullOrEmpty(context.Project)}, " +
-                      $"MEMORY={!string.IsNullOrEmpty(context.Memory)}, " +
-                      $"USER={!string.IsNullOrEmpty(context.User)})");
+                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)}, " +
+                      $"SKELETON={!string.IsNullOrEmpty(context.Skeleton)})");
 
             return context;
         }
@@ -128,8 +143,7 @@ namespace AgentCore.Editor.Bootstrap
         /// </para>
         /// <para>
         /// 工具列表按分类分组，以 Markdown 表格形式呈现。
-        /// 如果 ToolRegistry 中没有注册任何工具（例如 Phase 1 兼容模式或初始化顺序问题），
-        /// 占位符将被替换为"暂无可用工具"的提示。
+        /// 如果 ToolRegistry 中没有注册任何工具，占位符将被替换为"暂无可用工具"的提示。
         /// </para>
         /// </summary>
         private string LoadToolsGuide()
@@ -153,10 +167,6 @@ namespace AgentCore.Editor.Bootstrap
         /// 工具按 <see cref="ToolMetadata.Category"/> 分组，每组以 Markdown 表格形式展示，
         /// 包含工具名称和描述。分类名称作为三级标题显示。
         /// </para>
-        /// <para>
-        /// 如果 ToolRegistry 为空（尚未注册任何工具），返回提示文本。
-        /// 这确保了与 Phase 1 的向后兼容性，以及在 ToolRegistry 尚未初始化时的优雅降级。
-        /// </para>
         /// </summary>
         /// <returns>格式化的工具列表 Markdown 文本</returns>
         private string GenerateActiveToolsList()
@@ -173,7 +183,6 @@ namespace AgentCore.Editor.Bootstrap
                 return "> [WARNING] 工具列表获取失败，请检查 ToolRegistry 初始化状态。";
             }
 
-            // 无工具注册时的降级处理
             if (allMetadata == null || allMetadata.Count == 0)
             {
                 Debug.Log("[AgentCore] ToolRegistry is empty, using fallback tools list placeholder.");
@@ -207,7 +216,6 @@ namespace AgentCore.Editor.Bootstrap
 
                 foreach (var meta in group.OrderBy(m => m.Name))
                 {
-                    // 截断过长的描述，避免表格过宽
                     var description = TruncateDescription(meta.Description, 80);
                     sb.AppendLine($"| `{meta.Name}` | {description} |");
                 }
@@ -241,7 +249,6 @@ namespace AgentCore.Editor.Bootstrap
         {
             return category switch
             {
-                // 原生工具分类（Phase 2.5）
                 "Scene" => "场景管理",
                 "GameObject" => "游戏对象操作",
                 "Script" => "脚本管理",
@@ -263,7 +270,6 @@ namespace AgentCore.Editor.Bootstrap
                 "Meta" => "元操作",
                 "Utility" => "实用工具",
                 "General" => "通用工具",
-                // 扩展分类（向后兼容）
                 "filesystem" => "文件操作",
                 "cloud" => "云端服务",
                 "custom" => "自定义工具",
@@ -282,7 +288,6 @@ namespace AgentCore.Editor.Bootstrap
         {
             return category switch
             {
-                // 原生工具分类排序（Phase 2.5）
                 "Scene" => 0,
                 "GameObject" => 1,
                 "Script" => 2,
@@ -304,7 +309,6 @@ namespace AgentCore.Editor.Bootstrap
                 "Profiler" => 19,
                 "Utility" => 20,
                 "General" => 21,
-                // 扩展分类（向后兼容）
                 "filesystem" => 31,
                 "cloud" => 32,
                 "custom" => 33,
@@ -315,10 +319,6 @@ namespace AgentCore.Editor.Bootstrap
 
         /// <summary>
         /// 截断工具描述文本，避免 Markdown 表格过宽。
-        /// <para>
-        /// 如果描述超过指定长度，将在最近的空格处截断并添加省略号。
-        /// 同时移除描述中的换行符，确保表格格式正确。
-        /// </para>
         /// </summary>
         /// <param name="description">原始描述文本</param>
         /// <param name="maxLength">最大字符数</param>
@@ -328,16 +328,12 @@ namespace AgentCore.Editor.Bootstrap
             if (string.IsNullOrEmpty(description))
                 return "(无描述)";
 
-            // 移除换行符，确保表格格式正确
             var singleLine = description.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
-
-            // 移除 Markdown 表格中的管道符，避免破坏表格结构
             singleLine = singleLine.Replace("|", "\\|");
 
             if (singleLine.Length <= maxLength)
                 return singleLine;
 
-            // 在最近的空格处截断
             var truncated = singleLine.Substring(0, maxLength);
             var lastSpace = truncated.LastIndexOf(' ');
             if (lastSpace > maxLength / 2)
@@ -349,7 +345,7 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
-        /// 加载用户可编辑的文件（MEMORY.md 或 USER.md）。
+        /// 加载用户可编辑的文件（PROJECT.md、SOUL.ext.md 等）。
         /// 按优先级查找：
         /// 1. 项目根目录（Application.dataPath 的父目录）
         /// 2. 项目根目录下的 AgentCore/ 子目录
@@ -359,9 +355,7 @@ namespace AgentCore.Editor.Bootstrap
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (projectRoot == null) return null;
 
-            // 优先查找项目根目录
             var rootPath = Path.Combine(projectRoot, fileName);
-            // 其次查找 AgentCore/ 子目录
             var agentCorePath = Path.Combine(projectRoot, "AgentCore", fileName);
 
             string filePath = null;
@@ -382,7 +376,6 @@ namespace AgentCore.Editor.Bootstrap
             try
             {
                 var content = File.ReadAllText(filePath);
-                // 跳过空文件或只有模板注释的文件
                 if (string.IsNullOrWhiteSpace(content) || IsTemplateOnly(content))
                 {
                     return null;
@@ -397,11 +390,36 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
+        /// 加载代码库骨架文件（来自代码索引功能，可选）。
+        /// 文件路径：Library/AgentCore/workspace-skeleton.md（不提交 VCS）
+        /// </summary>
+        private string LoadSkeletonFile()
+        {
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (projectRoot == null) return null;
+
+            var skeletonPath = Path.Combine(projectRoot, SkeletonRelativePath);
+            if (!File.Exists(skeletonPath)) return null;
+
+            try
+            {
+                var content = File.ReadAllText(skeletonPath);
+                if (string.IsNullOrWhiteSpace(content)) return null;
+                return content;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to load skeleton file: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 查找用户文件的实际路径。
         /// 按优先级查找：项目根目录 → AgentCore/ 子目录。
         /// 如果文件不存在，返回 null。
         /// </summary>
-        /// <param name="fileName">文件名（如 MEMORY.md 或 USER.md）</param>
+        /// <param name="fileName">文件名（如 PROJECT.md 或 SOUL.ext.md）</param>
         /// <returns>文件的完整路径，或 null（如果不存在）</returns>
         public static string FindUserFilePath(string fileName)
         {
@@ -421,7 +439,7 @@ namespace AgentCore.Editor.Bootstrap
         /// 获取用户文件的默认创建路径（项目根目录下的 AgentCore/ 子目录）。
         /// 如果文件已存在，返回已存在的路径；否则返回默认路径。
         /// </summary>
-        /// <param name="fileName">文件名（如 MEMORY.md 或 USER.md）</param>
+        /// <param name="fileName">文件名（如 PROJECT.md 或 SOUL.ext.md）</param>
         /// <returns>文件的完整路径</returns>
         public static string GetDefaultUserFilePath(string fileName)
         {
@@ -435,6 +453,63 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
+        /// 生成用户文件的初始模板内容。
+        /// 集中管理所有用户可编辑文件的模板，供 Settings UI 调用。
+        /// </summary>
+        /// <param name="fileName">文件名（PROJECT.md 或 SOUL.ext.md）</param>
+        /// <returns>模板内容字符串</returns>
+        public static string GenerateUserFileTemplate(string fileName)
+        {
+            if (fileName == "PROJECT.md")
+            {
+                return
+                    "# AgentCore Project Configuration\n" +
+                    "<!--\n" +
+                    "  此文件由 AgentCore 生成，供团队维护。\n" +
+                    "  建议提交到 VCS（Git/SVN/Perforce）以便团队共享。\n" +
+                    "-->\n\n" +
+                    "## Project Conventions\n" +
+                    "<!--\n" +
+                    "  团队约定：命名规范、架构决策、禁止事项、工作流程等。\n" +
+                    "  这里的内容会注入到每次对话的 System Prompt 中。\n\n" +
+                    "  示例：\n" +
+                    "  - 本项目使用 Mirror 网络框架，禁止使用 UNET\n" +
+                    "  - 资源管理使用 Addressables，禁止使用 Resources.Load\n" +
+                    "  - 命名规范：类名 PascalCase，私有字段 _camelCase\n" +
+                    "-->\n\n\n" +
+                    "## Personal Preferences\n" +
+                    "<!--\n" +
+                    "  个人偏好：回复语言、代码风格偏好、工作习惯等。\n" +
+                    "  建议不提交到 VCS（在 .gitignore 中排除此 section 或整个文件）。\n\n" +
+                    "  示例：\n" +
+                    "  - 请用英文回复\n" +
+                    "  - 代码注释使用中文\n" +
+                    "  - 每次修改前先展示 diff\n" +
+                    "-->\n\n";
+            }
+
+            if (fileName == "SOUL.ext.md")
+            {
+                return
+                    "# SOUL.ext.md — Agent 行为规则扩展\n" +
+                    "<!--\n" +
+                    "  此文件追加到内置 SOUL.md 之后，不替换内置规则。\n" +
+                    "  适合添加项目特定的 Agent 行为约束。\n" +
+                    "  建议提交到 VCS（团队共享的行为规则扩展）。\n\n" +
+                    "  适合放在这里的内容：\n" +
+                    "  - 追加新的 Unity Hard Rules（如禁止使用特定 API）\n" +
+                    "  - 追加工具使用约束\n" +
+                    "  - 追加项目特定的格式约束\n\n" +
+                    "  不适合放在这里的内容（请放 PROJECT.md）：\n" +
+                    "  - 项目技术栈约定\n" +
+                    "  - 个人偏好\n" +
+                    "-->\n\n";
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>
         /// 检查文件内容是否只包含模板注释（没有实际内容）。
         /// </summary>
         private bool IsTemplateOnly(string content)
@@ -443,7 +518,6 @@ namespace AgentCore.Editor.Bootstrap
             foreach (var line in lines)
             {
                 var trimmed = line.Trim();
-                // 跳过空行、标题行、HTML 注释行
                 if (string.IsNullOrEmpty(trimmed)) continue;
                 if (trimmed.StartsWith("#")) continue;
                 if (trimmed.StartsWith("<!--")) continue;

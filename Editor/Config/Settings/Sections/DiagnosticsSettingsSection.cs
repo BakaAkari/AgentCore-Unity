@@ -48,17 +48,17 @@ namespace AgentCore.Editor.Config.Settings.Sections
 
             EditorGUILayout.Space(8);
 
-            context.Ui.DrawCard("User Context Files", "Open or create project-local context files used by the bootstrap pipeline.", () =>
+            context.Ui.DrawCard("Project Context Files", "Open or create project-local context files used by the bootstrap pipeline.", () =>
             {
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Open MEMORY.md", GUILayout.Width(130)))
+                if (GUILayout.Button("Open PROJECT.md", GUILayout.Width(130)))
                 {
-                    OpenOrCreateUserFile("MEMORY.md");
+                    OpenOrCreateUserFile("PROJECT.md");
                 }
 
-                if (GUILayout.Button("Open USER.md", GUILayout.Width(110)))
+                if (GUILayout.Button("Open SOUL.ext.md", GUILayout.Width(130)))
                 {
-                    OpenOrCreateUserFile("USER.md");
+                    OpenOrCreateUserFile("SOUL.ext.md");
                 }
 
                 GUILayout.FlexibleSpace();
@@ -98,7 +98,7 @@ namespace AgentCore.Editor.Config.Settings.Sections
 
             try
             {
-                File.WriteAllText(filePath, GenerateUserFileTemplate(fileName), System.Text.Encoding.UTF8);
+                File.WriteAllText(filePath, BootstrapLoader.GenerateUserFileTemplate(fileName), System.Text.Encoding.UTF8);
                 AssetDatabase.Refresh();
             }
             catch (Exception ex)
@@ -107,14 +107,5 @@ namespace AgentCore.Editor.Config.Settings.Sections
             }
         }
 
-        private static string GenerateUserFileTemplate(string fileName)
-        {
-            if (fileName == "MEMORY.md")
-            {
-                return "# MEMORY.md — 项目知识库\n\n## 项目概述\n\n<!-- 在此描述你的项目，Agent 会据此理解项目背景。 -->\n";
-            }
-
-            return "# USER.md — Agent 行为预设\n\n## 语言与沟通\n\n- 使用中文回复，技术术语保留英文原文。\n";
-        }
     }
 }

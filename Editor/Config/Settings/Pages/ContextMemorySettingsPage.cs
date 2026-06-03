@@ -58,8 +58,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 }
 
                 EditorGUILayout.Space(6);
-                DrawUserFileRow("MEMORY.md", "Local knowledge file — project context the Agent can reference.");
-                DrawUserFileRow("USER.md", "User preference file — define Agent behavior and rules.");
+                DrawUserFileRow("PROJECT.md", "Project conventions and personal preferences — team-shared, recommended for VCS commit.");
+                DrawUserFileRow("SOUL.ext.md", "Agent behavior rule extensions — appended to built-in SOUL, recommended for VCS commit.");
             });
 
             EditorGUILayout.Space(8);
@@ -314,23 +314,13 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             try
             {
-                File.WriteAllText(filePath, GenerateUserFileTemplate(fileName), System.Text.Encoding.UTF8);
+                File.WriteAllText(filePath, BootstrapLoader.GenerateUserFileTemplate(fileName), System.Text.Encoding.UTF8);
                 AssetDatabase.Refresh();
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[AgentCore] Failed to create {fileName}: {ex.Message}");
             }
-        }
-
-        private static string GenerateUserFileTemplate(string fileName)
-        {
-            if (fileName == "MEMORY.md")
-            {
-                return "# MEMORY.md — 项目知识库\n\n## 项目概述\n\n<!-- 在此描述你的项目，Agent 会据此理解项目背景。 -->\n";
-            }
-
-            return "# USER.md — Agent 行为预设\n\n## 语言与沟通\n\n- 使用中文回复，技术术语保留英文原文。\n";
         }
 
         // ── Helpers ──

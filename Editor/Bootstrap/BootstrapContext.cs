@@ -5,13 +5,26 @@ namespace AgentCore.Editor.Bootstrap
     /// <summary>
     /// Bootstrap Files 加载后的上下文数据。
     /// 包含各层 Bootstrap 文件的内容，最终编译为 System Prompt。
+    ///
+    /// 加载顺序：
+    /// 1. SOUL.md — 角色定义（内置不可变）
+    /// 1+. SOUL.ext.md — 行为规则扩展（用户可选，追加到 SOUL）
+    /// 2. TOOLS.md — 工具使用指南（自动生成）
+    /// 3. PROJECT.md — 项目上下文（自动收集）
+    /// 3+. Workspace — PROJECT.md 用户内容（用户可编辑，建议 VCS 提交）
+    /// 4. SKELETON.md — 代码库骨架（自动生成，可选，来自代码索引功能）
     /// </summary>
     public class BootstrapContext
     {
         /// <summary>
-        /// SOUL.md — 角色定义与核心原则（内置）
+        /// SOUL.md — 角色定义与核心原则（内置不可变）
         /// </summary>
         public string Soul { get; set; }
+
+        /// <summary>
+        /// SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL 之后）
+        /// </summary>
+        public string SoulExtension { get; set; }
 
         /// <summary>
         /// TOOLS.md — 工具使用指南（自动生成）
@@ -24,18 +37,20 @@ namespace AgentCore.Editor.Bootstrap
         public string Project { get; set; }
 
         /// <summary>
-        /// MEMORY.md — 本地知识文件（用户可编辑，可选）
+        /// Workspace — PROJECT.md 用户内容（用户可编辑，建议 VCS 提交）
+        /// 包含项目约定（Project Conventions）和个人偏好（Personal Preferences）
         /// </summary>
-        public string Memory { get; set; }
+        public string Workspace { get; set; }
 
         /// <summary>
-        /// USER.md — 用户偏好（用户可编辑，可选）
+        /// SKELETON.md — 代码库骨架（自动生成，可选，来自代码索引功能）
+        /// 存放于 Library/AgentCore/workspace-skeleton.md，不提交 VCS
         /// </summary>
-        public string User { get; set; }
+        public string Skeleton { get; set; }
 
         /// <summary>
         /// 将所有 Bootstrap 内容编译为单一 System Prompt 字符串。
-        /// 加载顺序：SOUL -> TOOLS -> PROJECT -> MEMORY -> USER
+        /// 加载顺序：SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) → [SKELETON]
         /// </summary>
         public string CompileSystemPrompt()
         {
@@ -45,6 +60,13 @@ namespace AgentCore.Editor.Bootstrap
             if (!string.IsNullOrEmpty(Soul))
             {
                 sb.AppendLine(Soul);
+
+                // 1+. SOUL 扩展（可选，追加）
+                if (!string.IsNullOrEmpty(SoulExtension))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine(SoulExtension);
+                }
             }
 
             // 2. TOOLS — 工具指南（必须）
@@ -62,20 +84,20 @@ namespace AgentCore.Editor.Bootstrap
                 sb.AppendLine(Project);
             }
 
-            // 4. MEMORY — 本地知识（可选）
-            if (!string.IsNullOrEmpty(Memory))
+            // 3+. WORKSPACE — 项目配置（用户可编辑）
+            if (!string.IsNullOrEmpty(Workspace))
             {
                 sb.AppendLine("\n---\n");
-                sb.AppendLine("## 项目知识（来自 MEMORY.md）\n");
-                sb.AppendLine(Memory);
+                sb.AppendLine("## 项目配置（来自 PROJECT.md）\n");
+                sb.AppendLine(Workspace);
             }
 
-            // 5. USER — 用户偏好（可选）
-            if (!string.IsNullOrEmpty(User))
+            // 4. SKELETON — 代码库骨架（可选）
+            if (!string.IsNullOrEmpty(Skeleton))
             {
                 sb.AppendLine("\n---\n");
-                sb.AppendLine("## 用户偏好（来自 USER.md）\n");
-                sb.AppendLine(User);
+                sb.AppendLine("## 代码库骨架（自动生成）\n");
+                sb.AppendLine(Skeleton);
             }
 
             return sb.ToString();
@@ -83,14 +105,13 @@ namespace AgentCore.Editor.Bootstrap
 
         /// <summary>
         /// 估算 System Prompt 的 token 数量。
-        /// 使用近似算法：中文 ~1.5 token/字，英文 ~0.75 token/word。
+        /// 使用近似算法：每 3 个字符约 1 个 token（中英文混合场景的经验值）。
         /// </summary>
         public int EstimateTokenCount()
         {
             var prompt = CompileSystemPrompt();
             if (string.IsNullOrEmpty(prompt)) return 0;
 
-            // 简单估算：每 3 个字符约 1 个 token（中英文混合场景的经验值）
             return prompt.Length / 3;
         }
     }

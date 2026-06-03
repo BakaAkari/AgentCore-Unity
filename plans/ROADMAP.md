@@ -187,14 +187,20 @@ v0.4.7 — 文档状态校准（plans/ 全量审计 + ROADMAP 修正 + ADR-3）
 
 ### 3.2 P0 — 代码库索引与理解（提升为高优先级）
 
-> **优先级提升原因**: 代码库理解是 Agent 自主能力的基础，比手动模式切换更重要。当前实现前必须遵循 `codebase-indexing-phase1-plan.md` v1.2：以 SVN WorkspaceRoot 为索引上下文根，UnityRoot 仅作为 Unity 工程子根。
+> **优先级提升原因**: 代码库理解是 Agent 自主能力的基础，比手动模式切换更重要。当前实现前必须遵循 `codebase-indexing-phase1-plan.md` v1.3：以 SVN WorkspaceRoot 为索引上下文根，UnityRoot 仅作为 Unity 工程子根。
+>
+> **⚠️ 前置条件**: 6.2.1 及后续任务依赖 **6.2.0 WorkspaceRoot / UnityRoot / Scope 基础设施**完成。详见 [`workspace-foundation-v0.9.0-p0-plan.md`](workspace-foundation-v0.9.0-p0-plan.md)。
+>
+> **架构决策（v1.3）**: 采用**完全本地化两层架构**，放弃向量数据库。Layer 0：`.md` 骨架文档（规则扫描生成，本地保存，Bootstrap 注入）；Layer 1：SQLite 符号索引（Roslyn 解析，后台异步，本地保存）。所有索引文件存储在 `Library/AgentCore/` 下，**不提交 VCS**。
 
 | # | 任务 | 说明 | 关联计划 | 状态 |
 |---|------|------|---------|------|
-| 6.2.1 | **文件级索引** | 使用 Roslyn 解析 WorkspaceRoot 下启用的 Scope Root C# 文件，提取类名、命名空间、方法签名；存储到 SQLite 或兼容本地后端 | Codebase-1 | [ ] |
+| 6.2.0 | **WorkspaceRoot / UnityRoot / Scope 基础设施（P0）** | 建立 WorkspaceContext 数据模型、WorkspaceRootResolver、UnityRootResolver、ScopeRootResolver、RolePolicyResolver、SvnWorkspaceInfoResolver、WorkspaceFingerprintBuilder、WorkspaceContextService、WorkspaceConfigStorage 与 WorkspaceSettingsPage；作为 6.2.0.1+ 的前置条件 | Workspace-P0 | [ ] |
+| 6.2.0.1 | **项目骨架文档（Layer 0）** | 规则扫描生成 `Library/AgentCore/workspace-skeleton.md`；**本地保存，不提交 VCS**；Bootstrap 注入 System Prompt；用户可在 Chat 中让 LLM 优化调整内容；控制在几百行以内 | Workspace-P1 | [ ] |
+| 6.2.1 | **文件级索引（Layer 1）** | 使用 Roslyn 解析 WorkspaceRoot 下启用的 Scope Root C# 文件，提取类名、命名空间、方法签名；存储到 SQLite 本地后端；**不提交 VCS** | Codebase-1 | [ ] |
 | 6.2.2 | **符号检索** | 支持按类名、方法名、字段名搜索；支持 Scope/Root/Role/Branch 过滤、模糊匹配和正则表达式 | Codebase-2 | [ ] |
-| 6.2.3 | **语义搜索** | 集成 LightRAG 进行代码片段嵌入；支持限定当前 WorkspaceRoot、Branch、Scope 的自然语言查询 | Codebase-3 | [ ] |
-| 6.2.4 | **依赖图构建** | 分析类型引用、程序集边界、Unity 特殊引用、Workspace 子 Root、地图/模式和资源包依赖 | Codebase-4 | [ ] |
+| ~~6.2.3~~ | ~~**语义搜索**~~ | **已废弃**：放弃向量数据库，不做代码语义搜索。LightRAG 仅保留用于文档知识库 | ~~Codebase-3~~ | [DEPRECATED] |
+| 6.2.3 | **依赖图构建** | 分析类型引用、程序集边界、Unity 特殊引用、Workspace 子 Root、地图/模式和资源包依赖 | Codebase-3 | [ ] |
 
 ### 3.3 P1 — 规则系统与智能推荐（中优先级）
 
@@ -225,8 +231,10 @@ v0.5.5 — 版本控制集成 Phase 2（写操作 + 确认机制 + 26 个 action
 v0.6.0 — VCS 可选组件化（Optional Components + 动态 Hub/Settings contribution）[DONE]
 v0.6.1 — Settings 页面架构重构（Settings shell + section registry + Provider 业务逻辑清理）[DONE]
 v0.7.0 — Settings UI 重构为 Dashboard + 4 Pages（顶部 Tab 导航，VCS 独立卡片，Maintenance 操作）[DONE]
-v0.6.2 — 代码库索引 Phase 1（文件级索引 + 符号检索）
-v0.6.3 — 代码库索引 Phase 2（语义搜索 + 依赖图构建）
+v0.9.0 — WorkspaceRoot / UnityRoot / Scope 基础设施 P0（WorkspaceContext + Resolver + Settings 页面，详见 workspace-foundation-v0.9.0-p0-plan.md）
+v0.9.0-P1 — 项目骨架文档 Layer 0（规则扫描生成 Library/AgentCore/workspace-skeleton.md，本地保存不提交 VCS，Bootstrap 注入 System Prompt）
+v0.9.1 — 代码库索引 Phase 1（文件级索引 + 符号检索，SQLite 本地存储，依赖 v0.9.0 WorkspaceContext）
+v0.9.2 — 代码库索引 Phase 2（依赖图构建；语义搜索已废弃）
 v0.6.4 — 规则系统与智能推荐（.agentcore/rules.md + SmartToolRecommender + 响应式建议）
 v0.6.5 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
 ```
@@ -239,14 +247,17 @@ v0.6.5 — 体验优化（Diff 视图 + 主题系统 + 快捷键自定义）
 - v0.6.1 → Settings 页面架构重构，Provider shell 化并固化 section 开发规则
 - v0.7.0 → Settings UI 从左侧 11 Section 导航改为 Dashboard + 4 Pages 顶部 Tab，VCS 设置提升为独立卡片
 - v0.6.2+ → 原计划顺延
+- ~~6.2.3 语义搜索~~ → **废弃（2026-06-03）**：放弃向量数据库依赖，代码索引采用完全本地化两层架构（.md 骨架 + SQLite），不做代码语义搜索；LightRAG 仅保留用于文档知识库
+- 6.2.0.1 骨架文档 → **调整（2026-06-03）**：本地保存不提交 VCS，规则扫描自动生成，用户可在 Chat 中让 LLM 优化
 
 ### 3.6 技术栈选型（基于竞品分析）
 
 | 模块 | 推荐技术 | 理由 | 替代方案 |
 |------|---------|------|---------|
 | **AST 解析** | Roslyn (Microsoft.CodeAnalysis) | C# 官方编译器 API，Unity 已内置 | 手动正则解析（不推荐） |
-| **向量数据库** | LightRAG (已集成) | 复用现有基础设施，支持语义搜索 | Qdrant（需外部服务，Phase 7 可选） |
-| **本地索引** | SQLite (System.Data.SQLite) | 轻量、零配置、完全离线 | JSON 文件（性能差） |
+| **骨架文档** | 规则扫描生成 `.md` | 零依赖、本地生成、适合注入 System Prompt、不提交 VCS | LLM 生成（用户可在 Chat 中手动优化） |
+| **本地索引** | SQLite (System.Data.SQLite) | 轻量、零配置、完全离线、不提交 VCS | JSONL 降级方案（SQLite DLL 加载失败时） |
+| **向量数据库** | ~~代码索引用途已废弃~~ | 代码索引采用完全本地化两层架构，不引入向量数据库；LightRAG 仅保留用于文档知识库 | — |
 | **上下文压缩** | LLM 摘要 (Claude Haiku) | 成本低、速度快、质量高 | 规则压缩（效果差） |
 | **规则解析** | Markdown Parser (Markdig) | 轻量、易扩展、社区成熟 | 自定义格式（学习成本高） |
 
@@ -444,7 +455,8 @@ v0.6.0 → Phase 7.1 (UPM 发布)
 | [`README.md`](README.md) |  文档导航 | `plans/` 顶层 |
 | [`ROADMAP.md`](ROADMAP.md) |  主导方向文档 | `plans/` 顶层 |
 | [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md) |  企业级 Unity 项目适配需求基准，WorkspaceRoot 规则上游依据 | `plans/` 顶层 |
-| [`codebase-indexing-phase1-plan.md`](codebase-indexing-phase1-plan.md) |  v0.9.0 代码索引 Phase 1 设计，已按 SVN WorkspaceRoot 校准 | `plans/` 顶层 |
+| [`workspace-foundation-v0.9.0-p0-plan.md`](workspace-foundation-v0.9.0-p0-plan.md) |  **v0.9.0 P0 Workspace 基础设施实施计划**，6.2.1+ 前置条件，当前最高优先级 | `plans/` 顶层 |
+| [`codebase-indexing-phase1-plan.md`](codebase-indexing-phase1-plan.md) |  v0.9.0 代码索引 Phase 1 设计，已按 SVN WorkspaceRoot 校准；依赖 workspace-foundation 完成 | `plans/` 顶层 |
 | [`enterprise-agentcore-implementation-audit.md`](enterprise-agentcore-implementation-audit.md) |  已实现功能企业级适配审计，指出 WorkspaceRoot-aware 改造缺口 | `plans/` 顶层 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) |  架构参考；其中标准 Unity 项目示例需按企业基准解释 | `plans/` 顶层 |
 | [`ai-coding-assistants-analysis.md`](ai-coding-assistants-analysis.md) |  参考文档；其中 `Assets/` 示例不作为当前企业基准 | `plans/` 顶层 |

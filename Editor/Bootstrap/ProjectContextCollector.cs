@@ -59,7 +59,7 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
-        /// 收集扩展项目信息，用于 MEMORY.md 初始化。
+        /// 收集扩展项目信息，用于 PROJECT.md 自动生成和 Bootstrap 上下文注入。
         /// 包含基础信息 + 场景列表 + 脚本统计 + 项目规模 + Tags/Layers 等。
         /// </summary>
         public static string CollectExtended()
