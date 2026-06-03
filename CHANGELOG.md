@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-06-03
+
+### Added
+- **`manage_workspace_config` 工具** — 专用于读写 `PROJECT.md` 和 `SOUL.ext.md` 的工具，Agent 可在 Chat 中主动分析项目并更新配置文件。
+  - `read_project_config` / `write_project_config` — 读写 PROJECT.md（项目约定 + 个人偏好）
+  - `read_soul_extension` / `write_soul_extension` — 读写 SOUL.ext.md（Agent 行为规则扩展）
+  - `get_config_paths` — 查询两个配置文件的当前路径和存在状态
+  - 写入时自动创建 `AgentCore/` 目录，路径解析与 Bootstrap 加载逻辑完全一致
+  - 变更在下次对话开始时生效（Bootstrap 在对话启动时加载）
+
+### Changed
+- **SOUL.md 新增 §13 Workspace Configuration Management** — 明确告知 Agent 何时主动读写 PROJECT.md / SOUL.ext.md，以及与 `manage_memory` / `manage_knowledge` 的决策边界。
+- **TOOLS.md.template 新增 Workspace Configuration 章节** — 包含 `manage_workspace_config` 完整使用指南和 Tool Selection Guide 条目。
+- **§4 Anti-Hallucination 表格** — 新增 `manage_workspace_config` 正确名称及常见幻觉名称。
+
 ## [0.8.1] - 2026-06-03
 
 ### Changed

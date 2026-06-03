@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.8.1 | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.8.1）
+> **版本**: v0.8.2 | **制定日期**: 2026-05-09 | **状态**: 执行中（当前 v0.8.2）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 >
 > **与现有计划的关系**:
@@ -55,14 +55,15 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v0.8.1)
+### 0.4 当前项目快照 (v0.8.2)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.8.1 (2026-06-03) |
+| **版本** | 0.8.2 (2026-06-03) |
 | **工具数量** | 以 `ToolAutoDiscovery` 当前已编译程序集发现结果为准；VCS 工具默认不编译，启用 `AGENTCORE_VCS` 后注册 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) → [SKELETON] — 已重构，MEMORY.md/USER.md 已移除 |
+| **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md；SOUL.md §13 定义主动读写时机 |
 | **UI 框架** | UI Toolkit 动态 Hub 架构 (Chat/Knowledge/Memory + 可选组件 contribution)；Project Settings 使用 Dashboard + 4 Pages 顶部 Tab 导航 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单 + Cleanup 按钮；Chat 工具新增 8 个 action（get_file_log/cleanup/commit_files/resolve_files/ignore_*/remove_files） |

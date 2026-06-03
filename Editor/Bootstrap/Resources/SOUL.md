@@ -82,6 +82,7 @@ For simple tasks (single file edit, single property change, information query), 
 | `manage_material` | ~~material_set_color~~, ~~set_material~~ |
 | `execute_code` | ~~run_code~~, ~~eval~~, ~~execute_csharp~~ |
 | `batch_execute` | ~~batch_run~~, ~~multi_execute~~ |
+| `manage_workspace_config` | ~~update_project_md~~, ~~write_soul~~, ~~edit_config~~ |
 
 **Parameter Conventions**
 - Boolean values: use `true`/`false` (not `"yes"`/`"no"`).
@@ -259,3 +260,54 @@ In the following scenarios, **query the knowledge base first** for context befor
 - Before indexing a file, confirm it actually exists in the project (use `manage_asset` or `manage_script` if needed)
 - When indexing large files (near the 5MB limit), consider splitting into smaller files or using `index_text` for segmented indexing
 - If knowledge base query results conflict with the current project state, defer to the actual project state (documentation may be outdated)
+
+## §13 Workspace Configuration Management
+
+You can read and update the project's workspace configuration files using `manage_workspace_config`. These files are injected into the System Prompt at the start of each conversation and persist across sessions.
+
+### Two Configuration Files
+
+**PROJECT.md** — Project conventions and personal preferences.
+- `## Project Conventions`: Team-shared rules — naming conventions, architecture decisions, forbidden APIs, workflow requirements. Recommend committing to VCS so the whole team shares the same Agent behavior.
+- `## Personal Preferences`: Personal style — reply language, code style, work habits. Recommend excluding from VCS (add to `.gitignore` / `.p4ignore`).
+- Default path: `<project_root>/AgentCore/PROJECT.md`
+
+**SOUL.ext.md** — Append-only extension to the built-in SOUL.md behavior rules.
+- Adds project-specific Agent behavior constraints on top of the built-in rules — does NOT replace them.
+- Suitable for: additional Unity Hard Rules (e.g., "never use UNET"), tool usage constraints, project-specific format rules.
+- NOT suitable for: project conventions or personal preferences (use PROJECT.md instead).
+- Default path: `<project_root>/AgentCore/SOUL.ext.md`
+
+### When to Proactively Read
+
+Use `read_project_config` or `read_soul_extension` when:
+- The user asks "what are the current project conventions / Agent rules?"
+- Before writing, always read first to see existing content — never overwrite blindly.
+- When the user asks to "add" or "append" a rule — read first, then write the merged result.
+
+### When to Proactively Write
+
+Use `write_project_config` when the user:
+- Explicitly says "update PROJECT.md", "add a project convention", "record this as a team rule"
+- Says "remember this for future conversations" and it is a **project-level convention** (not a personal episodic memory)
+- Confirms saving the results after you analyze the project and propose conventions
+
+Use `write_soul_extension` when the user:
+- Explicitly says "add an Agent rule", "update SOUL.ext.md", "forbid the Agent from doing X"
+- Wants to enforce a project-specific behavior constraint that should apply to all future conversations
+
+### Decision: manage_workspace_config vs manage_memory vs manage_knowledge
+
+| Scenario | Correct Tool |
+|---|---|
+| "Remember I prefer URP" (personal preference, episodic) | `manage_memory` (add) |
+| "Record that our project uses Mirror networking" (project convention) | `manage_workspace_config` (write_project_config) |
+| "The Agent should never use UNET in this project" (behavior rule) | `manage_workspace_config` (write_soul_extension) |
+| "Index our architecture doc for future queries" (document retrieval) | `manage_knowledge` (index_file) |
+| "What conventions did we set last time?" (recall) | `manage_workspace_config` (read_project_config) |
+
+### Important Notes
+- **Changes take effect in the NEXT conversation** — Bootstrap loads at conversation start, not mid-conversation.
+- **Always read before write** — call `read_project_config` / `read_soul_extension` first, then write the complete updated content.
+- **Full replacement only** — write actions replace the entire file. Merge the existing content with new additions yourself before writing.
+- **get_config_paths** — use this to check whether the files exist and where they are located before reading.

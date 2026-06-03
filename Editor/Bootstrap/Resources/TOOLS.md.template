@@ -221,8 +221,24 @@
   - Content search across multiple files → `manage_file` (action: `search_content`)
   - C# script creation with templates, analysis, add methods → `manage_script`
   - Unity asset operations (AssetDatabase search, import, dependencies) → `manage_asset`
+  - PROJECT.md / SOUL.ext.md workspace config → `manage_workspace_config` (NOT `manage_file`)
 - All paths are relative to the project root (parent of `Assets/`).
 - Security: paths that escape the project directory are rejected.
+
+### Workspace Configuration
+- `manage_workspace_config` — Read and write workspace configuration files injected into the System Prompt.
+  - `read_project_config`: Read current PROJECT.md content (project conventions + personal preferences).
+  - `write_project_config`: Write full PROJECT.md content. Always read first, then write the merged result.
+  - `read_soul_extension`: Read current SOUL.ext.md content (Agent behavior rule extensions).
+  - `write_soul_extension`: Write full SOUL.ext.md content. Always read first, then write the merged result.
+  - `get_config_paths`: Return current file paths and existence status for both config files.
+- **When to use:**
+  - User asks to "update project conventions", "add a team rule", "record this preference for future conversations" → `write_project_config`
+  - User asks to "add an Agent rule", "forbid the Agent from doing X", "update SOUL.ext.md" → `write_soul_extension`
+  - User asks "what are the current project conventions?" → `read_project_config`
+  - Before any write, always call the corresponding read action first.
+- **Changes take effect in the NEXT conversation** — Bootstrap loads at conversation start.
+- **Do NOT use `manage_file` for PROJECT.md / SOUL.ext.md** — use this tool instead for semantic clarity and correct path resolution.
 
 ### Tool Selection Guide
 - **Want to modify a script file?** → `manage_script` (action: `write`)
@@ -237,6 +253,10 @@
 - **Want to see compilation errors?** → `read_console` (action: `get_errors`)
 - **Want to diagnose why Play Mode fails?** → `read_console` (action: `get_errors`) first, then check the file/line info
 - **Want to list project config files?** → `manage_file` (action: `list_directory`, path: `ProjectSettings`)
+- **Want to read project conventions / Agent rules?** → `manage_workspace_config` (action: `read_project_config` / `read_soul_extension`)
+- **Want to update project conventions or personal preferences?** → `manage_workspace_config` (action: `write_project_config`)
+- **Want to add a project-specific Agent behavior rule?** → `manage_workspace_config` (action: `write_soul_extension`)
+- **Want to check if PROJECT.md / SOUL.ext.md exist?** → `manage_workspace_config` (action: `get_config_paths`)
 - **Want to analyze scene health?** → `scene_analysis` (action: `health_check`)
 - **Want to understand scene structure?** → `scene_analysis` (action: `summarize`) or `manage_scene` (action: `get_hierarchy`)
 - **Want to find performance issues?** → `scene_analysis` (action: `performance_hints`) or `optimization` (action: `analyze_scene`)
