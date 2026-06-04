@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using AgentCore.Editor.Config.Settings.Pages;
 using UnityEngine;
 
 namespace AgentCore.Editor.Extensions
@@ -13,6 +14,7 @@ namespace AgentCore.Editor.Extensions
     {
         private static readonly List<IAgentCorePanelContribution> _panels = new List<IAgentCorePanelContribution>();
         private static readonly List<IAgentCoreSettingsContribution> _settings = new List<IAgentCoreSettingsContribution>();
+        private static readonly List<IAgentCoreSettingsPage> _pages = new List<IAgentCoreSettingsPage>();
         private static bool _isInitialized;
 
         /// <summary>
@@ -40,12 +42,26 @@ namespace AgentCore.Editor.Extensions
         }
 
         /// <summary>
+        /// Gets all dynamically discovered settings pages contributed by optional components,
+        /// ordered by their declared order and identifier.
+        /// </summary>
+        public static IReadOnlyList<IAgentCoreSettingsPage> Pages
+        {
+            get
+            {
+                EnsureInitialized();
+                return _pages;
+            }
+        }
+
+        /// <summary>
         /// Clears cached contributions and rescans all currently loaded assemblies.
         /// </summary>
         public static void Refresh()
         {
             _panels.Clear();
             _settings.Clear();
+            _pages.Clear();
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -57,6 +73,7 @@ namespace AgentCore.Editor.Extensions
 
             SortAndDeduplicate(_panels, contribution => contribution.Id);
             SortAndDeduplicate(_settings, contribution => contribution.Id);
+            SortAndDeduplicate(_pages, page => page.Id);
             _isInitialized = true;
         }
 
@@ -98,6 +115,17 @@ namespace AgentCore.Editor.Extensions
             if (typeof(IAgentCoreSettingsContribution).IsAssignableFrom(type))
             {
                 TryCreateContribution(type, _settings);
+            }
+
+            if (typeof(IAgentCoreSettingsPage).IsAssignableFrom(type))
+            {
+                // Only discover pages from optional component assemblies (not the main AgentCore.Editor assembly)
+                // to avoid double-registering built-in pages.
+                var assemblyName = type.Assembly.GetName().Name;
+                if (assemblyName != null && assemblyName != "AgentCore.Editor")
+                {
+                    TryCreateContribution(type, _pages);
+                }
             }
         }
 
@@ -142,6 +170,8 @@ namespace AgentCore.Editor.Extensions
                     return panel.Order;
                 case IAgentCoreSettingsContribution settings:
                     return settings.Order;
+                case IAgentCoreSettingsPage page:
+                    return page.Order;
                 default:
                     return 0;
             }

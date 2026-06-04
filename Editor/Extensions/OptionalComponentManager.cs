@@ -16,6 +16,11 @@ namespace AgentCore.Editor.Extensions
         public const string VcsDefine = "AGENTCORE_VCS";
 
         /// <summary>
+        /// Scripting define symbol used to enable the Code Indexing optional component.
+        /// </summary>
+        public const string IndexingDefine = "AGENTCORE_INDEXING";
+
+        /// <summary>
         /// Gets all optional components known to AgentCore.
         /// </summary>
         /// <returns>Optional component metadata list.</returns>
@@ -28,7 +33,13 @@ namespace AgentCore.Editor.Extensions
                     "Version Control",
                     "Git / SVN / Perforce tools and Hub panel.",
                     VcsDefine,
-                    IsVcsEnabled())
+                    IsVcsEnabled()),
+                new OptionalComponentInfo(
+                    "indexing",
+                    "Code Indexing",
+                    "Roslyn-based C# symbol index for the search_code tool. Enables fast symbol lookup, namespace browsing, and incremental re-indexing across all workspace roots.",
+                    IndexingDefine,
+                    IsIndexingEnabled())
             };
         }
 
@@ -48,6 +59,24 @@ namespace AgentCore.Editor.Extensions
         public static void SetVcsEnabled(bool enabled)
         {
             SetDefine(VcsDefine, enabled);
+        }
+
+        /// <summary>
+        /// Checks whether the Code Indexing optional component is enabled for the active build target group.
+        /// </summary>
+        /// <returns>True if the AGENTCORE_INDEXING define is present.</returns>
+        public static bool IsIndexingEnabled()
+        {
+            return HasDefine(IndexingDefine);
+        }
+
+        /// <summary>
+        /// Enables or disables the Code Indexing optional component for the active build target group.
+        /// </summary>
+        /// <param name="enabled">Whether Code Indexing should be enabled.</param>
+        public static void SetIndexingEnabled(bool enabled)
+        {
+            SetDefine(IndexingDefine, enabled);
         }
 
         private static bool HasDefine(string define)

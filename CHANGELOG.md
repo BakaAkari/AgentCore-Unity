@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-06-03
+
+### Added
+- **Code Indexing 独立设置标签页** — 新增 `IndexingSettingsPage`（`Editor/Indexing/UI/IndexingSettingsPage.cs`），当 `AGENTCORE_INDEXING` 组件启用时，在 AgentCore Project Settings 顶部导航栏自动出现独立的 "Code Indexing" 标签页（Order = 700，位于所有内置标签页之后）。
+  - **LLM Configuration 卡片** — 展示当前 LLM 端点、模型名称、温度、最大 Token 数，并提示索引本身不调用 LLM（仅供参考）。
+  - **Workspace 卡片** — 展示当前工作区根目录、Unity 根目录、工作区哈希。
+  - **Index Statistics 卡片** — 展示已索引文件数、符号数、根目录数、上次全量/增量索引时间，含 Refresh Stats 按钮。
+  - **Index Actions 卡片** — 提供 Full Index / Incremental / Clear Index 三个操作按钮，含操作结果反馈和说明文字。
+- **`IAgentCoreSettingsPage.Order` 属性** — 为 `IAgentCoreSettingsPage` 接口新增 `int Order { get; }` 属性，支持标签页排序（内置页面使用 100–600，可选组件页面使用 700+）。
+- **`AgentCoreExtensionRegistry.Pages`** — 扩展注册表新增 `Pages` 属性，通过反射自动发现来自非主程序集（非 `AgentCore.Editor`）的 `IAgentCoreSettingsPage` 实现，实现可选组件标签页的零耦合动态注入。
+- **`AgentCoreSettingsProvider.BuildPageList()`** — 设置 Provider 新增 `BuildPageList()` 静态方法，将内置页面与 `AgentCoreExtensionRegistry.Pages` 动态发现的页面合并，按 `Order` 排序后去重。
+
+### Changed
+- **内置设置页面 `Order` 属性** — 为 6 个内置页面补充 `Order` 实现：Dashboard(100)、Model & Agent(200)、Context & Memory(300)、Tools & Extensions(400)、Workspace(500)、UI & Diagnostics(600)。
+
+## [0.9.1] - 2026-06-03
+
+### Added
+- **代码库索引 Phase 1（v0.9.1）** — 基于 Roslyn 的 C# 符号索引系统，通过 `search_code` 工具提供精确符号检索能力（需启用 `AGENTCORE_INDEXING` 可选组件）。
+  - **数据模型层**：`IndexWorkspace`、`IndexRoot`、`IndexedFile`、`SymbolInfo`、`IndexingStats`、`IndexScopeType`、`IndexRootRole` 完整模型体系
+  - **存储层**：`IIndexStore` 抽象接口 + `JsonlIndexStore` MVP 实现（JSONL 文件存储，存放于 `Library/AgentCore/Indexing/{workspaceHash}/`，不提交 VCS）
+  - **根目录发现层**：`IIndexRootProvider` 接口 + 5 个 Provider 实现：
+    - `UnityRootProvider` — Unity 项目根目录（Assets/Scripts）
+    - `VcsWorkspaceRootProvider` — VCS 工作区根目录
+    - `WorkspaceChildRootProvider` — 工作区子根目录（自动发现）
+    - `UserConfiguredScopeRootProvider` — 用户配置的自定义根目录
+    - `ResourcePackageMetadataProvider` — 资源包元数据根目录
+    - `ExtraAuthorizedRootProvider` — 额外授权根目录
+  - **解析层**：`IndexWorkspaceResolver`（从 WorkspaceContext 构建 IndexWorkspace）+ `IndexRootResolver`（聚合所有 Provider，去重排序）
+  - **提取层**：`RoslynSymbolExtractor` — 基于 Microsoft.CodeAnalysis.CSharp 的语法树级符号提取，支持 class/interface/struct/enum/delegate/method/property/field/event/constructor，含 MD5 内容哈希用于增量检测
+  - **索引引擎**：`CodebaseIndexer` — 全量索引（`RunFullIndexAsync`）+ 增量索引（`RunIncrementalIndexAsync`），基于 LastModified ticks 快速变更检测，支持 include/exclude 模式过滤
+  - **进度追踪**：`IndexingProgress` — 索引阶段快照（Scanning/Indexing/Completed/Failed），含文件数/符号数/耗时统计
+  - **查询层**：`SymbolSearcher` — 多维度查询接口（按名称/全名/命名空间/文件/类型成员），`IsIndexAvailableAsync` 可用性检查
+  - **工具层**：`SearchCodeTool` — 10 个 action 的 `search_code` 工具（`resolve_workspace`、`list_roots`、`index_full`、`index_scope`、`index_incremental`、`search_symbol`、`list_namespaces`、`get_file_symbols`、`get_stats`、`clear_index`）
+  - **Settings UI**：`IndexingSettingsContribution` — Extensions 设置页中的 Code Indexing 卡片（工作区信息、索引统计、全量/增量/清空操作按钮）
+  - **组件描述符**：`IndexingComponentDescriptor` — 组件元数据（id: "indexing"，define: AGENTCORE_INDEXING）
+- **`OptionalComponentManager`** — 新增 `IndexingDefine = "AGENTCORE_INDEXING"`、`IsIndexingEnabled()`、`SetIndexingEnabled()` 支持 Code Indexing 可选组件的启用/禁用
+- **`ExtensionsSettingsSection`** — 新增 "indexing" case，支持通过 Extensions 设置页切换 Code Indexing 组件
+- **`TOOLS.md.template`** — 新增 `search_code` 工具完整使用指南（工作流、所有 action 说明、使用场景、注意事项）及 Tool Selection Guide 快速条目
+
+## [0.9.0] - 2026-06-03
+
+### Added
+- **Workspace 基础设施（v0.9.0 P0）** — 企业级 SVN 多根工作区支持，为代码索引、VCS 工具、RAG 和 Memory 提供统一的 WorkspaceRoot 边界。
+  - **数据模型层**：`WorkspaceContext`、`WorkspaceVcsInfo`、`WorkspaceRootInfo` 及配套枚举（`WorkspaceScopeType`、`WorkspaceRootRole`、`WorkspaceResolutionStatus`、`WorkspaceVcsType`）
+  - **解析层**：
+    - `UnityRootResolver` — 从 `Application.dataPath` 解析 Unity 项目根目录
+    - `SvnWorkspaceInfoResolver` — 运行 `svn info` 解析 Working Copy Root / URL / Revision / BranchId，支持 `.svn` 目录回退检测
+    - `WorkspaceRootResolver` — 优先级：ManualOverride → SVN 检测 → FallbackToUnityRoot
+    - `WorkspaceRootRoleResolver` — 将 `ScopeType` 映射到默认 `Role` / `IsReadOnly` / `IsGenerated`
+    - `ScopeRootResolver` — 自动扫描 workspace 下的业务子根（unity/gamemodes/maps/tools/plugins/shared/engine/generated 等），合并 `workspace.json` 配置
+  - **指纹层**：`WorkspaceFingerprintBuilder` — SHA256 短哈希（16 hex 字符），用于跨分支隔离索引数据库
+  - **服务层**：`WorkspaceContextService` — 静态单例，`GetCurrent()` / `Refresh()` / `InvalidateCache()`，Domain Reload 安全（静态缓存自动失效）
+  - **配置层**：`WorkspaceConfig` / `WorkspaceRootOverride` / `WorkspaceConfigStorage` — 读写 `.agentcore/workspace.json` 项目级配置
+  - **安全层**：`WorkspaceOperationRisk` 枚举 + `WorkspacePathPolicy` — 基于 Root Role 的写操作风险策略（Safe / LowRisk / MediumRisk / HighRisk / Blocked）
+  - **路径服务**：`WorkspacePathService` — `ResolveWorkspacePath` / `ResolveUnityAssetPath` / `TryGetRootInfo` / `IsInsideWorkspace` 等路径工具方法
+- **Workspace Settings 页面** — Project Settings → AgentCore → Workspace 新标签页，包含：
+  - Workspace Overview 卡片（WorkspaceRoot / UnityRoot / Branch / Revision / Fingerprint）
+  - Detection Actions 卡片（Refresh / Invalidate Cache / Auto-Detect 开关）
+  - Scope Roots 折叠面板（表格展示所有已检测子根及风险等级）
+  - Manual Overrides 折叠面板（WorkspaceRoot 覆盖路径 / Unity 相对路径 / workspace.json 管理）
+  - Path Safety Policy 折叠面板（Role → Risk 对照表）
+- **AgentCoreSettings v8** — 新增 Workspace 配置字段：`workspaceAutoDetectEnabled`、`workspaceRootOverride`、`unityRootRelativePathOverride`、`workspaceConfigVersion`
+
+### Changed
+- **`ProjectContextCollector`** — `Collect()` 新增 "Workspace 信息" 章节，注入 WorkspaceRoot / UnityRoot / Branch / Fingerprint / Scope Roots 表格到 Bootstrap 上下文，让 LLM 感知完整工作区结构
+- **`VcsDetector`（VCS 组件）** — `DetectVcs()` 优先复用 `WorkspaceContextService` 的缓存结果，避免重复执行 `svn info` 子进程；`GetVcsRootPath()` 对 SVN 返回 WorkspaceRoot（working copy root）而非 Unity 项目根目录
+
 ## [0.8.2] - 2026-06-03
 
 ### Added

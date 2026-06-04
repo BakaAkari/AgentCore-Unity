@@ -1,12 +1,14 @@
 using System;
 using System.IO;
+using AgentCore.Editor.Workspace;
 using UnityEngine;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
     /// <summary>
-    /// 版本控制系统检测器
-    /// 按优先级 SVN > Perforce > Git 检测项目使用的 VCS
+    /// 版本控制系统检测器。
+    /// 按优先级 SVN > Perforce > Git 检测项目使用的 VCS。
+    /// SVN 检测优先复用 <see cref="WorkspaceContextService"/> 的缓存结果，避免重复执行 svn 命令。
     /// </summary>
     public static class VcsDetector
     {
@@ -14,17 +16,66 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private static string _cachedRootPath;
 
         /// <summary>
-        /// 检测当前项目使用的版本控制系统
+        /// 检测当前项目使用的版本控制系统。
         /// </summary>
-        /// <returns>检测到的 VCS 类型</returns>
+        /// <returns>检测到的 VCS 类型。</returns>
         public static VcsType DetectVcs()
         {
             if (_cachedType.HasValue)
                 return _cachedType.Value;
 
+            // ── 优先级 1: 复用 WorkspaceContextService 的 SVN 缓存 ──────────
+            // WorkspaceContextService 已经运行过 svn info，直接读取结果，
+            // 避免 VcsDetector 再次启动子进程。
+            try
+            {
+                var wsCtx = WorkspaceContextService.GetCurrent();
+                if (wsCtx != null && wsCtx.Vcs != null)
+                {
+                    switch (wsCtx.Vcs.Type)
+                    {
+                        case WorkspaceVcsType.Svn:
+                            _cachedType = VcsType.Svn;
+                            // 优先使用 WorkspaceRoot（SVN working copy root），
+                            // 回退到 Unity 项目根目录。
+                            _cachedRootPath = !string.IsNullOrEmpty(wsCtx.WorkspaceRoot)
+                                ? wsCtx.WorkspaceRoot
+                                : GetProjectRootPath();
+                            return VcsType.Svn;
+
+                        case WorkspaceVcsType.Git:
+                            _cachedType = VcsType.Git;
+                            _cachedRootPath = !string.IsNullOrEmpty(wsCtx.WorkspaceRoot)
+                                ? wsCtx.WorkspaceRoot
+                                : FindGitRoot(GetProjectRootPath());
+                            return VcsType.Git;
+
+                        case WorkspaceVcsType.Perforce:
+                            _cachedType = VcsType.Perforce;
+                            _cachedRootPath = !string.IsNullOrEmpty(wsCtx.WorkspaceRoot)
+                                ? wsCtx.WorkspaceRoot
+                                : GetProjectRootPath();
+                            return VcsType.Perforce;
+
+                        case WorkspaceVcsType.None:
+                            // WorkspaceContext 明确说明无 VCS，跳过后续检测
+                            _cachedType = VcsType.None;
+                            _cachedRootPath = GetProjectRootPath();
+                            return VcsType.None;
+
+                        // WorkspaceVcsType.Unknown → 继续本地检测
+                    }
+                }
+            }
+            catch
+            {
+                // WorkspaceContextService 不可用时，降级到本地检测
+            }
+
+            // ── 本地检测（WorkspaceContext 不可用或 VcsType.Unknown 时） ────
             var projectPath = GetProjectRootPath();
-            
-            // 优先级 1: SVN
+
+            // 优先级 1: SVN（.svn 目录检测）
             if (IsSvnRepository(projectPath))
             {
                 _cachedType = VcsType.Svn;
@@ -54,7 +105,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         /// <summary>
-        /// 获取 VCS 根目录路径
+        /// 获取 VCS 根目录路径。
+        /// 对于 SVN，返回 working copy root（由 WorkspaceContextService 解析）。
         /// </summary>
         public static string GetVcsRootPath()
         {
@@ -64,7 +116,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         /// <summary>
-        /// 清除缓存，强制重新检测
+        /// 清除缓存，强制重新检测。
         /// </summary>
         public static void ClearCache()
         {

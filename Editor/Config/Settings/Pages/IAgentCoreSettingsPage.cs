@@ -21,6 +21,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         string Description { get; }
 
         /// <summary>
+        /// Gets the sort order for tab positioning.
+        /// Built-in pages use 0–500; optional component pages should use 600+.
+        /// </summary>
+        int Order { get; }
+
+        /// <summary>
         /// Called when this page becomes the active page.
         /// </summary>
         /// <param name="context">The current settings context.</param>

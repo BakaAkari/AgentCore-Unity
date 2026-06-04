@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 7;
+        private const int CurrentVersion = 8;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -176,6 +176,20 @@ namespace AgentCore.Editor.Config
         [Range(0.3f, 0.95f)]
         public float conversationCompressionTrigger = 0.7f;
 
+        // --- Workspace 配置 ---
+        [Header("Workspace")]
+        [Tooltip("启用 Workspace 自动检测（从 UnityRoot 向上识别 SVN 工作副本根）")]
+        public bool workspaceAutoDetectEnabled = true;
+
+        [Tooltip("手动指定 WorkspaceRoot 绝对路径（留空则自动检测）")]
+        public string workspaceRootOverride = "";
+
+        [Tooltip("手动指定 UnityRoot 相对于 WorkspaceRoot 的路径（留空则自动推断）")]
+        public string unityRootRelativePathOverride = "";
+
+        [Tooltip("Workspace 配置版本（内部使用，用于检测 workspace.json 变更）")]
+        public int workspaceConfigVersion = 0;
+
         // --- UI 偏好 ---
         [Header("UI Preferences")]
         [Tooltip("启用流式输出")]
@@ -283,6 +297,12 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v6→v7: settings UI restructured to Dashboard + 4 Pages");
             }
 
+            // v7 -> v8: 新增 Workspace 基础设施字段（使用声明时默认值，无需额外迁移）
+            if (settingsVersion < 8)
+            {
+                Debug.Log("[AgentCore] Settings migrated v7→v8: workspace infrastructure fields initialized");
+            }
+
             settingsVersion = CurrentVersion;
             Save(true);
         }
@@ -320,6 +340,10 @@ namespace AgentCore.Editor.Config
             toolResultCompressionThreshold = 1000;
             toolResultTargetTokens = 200;
             conversationCompressionTrigger = 0.7f;
+            workspaceAutoDetectEnabled = true;
+            workspaceRootOverride = "";
+            unityRootRelativePathOverride = "";
+            workspaceConfigVersion = 0;
             streamingEnabled = true;
             showToolCallDetails = true;
             settingsVersion = CurrentVersion;

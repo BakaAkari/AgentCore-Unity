@@ -32,6 +32,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Description => "Configure the LLM connection and agent runtime behavior.";
 
         /// <inheritdoc />
+        public int Order => 200;
+
+        /// <inheritdoc />
         public void OnActivate(AgentCoreSettingsContext context)
         {
             EnsureApiKeyDisplay(context);

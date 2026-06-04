@@ -1,33 +1,28 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-06-02 | **当前规划基准**: v0.9.0 Phase 1 预研 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-06-04 | **当前版本**: v0.9.2 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
 ---
 
-##  活跃文档（当前开发指导）
+## 活跃文档（当前开发指导）
 
 | 文档 | 用途 | 状态 |
 |------|------|------|
-| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6-7 的开发路线图和任务清单 |  活跃维护；已按 SVN WorkspaceRoot 基准校准 |
-| [**workspace-foundation-v0.9.0-p0-plan.md**](workspace-foundation-v0.9.0-p0-plan.md) | **v0.9.0 P0 Workspace 基础设施实施计划** — WorkspaceContext / WorkspaceRootResolver / ScopeRootResolver / WorkspaceSettingsPage 等前置基础设施 |  **当前最高优先级**；6.2.1 代码索引的前置条件 |
-| [**enterprise-unity-workflow-requirements.md**](enterprise-unity-workflow-requirements.md) | **企业级 Unity 项目适配需求基准** — 记录大规模地图/模式/资源包/SVN 分线工作流 |  当前企业适配上游依据 |
-| [**codebase-indexing-phase1-plan.md**](codebase-indexing-phase1-plan.md) | **v0.9.0 代码索引 Phase 1 设计** — 文件级索引 + 符号检索，本地 SQLite，不依赖外部服务 |  已按 SVN WorkspaceRoot / UnityRoot / Scope Root 校准；依赖 workspace-foundation 完成 |
-| [**enterprise-agentcore-implementation-audit.md**](enterprise-agentcore-implementation-audit.md) | **现有实现企业适配审计** — 对照 SVN WorkspaceRoot 模型识别 VCS、RAG、Memory、工具边界缺口 |  当前改造依据 |
-| [**ARCHITECTURE.md**](ARCHITECTURE.md) | **系统架构总览** — 核心设计决策、架构图、模块职责 |  架构参考；其中标准 Unity 项目示例需按企业基准解释 |
-| [**ai-coding-assistants-analysis.md**](ai-coding-assistants-analysis.md) | AI 编码助手生态分析 — Cursor/Cline/Windsurf 等工具对比 |  参考文档；其中 `Assets/` 示例不作为当前企业基准 |
-| [**teamcity-svn-unity-build-quality-plan.md**](teamcity-svn-unity-build-quality-plan.md) | Unity + SVN + TeamCity 大型项目构建质量治理方案草案 |  外部客户方案草案，持续迭代 |
+| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6-7 的开发路线图、任务清单和 ADR | 活跃维护 |
+| [**enterprise-unity-workflow-requirements.md**](enterprise-unity-workflow-requirements.md) | **企业级 Unity 项目适配需求基准** — 记录大规模地图/模式/资源包/SVN 分线工作流；后续代码索引、VCS、RAG、Memory、工具系统等功能设计的上游依据 | 需求基准，持续参考 |
+| [**vcs-treeview-refactor-plan.md**](vcs-treeview-refactor-plan.md) | **VCS Panel TreeView 重构方案** — 将 VCS Panel 改造为 WorkspaceRoot-relative 树形结构，按 Scope Root 分组；依赖 workspace-foundation 已完成（v0.9.0） | 待实现（下一优先任务之一） |
 
 ---
 
-##  归档文档（历史参考）
+## 归档文档（历史参考）
 
 已完成的计划文档已移至 [`_archive/`](_archive/) 目录，按类型分类：
 
-###  Phase 计划（已完成）
+### Phase 计划（已完成）
 
-所有 Phase 1-4 的详细实施计划已归档至 [`_archive/phases/`](_archive/phases/)：
+所有 Phase 1-5 的详细实施计划已归档至 [`_archive/phases/`](_archive/phases/)：
 
 | 文档 | 完成版本 | 说明 |
 |------|---------|------|
@@ -37,7 +32,7 @@
 | [phase3-plan.md](_archive/phases/phase3-plan.md) | v0.3.1 | Phase 3: 能记忆 — Memory、Session、Mem0/LightRAG |
 | [phase4-plan.md](_archive/phases/phase4-plan.md) | v0.3.2~v0.3.7 | Phase 4: 更好用 — UX 打磨、快捷键、工具管理 |
 
-###  重构计划（已完成）
+### 重构计划（已完成）
 
 稳定性优先阶段的重构计划已归档至 [`_archive/refactoring/`](_archive/refactoring/)：
 
@@ -49,8 +44,9 @@
 | [chatwindow-split-plan.md](_archive/refactoring/chatwindow-split-plan.md) | v0.4.6 | ChatWindow partial 拆分 — 9 个文件 |
 | [vcs-optional-component-refactor-plan.md](_archive/refactoring/vcs-optional-component-refactor-plan.md) | v0.6.0 | VCS 可选组件化 — define-gated 内置组件 |
 | [settings-page-architecture-refactor-plan.md](_archive/refactoring/settings-page-architecture-refactor-plan.md) | v0.6.1 | Settings 页面架构重构 — Settings shell + section registry |
+| [bootstrap-refactor-plan.md](_archive/refactoring/bootstrap-refactor-plan.md) | v0.8.x | Bootstrap 链路重构 — SOUL/TOOLS/PROJECT 三层架构 |
 
-###  功能计划（已完成）
+### 功能计划（已完成）
 
 已落地的功能设计文档已归档至 [`_archive/features/`](_archive/features/)：
 
@@ -64,8 +60,10 @@
 | [context-compression-implementation.md](_archive/features/context-compression-implementation.md) | v0.5.0 | 上下文压缩实施文档 — 开发执行手册 |
 | [context-visualization-plan.md](_archive/features/context-visualization-plan.md) | v0.5.2 | 上下文压缩可视化 — ContextUsagePanel 设计 |
 | [version-control-integration-plan.md](_archive/features/version-control-integration-plan.md) | v0.5.4~v0.5.5 | 版本控制集成 — Git/SVN/Perforce 查询与操作 |
+| [workspace-foundation-v0.9.0-p0-plan.md](_archive/features/workspace-foundation-v0.9.0-p0-plan.md) | v0.9.0 | Workspace 基础设施 P0 — WorkspaceContext / Resolver / Service / Config / Safety / Settings |
+| [codebase-indexing-phase1-plan.md](_archive/features/codebase-indexing-phase1-plan.md) | v0.9.1 | 代码库索引 Phase 1 — 文件级索引 + 符号检索，单层 SQLite 架构 |
 
-###  技术分析（参考文档）
+### 技术分析（参考文档）
 
 技术选型和架构分析文档已归档至 [`_archive/analysis/`](_archive/analysis/)：
 
@@ -75,23 +73,26 @@
 | [mem0-vs-openmemory-analysis.md](_archive/analysis/mem0-vs-openmemory-analysis.md) | 技术选型 | mem0 Server vs OpenMemory MCP 部署对比 |
 | [mem0-settings-optimization.md](_archive/analysis/mem0-settings-optimization.md) | UX 优化 | Memory Service 设置界面优化方案 |
 | [context-compression-llm-analysis.md](_archive/analysis/context-compression-llm-analysis.md) | 技术选型 | 上下文压缩 LLM 分离式/统一式选型分析 |
+| [ai-coding-assistants-analysis.md](_archive/analysis/ai-coding-assistants-analysis.md) | 竞品分析 | Cursor/Cline/Roo Code/OpenCode/Hermes 对比；已确认采用 Roo Code 符号索引路线 |
+| [ARCHITECTURE.md](_archive/analysis/ARCHITECTURE.md) | 架构参考 | 系统架构总览 v0.4.8（历史参考，企业级适配见 ROADMAP §0.3） |
+| [enterprise-agentcore-implementation-audit.md](_archive/analysis/enterprise-agentcore-implementation-audit.md) | 适配审计 | 已实现功能企业级适配审计（结论已固化到 ROADMAP §0.3） |
+| [teamcity-svn-unity-build-quality-plan.md](_archive/analysis/teamcity-svn-unity-build-quality-plan.md) | 外部方案 | Unity + SVN + TeamCity 大型项目构建质量治理草案 |
 
 ---
 
-##  文档使用指南
+## 文档使用指南
 
 ### 对于开发者
 
 1. **开始新功能前** → 查阅 [ROADMAP.md](ROADMAP.md) 确认任务优先级和范围
-2. **涉及企业级 Unity 项目、代码索引、VCS、RAG、Memory 或文件工具边界时** → 优先阅读 [enterprise-unity-workflow-requirements.md](enterprise-unity-workflow-requirements.md)、[codebase-indexing-phase1-plan.md](codebase-indexing-phase1-plan.md) 和 [enterprise-agentcore-implementation-audit.md](enterprise-agentcore-implementation-audit.md)
-3. **理解系统架构** → 阅读 [ARCHITECTURE.md](ARCHITECTURE.md) 了解核心设计；如出现 Unity 项目根或 `Assets/` 示例，必须按“WorkspaceRoot = SVN 工作副本根，UnityRoot = WorkspaceRoot 下 Unity 工程子根”重新解释
-4. **查找历史决策** → 在 [`_archive/`](_archive/) 中搜索相关计划文档
+2. **涉及企业级 Unity 项目、代码索引、VCS、RAG、Memory 或文件工具边界时** → 优先阅读 [enterprise-unity-workflow-requirements.md](enterprise-unity-workflow-requirements.md)
+3. **查找历史决策** → 在 [`_archive/`](_archive/) 中搜索相关计划文档
 
 ### 对于 AI 助手
 
-1. **优先参考活跃文档** — ROADMAP 是当前开发主导文档；企业级适配相关任务必须优先参考三份企业基准文档
-2. **WorkspaceRoot 规则优先** — 默认以 SVN 工作副本根作为 AgentCore WorkspaceRoot；UnityRoot 只是 WorkspaceRoot 下的 Unity 工程子根；地图、模式、工具、资源包、插件等目录是 WorkspaceRoot 下的 Scope Root
-3. **代码事实优先** — 当文档与实际代码不一致时，以 `Editor/` 下的源码为准，并在计划中明确现有代码是待改造现状还是目标设计
+1. **优先参考活跃文档** — ROADMAP 是当前开发主导文档
+2. **WorkspaceRoot 规则优先** — 默认以 SVN 工作副本根作为 AgentCore WorkspaceRoot；UnityRoot 只是 WorkspaceRoot 下的 Unity 工程子根
+3. **代码事实优先** — 当文档与实际代码不一致时，以 `Editor/` 下的源码为准
 4. **归档文档仅作历史参考** — 不要基于归档文档推断当前功能状态
 
 ### 文档维护规则
@@ -99,11 +100,10 @@
 - **新增功能计划** → 在 `plans/` 顶层创建 `xxx-feature-plan.md`
 - **功能完成后** → 在文档顶部标注状态并移至 `_archive/features/`
 - **ROADMAP 更新** → 每次版本发布后同步更新任务状态
-- **ARCHITECTURE 更新** → 重大架构变更后同步更新版本号和架构图
 
 ---
 
-##  相关文档
+## 相关文档
 
 - [**AGENTS.md**](../AGENTS.md) — LLM 开发规范（编码规则、工具开发、流程管理）
 - [**CHANGELOG.md**](../CHANGELOG.md) — 版本变更日志

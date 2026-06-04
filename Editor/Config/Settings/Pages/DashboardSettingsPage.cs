@@ -25,6 +25,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Description => "Overview of AgentCore configuration status and quick actions.";
 
         /// <inheritdoc />
+        public int Order => 100;
+
+        /// <inheritdoc />
         public void OnActivate(AgentCoreSettingsContext context) { }
 
         /// <inheritdoc />

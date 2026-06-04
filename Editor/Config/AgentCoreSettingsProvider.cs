@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.Config.Settings;
 using AgentCore.Editor.Config.Settings.Pages;
+using AgentCore.Editor.Extensions;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -14,19 +16,44 @@ namespace AgentCore.Editor.Config
     public class AgentCoreSettingsProvider : SettingsProvider
     {
         private AgentCoreSettingsContext _settingsContext;
-        private readonly IAgentCoreSettingsPage[] _pages;
+        private IAgentCoreSettingsPage[] _pages;
 
         private AgentCoreSettingsProvider(string path, SettingsScope scope)
             : base(path, scope)
         {
-            _pages = new IAgentCoreSettingsPage[]
+            _pages = BuildPageList();
+        }
+
+        /// <summary>
+        /// Builds the ordered page list by merging built-in pages with dynamically discovered
+        /// optional component pages from <see cref="AgentCoreExtensionRegistry.Pages"/>.
+        /// </summary>
+        private static IAgentCoreSettingsPage[] BuildPageList()
+        {
+            var builtIn = new IAgentCoreSettingsPage[]
             {
                 new DashboardSettingsPage(),
                 new ModelAgentSettingsPage(),
                 new ContextMemorySettingsPage(),
                 new ToolsExtensionsSettingsPage(),
+                new WorkspaceSettingsPage(),
                 new UiDiagnosticsSettingsPage(),
             };
+
+            // Merge with dynamically discovered pages from optional component assemblies.
+            var dynamic = AgentCoreExtensionRegistry.Pages;
+            if (dynamic == null || dynamic.Count == 0)
+                return builtIn;
+
+            var merged = new List<IAgentCoreSettingsPage>(builtIn);
+            foreach (var page in dynamic)
+            {
+                // Avoid duplicates by Id.
+                if (merged.All(p => p.Id != page.Id))
+                    merged.Add(page);
+            }
+
+            return merged.OrderBy(p => p.Order).ThenBy(p => p.Id, StringComparer.Ordinal).ToArray();
         }
 
         /// <summary>

@@ -33,6 +33,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Description => "Chat UI preferences, connection diagnostics, and maintenance actions.";
 
         /// <inheritdoc />
+        public int Order => 600;
+
+        /// <inheritdoc />
         public void OnActivate(AgentCoreSettingsContext context) { }
 
         /// <inheritdoc />

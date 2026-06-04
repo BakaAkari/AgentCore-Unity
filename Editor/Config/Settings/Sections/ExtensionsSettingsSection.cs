@@ -92,6 +92,9 @@ namespace AgentCore.Editor.Config.Settings.Sections
                 case "vcs":
                     OptionalComponentManager.SetVcsEnabled(enabled);
                     break;
+                case "indexing":
+                    OptionalComponentManager.SetIndexingEnabled(enabled);
+                    break;
                 default:
                     EditorUtility.DisplayDialog(
                         "Unsupported Optional Component",

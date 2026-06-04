@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using AgentCore.Editor.Utils;
+using AgentCore.Editor.Workspace;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -14,6 +15,7 @@ namespace AgentCore.Editor.Bootstrap
     /// <summary>
     /// 自动收集 Unity 项目信息，生成 PROJECT.md 内容。
     /// 收集的信息包括：Unity 版本、渲染管线、目标平台、项目结构、已安装包等。
+    /// 同时注入 Workspace 摘要（WorkspaceRoot、Branch、Scope Roots 表格）。
     /// </summary>
     public static class ProjectContextCollector
     {
@@ -38,6 +40,11 @@ namespace AgentCore.Editor.Bootstrap
                 sb.AppendLine($"- **版本号**: {PlayerSettings.bundleVersion}");
                 sb.AppendLine();
 
+                // Workspace 摘要
+                sb.AppendLine("### Workspace 信息");
+                sb.AppendLine(CollectWorkspaceSummary());
+                sb.AppendLine();
+
                 // 项目结构摘要
                 sb.AppendLine("### 项目结构摘要");
                 sb.AppendLine("```");
@@ -53,6 +60,75 @@ namespace AgentCore.Editor.Bootstrap
             {
                 sb.AppendLine($"\n> [WARN] 项目信息收集部分失败: {ex.Message}");
                 Debug.LogWarning($"[AgentCore] ProjectContextCollector error: {ex}");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 收集 Workspace 摘要，包含 WorkspaceRoot、UnityRoot、Branch、Fingerprint 和 Scope Roots 表格。
+        /// 失败时静默降级，不影响主流程。
+        /// </summary>
+        private static string CollectWorkspaceSummary()
+        {
+            var sb = new StringBuilder();
+            try
+            {
+                var ctx = WorkspaceContextService.GetCurrent();
+
+                if (ctx == null || !ctx.IsValid)
+                {
+                    var status = ctx?.Status.ToString() ?? "null";
+                    var err = ctx?.ErrorMessage;
+                    sb.AppendLine(string.IsNullOrEmpty(err)
+                        ? $"- **Workspace**: 未解析 (Status={status})"
+                        : $"- **Workspace**: 解析失败 — {err}");
+                    return sb.ToString();
+                }
+
+                sb.AppendLine($"- **Workspace Root**: `{ctx.WorkspaceRoot}`");
+                sb.AppendLine($"- **Unity Root**: `{ctx.UnityRoot}`");
+
+                if (!string.IsNullOrEmpty(ctx.UnityRootRelativePath))
+                    sb.AppendLine($"- **Unity 相对路径**: `{ctx.UnityRootRelativePath}`");
+
+                if (!string.IsNullOrEmpty(ctx.Fingerprint))
+                    sb.AppendLine($"- **Fingerprint**: `{ctx.Fingerprint}`");
+
+                // VCS 信息
+                if (ctx.Vcs != null && ctx.Vcs.Type != WorkspaceVcsType.None)
+                {
+                    sb.AppendLine($"- **VCS**: {ctx.Vcs.Type}");
+                    if (!string.IsNullOrEmpty(ctx.Vcs.BranchId))
+                        sb.AppendLine($"- **Branch**: `{ctx.Vcs.BranchId}`");
+                    if (!string.IsNullOrEmpty(ctx.Vcs.Revision))
+                        sb.AppendLine($"- **Revision**: {ctx.Vcs.Revision}");
+                    if (!string.IsNullOrEmpty(ctx.Vcs.Url))
+                        sb.AppendLine($"- **SVN URL**: `{ctx.Vcs.Url}`");
+                }
+
+                // Scope Roots 表格
+                var enabledRoots = ctx.EnabledRoots;
+                if (enabledRoots != null && enabledRoots.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("**Scope Roots:**");
+                    sb.AppendLine();
+                    sb.AppendLine("| 名称 | Scope | Role | 相对路径 |");
+                    sb.AppendLine("|------|-------|------|---------|");
+                    foreach (var root in enabledRoots)
+                    {
+                        if (root == null) continue;
+                        var name = root.DisplayName ?? root.Id ?? "?";
+                        var relPath = root.RelativePath ?? "(unknown)";
+                        sb.AppendLine($"| {name} | {root.ScopeType} | {root.Role} | `{relPath}` |");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"- **Workspace**: 收集失败 — {ex.Message}");
+                Debug.LogWarning($"[AgentCore] WorkspaceSummary collection error: {ex.Message}");
             }
 
             return sb.ToString();

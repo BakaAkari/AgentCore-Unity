@@ -25,6 +25,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Description => "Configure context sources, budget, compression, memory service, and knowledge base.";
 
         /// <inheritdoc />
+        public int Order => 300;
+
+        /// <inheritdoc />
         public void OnActivate(AgentCoreSettingsContext context)
         {
             EnsureApiKeyDisplays(context);

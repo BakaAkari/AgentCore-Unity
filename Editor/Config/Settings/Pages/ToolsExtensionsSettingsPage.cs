@@ -27,6 +27,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Description => "Control which tools are exposed to the LLM and manage optional components.";
 
         /// <inheritdoc />
+        public int Order => 400;
+
+        /// <inheritdoc />
         public void OnActivate(AgentCoreSettingsContext context) { }
 
         /// <inheritdoc />
