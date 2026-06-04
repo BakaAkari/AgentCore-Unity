@@ -60,17 +60,29 @@ com.agentcore.unity/
 │   ├── Bootstrap/                  # 启动引导系统
 │   │   └── Resources/              #   内嵌资源 (SOUL.md, TOOLS.md.template 等)
 │   ├── Config/                     # 配置系统 (Settings, SecureKeyStorage 等)
-│   ├── Core/                       # 核心运行时 (AgentLoop, 状态机, 编译监控等)
+│   ├── Core/                       # 核心运行时 (AgentLoop partial 9 文件, 状态机, 编译监控等)
+│   ├── Indexing/                   # 代码索引可选组件（受 AGENTCORE_INDEXING 控制）
+│   │   ├── Config/                 #   组件描述符
+│   │   ├── Core/                   #   索引引擎 (CodebaseIndexer, RoslynSymbolExtractor 等)
+│   │   ├── Models/                 #   数据模型 (IndexWorkspace, IndexRoot, SymbolInfo 等)
+│   │   ├── Query/                  #   查询模型 (SearchQuery)
+│   │   ├── Roots/                  #   根目录 Provider (Unity/VCS/Workspace/User/Package)
+│   │   ├── Tools/                  #   search_code 工具
+│   │   └── UI/                     #   IndexingSettingsPage + IndexingSettingsContribution
 │   ├── LLM/                        # LLM 客户端 (接口, OpenAI兼容, 流解析等)
 │   ├── Session/                    # 会话管理 (存储, 序列化, 自动记忆等)
 │   ├── Tools/                      # 工具系统（核心扩展点）
 │   │   ├── Infrastructure/         #   工具基础设施 (特性, 自动发现, 辅助方法等)
 │   │   ├── Native/                 #   原生工具（Unity API）— 按功能分子目录
 │   │   ├── Cloud/                  #   云端工具（HTTP API）
-│   │   └── FileSystem/             #   文件系统工具（预留）
+│   │   └── FileSystem/             #   文件系统工具
 │   ├── UI/                         # 用户界面
 │   │   └── Components/             #   UI 组件
 │   ├── VCS/                        # 内置可选 VCS 组件（受 AGENTCORE_VCS 控制）
+│   ├── Workspace/                  # Workspace 基础设施（v0.9.0）
+│   │   ├── Config/                 #   WorkspaceConfig / WorkspaceConfigStorage
+│   │   ├── Resolution/             #   WorkspaceRootResolver / ScopeRootResolver 等
+│   │   └── Safety/                 #   WorkspacePathPolicy / WorkspaceOperationRisk
 │   └── Utils/                      # 通用工具
 └── plans/                          # 设计文档（仅参考）
 ```
