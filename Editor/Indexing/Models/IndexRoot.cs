@@ -40,10 +40,23 @@ namespace AgentCore.Editor.Components.Indexing.Models
         /// <summary>文件包含模式列表（如 ["*.cs"]）。</summary>
         public List<string> IncludePatterns { get; set; } = new List<string> { "*.cs" };
 
-        /// <summary>文件排除模式列表（如 ["bin/", "obj/", "Library/"]）。</summary>
+        /// <summary>
+        /// 文件排除模式列表。
+        /// 支持目录前缀（以 "/" 结尾）和通配符（"*"）。
+        /// 默认排除编译产物、Unity 缓存、VCS 元数据和构建输出目录。
+        /// </summary>
         public List<string> ExcludePatterns { get; set; } = new List<string>
         {
-            "bin/", "obj/", "Library/", "Temp/", "Generated/"
+            // 编译产物
+            "bin/", "obj/",
+            // Unity 缓存与临时目录
+            "Library/", "Temp/", "Logs/",
+            // 生成代码
+            "Generated/",
+            // 构建输出
+            "Build/", "Builds/",
+            // VCS 元数据
+            ".svn/", ".git/",
         };
 
         /// <summary>提供此根的 Provider ID（用于调试和覆盖）。</summary>

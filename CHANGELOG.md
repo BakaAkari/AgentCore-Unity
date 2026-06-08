@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-06-08
+
+### Added
+- **代码库索引 Phase 2（v0.9.3）** — SQLite 迁移 + 依赖图构建 + FTS5 全文搜索，`search_code` 工具新增 5 个 action。
+  - **`SymbolDependency` 模型**（`Editor/Indexing/Models/SymbolDependency.cs`）— 表示符号间的类型依赖关系，含 `FromSymbolId`、`ToTypeName`、`Kind`、`FileId`、`Line` 字段；`DependencyKind` 静态常量类定义 8 种依赖类型：`inheritance`、`interface_impl`、`field_type`、`method_param`、`method_return`、`attribute`、`generic_arg`、`using_directive`。
+  - **`DependencyExtractor`**（`Editor/Indexing/Core/DependencyExtractor.cs`）— 基于 Roslyn `SyntaxTree` 的 C# 类型依赖提取器，从类型声明、字段、属性、方法参数/返回值、特性、泛型参数、using 指令中提取依赖关系，支持泛型类型展开。
+  - **`SqliteIndexStore`**（`Editor/Indexing/Core/SqliteIndexStore.cs`）— 完整的 SQLite 后端实现，替代 JSONL 作为默认存储；包含 FTS5 虚拟表（`symbols_fts`）支持全文搜索，`symbol_dependencies` 表存储依赖图；实现 `IIndexStore` 全部 20 个方法；`BackendType` 返回 `"sqlite"`。
+  - **`IndexStoreFactory`**（`Editor/Indexing/Core/IndexStoreFactory.cs`）— 工厂类，优先创建 `SqliteIndexStore`（DB 路径：`{WorkspaceRoot}/.agentcore/index/codebase.db`），SQLite 不可用时自动降级为 `JsonlIndexStore`；提供 `CreateFromCurrent()`、`Create(workspaceRoot)`、`GetDbPath(workspaceRoot)` 三个静态方法。
+  - **`search_code` 新增 5 个 action**（`Editor/Indexing/Tools/SearchCodeTool.cs`）：
+    - `search_text` — FTS5 全文搜索，支持前缀匹配和 LIKE 降级，返回匹配符号列表
+    - `get_dependencies` — 查询指定文件或符号的出向类型依赖（继承、接口实现、字段类型等）
+    - `find_usages` — 查询指定类型名称的入向引用（谁依赖了这个类型）
+    - `get_symbol_context` — 聚合查询：符号详情 + 同文件符号 + 出向依赖 + 入向引用，一次调用获取完整上下文
+    - `get_backend_info` — 返回当前存储后端类型（sqlite/jsonl）、DB 文件路径及是否存在
+
+### Changed
+- **`CodebaseIndexer`** — 集成 `DependencyExtractor`，全量/增量索引时自动提取并存储符号依赖关系（`BulkInsertDependenciesAsync` + `DeleteDependenciesByFileAsync`）。
+- **`IIndexStore` 接口** — 新增 5 个方法：`BulkInsertDependenciesAsync`、`DeleteDependenciesByFileAsync`、`GetDependenciesAsync`、`FindUsagesAsync`、`SearchSymbolsByTextAsync`；新增 `BackendType` 属性（`string`）。
+- **`JsonlIndexStore`** — 实现新增的 5 个接口方法（stub 实现，返回空集合）；`BackendType` 返回 `"jsonl"`。
+- **`SearchCodeTool.CreateStore()`** — 改为调用 `IndexStoreFactory.CreateFromCurrent()`，自动选择最优后端。
+- **`IndexRoot.ExcludePatterns` 默认值** — 补全排除目录：新增 `Logs/`（Unity 日志）、`Build/`、`Builds/`（构建输出）、`.svn/`、`.git/`（VCS 元数据）。
+- **`TOOLS.md.template`** — `search_code` 章节完整更新，新增 5 个 action 的详细说明、参数和使用场景；Tool Selection Guide 新增对应条目；存储路径说明更新为 SQLite DB 路径。
+
 ## [0.9.2] - 2026-06-03
 
 ### Added

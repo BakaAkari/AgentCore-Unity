@@ -462,6 +462,65 @@ namespace AgentCore.Editor.Components.Indexing.Core
             return Task.FromResult(GetMetadataSync(workspaceId, key));
         }
 
+        // ── Dependencies (stub — JSONL 后端不持久化依赖图) ─────────────────────
+
+        /// <inheritdoc/>
+        public Task BulkInsertDependenciesAsync(IEnumerable<SymbolDependency> deps, CancellationToken ct = default)
+        {
+            // JSONL 后端不存储依赖图，静默忽略。
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc/>
+        public Task DeleteDependenciesByFileAsync(int fileId, CancellationToken ct = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc/>
+        public Task<IReadOnlyList<SymbolDependency>> GetDependenciesAsync(
+            int workspaceId, int fileId, int? symbolId = null, CancellationToken ct = default)
+        {
+            IReadOnlyList<SymbolDependency> empty = new List<SymbolDependency>();
+            return Task.FromResult(empty);
+        }
+
+        /// <inheritdoc/>
+        public Task<IReadOnlyList<SymbolDependency>> FindUsagesAsync(
+            int workspaceId, string typeName, CancellationToken ct = default)
+        {
+            IReadOnlyList<SymbolDependency> empty = new List<SymbolDependency>();
+            return Task.FromResult(empty);
+        }
+
+        // ── Full-Text Search (JSONL 降级：LIKE 模糊匹配) ───────────────────────
+
+        /// <inheritdoc/>
+        public Task<IReadOnlyList<SymbolInfo>> SearchSymbolsByTextAsync(
+            int workspaceId, string text, int maxResults = 50, CancellationToken ct = default)
+        {
+            EnsureLoaded();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                IReadOnlyList<SymbolInfo> empty = new List<SymbolInfo>();
+                return Task.FromResult(empty);
+            }
+
+            var lower = text.ToLowerInvariant();
+            var results = _symbols
+                .Where(s => s.WorkspaceId == workspaceId)
+                .Where(s =>
+                    (s.Name != null && s.Name.ToLowerInvariant().Contains(lower)) ||
+                    (s.FullName != null && s.FullName.ToLowerInvariant().Contains(lower)) ||
+                    (s.Namespace != null && s.Namespace.ToLowerInvariant().Contains(lower)) ||
+                    (s.Signature != null && s.Signature.ToLowerInvariant().Contains(lower)))
+                .Take(maxResults)
+                .ToList();
+
+            IReadOnlyList<SymbolInfo> list = results;
+            return Task.FromResult(list);
+        }
+
         // ── IDisposable ────────────────────────────────────────────────────────
 
         /// <inheritdoc/>

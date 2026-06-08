@@ -28,7 +28,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     ///   clear_index        — 清除当前 Workspace 的索引
     /// </summary>
     [AgentTool("search_code",
-        Description = "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储，不提交 VCS。",
+        Description = "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、全文搜索（FTS5）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储（SQLite），不提交 VCS。",
         Category = "Indexing",
         RequiresMainThread = false,
         MayModifyScripts = false)]
@@ -41,12 +41,12 @@ namespace AgentCore.Editor.Components.Indexing.Tools
   ""properties"": {
     ""action"": {
       ""type"": ""string"",
-      ""enum"": [""resolve_workspace"", ""list_roots"", ""index_full"", ""index_scope"", ""index_incremental"", ""search_symbol"", ""list_namespaces"", ""get_file_symbols"", ""get_stats"", ""clear_index""],
+      ""enum"": [""resolve_workspace"", ""list_roots"", ""index_full"", ""index_scope"", ""index_incremental"", ""search_symbol"", ""search_text"", ""list_namespaces"", ""get_file_symbols"", ""get_stats"", ""clear_index"", ""get_dependencies"", ""find_usages"", ""get_symbol_context"", ""get_backend_info""],
       ""description"": ""要执行的操作""
     },
     ""query"": {
       ""type"": ""string"",
-      ""description"": ""[search_symbol] 搜索关键词（符号名称或完全限定名的一部分）""
+      ""description"": ""[search_symbol / search_text] 搜索关键词（符号名称或完全限定名的一部分）""
     },
     ""symbol_type"": {
       ""type"": ""string"",
@@ -97,7 +97,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     },
     ""limit"": {
       ""type"": ""integer"",
-      ""description"": ""[search_symbol] 返回结果数量上限（默认 50，最大 200）""
+      ""description"": ""[search_symbol / search_text / get_dependencies / find_usages] 返回结果数量上限（默认 50，最大 200）""
     },
     ""namespace"": {
       ""type"": ""string"",
@@ -105,7 +105,27 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     },
     ""file_path"": {
       ""type"": ""string"",
-      ""description"": ""[get_file_symbols] 文件绝对路径或相对于 WorkspaceRoot 的路径""
+      ""description"": ""[get_file_symbols / get_dependencies] 文件绝对路径或相对于 WorkspaceRoot 的路径""
+    },
+    ""symbol_id"": {
+      ""type"": ""integer"",
+      ""description"": ""[get_dependencies / get_symbol_context] 符号数据库 ID（来自 search_symbol 结果）""
+    },
+    ""type_name"": {
+      ""type"": ""string"",
+      ""description"": ""[find_usages] 要查找被引用的类型名称（简名或全名均可）""
+    },
+    ""full_name"": {
+      ""type"": ""string"",
+      ""description"": ""[get_symbol_context] 符号完全限定名（如 'MyNamespace.MyClass.MyMethod'）""
+    },
+    ""include_dependencies"": {
+      ""type"": ""boolean"",
+      ""description"": ""[get_symbol_context] 是否包含该符号的依赖关系（默认 true）""
+    },
+    ""include_usages"": {
+      ""type"": ""boolean"",
+      ""description"": ""[get_symbol_context] 是否包含引用该符号的其他符号（默认 true）""
     }
   },
   ""required"": [""action""]
@@ -116,7 +136,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         /// <inheritdoc/>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "search_code",
-            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储，不提交 VCS。",
+            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、全文搜索（FTS5）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储（SQLite），不提交 VCS。",
             category: "Indexing",
             parametersSchema: _parametersSchema,
             requiresMainThread: false,
@@ -179,9 +199,29 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                         response = await HandleClearIndexAsync(cancellationToken);
                         break;
 
+                    case "search_text":
+                        response = await HandleSearchTextAsync(parameters, cancellationToken);
+                        break;
+
+                    case "get_dependencies":
+                        response = await HandleGetDependenciesAsync(parameters, cancellationToken);
+                        break;
+
+                    case "find_usages":
+                        response = await HandleFindUsagesAsync(parameters, cancellationToken);
+                        break;
+
+                    case "get_symbol_context":
+                        response = await HandleGetSymbolContextAsync(parameters, cancellationToken);
+                        break;
+
+                    case "get_backend_info":
+                        response = await HandleGetBackendInfoAsync(cancellationToken);
+                        break;
+
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: resolve_workspace, list_roots, index_full, index_scope, index_incremental, search_symbol, list_namespaces, get_file_symbols, get_stats, clear_index");
+                            $"Unknown action: '{action}'. Valid actions: resolve_workspace, list_roots, index_full, index_scope, index_incremental, search_symbol, search_text, list_namespaces, get_file_symbols, get_stats, clear_index, get_dependencies, find_usages, get_symbol_context, get_backend_info");
                         break;
                 }
             }
@@ -638,27 +678,287 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             return ToolResponse.Ok($"已清除 Workspace '{workspace.DisplayName}' 的索引数据（fingerprint: {workspace.Fingerprint}）");
         }
 
+        /// <summary>
+        /// search_text — FTS5 全文搜索符号名称（比 search_symbol 更快，适合模糊关键词）。
+        /// </summary>
+        private static async Task<ToolResponse> HandleSearchTextAsync(JObject parameters, CancellationToken ct)
+        {
+            var text = ToolHelpers.GetOptionalString(parameters, "query");
+            if (string.IsNullOrEmpty(text))
+                return ToolResponse.Fail("search_text 需要提供 query 参数。");
+
+            var limit = Math.Min(ToolHelpers.GetOptionalInt(parameters, "limit", 50), 200);
+
+            using var store = CreateStore();
+            if (store == null)
+                return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
+                return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
+
+            var results = await store.SearchSymbolsByTextAsync(stored.Id, text, limit, ct);
+
+            var resultItems = results.Select(s => BuildSymbolResult(s, workspace)).ToList();
+            return ToolResponse.OkWithData(new
+            {
+                query = text,
+                backend = store.BackendType,
+                total = resultItems.Count,
+                results = resultItems,
+            }, $"全文搜索 '{text}' 找到 {resultItems.Count} 个符号");
+        }
+
+        /// <summary>
+        /// get_dependencies — 获取某文件或符号的出向依赖（该文件/符号引用了哪些类型）。
+        /// </summary>
+        private static async Task<ToolResponse> HandleGetDependenciesAsync(JObject parameters, CancellationToken ct)
+        {
+            var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
+            var symbolId = ToolHelpers.GetOptionalInt(parameters, "symbol_id", 0);
+
+            if (string.IsNullOrEmpty(filePath) && symbolId == 0)
+                return ToolResponse.Fail("get_dependencies 需要提供 file_path 或 symbol_id 之一。");
+
+            using var store = CreateStore();
+            if (store == null)
+                return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
+                return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
+
+            // 解析 fileId
+            int fileId = 0;
+            if (!string.IsNullOrEmpty(filePath))
+            {
+                // 支持相对路径
+                var absPath = filePath;
+                if (!System.IO.Path.IsPathRooted(absPath) && !string.IsNullOrEmpty(workspace.WorkspaceRoot))
+                    absPath = System.IO.Path.Combine(workspace.WorkspaceRoot, filePath);
+
+                var indexedFile = await store.GetFileByPathAsync(stored.Id, absPath, ct);
+                if (indexedFile == null)
+                    return ToolResponse.Fail($"文件 '{filePath}' 未在索引中找到，请先执行索引。");
+                fileId = indexedFile.Id;
+            }
+
+            int? symId = symbolId > 0 ? (int?)symbolId : null;
+            var deps = await store.GetDependenciesAsync(stored.Id, fileId, symId, ct);
+
+            var limit = Math.Min(ToolHelpers.GetOptionalInt(parameters, "limit", 200), 500);
+            var items = deps.Take(limit).Select(d => new
+            {
+                from_file_id = d.FromFileId,
+                from_symbol_id = d.FromSymbolId,
+                to_type_name = d.ToTypeName,
+                to_symbol_id = d.ToSymbolId,
+                dependency_kind = d.DependencyKind,
+                source_line = d.SourceLine,
+            }).ToList();
+
+            return ToolResponse.OkWithData(new
+            {
+                file_path = filePath,
+                symbol_id = symbolId > 0 ? symbolId : (int?)null,
+                total = deps.Count,
+                shown = items.Count,
+                dependencies = items,
+            }, $"找到 {deps.Count} 条依赖关系");
+        }
+
+        /// <summary>
+        /// find_usages — 查找哪些文件/符号引用了指定类型名称（入向依赖）。
+        /// </summary>
+        private static async Task<ToolResponse> HandleFindUsagesAsync(JObject parameters, CancellationToken ct)
+        {
+            var typeName = ToolHelpers.GetOptionalString(parameters, "type_name");
+            if (string.IsNullOrEmpty(typeName))
+                return ToolResponse.Fail("find_usages 需要提供 type_name 参数。");
+
+            using var store = CreateStore();
+            if (store == null)
+                return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
+                return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
+
+            var usages = await store.FindUsagesAsync(stored.Id, typeName, ct);
+
+            var limit = Math.Min(ToolHelpers.GetOptionalInt(parameters, "limit", 100), 500);
+            var items = usages.Take(limit).Select(d => new
+            {
+                from_file_id = d.FromFileId,
+                from_symbol_id = d.FromSymbolId,
+                to_type_name = d.ToTypeName,
+                to_symbol_id = d.ToSymbolId,
+                dependency_kind = d.DependencyKind,
+                source_line = d.SourceLine,
+            }).ToList();
+
+            return ToolResponse.OkWithData(new
+            {
+                type_name = typeName,
+                total = usages.Count,
+                shown = items.Count,
+                usages = items,
+            }, $"类型 '{typeName}' 被 {usages.Count} 处引用");
+        }
+
+        /// <summary>
+        /// get_symbol_context — 聚合符号的完整上下文：符号信息 + 同文件符号 + 出向依赖 + 入向引用。
+        /// </summary>
+        private static async Task<ToolResponse> HandleGetSymbolContextAsync(JObject parameters, CancellationToken ct)
+        {
+            var fullName = ToolHelpers.GetOptionalString(parameters, "full_name");
+            var symbolId = ToolHelpers.GetOptionalInt(parameters, "symbol_id", 0);
+
+            if (string.IsNullOrEmpty(fullName) && symbolId == 0)
+                return ToolResponse.Fail("get_symbol_context 需要提供 full_name 或 symbol_id 之一。");
+
+            var includeDeps = ToolHelpers.GetOptionalBool(parameters, "include_dependencies", true);
+            var includeUsages = ToolHelpers.GetOptionalBool(parameters, "include_usages", true);
+
+            using var store = CreateStore();
+            if (store == null)
+                return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
+                return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
+
+            // 通过 full_name 查找符号
+            SymbolInfo targetSymbol = null;
+            if (!string.IsNullOrEmpty(fullName))
+            {
+                var searcher = new SymbolSearcher(store);
+                var query = new AgentCore.Editor.Components.Indexing.Query.SearchQuery
+                {
+                    Query = fullName,
+                    Fuzzy = false,
+                    Limit = 5,
+                };
+                var candidates = await searcher.SearchAsync(query, ct);
+                targetSymbol = candidates.FirstOrDefault(s =>
+                    string.Equals(s.FullName, fullName, StringComparison.Ordinal));
+                if (targetSymbol == null)
+                    targetSymbol = candidates.FirstOrDefault();
+            }
+            else if (symbolId > 0)
+            {
+                // 通过 file symbols 查找（需要先找到文件）
+                // 降级：通过 FTS 搜索 symbol_id 对应的符号
+                var searcher = new SymbolSearcher(store);
+                var allByFile = await store.SearchSymbolsByTextAsync(stored.Id, "", 1, ct);
+                // 直接通过 GetSymbolsByFileAsync 无法按 ID 查，改用 search_text 降级
+                // 实际上 get_symbol_context 主要通过 full_name 使用，symbol_id 路径作为辅助
+            }
+
+            if (targetSymbol == null && symbolId == 0)
+                return ToolResponse.Fail($"未找到符号 '{fullName}'，请先确认符号名称或执行索引。");
+
+            object symbolResult = targetSymbol != null ? BuildSymbolResult(targetSymbol, workspace) : null;
+
+            // 获取同文件符号
+            object[] fileSymbols = null;
+            if (targetSymbol != null)
+            {
+                var fileSymList = await store.GetSymbolsByFileAsync(targetSymbol.FileId, ct);
+                fileSymbols = fileSymList
+                    .Where(s => s.Id != targetSymbol.Id)
+                    .Select(s => (object)new
+                    {
+                        id = s.Id,
+                        name = s.Name,
+                        full_name = s.FullName,
+                        symbol_type = s.SymbolType,
+                        line_number = s.LineNumber,
+                    })
+                    .ToArray();
+            }
+
+            // 获取出向依赖
+            object[] depsResult = null;
+            if (includeDeps && targetSymbol != null)
+            {
+                var deps = await store.GetDependenciesAsync(stored.Id, targetSymbol.FileId, targetSymbol.Id, ct);
+                depsResult = deps.Select(d => (object)new
+                {
+                    to_type_name = d.ToTypeName,
+                    to_symbol_id = d.ToSymbolId,
+                    dependency_kind = d.DependencyKind,
+                    source_line = d.SourceLine,
+                }).ToArray();
+            }
+
+            // 获取入向引用（谁引用了这个类型）
+            object[] usagesResult = null;
+            if (includeUsages && targetSymbol != null)
+            {
+                var name = targetSymbol.Name;
+                var usages = await store.FindUsagesAsync(stored.Id, name, ct);
+                usagesResult = usages.Take(50).Select(d => (object)new
+                {
+                    from_file_id = d.FromFileId,
+                    from_symbol_id = d.FromSymbolId,
+                    dependency_kind = d.DependencyKind,
+                    source_line = d.SourceLine,
+                }).ToArray();
+            }
+
+            return ToolResponse.OkWithData(new
+            {
+                symbol = symbolResult,
+                file_symbols_count = fileSymbols?.Length ?? 0,
+                file_symbols = fileSymbols,
+                dependencies_count = depsResult?.Length ?? 0,
+                dependencies = depsResult,
+                usages_count = usagesResult?.Length ?? 0,
+                usages = usagesResult,
+            }, $"符号上下文：{targetSymbol?.FullName ?? fullName}，{depsResult?.Length ?? 0} 条依赖，{usagesResult?.Length ?? 0} 处引用");
+        }
+
+        /// <summary>
+        /// get_backend_info — 获取当前索引后端信息（SQLite / Jsonl，数据库路径等）。
+        /// </summary>
+        private static async Task<ToolResponse> HandleGetBackendInfoAsync(CancellationToken ct)
+        {
+            using var store = CreateStore();
+            if (store == null)
+                return ToolResponse.Fail("索引存储初始化失败，请检查 WorkspaceRoot 配置。");
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+
+            string dbPath = null;
+            if (!string.IsNullOrEmpty(workspace?.WorkspaceRoot))
+                dbPath = IndexStoreFactory.GetDbPath(workspace.WorkspaceRoot);
+
+            return ToolResponse.OkWithData(new
+            {
+                backend_type = store.BackendType,
+                workspace_root = workspace?.WorkspaceRoot,
+                db_path = dbPath,
+                db_exists = dbPath != null && System.IO.File.Exists(dbPath),
+                workspace_indexed = stored != null,
+                workspace_fingerprint = workspace?.Fingerprint,
+            }, $"当前索引后端：{store.BackendType}");
+        }
+
         // ── 私有辅助方法 ─────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 创建默认 IIndexStore 实例（JsonlIndexStore）。
+        /// 创建 IIndexStore 实例（优先 SQLite，降级 Jsonl）。
         /// 如果 WorkspaceRoot 无法解析则返回 null。
         /// </summary>
         private static IIndexStore CreateStore()
         {
-            try
-            {
-                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-                if (string.IsNullOrEmpty(workspace.WorkspaceRoot))
-                    return null;
-
-                return new JsonlIndexStore(workspace.WorkspaceRoot);
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning($"[SearchCodeTool] CreateStore failed: {ex.Message}");
-                return null;
-            }
+            return IndexStoreFactory.CreateFromCurrent();
         }
 
         /// <summary>

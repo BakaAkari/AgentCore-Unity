@@ -88,7 +88,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 SymbolCount = symbols.Count,
             };
 
-            return ExtractionResult.Success(indexedFile, symbols);
+            return ExtractionResult.Success(indexedFile, symbols, syntaxTree);
         }
 
         // ── 类型声明提取 ──────────────────────────────────────────────────────────
@@ -593,9 +593,15 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public IReadOnlyList<SymbolInfo> Symbols { get; private set; }
 
         /// <summary>
+        /// 已解析的 SyntaxTree（供 DependencyExtractor 复用，避免重复解析）。
+        /// 仅 IsSuccess=true 时有值。
+        /// </summary>
+        public SyntaxTree SyntaxTree { get; private set; }
+
+        /// <summary>
         /// 创建成功结果。
         /// </summary>
-        public static ExtractionResult Success(IndexedFile file, List<SymbolInfo> symbols)
+        public static ExtractionResult Success(IndexedFile file, List<SymbolInfo> symbols, SyntaxTree syntaxTree = null)
         {
             return new ExtractionResult
             {
@@ -603,6 +609,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 FilePath = file.FilePath,
                 File = file,
                 Symbols = symbols,
+                SyntaxTree = syntaxTree,
             };
         }
 

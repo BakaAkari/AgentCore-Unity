@@ -115,6 +115,40 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// 获取 KV 元数据。不存在时返回 null。
         /// </summary>
         Task<string> GetMetadataAsync(int workspaceId, string key, CancellationToken ct = default);
+
+        // ── Dependencies ───────────────────────────────────────────────────────
+
+        /// <summary>
+        /// 批量插入依赖关系记录。
+        /// </summary>
+        Task BulkInsertDependenciesAsync(IEnumerable<SymbolDependency> deps, CancellationToken ct = default);
+
+        /// <summary>
+        /// 删除指定文件的所有依赖关系记录（重新索引前清理）。
+        /// </summary>
+        Task DeleteDependenciesByFileAsync(int fileId, CancellationToken ct = default);
+
+        /// <summary>
+        /// 获取指定文件（或符号）的正向依赖列表。
+        /// <para>symbolId 为 null 时返回文件级所有依赖；不为 null 时只返回该符号的依赖。</para>
+        /// </summary>
+        Task<IReadOnlyList<SymbolDependency>> GetDependenciesAsync(
+            int workspaceId, int fileId, int? symbolId = null, CancellationToken ct = default);
+
+        /// <summary>
+        /// 查找所有引用了指定类型名称的依赖记录（反向引用 / find usages）。
+        /// </summary>
+        Task<IReadOnlyList<SymbolDependency>> FindUsagesAsync(
+            int workspaceId, string typeName, CancellationToken ct = default);
+
+        // ── Full-Text Search ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// 使用全文索引（FTS5）搜索符号。
+        /// <para>JSONL 后端降级为 LIKE 模糊匹配；SQLite 后端使用 FTS5 虚拟表。</para>
+        /// </summary>
+        Task<IReadOnlyList<SymbolInfo>> SearchSymbolsByTextAsync(
+            int workspaceId, string text, int maxResults = 50, CancellationToken ct = default);
     }
 
     /// <summary>

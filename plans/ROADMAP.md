@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.9.2 | **更新日期**: 2026-06-04 | **状态**: 执行中（当前 v0.9.2）
+> **版本**: v0.9.3 | **更新日期**: 2026-06-08 | **状态**: 执行中（当前 v0.9.3）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,18 +36,18 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v0.9.2)
+### 0.4 当前项目快照 (v0.9.3)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.9.2 (2026-06-03) |
+| **版本** | 0.9.3 (2026-06-08) |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已重构 |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
 | **UI 框架** | UI Toolkit 动态 Hub 架构；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 8 个 action（`AGENTCORE_VCS` 控制） |
-| **Indexing 组件** | Roslyn 符号索引（JSONL 本地存储）+ `search_code` 工具 10 个 action（`AGENTCORE_INDEXING` 控制） |
+| **Indexing 组件** | Roslyn 符号索引（SQLite + FTS5 + 依赖图）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制） |
 | **测试覆盖** | 5 个测试文件，90+ test cases |
 
 ### 0.5 已完成的历史 Phase
@@ -92,16 +92,16 @@
 |---|------|------|------|
 | 6.2.1 | **文件级索引（Layer 1）** | Roslyn 解析 WorkspaceRoot 下 C# 文件，提取类名/命名空间/方法签名；JSONL 本地存储 | [x] v0.9.1 |
 | 6.2.2 | **符号检索** | `search_code` 工具 10 个 action，支持 Scope/Root/Role/Branch 过滤 | [x] v0.9.1 |
-| 6.2.3 | **依赖图构建** | 分析类型引用、程序集边界、Unity 特殊引用、Workspace 子 Root、地图/模式和资源包依赖 | [ ] |
+| 6.2.3 | **SQLite 迁移 + 依赖图构建** | SQLite 替代 JSONL 作为默认后端；SyntaxTree 级 C# 类型依赖提取；`search_code` 新增 5 个 action（get_dependencies、find_usages、get_symbol_context、search_text、get_backend_info）；FTS5 全文搜索；`IndexStoreFactory` 自动降级 | [x] v0.9.3 |
 
 ### 2.2 P0 — VCS Panel 体验提升
 
-> **关联文档**: [`vcs-treeview-refactor-plan.md`](vcs-treeview-refactor-plan.md)
-> **前置条件**: WorkspaceRoot 基础设施已完成（v0.9.0）。
+> **架构决策**: TreeView 重构已放弃（树形结构导致用户需要多次展开折叠，且无法有效体现文件路径）。改为扁平列表按完整相对路径排序，等价于目录结构展开后的自然顺序。
+> ~~**关联文档**: [`vcs-treeview-refactor-plan.md`](vcs-treeview-refactor-plan.md)~~ （已废弃）
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
-| 6.3.1 | **VCS Panel TreeView 重构** | 将 Working Copy Status 从扁平列表改为 WorkspaceRoot-relative 树形结构，按 Scope Root 分组 | [ ] |
+| 6.3.1 | **VCS Panel 扁平列表按路径排序** | Working Copy Status 扁平列表按完整相对路径（`/` 分隔符）排序，等价于目录结构展开后的自然顺序；`SortStatusFiles()` 已实现 | [x] v0.9.3 |
 
 ### 2.3 P1 — 规则系统与智能推荐（中优先级）
 
@@ -123,10 +123,9 @@
 ### 2.5 Phase 6 里程碑
 
 ```
-v0.9.3 — 代码库索引 Phase 2（依赖图构建）
-v0.9.4 — VCS Panel TreeView 重构（WorkspaceRoot-relative 树形结构）
-v0.9.5 — 规则系统（.agentcore/rules.md + 分层注入）
-v0.9.6 — 智能推荐（SmartToolRecommender + 响应式建议）
+v0.9.3 — 代码库索引 Phase 2（依赖图构建）+ VCS Panel 扁平列表按路径排序 ✅
+v0.9.4 — 规则系统（.agentcore/rules.md + 分层注入）
+v0.9.5 — 智能推荐（SmartToolRecommender + 响应式建议）
 v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 ```
 

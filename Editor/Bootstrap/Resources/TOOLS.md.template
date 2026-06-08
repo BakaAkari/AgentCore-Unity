@@ -288,6 +288,11 @@
 - **Want to build the symbol index for the first time?** → `search_code` (action: `index_full`)
 - **Want to update the symbol index after code changes?** → `search_code` (action: `index_incremental`)
 - **Want to check index statistics?** → `search_code` (action: `get_stats`)
+- **Want to full-text search symbols by keyword?** → `search_code` (action: `search_text`)
+- **Want to see what types a class depends on?** → `search_code` (action: `get_dependencies`)
+- **Want to find all usages of a type?** → `search_code` (action: `find_usages`)
+- **Want to get full context of a symbol (deps + usages)?** → `search_code` (action: `get_symbol_context`)
+- **Want to check which storage backend is active (SQLite/Jsonl)?** → `search_code` (action: `get_backend_info`)
 
 ### 记忆管理
 - `manage_memory` — 长期记忆的增删查
@@ -339,18 +344,31 @@
   - 注意：知识库服务需要在 Settings 面板中配置 LightRAG 端点地址；索引操作是异步的，处理完成后方可查询
 
 ### 代码库索引与符号检索
-- `search_code` — 基于 Roslyn 的 C# 符号索引，支持全量/增量索引和多维度符号查询（需启用 Code Indexing 可选组件）
-  - **工作流**：首次使用先 `index_full` 建立索引，后续用 `index_incremental` 保持更新，再用 `search_symbol` 查询
+- `search_code` — 基于 Roslyn 的 C# 符号索引，支持全量/增量索引、多维度符号查询、依赖图分析和 FTS5 全文搜索（需启用 Code Indexing 可选组件）
+  - **工作流**：首次使用先 `index_full` 建立索引，后续用 `index_incremental` 保持更新，再用 `search_symbol` 或 `search_text` 查询
   - `resolve_workspace`: 查看当前工作区信息（WorkspaceRoot、UnityRoot、WorkspaceHash）
   - `list_roots`: 列出所有已发现的索引根目录（含 scope_type、role、path、file_count）
-  - `index_full`: 全量索引 — 清空并重建所有根目录的符号数据库
+  - `index_full`: 全量索引 — 清空并重建所有根目录的符号数据库（同时提取依赖图）
     - 可选参数：`max_file_size_bytes`（默认 1MB）
   - `index_scope`: 局部全量索引 — 只索引指定范围的根目录
     - 参数：`scope_type`（UnityProject/VcsWorkspace/ResourcePackage/UserConfigured）或 `scope_name`（根目录名称）或 `root_id`（根目录 ID）
   - `index_incremental`: 增量索引 — 只重新索引自上次以来修改过的文件（速度快，适合频繁调用）
-  - `search_symbol`: 按名称/类型/命名空间搜索符号
-    - 参数：`query`（必填，搜索关键词），`symbol_type`（可选：class/interface/struct/enum/method/property/field/event/delegate/constructor），`namespace_filter`（可选，命名空间前缀过滤），`scope_type`（可选，限定索引范围），`limit`（可选，默认 50，最大 200）
-    - 返回：每条结果包含 `name`、`full_name`、`symbol_type`、`namespace`、`file_path`、`line`、`declaration_snippet`、`accessibility`、`base_types`
+  - `search_symbol`: 按名称/类型/命名空间搜索符号（支持模糊/正则）
+    - 参数：`query`（必填，搜索关键词），`symbol_type`（可选：class/interface/struct/enum/method/property/field/event/delegate/constructor），`namespace`（可选，命名空间前缀过滤），`scope_type`（可选，限定索引范围），`limit`（可选，默认 50，最大 200）
+    - 返回：每条结果包含 `name`、`full_name`、`symbol_type`、`namespace`、`file_path`、`line_number`、`declaration_snippet`、`accessibility`、`base_types`
+  - `search_text`: FTS5 全文搜索符号名称（比 search_symbol 更快，适合模糊关键词）
+    - 参数：`query`（必填，搜索关键词），`limit`（可选，默认 50）
+    - 使用 SQLite FTS5 前缀搜索，速度快；Jsonl 后端降级为 LIKE 搜索
+  - `get_dependencies`: 获取某文件或符号的出向依赖（该文件/符号引用了哪些类型）
+    - 参数：`file_path`（文件路径）或 `symbol_id`（符号 ID，来自 search_symbol 结果），二选一
+    - 返回：依赖列表，每条包含 `to_type_name`、`dependency_kind`（inheritance/interface_impl/field_type/method_param/method_return/attribute/generic_arg/using_directive）、`source_line`
+  - `find_usages`: 查找哪些文件/符号引用了指定类型（入向依赖）
+    - 参数：`type_name`（必填，类型名称，简名或全名均可），`limit`（可选，默认 100）
+    - 返回：引用列表，每条包含 `from_file_id`、`from_symbol_id`、`dependency_kind`、`source_line`
+  - `get_symbol_context`: 聚合符号的完整上下文（符号信息 + 同文件符号 + 出向依赖 + 入向引用）
+    - 参数：`full_name`（符号完全限定名）或 `symbol_id`（符号 ID），二选一；`include_dependencies`（默认 true）、`include_usages`（默认 true）
+    - 适合在理解某个类的职责和依赖关系时使用
+  - `get_backend_info`: 获取当前索引后端信息（SQLite/Jsonl、数据库路径、是否已建立索引）
   - `list_namespaces`: 列出索引中所有命名空间
     - 可选参数：`scope_type`（按范围过滤）
   - `get_file_symbols`: 获取指定文件中的所有符号
@@ -359,9 +377,13 @@
   - `clear_index`: 清空当前工作区的所有索引数据
   - **使用场景**：
     - 查找某个类/接口的定义位置 → `search_symbol`（query: 类名）
+    - 快速模糊搜索符号 → `search_text`（query: 关键词）
     - 了解项目命名空间结构 → `list_namespaces`
     - 查看某个文件中定义了哪些类和方法 → `get_file_symbols`
     - 查找所有实现了某接口的类 → `search_symbol`（query: 接口名，symbol_type: class）
+    - 分析某个类依赖了哪些类型 → `get_dependencies`（file_path 或 symbol_id）
+    - 查找哪些地方引用了 PlayerController → `find_usages`（type_name: "PlayerController"）
+    - 全面了解某个类的上下文 → `get_symbol_context`（full_name: "MyNamespace.MyClass"）
     - 项目初始化时建立索引 → `index_full`
     - 每次对话开始时快速更新 → `index_incremental`
-  - 注意：需要在 Extensions 设置页启用 Code Indexing 组件（define: AGENTCORE_INDEXING）；索引数据存储在 `Library/AgentCore/Indexing/` 目录下，不需要提交到版本控制
+  - 注意：需要在 Extensions 设置页启用 Code Indexing 组件（define: AGENTCORE_INDEXING）；索引数据默认存储在 `{WorkspaceRoot}/.agentcore/index/codebase.db`（SQLite），不需要提交到版本控制

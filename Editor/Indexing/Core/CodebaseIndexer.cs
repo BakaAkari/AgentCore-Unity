@@ -288,6 +288,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 foreach (var deletedFile in toDelete)
                 {
                     ct.ThrowIfCancellationRequested();
+                    await _store.DeleteDependenciesByFileAsync(deletedFile.Id, ct);
                     await _store.DeleteSymbolsByFileAsync(deletedFile.Id, ct);
                     await _store.DeleteFileAsync(deletedFile.Id, ct);
                 }
@@ -312,9 +313,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     progress.CurrentRoot = root.RootPath;
                     progress.CurrentFile = filePath;
 
-                    // 先删除旧符号
+                    // 先删除旧符号和依赖
                     if (indexedFilesMap.TryGetValue(filePath, out var oldFile))
                     {
+                        await _store.DeleteDependenciesByFileAsync(oldFile.Id, ct);
                         await _store.DeleteSymbolsByFileAsync(oldFile.Id, ct);
                     }
 
@@ -699,6 +701,28 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 catch (Exception ex)
                 {
                     UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Failed to persist symbols for '{filePath}': {ex.Message}");
+                }
+
+                // 提取并持久化依赖关系
+                try
+                {
+                    // 构建 symbolName → dbId 映射（用于关联 FromSymbolId / ToSymbolId）
+                    var symbolIdMap = new Dictionary<string, int>(StringComparer.Ordinal);
+                    foreach (var sym in symbols)
+                    {
+                        if (!string.IsNullOrEmpty(sym.FullName) && sym.Id > 0)
+                            symbolIdMap[sym.FullName] = sym.Id;
+                    }
+
+                    var deps = DependencyExtractor.ExtractFromTree(
+                        extraction.SyntaxTree, workspaceId, fileId, symbolIdMap);
+
+                    if (deps != null && deps.Count > 0)
+                        await _store.BulkInsertDependenciesAsync(deps, ct);
+                }
+                catch (Exception ex)
+                {
+                    UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Failed to extract/persist dependencies for '{filePath}': {ex.Message}");
                 }
             }
         }
