@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -333,29 +334,41 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 var allOutput = new List<string>();
                 var affectedFiles = new List<string>();
+
+                // 构建路径查找字典：将 svn status 返回的路径（可能是绝对路径）
+                // 规范化后建立映射，以便与传入的相对/绝对路径匹配。
                 var statusResult = await GetStatusAsync(ct);
-                var stateByPath = statusResult.Files
-                    .GroupBy(f => f.FilePath)
+                // key: 规范化绝对路径（小写，统一分隔符），value: 状态
+                var stateByAbsPath = statusResult.Files
+                    .GroupBy(f => NormalizePath(ResolveAbsolutePath(f.FilePath, _workingDirectory)))
                     .ToDictionary(g => g.Key, g => g.First().State);
 
                 result.LogLines.Add($"Preparing {filePaths.Count} SVN path(s) for commit.");
 
                 foreach (var filePath in filePaths)
                 {
-                    stateByPath.TryGetValue(filePath, out var state);
+                    // 将传入路径解析为绝对路径，再规范化后查找状态
+                    var absPath = ResolveAbsolutePath(filePath, _workingDirectory);
+                    var normAbs = NormalizePath(absPath);
+                    stateByAbsPath.TryGetValue(normAbs, out var state);
+
                     var shouldDelete = state == VcsFileState.Missing;
-                    var shouldAdd = state == VcsFileState.Untracked;
+                    // 若路径在 status 中找不到（state == Unmodified/default），
+                    // 也尝试执行 svn add，让 SVN 自己判断（可能是新建文件尚未被 status 捕获）
+                    var shouldAdd = state == VcsFileState.Untracked || state == VcsFileState.Unmodified;
 
                     if (!shouldDelete && !shouldAdd)
                     {
+                        // 已纳入版本控制且有变更（Modified/Added/Conflicted 等），无需 add/delete
                         affectedFiles.Add(filePath);
                         result.LogLines.Add($"No schedule command needed: {filePath} ({state}).");
                         continue;
                     }
 
+                    // 使用绝对路径执行命令，避免工作目录不一致导致路径解析错误
                     var arguments = shouldDelete
-                        ? $"delete --force \"{filePath}\""
-                        : $"add --parents --force \"{filePath}\"";
+                        ? $"delete --force \"{absPath}\""
+                        : $"add --parents --force \"{absPath}\"";
                     var commandLine = $"svn {arguments}";
 
                     if (string.IsNullOrEmpty(result.CommandLine))
@@ -845,6 +858,40 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 将路径解析为绝对路径。
+        /// 若 path 已是绝对路径则直接返回；否则以 basePath 为基准拼接。
+        /// </summary>
+        private static string ResolveAbsolutePath(string path, string basePath)
+        {
+            if (string.IsNullOrEmpty(path))
+                return path;
+
+            // 已是绝对路径（Windows: C:\... 或 \\...，Unix: /...）
+            if (Path.IsPathRooted(path))
+                return path;
+
+            // 相对路径：以 basePath 为基准拼接
+            return Path.GetFullPath(Path.Combine(basePath, path));
+        }
+
+        /// <summary>
+        /// 规范化路径用于比较：统一使用正斜杠、小写（Windows 不区分大小写）。
+        /// </summary>
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return path;
+
+            var normalized = path.Replace('\\', '/');
+
+            // Windows 文件系统不区分大小写
+            if (System.Environment.OSVersion.Platform == System.PlatformID.Win32NT)
+                normalized = normalized.ToLowerInvariant();
+
+            return normalized;
         }
 
         private string GetStateDescription(VcsFileState state)

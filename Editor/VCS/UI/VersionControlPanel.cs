@@ -292,7 +292,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _refreshButton.SetEnabled(true);
             _cleanupButton.SetEnabled(true);
 
-            RefreshAllData();
+            _ = RefreshAllData();
         }
 
         private async void OnRefreshClicked()
@@ -875,17 +875,15 @@ namespace AgentCore.Editor.Components.VCS.UI
             ShowExternalToolUnavailable("Revert");
         }
 
-        private void OnStageSingleFileClicked(string filePath)
+        private async void OnStageSingleFileClicked(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by Working Copy Status list
-            
-            // 尝试使用外部工具添加文件
-            if (TryOpenExternalAdd(filePath))
+            // 尝试使用外部工具添加文件，等待外部进程退出后自动刷新状态列表
+            if (await TryOpenExternalAddAsync(filePath))
                 return;
-            
+
             // 外部工具不可用时显示提示
             ShowExternalToolUnavailable("Add");
         }
@@ -1523,6 +1521,69 @@ namespace AgentCore.Editor.Components.VCS.UI
                     return false;
                 default:
                     return false;
+            }
+        }
+
+        /// <summary>
+        /// 启动外部 Add 工具，等待外部进程退出后自动刷新文件状态列表。
+        /// 返回 true 表示外部工具已成功启动（无论用户在对话框中的操作结果）。
+        /// </summary>
+        private async Task<bool> TryOpenExternalAddAsync(string filePath)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePath = GetAbsolutePath(filePath);
+
+            string fileName;
+            string arguments;
+
+            switch (_currentVcsType)
+            {
+                case VcsType.Svn:
+                    fileName = "TortoiseProc.exe";
+                    arguments = $"/command:add /path:\"{absolutePath}\"";
+                    break;
+                default:
+                    return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(rootPath))
+                return false;
+
+            try
+            {
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = true,
+                    WorkingDirectory = rootPath
+                };
+
+                var process = System.Diagnostics.Process.Start(startInfo);
+                ShowMessage("Opened TortoiseSVN add dialog.", false);
+                LogVcsOperation("Open External Tool", $"Opened TortoiseSVN add dialog: {fileName} {arguments}");
+
+                if (process != null)
+                {
+                    // 等待外部进程退出，然后自动刷新文件状态列表
+                    var tcs = new TaskCompletionSource<bool>();
+                    process.EnableRaisingEvents = true;
+                    process.Exited += (_, __) => tcs.TrySetResult(true);
+
+                    // 如果进程在订阅事件前已经退出，直接完成
+                    if (process.HasExited)
+                        tcs.TrySetResult(true);
+
+                    await tcs.Task;
+                    await RefreshAllData();
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open TortoiseSVN add dialog. Error: {ex.Message}");
+                return false;
             }
         }
 

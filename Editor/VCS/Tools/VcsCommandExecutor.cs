@@ -64,12 +64,38 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 process.BeginErrorReadLine();
 
                 // 等待进程完成或超时
-                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(timeoutSeconds), ct);
-                var processTask = Task.Run(() => process.WaitForExit(), ct);
+                // 注意：使用 Task.Run 包装 WaitForExit(ms) 有超时参数的版本，
+                // 然后再调用无参 WaitForExit() 确保所有异步 I/O 读取事件都已触发完毕。
+                // 若只调用无参 WaitForExit()，在使用 BeginOutputReadLine/BeginErrorReadLine 时
+                // 可能在异步读取完成前就返回，导致输出内容不完整。
+                var timeoutMs = timeoutSeconds * 1000;
+                var processTask = Task.Run(() =>
+                {
+                    bool exited = process.WaitForExit(timeoutMs);
+                    if (exited)
+                    {
+                        // 等待所有异步 I/O 读取事件完成（.NET 文档要求的第二次调用）
+                        process.WaitForExit();
+                    }
+                    return exited;
+                }, ct);
 
-                var completedTask = await Task.WhenAny(processTask, timeoutTask);
+                bool timedOut;
+                try
+                {
+                    timedOut = !await processTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    // 取消
+                    try { process.Kill(); } catch { /* ignore */ }
+                    result.Success = false;
+                    result.ErrorMessage = "Command was cancelled";
+                    result.ExitCode = -1;
+                    return result;
+                }
 
-                if (completedTask == timeoutTask)
+                if (timedOut)
                 {
                     // 超时
                     try { process.Kill(); } catch { /* ignore */ }
@@ -79,7 +105,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
                 else if (ct.IsCancellationRequested)
                 {
-                    // 取消
+                    // 取消（在 WaitForExit 返回后检测到）
                     try { process.Kill(); } catch { /* ignore */ }
                     result.Success = false;
                     result.ErrorMessage = "Command was cancelled";

@@ -260,7 +260,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ===== Phase 1: 只读查询处理器 =====
 
-        private async Task<ToolResponse> HandleDetectVcs(CancellationToken ct)
+        private Task<ToolResponse> HandleDetectVcs(CancellationToken ct)
         {
             try
             {
@@ -269,7 +269,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 if (vcsType == VcsType.None)
                 {
-                    return ToolResponse.Fail("No version control system detected in the current project.");
+                    return Task.FromResult(ToolResponse.Fail("No version control system detected in the current project."));
                 }
 
                 var adapter = CreateAdapter(vcsType);
@@ -283,11 +283,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     priority_order = "SVN > Perforce > Git"
                 };
 
-                return ToolResponse.OkWithData(data, $"Detected {vcsType} at {rootPath}. Command available: {isAvailable}");
+                return Task.FromResult(ToolResponse.OkWithData(data, $"Detected {vcsType} at {rootPath}. Command available: {isAvailable}"));
             }
             catch (Exception ex)
             {
-                return ToolResponse.Fail($"Failed to detect VCS: {ex.Message}");
+                return Task.FromResult(ToolResponse.Fail($"Failed to detect VCS: {ex.Message}"));
             }
         }
 
@@ -687,7 +687,19 @@ namespace AgentCore.Editor.Components.VCS.Tools
             var result = await svnAdapter.GetSvnInfoAsync(target, ct);
 
             if (!result.Success)
-                return ToolResponse.Fail($"Failed to get SVN info: {result.ErrorMessage}");
+            {
+                // W155010 表示路径不在 SVN 工作副本中（Untracked/未纳入版本控制）
+                var errMsg = result.ErrorMessage ?? "";
+                if (errMsg.Contains("W155010") || errMsg.Contains("is not a working copy") ||
+                    errMsg.Contains("node not found"))
+                {
+                    var pathHint = string.IsNullOrEmpty(target) ? "the working directory" : $"'{target}'";
+                    return ToolResponse.Fail(
+                        $"SVN info failed: {pathHint} is not under version control (not tracked by SVN). " +
+                        $"Use 'add_files' to schedule it for addition first. Raw error: {errMsg}");
+                }
+                return ToolResponse.Fail($"Failed to get SVN info: {errMsg}");
+            }
 
             var data = new
             {
