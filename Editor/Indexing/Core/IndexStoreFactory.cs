@@ -8,11 +8,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
     /// <summary>
     /// IIndexStore 工厂类。
     ///
-    /// 优先创建 <see cref="SqliteIndexStore"/>（Phase 2 默认后端）；
-    /// 若 SQLite 初始化失败（如 Mono.Data.Sqlite 不可用），则降级为 <see cref="JsonlIndexStore"/>。
+    /// 默认使用 <see cref="JsonlIndexStore"/> 后端。
+    /// 若定义了 AGENTCORE_SQLITE scripting define，则优先尝试 SQLite 后端，失败时降级为 JSONL。
     ///
-    /// 数据库文件路径：{workspaceRoot}/.agentcore/index/codebase.db
-    /// Jsonl 降级路径：{workspaceRoot}/.agentcore/index/
+    /// Jsonl 路径：{workspaceRoot}/.agentcore/index/
+    /// SQLite 路径（仅 AGENTCORE_SQLITE）：{workspaceRoot}/.agentcore/index/codebase.db
     /// </summary>
     public static class IndexStoreFactory
     {
@@ -69,9 +69,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
             catch (Exception ex)
             {
                 UnityEngine.Debug.LogWarning($"[IndexStoreFactory] Cannot create index dir '{indexDir}': {ex.Message}. Falling back to JsonlIndexStore.");
-                return new JsonlIndexStore(workspaceRoot);
+                return new JsonlIndexStore(indexDir);
             }
 
+#if AGENTCORE_SQLITE
             // 尝试创建 SQLite 后端
             var dbPath = Path.Combine(indexDir, SqliteFileName);
             try
@@ -85,8 +86,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 UnityEngine.Debug.LogWarning(
                     $"[IndexStoreFactory] SQLite init failed ({ex.GetType().Name}: {ex.Message}). " +
                     $"Falling back to JsonlIndexStore at '{indexDir}'.");
-                return new JsonlIndexStore(workspaceRoot);
+                return new JsonlIndexStore(indexDir);
             }
+#else
+            // SQLite 后端未启用（需要 AGENTCORE_SQLITE define），使用 JSONL 后端
+            return new JsonlIndexStore(indexDir);
+#endif
         }
 
         /// <summary>

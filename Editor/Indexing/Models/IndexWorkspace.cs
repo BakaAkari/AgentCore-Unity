@@ -49,6 +49,25 @@ namespace AgentCore.Editor.Components.Indexing.Models
         /// <summary>最后更新时间（UTC Unix 时间戳秒）。</summary>
         public long UpdatedAt { get; set; }
 
+        // ── 扩展属性（CodebaseIndexer / SqliteIndexStore 使用）──────────────────
+
+        /// <summary>工作区显示名称（可选，用于 UI 展示）。</summary>
+        public string DisplayName { get; set; }
+
+        /// <summary>VCS 根目录路径（VcsRoot 的别名，向后兼容）。</summary>
+        public string VcsRootPath
+        {
+            get => VcsRoot;
+            set => VcsRoot = value;
+        }
+
+        /// <summary>VCS URL（SvnUrl 的别名，向后兼容）。</summary>
+        public string VcsUrl
+        {
+            get => SvnUrl;
+            set => SvnUrl = value;
+        }
+
         /// <summary>
         /// 创建一个新的 IndexWorkspace，自动填充时间戳。
         /// </summary>

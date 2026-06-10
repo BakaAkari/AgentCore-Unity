@@ -3,29 +3,34 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using AgentCore.Editor.Components.Indexing.Models;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using IndexSymbolInfo = AgentCore.Editor.Components.Indexing.Models.SymbolInfo;
+using IndexedFile = AgentCore.Editor.Components.Indexing.Models.IndexedFile;
+using IndexRoot = AgentCore.Editor.Components.Indexing.Models.IndexRoot;
+using IndexWorkspace = AgentCore.Editor.Components.Indexing.Models.IndexWorkspace;
+using IndexScopeType = AgentCore.Editor.Components.Indexing.Models.IndexScopeType;
+using IndexRootRole = AgentCore.Editor.Components.Indexing.Models.IndexRootRole;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
     /// <summary>
-    /// 使用 Roslyn SyntaxTree（语法树级，不使用 SemanticModel）从 C# 文件中提取符号信息。
+    /// 使用 Roslyn SyntaxTree（语法树级，不使�?SemanticModel）从 C# 文件中提取符号信息�?
     ///
-    /// 提取的符号类型：class, interface, struct, enum, method, property, field, event, constructor, delegate。
-    /// 不提取：方法体内局部变量、lambda、匿名类型、using 指令、attribute 参数值。
+    /// 提取的符号类型：class, interface, struct, enum, method, property, field, event, constructor, delegate�?
+    /// 不提取：方法体内局部变量、lambda、匿名类型、using 指令、attribute 参数值�?
     /// </summary>
     public static class RoslynSymbolExtractor
     {
         /// <summary>
-        /// 从指定文件提取所有符号。
+        /// 从指定文件提取所有符号�?
         /// </summary>
-        /// <param name="filePath">C# 文件绝对路径。</param>
-        /// <param name="fileId">已持久化的文件 ID（用于关联符号记录）。</param>
-        /// <param name="root">该文件所属的 IndexRoot（用于填充 Scope 冗余字段）。</param>
-        /// <param name="workspace">当前 IndexWorkspace（用于填充 BranchId 等字段）。</param>
-        /// <returns>提取结果，包含符号列表和文件元数据。</returns>
+        /// <param name="filePath">C# 文件绝对路径�?/param>
+        /// <param name="fileId">已持久化的文�?ID（用于关联符号记录）�?/param>
+        /// <param name="root">该文件所属的 IndexRoot（用于填�?Scope 冗余字段）�?/param>
+        /// <param name="workspace">当前 IndexWorkspace（用于填�?BranchId 等字段）�?/param>
+        /// <returns>提取结果，包含符号列表和文件元数据�?/returns>
         public static ExtractionResult ExtractFromFile(
             string filePath,
             int fileId,
@@ -66,13 +71,13 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
 
             var root2 = syntaxTree.GetRoot();
-            var symbols = new List<SymbolInfo>();
+            var symbols = new List<IndexSymbolInfo>();
             var lines = sourceText.Split('\n');
 
-            // 提取所有命名空间声明（支持嵌套和 file-scoped）
+            // 提取所有命名空间声明（支持嵌套�?file-scoped�?
             var namespaceMap = BuildNamespaceMap(root2);
 
-            // 遍历所有类型声明
+            // 遍历所有类型声�?
             ExtractTypeDeclarations(root2, fileId, filePath, root, workspace, namespaceMap, lines, symbols);
 
             var indexedFile = new IndexedFile
@@ -101,7 +106,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap,
             string[] lines,
-            List<SymbolInfo> symbols)
+            List<IndexSymbolInfo> symbols)
         {
             foreach (var node in rootNode.DescendantNodes())
             {
@@ -157,9 +162,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
         }
 
-        // ── 各类型提取方法 ────────────────────────────────────────────────────────
+        // ── 各类型提取方�?────────────────────────────────────────────────────────
 
-        private static SymbolInfo ExtractClass(
+        private static IndexSymbolInfo ExtractClass(
             ClassDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -182,7 +187,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractInterface(
+        private static IndexSymbolInfo ExtractInterface(
             InterfaceDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -203,7 +208,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractStruct(
+        private static IndexSymbolInfo ExtractStruct(
             StructDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -224,7 +229,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractEnum(
+        private static IndexSymbolInfo ExtractEnum(
             EnumDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -240,7 +245,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractDelegate(
+        private static IndexSymbolInfo ExtractDelegate(
             DelegateDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -262,7 +267,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractMethod(
+        private static IndexSymbolInfo ExtractMethod(
             MethodDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -286,7 +291,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractProperty(
+        private static IndexSymbolInfo ExtractProperty(
             PropertyDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -305,7 +310,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractField(
+        private static IndexSymbolInfo ExtractField(
             FieldDeclarationSyntax node, VariableDeclaratorSyntax variable,
             int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
@@ -327,7 +332,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractEvent(
+        private static IndexSymbolInfo ExtractEvent(
             EventDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -345,7 +350,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractEventField(
+        private static IndexSymbolInfo ExtractEventField(
             EventFieldDeclarationSyntax node, VariableDeclaratorSyntax variable,
             int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
@@ -364,7 +369,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 declarationNode: node);
         }
 
-        private static SymbolInfo ExtractConstructor(
+        private static IndexSymbolInfo ExtractConstructor(
             ConstructorDeclarationSyntax node, int fileId, string filePath,
             IndexRoot root, IndexWorkspace workspace,
             Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
@@ -384,7 +389,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         // ── 工厂方法 ──────────────────────────────────────────────────────────────
 
-        private static SymbolInfo CreateSymbol(
+        private static IndexSymbolInfo CreateSymbol(
             int fileId, string filePath, IndexRoot root, IndexWorkspace workspace,
             string symbolType, string name, string ns, string accessibility,
             bool isStatic = false, bool isAbstract = false, bool isPartial = false,
@@ -400,7 +405,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
             var snippet = GenerateDeclarationSnippet(lines, lineNumber - 1, declarationNode);
 
-            return new SymbolInfo
+            return new IndexSymbolInfo
             {
                 FileId = fileId,
                 FilePath = filePath.Replace('\\', '/'),
@@ -422,7 +427,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 GenericParams = genericParams != null ? string.Join(", ", genericParams) : null,
                 DeclarationSnippet = snippet,
                 LineNumber = lineNumber,
-                // 冗余 Scope 字段（快速过滤用）
+                // 冗余 Scope 字段（快速过滤用�?
                 ScopeType = root?.ScopeType ?? IndexScopeType.Unknown,
                 ScopeName = root?.ScopeName ?? string.Empty,
                 Role = root?.Role ?? IndexRootRole.ReadOnlyReference,
@@ -434,7 +439,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 构建 SyntaxNode → 命名空间字符串 的映射表（支持嵌套命名空间）。
+        /// 构建 SyntaxNode �?命名空间字符�?的映射表（支持嵌套命名空间）�?
         /// </summary>
         private static Dictionary<SyntaxNode, string> BuildNamespaceMap(SyntaxNode root)
         {
@@ -444,9 +449,17 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 string ns = null;
                 if (node is NamespaceDeclarationSyntax nsDecl)
+                {
                     ns = nsDecl.Name.ToString();
-                else if (node is FileScopedNamespaceDeclarationSyntax fsNs)
-                    ns = fsNs.Name.ToString();
+                }
+                else if (node.GetType().Name == "FileScopedNamespaceDeclarationSyntax")
+                {
+                    // FileScopedNamespaceDeclarationSyntax 是 C# 10 / Roslyn 4.x 新增类型
+                    // 通过反射访问 Name 属性，兼容旧版 Roslyn DLL
+                    var nameProp = node.GetType().GetProperty("Name");
+                    if (nameProp != null)
+                        ns = nameProp.GetValue(node)?.ToString();
+                }
 
                 if (ns != null)
                     map[node] = ns;
@@ -456,7 +469,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 获取节点所在的命名空间（向上查找最近的 namespace 声明）。
+        /// 获取节点所在的命名空间（向上查找最近的 namespace 声明）�?
         /// </summary>
         private static string GetNamespace(SyntaxNode node, Dictionary<SyntaxNode, string> namespaceMap)
         {
@@ -474,7 +487,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 从 BaseListSyntax 提取基类/接口名称列表。
+        /// �?BaseListSyntax 提取基类/接口名称列表�?
         /// </summary>
         private static string[] ExtractBaseTypes(BaseListSyntax baseList)
         {
@@ -486,7 +499,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 从 TypeParameterListSyntax 提取泛型参数名称列表。
+        /// �?TypeParameterListSyntax 提取泛型参数名称列表�?
         /// </summary>
         private static string[] ExtractGenericParams(TypeParameterListSyntax typeParams)
         {
@@ -498,7 +511,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 从修饰符列表推断可访问性字符串。
+        /// 从修饰符列表推断可访问性字符串�?
         /// </summary>
         private static string GetAccessibility(SyntaxTokenList modifiers)
         {
@@ -512,19 +525,19 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 生成声明片段（取声明行 ± 2 行，最多 5 行，去除方法体，保留 XML 注释）。
+        /// 生成声明片段（取声明�?± 2 行，最�?5 行，去除方法体，保留 XML 注释）�?
         /// </summary>
         private static string GenerateDeclarationSnippet(string[] lines, int zeroBasedLine, SyntaxNode node)
         {
             if (lines == null || zeroBasedLine < 0 || zeroBasedLine >= lines.Length)
                 return null;
 
-            // 向上查找 XML 文档注释（/// 行）
+            // 向上查找 XML 文档注释�?// 行）
             var startLine = zeroBasedLine;
             while (startLine > 0 && lines[startLine - 1].TrimStart().StartsWith("///"))
                 startLine--;
 
-            // 最多取 5 行
+            // 最多取 5 �?
             var endLine = Math.Min(startLine + 4, lines.Length - 1);
 
             var sb = new StringBuilder();
@@ -536,7 +549,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     line = line.Substring(0, 200) + "...";
                 sb.AppendLine(line);
 
-                // 遇到方法体开始 { 或语句结束 ; 时停止（保留签名）
+                // 遇到方法体开�?{ 或语句结�?; 时停止（保留签名�?
                 var trimmed = line.TrimEnd();
                 if (i >= zeroBasedLine && (trimmed.EndsWith("{") || trimmed.EndsWith(";")))
                     break;
@@ -546,7 +559,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 计算文件相对于 Root 的路径。
+        /// 计算文件相对�?Root 的路径�?
         /// </summary>
         private static string ComputeRelativePath(string filePath, string rootPath)
         {
@@ -559,7 +572,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 计算字符串的 MD5 hash（用于内容变更检测）。
+        /// 计算字符串的 MD5 hash（用于内容变更检测）�?
         /// </summary>
         private static string ComputeMd5(string content)
         {
@@ -573,35 +586,35 @@ namespace AgentCore.Editor.Components.Indexing.Core
     }
 
     /// <summary>
-    /// 单文件符号提取结果。
+    /// 单文件符号提取结果�?
     /// </summary>
     public sealed class ExtractionResult
     {
-        /// <summary>是否提取成功（false 表示文件读取或解析失败）。</summary>
+        /// <summary>是否提取成功（false 表示文件读取或解析失败）�?/summary>
         public bool IsSuccess { get; private set; }
 
-        /// <summary>文件路径。</summary>
+        /// <summary>文件路径�?/summary>
         public string FilePath { get; private set; }
 
-        /// <summary>错误信息（仅 IsSuccess=false 时有值）。</summary>
+        /// <summary>错误信息（仅 IsSuccess=false 时有值）�?/summary>
         public string ErrorMessage { get; private set; }
 
-        /// <summary>文件元数据（包含 ContentHash、LastModified 等）。</summary>
+        /// <summary>文件元数据（包含 ContentHash、LastModified 等）�?/summary>
         public IndexedFile File { get; private set; }
 
-        /// <summary>提取到的符号列表。</summary>
-        public IReadOnlyList<SymbolInfo> Symbols { get; private set; }
+        /// <summary>提取到的符号列表�?/summary>
+        public IReadOnlyList<IndexSymbolInfo> Symbols { get; private set; }
 
         /// <summary>
-        /// 已解析的 SyntaxTree（供 DependencyExtractor 复用，避免重复解析）。
-        /// 仅 IsSuccess=true 时有值。
+        /// 已解析的 SyntaxTree（供 DependencyExtractor 复用，避免重复解析）�?
+        /// �?IsSuccess=true 时有值�?
         /// </summary>
         public SyntaxTree SyntaxTree { get; private set; }
 
         /// <summary>
-        /// 创建成功结果。
+        /// 创建成功结果�?
         /// </summary>
-        public static ExtractionResult Success(IndexedFile file, List<SymbolInfo> symbols, SyntaxTree syntaxTree = null)
+        public static ExtractionResult Success(IndexedFile file, List<IndexSymbolInfo> symbols, SyntaxTree syntaxTree = null)
         {
             return new ExtractionResult
             {
@@ -614,7 +627,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 创建失败结果（文件读取失败，无内容 hash）。
+        /// 创建失败结果（文件读取失败，无内�?hash）�?
         /// </summary>
         public static ExtractionResult Fail(string filePath, string error)
         {
@@ -630,12 +643,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     ErrorMessage = error,
                     LastIndexed = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 },
-                Symbols = Array.Empty<SymbolInfo>(),
+                Symbols = Array.Empty<IndexSymbolInfo>(),
             };
         }
 
         /// <summary>
-        /// 创建失败结果（文件可读但解析失败，有内容 hash）。
+        /// 创建失败结果（文件可读但解析失败，有内容 hash）�?
         /// </summary>
         public static ExtractionResult Fail(string filePath, string error,
             string contentHash, long lastModified, long fileSize)
@@ -655,7 +668,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     ErrorMessage = error,
                     LastIndexed = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 },
-                Symbols = Array.Empty<SymbolInfo>(),
+                Symbols = Array.Empty<IndexSymbolInfo>(),
             };
         }
     }

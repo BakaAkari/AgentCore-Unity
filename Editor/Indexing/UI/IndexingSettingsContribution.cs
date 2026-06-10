@@ -52,7 +52,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
             try
             {
-                var workspace = IndexWorkspaceResolver.Resolve();
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
                 if (workspace == null)
                 {
                     EditorGUILayout.HelpBox("No workspace detected. Configure a workspace root first.", MessageType.Warning);
@@ -60,8 +60,17 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 }
 
                 EditorGUILayout.LabelField("Workspace Root", workspace.WorkspaceRoot, EditorStyles.miniLabel);
-                EditorGUILayout.LabelField("Unity Root", workspace.UnityRoot, EditorStyles.miniLabel);
-                EditorGUILayout.LabelField("Workspace Hash", workspace.WorkspaceHash, EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Unity Root",     workspace.UnityRoot,     EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Workspace Hash", workspace.Fingerprint,   EditorStyles.miniLabel);
+
+                // Show which backend will be used
+#if AGENTCORE_SQLITE
+                var dbPath = IndexStoreFactory.GetDbPath(workspace.WorkspaceRoot);
+                var backendLabel = System.IO.File.Exists(dbPath) ? "SQLite" : "SQLite (not yet created)";
+#else
+                var backendLabel = "JSONL";
+#endif
+                EditorGUILayout.LabelField("Index Backend", backendLabel, EditorStyles.miniLabel);
             }
             catch (Exception ex)
             {
@@ -74,9 +83,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
             EditorGUILayout.LabelField("Index Statistics", EditorStyles.boldLabel);
 
             if (_statsDirty)
-            {
                 RefreshStats();
-            }
 
             if (_cachedStats == null)
             {
@@ -84,19 +91,26 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 return;
             }
 
-            EditorGUILayout.LabelField($"Total Files:   {_cachedStats.TotalFiles}", EditorStyles.miniLabel);
-            EditorGUILayout.LabelField($"Total Symbols: {_cachedStats.TotalSymbols}", EditorStyles.miniLabel);
-            EditorGUILayout.LabelField($"Total Roots:   {_cachedStats.TotalRoots}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Backend:       {_cachedStats.StoreBackend ?? "unknown"}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Total Files:   {_cachedStats.TotalFiles}",                EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Total Symbols: {_cachedStats.TotalSymbols}",              EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Enabled Roots: {_cachedStats.EnabledRootCount}",          EditorStyles.miniLabel);
+
+            if (_cachedStats.ErrorFileCount > 0)
+                EditorGUILayout.LabelField($"Parse Errors:  {_cachedStats.ErrorFileCount}", EditorStyles.miniLabel);
 
             if (_cachedStats.LastFullIndexAt.HasValue)
-                EditorGUILayout.LabelField($"Last Full Index:        {_cachedStats.LastFullIndexAt.Value:yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(
+                    $"Last Full Index:        {_cachedStats.LastFullIndexAt.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss}",
+                    EditorStyles.miniLabel);
+
             if (_cachedStats.LastIncrementalIndexAt.HasValue)
-                EditorGUILayout.LabelField($"Last Incremental Index: {_cachedStats.LastIncrementalIndexAt.Value:yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(
+                    $"Last Incremental Index: {_cachedStats.LastIncrementalIndexAt.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss}",
+                    EditorStyles.miniLabel);
 
             if (GUILayout.Button("Refresh Stats", GUILayout.Width(120)))
-            {
                 _statsDirty = true;
-            }
         }
 
         private void DrawIndexActions()
@@ -116,14 +130,10 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 EditorGUILayout.BeginHorizontal();
 
                 if (GUILayout.Button(_isIndexing ? "Indexing…" : "Full Index", GUILayout.Width(120)))
-                {
                     RunIndexAsync(incremental: false);
-                }
 
                 if (GUILayout.Button("Incremental", GUILayout.Width(120)))
-                {
                     RunIndexAsync(incremental: true);
-                }
 
                 if (GUILayout.Button("Clear Index", GUILayout.Width(100)))
                 {
@@ -157,7 +167,6 @@ namespace AgentCore.Editor.Components.Indexing.UI
             _lastIndexResult = null;
 
             var cts = new CancellationTokenSource();
-
             _ = RunIndexInternalAsync(incremental, cts.Token);
         }
 
@@ -165,15 +174,20 @@ namespace AgentCore.Editor.Components.Indexing.UI
         {
             try
             {
-                var workspace = IndexWorkspaceResolver.Resolve();
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
                 if (workspace == null)
                 {
                     _lastIndexResult = "Error: No workspace detected.";
                     return;
                 }
 
-                using var store = new JsonlIndexStore(workspace);
-                await store.InitializeAsync(ct);
+                // Use IndexStoreFactory so Settings UI and search_code tool share the same backend.
+                using var store = IndexStoreFactory.Create(workspace.WorkspaceRoot);
+                if (store == null)
+                {
+                    _lastIndexResult = "Error: Failed to create index store.";
+                    return;
+                }
 
                 var indexer = new CodebaseIndexer(store);
 
@@ -183,12 +197,19 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 else
                     result = await indexer.RunFullIndexAsync(null, ct);
 
-                if (result.IsCompleted)
-                    _lastIndexResult = $"Done — {result.IndexedFiles} files, {result.IndexedSymbols} symbols ({result.ElapsedMs:F0} ms)";
-                else if (result.IsFailed)
+                if (result.IsCompleted && result.IsSuccess)
+                {
+                    var elapsedMs = result.ElapsedSeconds * 1000.0;
+                    _lastIndexResult = $"Done — {result.ProcessedFiles} files, {result.ExtractedSymbols} symbols ({elapsedMs:F0} ms)";
+                }
+                else if (result.IsCompleted && !result.IsSuccess)
+                {
                     _lastIndexResult = $"Error: {result.ErrorMessage}";
+                }
                 else
+                {
                     _lastIndexResult = "Indexing cancelled.";
+                }
 
                 _statsDirty = true;
             }
@@ -210,16 +231,25 @@ namespace AgentCore.Editor.Components.Indexing.UI
         {
             try
             {
-                var workspace = IndexWorkspaceResolver.Resolve();
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
                 if (workspace == null)
                 {
                     _lastIndexResult = "Error: No workspace detected.";
                     return;
                 }
 
-                using var store = new JsonlIndexStore(workspace);
-                await store.InitializeAsync(CancellationToken.None);
-                await store.ClearAsync(CancellationToken.None);
+                // Use IndexStoreFactory so Settings UI and search_code tool share the same backend.
+                using var store = IndexStoreFactory.Create(workspace.WorkspaceRoot);
+                if (store == null)
+                {
+                    _lastIndexResult = "Error: Failed to create index store.";
+                    return;
+                }
+
+                // Resolve workspace ID before clearing.
+                var ws = workspace;
+                var workspaceId = await store.UpsertWorkspaceAsync(ws, CancellationToken.None);
+                await store.ClearWorkspaceIndexAsync(workspaceId, CancellationToken.None);
 
                 _lastIndexResult = "Index cleared.";
                 _cachedStats = null;
@@ -237,18 +267,31 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
             try
             {
-                var workspace = IndexWorkspaceResolver.Resolve();
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
                 if (workspace == null)
                 {
                     _cachedStats = null;
                     return;
                 }
 
-                using var store = new JsonlIndexStore(workspace);
-                await store.InitializeAsync(CancellationToken.None);
+                // Use IndexStoreFactory so Settings UI and search_code tool share the same backend.
+                using var store = IndexStoreFactory.Create(workspace.WorkspaceRoot);
+                if (store == null)
+                {
+                    _cachedStats = null;
+                    return;
+                }
 
-                var stats = await store.GetStatsAsync(CancellationToken.None);
-                _cachedStats = stats.TotalFiles > 0 ? stats : null;
+                // Look up the workspace record; if it doesn't exist yet, there's no index.
+                var ws = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, CancellationToken.None);
+                if (ws == null)
+                {
+                    _cachedStats = null;
+                    return;
+                }
+
+                var stats = await store.GetStatsAsync(ws.Id, CancellationToken.None);
+                _cachedStats = (stats != null && stats.TotalFiles > 0) ? stats : null;
             }
             catch
             {

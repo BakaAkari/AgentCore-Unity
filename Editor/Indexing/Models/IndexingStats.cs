@@ -50,6 +50,35 @@ namespace AgentCore.Editor.Components.Indexing.Models
         /// <summary>按 Root 分组的统计信息。</summary>
         public List<RootStats> RootBreakdown { get; set; } = new List<RootStats>();
 
+        // ── 扩展字段别名（SqliteIndexStore / SearchCodeTool 使用）──────────────
+
+        /// <summary>存在语法错误的文件数（ErrorFileCount 的别名）。</summary>
+        public int ErrorFiles
+        {
+            get => ErrorFileCount;
+            set => ErrorFileCount = value;
+        }
+
+        /// <summary>已启用的 Root 数量（EnabledRootCount 的别名）。</summary>
+        public int TotalRoots
+        {
+            get => EnabledRootCount;
+            set => EnabledRootCount = value;
+        }
+
+        /// <summary>按 Scope 类型分组的文件数（key = scope_type 字符串）。</summary>
+        public Dictionary<string, int> FilesByScope { get; set; } = new Dictionary<string, int>();
+
+        /// <summary>按 Scope 类型分组的符号数（key = scope_type 字符串）。</summary>
+        public Dictionary<string, int> SymbolsByScope { get; set; } = new Dictionary<string, int>();
+
+        /// <summary>按 Scope 分组的统计信息（RootBreakdown 的别名）。</summary>
+        public List<RootStats> ScopeBreakdown
+        {
+            get => RootBreakdown;
+            set => RootBreakdown = value;
+        }
+
         /// <summary>
         /// 单个 Root 的统计信息。
         /// </summary>

@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.9.3 | **更新日期**: 2026-06-08 | **状态**: 执行中（当前 v0.9.3）
+> **版本**: v0.9.5 | **更新日期**: 2026-06-10 | **状态**: 执行中（当前 v0.9.5）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,18 +36,19 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v0.9.3)
+### 0.4 当前项目快照 (v0.9.5)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.9.3 (2026-06-08) |
+| **版本** | 0.9.5 (2026-06-10) |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已重构 |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
 | **UI 框架** | UI Toolkit 动态 Hub 架构；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
-| **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 8 个 action（`AGENTCORE_VCS` 控制） |
-| **Indexing 组件** | Roslyn 符号索引（SQLite + FTS5 + 依赖图）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制） |
+| **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制）；SOUL.md §15 主动调用规则已就绪 |
+| **Indexing 组件** | Roslyn 符号索引（JSONL 后端，`#if AGENTCORE_SQLITE` 可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制）；Full Index 修复已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪 |
+| **Agent 主动性** | SOUL.md 新增 §14（代码索引主动调用）+ §15（VCS 主动调用）；§2/§4 同步更新；Chat 窗口是系统主入口和总控 |
 | **测试覆盖** | 5 个测试文件，90+ test cases |
 
 ### 0.5 已完成的历史 Phase
@@ -93,6 +94,8 @@
 | 6.2.1 | **文件级索引（Layer 1）** | Roslyn 解析 WorkspaceRoot 下 C# 文件，提取类名/命名空间/方法签名；JSONL 本地存储 | [x] v0.9.1 |
 | 6.2.2 | **符号检索** | `search_code` 工具 10 个 action，支持 Scope/Root/Role/Branch 过滤 | [x] v0.9.1 |
 | 6.2.3 | **SQLite 迁移 + 依赖图构建** | SQLite 替代 JSONL 作为默认后端；SyntaxTree 级 C# 类型依赖提取；`search_code` 新增 5 个 action（get_dependencies、find_usages、get_symbol_context、search_text、get_backend_info）；FTS5 全文搜索；`IndexStoreFactory` 自动降级 | [x] v0.9.3 |
+| 6.2.4 | **Full Index Bug 修复** | `CodebaseIndexer` 重建 workspace 时遗漏 `UnityRoot` 字段导致 0 files/0 symbols；修复后验证：298 files, 6453 symbols | [x] v0.9.5 |
+| 6.2.5 | **Agent 主动调用规则（SOUL.md §14）** | `search_code` 对话开始协议、强制预查场景、搜索策略、索引新鲜度规则；`TOOLS.md.template` 补充对话开始工作流 | [x] v0.9.5 |
 
 ### 2.2 P0 — VCS Panel 体验提升
 
@@ -102,6 +105,7 @@
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
 | 6.3.1 | **VCS Panel 扁平列表按路径排序** | Working Copy Status 扁平列表按完整相对路径（`/` 分隔符）排序，等价于目录结构展开后的自然顺序；`SortStatusFiles()` 已实现 | [x] v0.9.3 |
+| 6.3.2 | **Agent 主动调用规则（SOUL.md §15）** | `version_control` 主动只读查询、自然语言→action 映射、写操作确认规则、VCS 类型感知（Git/SVN/Perforce） | [x] v0.9.5 |
 
 ### 2.3 P1 — 规则系统与智能推荐（中优先级）
 
@@ -124,8 +128,10 @@
 
 ```
 v0.9.3 — 代码库索引 Phase 2（依赖图构建）+ VCS Panel 扁平列表按路径排序 ✅
-v0.9.4 — 规则系统（.agentcore/rules.md + 分层注入）
-v0.9.5 — 智能推荐（SmartToolRecommender + 响应式建议）
+v0.9.4 — Indexing/VCS Settings UI 修复 + SQLite 兼容性修复 ✅
+v0.9.5 — Full Index Bug 修复（验证通过）+ Agent 主动调用规则（SOUL.md §14/§15）✅
+v0.9.6 — 规则系统（.agentcore/rules.md + 分层注入）
+v0.9.7 — 智能推荐（SmartToolRecommender + 响应式建议）
 v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 ```
 
@@ -200,6 +206,19 @@ v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 - **原因**: `search_code` 工具按需检索比静态骨架文档更精准、更省 token；骨架文档会随代码变化快速过时；向量数据库引入额外依赖和运维成本
 - **影响**: Bootstrap 链简化为 `SOUL → TOOLS → PROJECT(auto) → PROJECT.md(user)`；`BootstrapContext.Skeleton` 属性已删除
 
+### ADR-8: Agent 主动调用规则内嵌于 SOUL.md
+
+**状态**: `已决策 — 采用 SOUL.md 内嵌规则` | **日期**: 2026-06-10
+
+- **决策**: `search_code` 和 `version_control` 的主动调用规则直接写入 `SOUL.md`（§14、§15），而不是通过代码逻辑或 Settings 配置控制
+- **原因**: SOUL.md 是 LLM 行为的唯一权威来源；规则写在 SOUL.md 中可以被 LLM 直接理解和执行，无需额外的代码分发机制；与 §11（记忆）、§12（知识库）、§13（Workspace Config）的主动调用规则保持一致的模式
+- **影响**:
+  - `SOUL.md §2` 补充"索引优先"原则
+  - `SOUL.md §4` 反幻觉表新增 `search_code` 和 `version_control` 正确名称
+  - `SOUL.md §14` 新增代码索引主动调用规则（对话开始协议 + 6 个强制预查场景 + 搜索策略 + 索引新鲜度）
+  - `SOUL.md §15` 新增 VCS 主动调用规则（主动只读查询 + 自然语言映射 + 写操作确认 + VCS 类型感知）
+  - `TOOLS.md.template` `search_code` 章节补充对话开始工作流
+
 ---
 
 ## 5. 风险评估
@@ -237,9 +256,9 @@ v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 
 | 推荐度 | 任务 | 原因 |
 |--------|------|------|
-| 🔥 | **6.2.3 依赖图构建** | 符号索引已就绪，依赖图是代码理解的下一层能力 |
-| 🔥 | **6.3.1 VCS Panel TreeView 重构** | WorkspaceRoot 基础设施已就绪，可直接按 `vcs-treeview-refactor-plan.md` 实现 |
-| ✅ | **6.4.1 规则系统** | 为 Agent 提供项目级编码规范约束，提升代码生成质量 |
+| 🔥 | **6.4.1 规则系统（.agentcore/rules.md）** | Agent 主动调用规则已就绪（§14/§15），下一步是让 Agent 读取项目级编码规范并自动注入 System Prompt |
+| ✅ | **6.4.3 SmartToolRecommender** | 基于对话上下文推荐工具，配合 §14/§15 主动调用规则形成完整的智能推荐闭环 |
+| 💡 | **6.5.1 文件变更 Diff 视图** | VCS 工具已完善，Diff 视图可提升代码审查体验 |
 
 ---
 

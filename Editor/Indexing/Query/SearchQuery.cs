@@ -49,5 +49,21 @@ namespace AgentCore.Editor.Components.Indexing.Query
 
         /// <summary>命名空间过滤（null 表示不过滤，前缀匹配）。</summary>
         public string Namespace { get; set; }
+
+        // ── 别名属性（SqliteIndexStore 使用）──────────────────────────────────
+
+        /// <summary>名称模式过滤（Query 的别名，向后兼容）。</summary>
+        public string NamePattern
+        {
+            get => Query;
+            set => Query = value;
+        }
+
+        /// <summary>最大返回结果数（Limit 的别名，向后兼容）。</summary>
+        public int MaxResults
+        {
+            get => Limit;
+            set => Limit = value;
+        }
     }
 }

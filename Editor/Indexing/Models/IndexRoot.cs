@@ -69,6 +69,15 @@ namespace AgentCore.Editor.Components.Indexing.Models
         public bool IsDefaultSearchScope { get; set; } = true;
 
         /// <summary>
+        /// IsDefaultSearchScope 的别名（向后兼容旧调用方）。
+        /// </summary>
+        public bool IsInSearchScope
+        {
+            get => IsDefaultSearchScope;
+            set => IsDefaultSearchScope = value;
+        }
+
+        /// <summary>
         /// 根据 ScopeType 和 Role 推断默认只读状态。
         /// </summary>
         public static bool InferReadOnly(IndexScopeType scopeType, IndexRootRole role)

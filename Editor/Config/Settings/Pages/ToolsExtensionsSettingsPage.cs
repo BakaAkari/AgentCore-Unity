@@ -354,6 +354,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 case "vcs":
                     OptionalComponentManager.SetVcsEnabled(enabled);
                     break;
+                case "indexing":
+                    OptionalComponentManager.SetIndexingEnabled(enabled);
+                    break;
                 default:
                     EditorUtility.DisplayDialog(
                         "Unsupported Optional Component",

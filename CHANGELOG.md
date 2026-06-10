@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - 2026-06-10
+
+### Fixed
+- **Full Index 始终返回 0 files / 0 symbols（根本原因）**：`CodebaseIndexer.RunFullIndexAsync` 和 `RunIncrementalIndexAsync` 在调用 `UpsertWorkspaceAsync` 获取数据库 ID 后，会重建 `IndexWorkspace` 对象以注入 `Id` 字段，但重建时遗漏了 `UnityRoot` 和 `UnityRootRelativePath` 两个字段。这导致 `UnityRootProvider.DiscoverRoots()` 检测到 `workspace.UnityRoot == null` 后直接返回空列表，`enabledRoots` 为空，文件扫描阶段无任何文件可处理，最终输出 "Done — 0 files, 0 symbols"。修复：在两处重建代码中补充 `UnityRoot = workspace.UnityRoot` 和 `UnityRootRelativePath = workspace.UnityRootRelativePath`。已验证：298 files, 6453 symbols。
+
+### Added
+- **SOUL.md §14 — 代码索引主动调用规则**：新增完整的 `search_code` 主动调用规范，包含：
+  - 对话开始协议（`get_stats` → `index_incremental` → 空索引提示 → 不阻塞对话）
+  - 6 个强制预查场景（修改文件前、提到类名时、"添加功能到X"时、询问架构时、重命名/删除前、编译错误时）
+  - 搜索策略（5 条指导原则：fuzzy 搜索、search_text 广搜、get_symbol_context 全上下文、find_usages 影响评估、get_file_symbols 编辑前预览）
+  - 索引新鲜度规则（写脚本后调用 `index_incremental`，不自动调用 `index_full`）
+- **SOUL.md §15 — VCS 主动调用规则**：新增完整的 `version_control` 主动调用规范，包含：
+  - 主动只读查询（破坏性操作前、批量重构前自动调用 `get_status`）
+  - 7 条自然语言 → action 映射（"改了什么" → `get_status`，"看 diff" → `get_diff`，"看历史" → `get_log` 等）
+  - 写操作确认规则（NEVER 自动 commit/stage/revert/push，必须 `confirmed: true`）
+  - VCS 类型感知（`detect_vcs` + Git/SVN/Perforce 各自 action 列表）
+- **SOUL.md §2 补充**：在"行动前先观察"原则中新增"索引优先"规则——当 Code Index 可用时，修改文件前先用 `search_symbol` 或 `get_file_symbols` 定位目标
+- **SOUL.md §4 补充**：反幻觉工具名称表新增 `search_code`（防止使用 ~~code_search~~、~~symbol_search~~ 等错误名称）和 `version_control`（防止使用 ~~vcs_control~~、~~git_commit~~ 等错误名称）
+- **TOOLS.md.template `search_code` 章节补充**：在工作流说明中新增"对话开始时的标准工作流"（4 步：`get_stats` → `index_incremental` → 空索引提示 → 不阻塞对话）
+
+## [0.9.4] - 2026-06-09
+
+### Fixed
+- **IndexingSettingsPage / IndexingSettingsContribution 后端不一致**：两个 Settings UI 文件原先硬编码 `new JsonlIndexStore(workspace)`，绕过了 `IndexStoreFactory`，导致 Settings 页面的索引操作写入 JSONL 后端，而 `search_code` 工具通过 `IndexStoreFactory` 读取 SQLite 后端，两者数据完全不互通。现已统一改为 `IndexStoreFactory.Create(workspace.WorkspaceRoot)`，Settings UI 与工具层共享同一 SQLite 数据库。
+- **IndexingProgress 属性名错误**：修复 `result.IndexedFiles` → `result.ProcessedFiles`、`result.IndexedSymbols` → `result.ExtractedSymbols`、`result.ElapsedMs` → `result.ElapsedSeconds * 1000`（编译错误）。
+- **IndexingStats 属性名错误**：修复 `_cachedStats.TotalRoots` → `_cachedStats.EnabledRootCount`（编译错误）。
+- **ClearAsync() 调用错误**：修复为正确的 `ClearWorkspaceIndexAsync(workspaceId, ct)`，并在调用前通过 `UpsertWorkspaceAsync` 获取 `workspaceId`（编译错误）。
+- **GetStatsAsync() 签名错误**：修复为正确的 `GetStatsAsync(workspaceId, ct)`，并通过 `GetWorkspaceByFingerprintAsync` 先查询 workspace 记录（编译错误）。
+- **ToolsExtensionsSettingsPage 缺少 indexing toggle**：`SetComponentEnabled` 方法的 switch-case 缺少 `"indexing"` 分支，导致点击 Indexing 组件的 Enabled 开关时弹出 "Unsupported Optional Component" 错误对话框。现已补充 `case "indexing": OptionalComponentManager.SetIndexingEnabled(enabled)` 分支，与 `ExtensionsSettingsSection` 保持一致。
+
+### Changed
+- Settings UI 中新增 "Index Backend" 字段，显示当前使用的存储后端（SQLite / SQLite not yet created）。
+- 统计信息新增 "Backend" 和 "Parse Errors" 字段，时间戳改为本地时区显示。
+
 ## [0.9.3] - 2026-06-08
 
 ### Added

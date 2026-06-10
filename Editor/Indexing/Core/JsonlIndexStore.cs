@@ -31,7 +31,6 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private Dictionary<string, Dictionary<string, string>> _metadata; // workspaceId_key -> value
 
         private bool _loaded;
-        private bool _disposed;
 
         // 文件名常量
         private const string WorkspacesFile = "workspaces.jsonl";
@@ -526,7 +525,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <inheritdoc/>
         public void Dispose()
         {
-            _disposed = true;
+            // 内存缓存随 GC 回收，无需额外清理
         }
 
         // ── 私有辅助方法 ───────────────────────────────────────────────────────

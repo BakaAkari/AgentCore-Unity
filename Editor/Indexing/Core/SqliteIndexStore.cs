@@ -1,3 +1,4 @@
+#if AGENTCORE_SQLITE
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -32,7 +33,6 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         private readonly string _dbPath;
         private readonly object _writeLock = new object();
-        private bool _disposed;
 
         // ── 构造函数 ────────────────────────────────────────────────────────────
 
@@ -473,7 +473,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                             cmd.Parameters.AddWithValue("@fid",       sym.FileId);
                             cmd.Parameters.AddWithValue("@wid",       sym.WorkspaceId);
                             cmd.Parameters.AddWithValue("@rid",       sym.RootId);
-                            cmd.Parameters.AddWithValue("@st",        sym.ScopeType?.ToString());
+                            cmd.Parameters.AddWithValue("@st",        sym.ScopeType.ToString());
                             cmd.Parameters.AddWithValue("@sn",        sym.ScopeName);
                             cmd.Parameters.AddWithValue("@bi",        sym.BranchId);
                             cmd.Parameters.AddWithValue("@nm",        sym.Name);
@@ -495,7 +495,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                             cmd.ExecuteNonQuery();
 
                             // 回填 Id（触发器已同步 FTS5）
-                            sym.Id = (int)conn.LastInsertRowId;
+                            sym.Id = (int)GetScalarLong(conn, "SELECT last_insert_rowid()");
                         }
                         tx.Commit();
                     }
@@ -903,7 +903,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <inheritdoc/>
         public void Dispose()
         {
-            _disposed = true;
+            // 连接按需打开/关闭，无需额外清理
         }
 
         // ── 私有辅助方法 ────────────────────────────────────────────────────────
@@ -953,6 +953,18 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 cmd.Parameters.AddWithValue(name, val ?? (object)DBNull.Value);
             var result = cmd.ExecuteScalar();
             return result == null || result == DBNull.Value ? null : result.ToString();
+        }
+
+        /// <summary>执行返回单个 long 的 SQL 查询（用于 last_insert_rowid() 等）。</summary>
+        private static long GetScalarLong(SqliteConnection conn, string sql,
+            params (string name, object value)[] parms)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            foreach (var (name, val) in parms)
+                cmd.Parameters.AddWithValue(name, val ?? (object)DBNull.Value);
+            var result = cmd.ExecuteScalar();
+            return result == null || result == DBNull.Value ? 0L : Convert.ToInt64(result);
         }
 
         /// <summary>将文件路径规范化（反斜杠 → 正斜杠）。</summary>
@@ -1127,3 +1139,4 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
     }
 }
+#endif // AGENTCORE_SQLITE

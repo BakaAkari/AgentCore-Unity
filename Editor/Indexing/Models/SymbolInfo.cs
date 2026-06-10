@@ -88,5 +88,31 @@ namespace AgentCore.Editor.Components.Indexing.Models
 
         /// <summary>是否只读（冗余，加速过滤）。</summary>
         public bool ReadOnly { get; set; }
+
+        // ── 扩展字段（SqliteIndexStore / RoslynSymbolExtractor 使用）──────────────
+
+        /// <summary>VCS 分线标识（冗余，来自 IndexWorkspace.BranchId）。</summary>
+        public string BranchId { get; set; }
+
+        /// <summary>访问修饰符文本（public / internal / protected / private 等）。</summary>
+        public string AccessModifier { get; set; }
+
+        /// <summary>直接基类名称（类/结构体）。</summary>
+        public string BaseType { get; set; }
+
+        /// <summary>实现的接口名称列表（类/结构体）。</summary>
+        public string[] Interfaces { get; set; }
+
+        /// <summary>符号在文件中的起始行号（1-based，与 LineNumber 同义）。</summary>
+        public int LineStart { get; set; }
+
+        /// <summary>符号在文件中的结束行号（1-based，0 表示未知）。</summary>
+        public int LineEnd { get; set; }
+
+        /// <summary>符号完整签名文本（方法/属性/委托等）。</summary>
+        public string Signature { get; set; }
+
+        /// <summary>符号上的特性（Attribute）名称列表。</summary>
+        public string[] Attributes { get; set; }
     }
 }

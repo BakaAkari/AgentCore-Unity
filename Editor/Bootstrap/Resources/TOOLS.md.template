@@ -345,7 +345,13 @@
 
 ### 代码库索引与符号检索
 - `search_code` — 基于 Roslyn 的 C# 符号索引，支持全量/增量索引、多维度符号查询、依赖图分析和 FTS5 全文搜索（需启用 Code Indexing 可选组件）
-  - **工作流**：首次使用先 `index_full` 建立索引，后续用 `index_incremental` 保持更新，再用 `search_symbol` 或 `search_text` 查询
+  - **工作流**：
+    - **对话开始时的标准工作流**（每次对话开始，若用户请求涉及 C# 代码或项目结构时执行）：
+      1. 调用 `get_stats` 检查索引是否存在（Total Files > 0）
+      2. 如果索引存在，调用 `index_incremental` 同步最近的文件变更
+      3. 如果索引为空（Total Files = 0），提示用户先在 Project Settings > AgentCore > Indexing 运行 Full Index
+      4. 不要因为等待索引而阻塞对话——继续处理用户请求，索引完成后再使用
+    - **常规工作流**：首次使用先 `index_full` 建立索引，后续用 `index_incremental` 保持更新，再用 `search_symbol` 或 `search_text` 查询
   - `resolve_workspace`: 查看当前工作区信息（WorkspaceRoot、UnityRoot、WorkspaceHash）
   - `list_roots`: 列出所有已发现的索引根目录（含 scope_type、role、path、file_count）
   - `index_full`: 全量索引 — 清空并重建所有根目录的符号数据库（同时提取依赖图）

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Components.Indexing.Core;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Components.Indexing.Query;
+using AgentCore.Editor.Components.Indexing.Roots;
+using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
 using Newtonsoft.Json.Linq;
 
@@ -139,8 +141,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、全文搜索（FTS5）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储（SQLite），不提交 VCS。",
             category: "Indexing",
             parametersSchema: _parametersSchema,
-            requiresMainThread: false,
-            mayModifyScripts: false
+            requiresMainThread: false
         );
 
         // ── ExecuteAsync ─────────────────────────────────────────────────────────
@@ -650,11 +651,13 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 error_files = stats.ErrorFiles,
                 last_full_index_at = lastFull?.ToString("O"),
                 last_incremental_at = lastIncremental?.ToString("O"),
-                scope_breakdown = stats.ScopeBreakdown?.Select(kvp => new
-                {
-                    scope = kvp.Key,
-                    file_count = kvp.Value,
-                }).ToList(),
+                scope_breakdown = stats.FilesByScope != null
+                    ? stats.FilesByScope.Select(kvp => new
+                    {
+                        scope = kvp.Key,
+                        file_count = kvp.Value,
+                    }).ToList()
+                    : null,
             }, $"索引统计：{stats.TotalFiles} 个文件，{stats.TotalSymbols} 个符号，{stats.TotalRoots} 个 Root");
         }
 
