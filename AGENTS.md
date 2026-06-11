@@ -480,7 +480,7 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - **TOOLS.md.template** — 工具使用指南，新增工具后应更新此文件
 - **ProjectContextCollector** — 自动收集项目信息，不要收集敏感信息（API Key、用户路径等）
 
-> 详细设计见 `plans/bootstrap-refactor-plan.md`。
+> 详细设计见 `plans/_archive/refactoring/bootstrap-refactor-plan.md`。
 
 ### 6.3 UI 修改规则
 

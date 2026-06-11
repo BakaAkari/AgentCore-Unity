@@ -111,8 +111,8 @@
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
-| 6.4.1 | **.agentcore/rules.md 支持** | 优先读取 WorkspaceRoot 下的规则文件（编码规范、架构约定、测试要求），兼容 UnityRoot 局部规则 | [ ] |
-| 6.4.2 | **规则自动注入** | 规则内容自动添加到 System Prompt；支持按 WorkspaceRoot、Scope、Root 分层注入 | [ ] |
+| 6.4.1 | **.agentcore/rules.md 支持** | 优先读取 WorkspaceRoot 下的规则文件（编码规范、架构约定、测试要求），兼容 UnityRoot 局部规则 | [x] |
+| 6.4.2 | **规则自动注入** | 规则内容自动添加到 System Prompt；支持按 WorkspaceRoot、Scope、Root 分层注入 | [x] |
 | 6.4.3 | **SmartToolRecommender** | 基于对话上下文和当前任务推荐可用工具；UI 显示推荐理由 | [ ] |
 | 6.4.4 | **响应式建议** | LLM 响应末尾附带"下一步建议"（如"是否需要运行测试？"） | [ ] |
 
@@ -130,7 +130,7 @@
 v0.9.3 — 代码库索引 Phase 2（依赖图构建）+ VCS Panel 扁平列表按路径排序 ✅
 v0.9.4 — Indexing/VCS Settings UI 修复 + SQLite 兼容性修复 ✅
 v0.9.5 — Full Index Bug 修复（验证通过）+ Agent 主动调用规则（SOUL.md §14/§15）✅
-v0.9.6 — 规则系统（.agentcore/rules.md + 分层注入）
+v0.9.6 — 规则系统（.agentcore/rules.md + 分层注入）✅
 v0.9.7 — 智能推荐（SmartToolRecommender + 响应式建议）
 v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 ```
@@ -239,8 +239,9 @@ v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 | [`README.md`](README.md) | 文档导航 | `plans/` 顶层 |
 | [`ROADMAP.md`](ROADMAP.md) | **主导方向文档** | `plans/` 顶层 |
 | [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md) | 企业级 Unity 项目适配需求基准，后续任务上游依据 | `plans/` 顶层 |
-| [`vcs-treeview-refactor-plan.md`](vcs-treeview-refactor-plan.md) | VCS Panel TreeView 重构方案，待实现 | `plans/` 顶层 |
-| **已完成计划** | 历史归档 | [`_archive/features/`](_archive/features/) |
+| [`vcs-treeview-refactor-plan.md`](_archive/features/vcs-treeview-refactor-plan.md) | ~~已废弃~~ — TreeView 方案废弃，改为扁平列表（v0.9.3 完成），已归档 | `_archive/features/` |
+| [`codebase-indexing-phase2-plan.md`](_archive/features/codebase-indexing-phase2-plan.md) | 已完成（v0.9.3）— SQLite 迁移 + 依赖图 + FTS5，已归档 | `_archive/features/` |
+| **其他已完成计划** | 历史归档 | [`_archive/features/`](_archive/features/) |
 | **重构计划** | 历史归档 | [`_archive/refactoring/`](_archive/refactoring/) |
 | **Phase 计划** | 历史归档 | [`_archive/phases/`](_archive/phases/) |
 | **技术分析** | 历史归档 | [`_archive/analysis/`](_archive/analysis/) |

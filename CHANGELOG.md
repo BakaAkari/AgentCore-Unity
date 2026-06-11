@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6] - 2026-06-11
+
+### Added
+- **规则系统（Rules System）**：新增两层规则文件支持，规则内容自动注入 System Prompt 末尾。
+  - **层1 — Workspace 层**：`{WorkspaceRoot}/.agentcore/rules.md`，适合跨项目的团队规则（编码规范、安全要求、工作流约定）。
+  - **层2 — Project 层**：`{UnityRoot}/AgentCore/rules.md`，适合当前 Unity 项目的特定规则（架构约定、禁用 API、命名规范）。
+  - 两层规则均存在时全部注入（Workspace 层在前，Project 层在后），互不覆盖。
+  - 新增 `RulesLoader.cs`：负责加载两层规则文件，提供 `GetWorkspaceRulesPath()`、`GetProjectRulesPath()`、`GenerateRulesTemplate()` 静态辅助方法。
+  - `BootstrapContext` 新增 `Rules` 属性（`List<RulesEntry>`），`CompileSystemPrompt()` 在末尾追加规则注入。
+  - `BootstrapLoader.Load()` 在 PROJECT.md 用户层之后调用 `RulesLoader.Load()`。
+- **`manage_workspace_config` 工具新增 3 个 action**：
+  - `read_rules`：读取指定层（`layer: "workspace"` 或 `"project"`）的 rules.md 内容。
+  - `write_rules`：写入指定层的 rules.md 内容，自动创建目录。
+  - `get_rules_paths`：返回两层规则文件的路径和存在状态。
+- **Settings UI — Rules System Card**：在 Context 设置页新增 "Rules System" 卡片，显示启用开关和两层规则文件的路径/操作按钮（Edit / Show / Create）。
+- **SOUL.md §13 更新**：补充 rules.md 两层设计说明、读写时机、决策表新增规则相关场景。
+- **TOOLS.md.template 更新**：Workspace Configuration 节补充 `read_rules`、`write_rules`、`get_rules_paths` 说明；Tool Selection Guide 新增 5 条规则相关路由条目。
+
+### Changed
+- `AgentCoreSettings`：新增 `rulesEnabled` 字段（默认 `true`），版本号 8 → 9，新增 v8→v9 迁移日志。
+- `BootstrapLoader` 日志输出新增 `RULES={count}` 字段。
+
 ## [0.9.5] - 2026-06-10
 
 ### Fixed

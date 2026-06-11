@@ -1,6 +1,6 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-06-04 | **当前版本**: v0.9.2 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-06-11 | **当前版本**: v0.9.5 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
@@ -11,8 +11,8 @@
 | 文档 | 用途 | 状态 |
 |------|------|------|
 | [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6-7 的开发路线图、任务清单和 ADR | 活跃维护 |
+| [**rules-system-plan.md**](rules-system-plan.md) | **规则系统设计方案（v0.9.6）** — `.agentcore/rules.md` 分层规则文件支持 + 自动注入 System Prompt；对应 ROADMAP 6.4.1 + 6.4.2 | 待确认，编码前对齐 |
 | [**enterprise-unity-workflow-requirements.md**](enterprise-unity-workflow-requirements.md) | **企业级 Unity 项目适配需求基准** — 记录大规模地图/模式/资源包/SVN 分线工作流；后续代码索引、VCS、RAG、Memory、工具系统等功能设计的上游依据 | 需求基准，持续参考 |
-| [**vcs-treeview-refactor-plan.md**](vcs-treeview-refactor-plan.md) | **VCS Panel TreeView 重构方案** — 将 VCS Panel 改造为 WorkspaceRoot-relative 树形结构，按 Scope Root 分组；依赖 workspace-foundation 已完成（v0.9.0） | 待实现（下一优先任务之一） |
 
 ---
 
@@ -62,6 +62,8 @@
 | [version-control-integration-plan.md](_archive/features/version-control-integration-plan.md) | v0.5.4~v0.5.5 | 版本控制集成 — Git/SVN/Perforce 查询与操作 |
 | [workspace-foundation-v0.9.0-p0-plan.md](_archive/features/workspace-foundation-v0.9.0-p0-plan.md) | v0.9.0 | Workspace 基础设施 P0 — WorkspaceContext / Resolver / Service / Config / Safety / Settings |
 | [codebase-indexing-phase1-plan.md](_archive/features/codebase-indexing-phase1-plan.md) | v0.9.1 | 代码库索引 Phase 1 — 文件级索引 + 符号检索，单层 SQLite 架构 |
+| [codebase-indexing-phase2-plan.md](_archive/features/codebase-indexing-phase2-plan.md) | v0.9.3 | 代码库索引 Phase 2 — SQLite 迁移 + 依赖图构建 + FTS5 全文搜索 |
+| [vcs-treeview-refactor-plan.md](_archive/features/vcs-treeview-refactor-plan.md) | ~~废弃~~ | VCS Panel TreeView 重构方案（已废弃，改为扁平列表，v0.9.3 完成） |
 
 ### 技术分析（参考文档）
 

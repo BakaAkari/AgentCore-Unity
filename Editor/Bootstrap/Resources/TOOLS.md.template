@@ -231,14 +231,21 @@
   - `write_project_config`: Write full PROJECT.md content. Always read first, then write the merged result.
   - `read_soul_extension`: Read current SOUL.ext.md content (Agent behavior rule extensions).
   - `write_soul_extension`: Write full SOUL.ext.md content. Always read first, then write the merged result.
-  - `get_config_paths`: Return current file paths and existence status for both config files.
+  - `get_config_paths`: Return current file paths and existence status for PROJECT.md and SOUL.ext.md.
+  - `read_rules`: Read rules.md content for the specified layer. Requires `layer` param: `"workspace"` or `"project"`.
+  - `write_rules`: Write full rules.md content for the specified layer. Always read first, then write the merged result. Requires `layer` and `content` params.
+  - `get_rules_paths`: Return current file paths and existence status for both rules.md layers (workspace + project).
 - **When to use:**
   - User asks to "update project conventions", "add a team rule", "record this preference for future conversations" → `write_project_config`
   - User asks to "add an Agent rule", "forbid the Agent from doing X", "update SOUL.ext.md" → `write_soul_extension`
+  - User asks to "add a project rule", "update rules.md", "define a project constraint" → `write_rules` (layer: project)
+  - User asks to "add a workspace rule", "add a team-wide rule" → `write_rules` (layer: workspace)
   - User asks "what are the current project conventions?" → `read_project_config`
+  - User asks "what rules are defined for this project?" → `read_rules` (layer: project)
   - Before any write, always call the corresponding read action first.
 - **Changes take effect in the NEXT conversation** — Bootstrap loads at conversation start.
-- **Do NOT use `manage_file` for PROJECT.md / SOUL.ext.md** — use this tool instead for semantic clarity and correct path resolution.
+- **Do NOT use `manage_file` for PROJECT.md / SOUL.ext.md / rules.md** — use this tool instead for semantic clarity and correct path resolution.
+- **Rules layers**: `workspace` = `{WorkspaceRoot}/.agentcore/rules.md` (team-wide); `project` = `{UnityRoot}/AgentCore/rules.md` (project-specific).
 
 ### Tool Selection Guide
 - **Want to modify a script file?** → `manage_script` (action: `write`)
@@ -257,6 +264,11 @@
 - **Want to update project conventions or personal preferences?** → `manage_workspace_config` (action: `write_project_config`)
 - **Want to add a project-specific Agent behavior rule?** → `manage_workspace_config` (action: `write_soul_extension`)
 - **Want to check if PROJECT.md / SOUL.ext.md exist?** → `manage_workspace_config` (action: `get_config_paths`)
+- **Want to read project-specific rules?** → `manage_workspace_config` (action: `read_rules`, layer: `project`)
+- **Want to read workspace-wide team rules?** → `manage_workspace_config` (action: `read_rules`, layer: `workspace`)
+- **Want to add/update project rules (rules.md)?** → `manage_workspace_config` (action: `write_rules`, layer: `project`)
+- **Want to add/update workspace-wide rules?** → `manage_workspace_config` (action: `write_rules`, layer: `workspace`)
+- **Want to check if rules.md files exist?** → `manage_workspace_config` (action: `get_rules_paths`)
 - **Want to analyze scene health?** → `scene_analysis` (action: `health_check`)
 - **Want to understand scene structure?** → `scene_analysis` (action: `summarize`) or `manage_scene` (action: `get_hierarchy`)
 - **Want to find performance issues?** → `scene_analysis` (action: `performance_hints`) or `optimization` (action: `analyze_scene`)

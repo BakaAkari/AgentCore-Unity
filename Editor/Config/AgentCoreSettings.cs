@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 8;
+        private const int CurrentVersion = 9;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -66,6 +66,9 @@ namespace AgentCore.Editor.Config
 
         [Tooltip("自动收集项目上下文")]
         public bool autoProjectContext = true;
+
+        [Tooltip("启用规则系统（从 .agentcore/rules.md 和 AgentCore/rules.md 加载规则注入 System Prompt）")]
+        public bool rulesEnabled = true;
 
         // --- mem0 配置（Phase 3 使用，Phase 1 预留）---
         [Header("Memory Service - mem0")]
@@ -303,6 +306,12 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v7→v8: workspace infrastructure fields initialized");
             }
 
+            // v8 -> v9: 新增规则系统字段（rulesEnabled 默认 true，无需额外迁移）
+            if (settingsVersion < 9)
+            {
+                Debug.Log("[AgentCore] Settings migrated v8→v9: rules system field initialized (rulesEnabled=true)");
+            }
+
             settingsVersion = CurrentVersion;
             Save(true);
         }
@@ -340,6 +349,7 @@ namespace AgentCore.Editor.Config
             toolResultCompressionThreshold = 1000;
             toolResultTargetTokens = 200;
             conversationCompressionTrigger = 0.7f;
+            rulesEnabled = true;
             workspaceAutoDetectEnabled = true;
             workspaceRootOverride = "";
             unityRootRelativePathOverride = "";

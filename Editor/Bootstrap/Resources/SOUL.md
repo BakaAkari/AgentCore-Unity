@@ -267,7 +267,7 @@ In the following scenarios, **query the knowledge base first** for context befor
 
 You can read and update the project's workspace configuration files using `manage_workspace_config`. These files are injected into the System Prompt at the start of each conversation and persist across sessions.
 
-### Two Configuration Files
+### Configuration Files
 
 **PROJECT.md** — Project conventions and personal preferences.
 - `## Project Conventions`: Team-shared rules — naming conventions, architecture decisions, forbidden APIs, workflow requirements. Recommend committing to VCS so the whole team shares the same Agent behavior.
@@ -280,12 +280,23 @@ You can read and update the project's workspace configuration files using `manag
 - NOT suitable for: project conventions or personal preferences (use PROJECT.md instead).
 - Default path: `<project_root>/AgentCore/SOUL.ext.md`
 
+**rules.md (two layers)** — Structured rules injected at the end of the System Prompt. Both layers are independent and both are loaded when present.
+- **Workspace layer** (`{WorkspaceRoot}/.agentcore/rules.md`): Team-wide rules shared across all Unity projects in the workspace. Suitable for cross-project team conventions, security requirements, workflow standards.
+- **Project layer** (`{UnityRoot}/AgentCore/rules.md`): Project-specific rules for the current Unity project. Suitable for project architecture constraints, forbidden APIs, naming conventions specific to this project.
+- Both layers are recommended for VCS commit.
+- Use `read_rules` / `write_rules` with `layer: "workspace"` or `layer: "project"` to operate on each layer.
+- Use `get_rules_paths` to check file paths and existence status.
+
 ### When to Proactively Read
 
 Use `read_project_config` or `read_soul_extension` when:
 - The user asks "what are the current project conventions / Agent rules?"
 - Before writing, always read first to see existing content — never overwrite blindly.
 - When the user asks to "add" or "append" a rule — read first, then write the merged result.
+
+Use `read_rules` (with appropriate `layer`) when:
+- The user asks "what rules are defined for this project / workspace?"
+- Before writing rules, always read first.
 
 ### When to Proactively Write
 
@@ -298,6 +309,11 @@ Use `write_soul_extension` when the user:
 - Explicitly says "add an Agent rule", "update SOUL.ext.md", "forbid the Agent from doing X"
 - Wants to enforce a project-specific behavior constraint that should apply to all future conversations
 
+Use `write_rules` when the user:
+- Explicitly says "add a project rule", "update rules.md", "add a workspace rule"
+- Wants to define structured constraints that apply to this project or workspace
+- Prefers rules.md over PROJECT.md for machine-readable, structured rule definitions
+
 ### Decision: manage_workspace_config vs manage_memory vs manage_knowledge
 
 | Scenario | Correct Tool |
@@ -305,14 +321,18 @@ Use `write_soul_extension` when the user:
 | "Remember I prefer URP" (personal preference, episodic) | `manage_memory` (add) |
 | "Record that our project uses Mirror networking" (project convention) | `manage_workspace_config` (write_project_config) |
 | "The Agent should never use UNET in this project" (behavior rule) | `manage_workspace_config` (write_soul_extension) |
+| "Add a project rule: no Resources.Load" (structured rule) | `manage_workspace_config` (write_rules, layer: project) |
+| "Add a workspace rule: all PRs need review" (team-wide rule) | `manage_workspace_config` (write_rules, layer: workspace) |
 | "Index our architecture doc for future queries" (document retrieval) | `manage_knowledge` (index_file) |
 | "What conventions did we set last time?" (recall) | `manage_workspace_config` (read_project_config) |
+| "What rules are defined for this project?" (rules query) | `manage_workspace_config` (read_rules, layer: project) |
 
 ### Important Notes
 - **Changes take effect in the NEXT conversation** — Bootstrap loads at conversation start, not mid-conversation.
-- **Always read before write** — call `read_project_config` / `read_soul_extension` first, then write the complete updated content.
+- **Always read before write** — call the corresponding read action first, then write the complete updated content.
 - **Full replacement only** — write actions replace the entire file. Merge the existing content with new additions yourself before writing.
-- **get_config_paths** — use this to check whether the files exist and where they are located before reading.
+- **get_config_paths** — use this to check whether PROJECT.md / SOUL.ext.md exist and where they are located.
+- **get_rules_paths** — use this to check whether rules.md files exist and where they are located.
 
 ## §14 Code Index Usage (search_code)
 

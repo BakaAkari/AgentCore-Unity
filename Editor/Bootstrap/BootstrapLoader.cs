@@ -82,13 +82,17 @@ namespace AgentCore.Editor.Bootstrap
                 Debug.Log($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
             }
 
+            // 4. Rules — 规则文件（WorkspaceRoot 层 + UnityRoot 层）
+            context.Rules = new RulesLoader().Load();
+
             var tokenEstimate = context.EstimateTokenCount();
             Debug.Log($"[AgentCore] Bootstrap loaded: ~{tokenEstimate} tokens " +
                       $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
                       $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
                       $"TOOLS={!string.IsNullOrEmpty(context.Tools)}, " +
                       $"PROJECT={!string.IsNullOrEmpty(context.Project)}, " +
-                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)})");
+                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)}, " +
+                      $"RULES={context.Rules.Count})");
 
             return context;
         }

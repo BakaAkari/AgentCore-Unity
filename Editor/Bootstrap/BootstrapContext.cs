@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 
 namespace AgentCore.Editor.Bootstrap
@@ -12,6 +13,7 @@ namespace AgentCore.Editor.Bootstrap
     /// 2. TOOLS.md — 工具使用指南（自动生成）
     /// 3. PROJECT.md — 项目上下文（自动收集）
     /// 3+. Workspace — PROJECT.md 用户内容（用户可编辑，建议 VCS 提交）
+    /// 4. Rules — 规则文件（WorkspaceRoot 层 + UnityRoot 层，用户可编辑，建议 VCS 提交）
     /// </summary>
     public class BootstrapContext
     {
@@ -42,8 +44,14 @@ namespace AgentCore.Editor.Bootstrap
         public string Workspace { get; set; }
 
         /// <summary>
+        /// Rules — 规则文件条目列表（按层级顺序：WorkspaceRoot 层在前，UnityRoot 层在后）
+        /// 每个条目包含来源层级标识和文件内容。
+        /// </summary>
+        public List<RulesLoader.RulesEntry> Rules { get; set; } = new List<RulesLoader.RulesEntry>();
+
+        /// <summary>
         /// 将所有 Bootstrap 内容编译为单一 System Prompt 字符串。
-        /// 加载顺序：SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user)
+        /// 加载顺序：SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) → Rules
         /// </summary>
         public string CompileSystemPrompt()
         {
@@ -83,6 +91,20 @@ namespace AgentCore.Editor.Bootstrap
                 sb.AppendLine("\n---\n");
                 sb.AppendLine("## 项目配置（来自 PROJECT.md）\n");
                 sb.AppendLine(Workspace);
+            }
+
+            // 4. RULES — 规则文件（WorkspaceRoot 层 + UnityRoot 层）
+            if (Rules != null && Rules.Count > 0)
+            {
+                foreach (var entry in Rules)
+                {
+                    sb.AppendLine("\n---\n");
+                    var header = entry.Layer == "workspace"
+                        ? "## Workspace 规则（来自 .agentcore/rules.md）"
+                        : "## 项目规则（来自 AgentCore/rules.md）";
+                    sb.AppendLine(header + "\n");
+                    sb.AppendLine(entry.Content);
+                }
             }
 
             return sb.ToString();
