@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AgentCoreSettings`：新增 `rulesEnabled` 字段（默认 `true`），版本号 8 → 9，新增 v8→v9 迁移日志。
 - `BootstrapLoader` 日志输出新增 `RULES={count}` 字段。
 
+### Deprecated
+- **SmartToolRecommender（6.4.3）**：废弃基于上下文的工具推荐功能。决策理由：Agent 对项目设计方向和当前开发阶段的理解永远不如用户明确，主动建议在实践中会产生大量无止尽的优化建议，浪费 token，干扰用户工作节奏。（见 ADR-9）
+- **响应式建议（6.4.4）**：废弃 LLM 响应末尾附带"下一步建议"功能，原因同上。（见 ADR-9）
+
 ## [0.9.5] - 2026-06-10
 
 ### Fixed
