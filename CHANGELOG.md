@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8] - 2026-06-12
+
+### Changed
+- **上下文参数默认值更新**：适配现代大 context LLM（Claude 200K / DeepSeek V3-V4 128K / Kimi 128K / GPT-4.5+ 128K）。
+  - `reserveResponseTokens`：8000 → **32000**（现代 LLM 输出能力更强，预留更多回复空间）
+  - `toolResultCompressionThreshold`：1000 → **2000**（避免过度压缩中等长度工具结果）
+  - `toolResultTargetTokens`：200 → **500**（压缩后保留更多工具结果细节）
+- **`ContextWindowManager` 模型映射表更新**：修正过时的 token 上限，新增主流模型系列。
+  - `deepseek-v*` / `deepseek-r*`：64K → **128K**（DeepSeek V3/V4/R1 实际支持 128K）
+  - `gpt-4` 基础版：8192 → **128K**（旧版 8K API 已停用，现行均为 128K）
+  - 新增 `gpt-4.5` / `gpt-5` 系列：**128K**
+  - 新增 `o1-` / `o3-` / `o4-` 系列（GPT-o 推理模型）：**200K**
+  - 新增 `kimi-` / `moonshot-` 系列：**128K**
+  - 新增 `llama-3` / `llama3` 系列：**128K**（Meta Llama 3.1+）
+  - 新增 `mistral-` 系列：**128K**
+  - 未知模型默认值维持 **128K**（现代 LLM 最低公约数）
+- `AgentCoreSettings` 版本号升至 v9，旧配置自动迁移（仅迁移仍使用旧默认值的字段，不覆盖用户自定义配置）
+
+## [0.9.7] - 2026-06-12
+
+### Removed
+- **Rules System 完全废弃**（见 ADR-10）：移除与 PROJECT.md 功能高度重叠的规则系统。
+  - 删除 `RulesLoader.cs`（272 行）
+  - `BootstrapContext` 移除 `Rules` 属性和规则注入逻辑
+  - `BootstrapLoader` 移除 `RulesLoader.Load()` 调用
+  - `AgentCoreSettings` 移除 `rulesEnabled` 字段，版本号回退 9 → 8
+  - `ManageWorkspaceConfigTool` 移除 `read_rules`、`write_rules`、`get_rules_paths` 三个 action
+  - `ContextMemorySettingsPage` 和 `ContextSettingsSection` 移除 Rules System UI 卡片
+  - `SOUL.md §13` 移除 rules.md 相关说明
+  - `TOOLS.md.template` 移除 rules actions 说明和路由条目
+
+### Changed
+- `ROADMAP.md`：6.4.1/6.4.2 标记为废弃（见 ADR-10），新增 ADR-10 决策记录
+
 ## [0.9.6] - 2026-06-11
 
 ### Added

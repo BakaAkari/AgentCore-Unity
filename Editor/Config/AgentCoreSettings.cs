@@ -42,8 +42,8 @@ namespace AgentCore.Editor.Config
         [Tooltip("上下文窗口 token 上限（0 = 自动根据模型名称推断）")]
         public int maxContextTokens = 0;
 
-        [Tooltip("为 AI 回复预留的 token 数")]
-        public int reserveResponseTokens = 8000;
+        [Tooltip("为 AI 回复预留的 token 数（现代 LLM 输出能力强，建议 32000）")]
+        public int reserveResponseTokens = 32000;
 
         // --- 自主纠错配置 ---
         [Header("Self-Correction")]
@@ -66,9 +66,6 @@ namespace AgentCore.Editor.Config
 
         [Tooltip("自动收集项目上下文")]
         public bool autoProjectContext = true;
-
-        [Tooltip("启用规则系统（从 .agentcore/rules.md 和 AgentCore/rules.md 加载规则注入 System Prompt）")]
-        public bool rulesEnabled = true;
 
         // --- mem0 配置（Phase 3 使用，Phase 1 预留）---
         [Header("Memory Service - mem0")]
@@ -170,10 +167,10 @@ namespace AgentCore.Editor.Config
         public string compressionLLMModel = "claude-3-haiku-20240307";
 
         [Tooltip("工具结果压缩阈值（超过此 token 数的工具结果将被压缩）")]
-        public int toolResultCompressionThreshold = 1000;
+        public int toolResultCompressionThreshold = 2000;
 
         [Tooltip("工具结果压缩目标 token 数")]
-        public int toolResultTargetTokens = 200;
+        public int toolResultTargetTokens = 500;
 
         [Tooltip("对话压缩触发比例（上下文使用率超过此值时触发对话压缩，0.0-1.0）")]
         [Range(0.3f, 0.95f)]
@@ -306,10 +303,27 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v7→v8: workspace infrastructure fields initialized");
             }
 
-            // v8 -> v9: 新增规则系统字段（rulesEnabled 默认 true，无需额外迁移）
+            // v8 -> v9: 更新默认值以适配现代大 context LLM（Claude 200K / DeepSeek 128K / Kimi 128K 等）
             if (settingsVersion < 9)
             {
-                Debug.Log("[AgentCore] Settings migrated v8→v9: rules system field initialized (rulesEnabled=true)");
+                // reserveResponseTokens: 8000 → 32000（现代 LLM 输出能力更强，预留更多空间）
+                if (reserveResponseTokens == 8000)
+                {
+                    reserveResponseTokens = 32000;
+                    Debug.Log("[AgentCore] Settings migrated v8→v9: reserveResponseTokens updated to 32000");
+                }
+                // toolResultCompressionThreshold: 1000 → 2000（避免过度压缩中等长度工具结果）
+                if (toolResultCompressionThreshold == 1000)
+                {
+                    toolResultCompressionThreshold = 2000;
+                    Debug.Log("[AgentCore] Settings migrated v8→v9: toolResultCompressionThreshold updated to 2000");
+                }
+                // toolResultTargetTokens: 200 → 500（保留更多工具结果细节）
+                if (toolResultTargetTokens == 200)
+                {
+                    toolResultTargetTokens = 500;
+                    Debug.Log("[AgentCore] Settings migrated v8→v9: toolResultTargetTokens updated to 500");
+                }
             }
 
             settingsVersion = CurrentVersion;
@@ -327,7 +341,7 @@ namespace AgentCore.Editor.Config
             maxTokens = 16000;
             maxToolCallRounds = 50;
             maxContextTokens = 0;
-            reserveResponseTokens = 8000;
+            reserveResponseTokens = 16000;
             autoCompileCheck = true;
             autoConsoleCapture = true;
             fallbackRoutingEnabled = true;
@@ -346,10 +360,9 @@ namespace AgentCore.Editor.Config
             useSeparateCompressionLLM = false;
             compressionLLMEndpoint = "";
             compressionLLMModel = "claude-3-haiku-20240307";
-            toolResultCompressionThreshold = 1000;
-            toolResultTargetTokens = 200;
+            toolResultCompressionThreshold = 2000;
+            toolResultTargetTokens = 500;
             conversationCompressionTrigger = 0.7f;
-            rulesEnabled = true;
             workspaceAutoDetectEnabled = true;
             workspaceRootOverride = "";
             unityRootRelativePathOverride = "";

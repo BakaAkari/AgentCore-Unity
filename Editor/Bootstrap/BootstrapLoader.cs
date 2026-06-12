@@ -20,6 +20,7 @@ namespace AgentCore.Editor.Bootstrap
     /// 3. PROJECT.md — 项目上下文（自动收集）
     /// 3+. PROJECT.md（用户） — 项目约定与个人偏好（用户可编辑，建议 VCS 提交）
     /// </summary>
+    // ReSharper disable once ClassNeverInstantiated.Global
     public class BootstrapLoader
     {
         /// <summary>
@@ -82,17 +83,13 @@ namespace AgentCore.Editor.Bootstrap
                 Debug.Log($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
             }
 
-            // 4. Rules — 规则文件（WorkspaceRoot 层 + UnityRoot 层）
-            context.Rules = new RulesLoader().Load();
-
             var tokenEstimate = context.EstimateTokenCount();
             Debug.Log($"[AgentCore] Bootstrap loaded: ~{tokenEstimate} tokens " +
                       $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
                       $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
                       $"TOOLS={!string.IsNullOrEmpty(context.Tools)}, " +
                       $"PROJECT={!string.IsNullOrEmpty(context.Project)}, " +
-                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)}, " +
-                      $"RULES={context.Rules.Count})");
+                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)})");
 
             return context;
         }

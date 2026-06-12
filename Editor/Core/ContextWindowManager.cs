@@ -31,26 +31,48 @@ namespace AgentCore.Editor.Core
             // Claude 系列 — 所有版本均为 200k
             ("claude-", 200000),
 
+            // GPT-o 系列（o1/o3/o4）— 200k（必须在 gpt- 之前匹配）
+            ("o1-", 200000),
+            ("o3-", 200000),
+            ("o4-", 200000),
+            // GPT-4.5 / GPT-5 系列 — 128k（必须在 gpt-4 之前匹配）
+            ("gpt-4.5", 128000),
+            ("gpt-5", 128000),
             // GPT-4o 系列 — 128k（必须在 gpt-4 之前匹配）
             ("gpt-4o", 128000),
             // GPT-4 Turbo — 128k
             ("gpt-4-turbo", 128000),
-            // GPT-4 基础版 — 8k
-            ("gpt-4", 8192),
+            // GPT-4 基础版 — 128k（旧版 8k 已停用，现行 API 均为 128k）
+            ("gpt-4", 128000),
             // GPT-3.5 系列 — 16k
             ("gpt-3.5", 16385),
 
-            // DeepSeek 系列 — 64k
-            ("deepseek-", 64000),
+            // DeepSeek V3 / V4 系列 — 128k（V2 及以上均为 128k）
+            ("deepseek-v", 128000),
+            // DeepSeek R 系列（推理模型）— 128k
+            ("deepseek-r", 128000),
+            // DeepSeek 其他系列 — 128k（保守估计）
+            ("deepseek-", 128000),
+
+            // Kimi / Moonshot 系列 — 128k
+            ("kimi-", 128000),
+            ("moonshot-", 128000),
 
             // Qwen 系列 — 128k
             ("qwen-", 128000),
 
             // Gemini 系列 — 1M（Google 最新模型）
             ("gemini-", 1000000),
+
+            // Llama 系列 — 128k（Meta Llama 3.1+）
+            ("llama-3", 128000),
+            ("llama3", 128000),
+
+            // Mistral 系列 — 128k
+            ("mistral-", 128000),
         };
 
-        /// <summary>未知模型的默认最大 token 数</summary>
+        /// <summary>未知模型的默认最大 token 数（现代 LLM 最低公约数）</summary>
         private const int DefaultMaxTokens = 128000;
 
         #endregion

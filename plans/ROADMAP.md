@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.9.6 | **更新日期**: 2026-06-11 | **状态**: 执行中（当前 v0.9.6）
+> **版本**: v0.9.7 | **更新日期**: 2026-06-12 | **状态**: 执行中（当前 v0.9.7）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -108,12 +108,12 @@
 | 6.3.1 | **VCS Panel 扁平列表按路径排序** | Working Copy Status 扁平列表按完整相对路径（`/` 分隔符）排序，等价于目录结构展开后的自然顺序；`SortStatusFiles()` 已实现 | [x] v0.9.3 |
 | 6.3.2 | **Agent 主动调用规则（SOUL.md §15）** | `version_control` 主动只读查询、自然语言→action 映射、写操作确认规则、VCS 类型感知（Git/SVN/Perforce） | [x] v0.9.5 |
 
-### 2.3 P1 — 规则系统（已完成）
+### 2.3 P1 — 规则系统（已废弃）
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
-| 6.4.1 | **.agentcore/rules.md 支持** | 优先读取 WorkspaceRoot 下的规则文件（编码规范、架构约定、测试要求），兼容 UnityRoot 局部规则 | [x] v0.9.6 |
-| 6.4.2 | **规则自动注入** | 规则内容自动添加到 System Prompt；支持按 WorkspaceRoot、Scope、Root 分层注入 | [x] v0.9.6 |
+| 6.4.1 | ~~**.agentcore/rules.md 支持**~~ | ~~优先读取 WorkspaceRoot 下的规则文件（编码规范、架构约定、测试要求），兼容 UnityRoot 局部规则~~ | [!] 已废弃（见 ADR-10） |
+| 6.4.2 | ~~**规则自动注入**~~ | ~~规则内容自动添加到 System Prompt；支持按 WorkspaceRoot、Scope、Root 分层注入~~ | [!] 已废弃（见 ADR-10） |
 | 6.4.3 | ~~**SmartToolRecommender**~~ | ~~基于对话上下文和当前任务推荐可用工具；UI 显示推荐理由~~ | [!] 已废弃（见 ADR-9） |
 | 6.4.4 | ~~**响应式建议**~~ | ~~LLM 响应末尾附带"下一步建议"（如"是否需要运行测试？"）~~ | [!] 已废弃（见 ADR-9） |
 
@@ -132,7 +132,7 @@ v0.9.3 — 代码库索引 Phase 2（依赖图构建）+ VCS Panel 扁平列表�
 v0.9.4 — Indexing/VCS Settings UI 修复 + SQLite 兼容性修复 ✅
 v0.9.5 — Full Index Bug 修复（验证通过）+ Agent 主动调用规则（SOUL.md §14/§15）✅
 v0.9.6 — 规则系统（.agentcore/rules.md + 分层注入）✅
-v0.9.7 — 完整功能测试验收（Round 1~4）
+v0.9.7 — 废弃 Rules System（与 PROJECT.md 功能重叠，见 ADR-10）✅
 v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 ```
 
@@ -215,6 +215,22 @@ v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 - **核心理由**: Agent 对项目的理解、设计方向和当前开发阶段，永远不如用户明确。基于上下文的主动建议在实践中会产生大量"钻牛角尖"式的无止尽优化建议，浪费 token，干扰用户的实际工作节奏
 - **替代方案**: 无。用户主导对话方向，Agent 专注执行用户明确提出的任务
 - **影响**: 6.4.3 和 6.4.4 标记为 `[!] 已废弃`；v0.9.7 里程碑改为完整功能测试验收
+
+### ADR-10: 废弃 Rules System — PROJECT.md 已足够
+
+**状态**: `已决策 — 废弃` | **日期**: 2026-06-12
+
+- **决策**: 完全移除 Rules System（`RulesLoader.cs`、`rulesEnabled` 设置、`read_rules`/`write_rules`/`get_rules_paths` 工具 action、Settings UI 卡片、SOUL.md §13 相关内容）
+- **原因**: Rules System（`rules.md`）与 PROJECT.md 功能高度重叠——两者都是"项目约定/编码规范"注入 System Prompt。维护两套机制增加了用户认知负担，且 rules.md 的"结构化规则"定位在实践中并未带来额外价值。PROJECT.md 已经足够满足所有规则注入需求。
+- **影响**:
+  - 删除 `Editor/Bootstrap/RulesLoader.cs`
+  - `BootstrapContext` 移除 `Rules` 属性，`CompileSystemPrompt()` 移除规则注入块
+  - `BootstrapLoader` 移除 `RulesLoader.Load()` 调用
+  - `AgentCoreSettings` 移除 `rulesEnabled` 字段，版本号 9 → 8（回退，因 v9 专为此字段引入）
+  - `ManageWorkspaceConfigTool` 移除 `read_rules`/`write_rules`/`get_rules_paths` actions
+  - `ContextMemorySettingsPage` 和 `ContextSettingsSection` 移除 Rules System UI 卡片
+  - `SOUL.md §13` 移除 rules.md 相关说明、读写时机、决策表条目
+  - `TOOLS.md.template` 移除 rules actions 说明和 Tool Selection Guide 条目
 
 ### ADR-8: Agent 主动调用规则内嵌于 SOUL.md
 
