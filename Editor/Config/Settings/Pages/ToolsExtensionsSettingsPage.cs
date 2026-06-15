@@ -14,8 +14,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
     public sealed class ToolsExtensionsSettingsPage : IAgentCoreSettingsPage
     {
         private const string CategoryFoldoutPrefix = "tools-extensions.category.";
-        private const string OptionalComponentsFoldoutKey = "tools-extensions.optional-components";
-        private const string ExtensionSettingsFoldoutKey = "tools-extensions.extension-settings";
+        private const string ComponentSettingsFoldoutPrefix = "tools-extensions.component-settings.";
 
         /// <inheritdoc />
         public string Id => "tools-extensions";
@@ -44,9 +43,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUILayout.Space(8);
             DrawOptionalComponentsCard(context);
             EditorGUILayout.Space(8);
-            DrawVersionControlCard(context);
-            EditorGUILayout.Space(8);
-            DrawExtensionSettingsCard(context);
+            DrawOtherExtensionSettingsCard(context);
         }
 
         // ── Capability Overview ──
@@ -344,7 +341,68 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 SetComponentEnabled(component, enabled);
             }
 
+            // Inline contribution(s) belonging to this component, displayed as a foldout
+            // so the open/close state matches users' mental model of "this component's settings".
+            DrawInlineComponentSettings(context, component);
+
             EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawInlineComponentSettings(AgentCoreSettingsContext context, OptionalComponentInfo component)
+        {
+            var ownedContributions = AgentCoreExtensionRegistry.Settings
+                .Where(c => c != null && string.Equals(c.OwnerComponentId, component.Id, StringComparison.Ordinal))
+                .OrderBy(c => c.Order)
+                .ToList();
+
+            if (ownedContributions.Count == 0)
+            {
+                if (component.Enabled)
+                {
+                    // Component enabled but contributes no in-page settings (e.g. Indexing — configured in Hub panel).
+                    EditorGUILayout.Space(4);
+                    EditorGUILayout.LabelField("No in-page settings. Configure via the AgentCore Hub panel if available.", EditorStyles.miniLabel);
+                }
+                return;
+            }
+
+            if (!component.Enabled)
+            {
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("Settings appear after enabling this component.", EditorStyles.miniLabel);
+                return;
+            }
+
+            EditorGUILayout.Space(4);
+            var foldoutKey = ComponentSettingsFoldoutPrefix + component.Id;
+            var expanded = context.State.GetFoldout(foldoutKey, true);
+            expanded = EditorGUILayout.Foldout(expanded, "Settings", true);
+            context.State.SetFoldout(foldoutKey, expanded);
+
+            if (!expanded)
+                return;
+
+            EditorGUI.indentLevel++;
+            foreach (var contribution in ownedContributions)
+            {
+                DrawInlineContributionBody(contribution);
+                EditorGUILayout.Space(4);
+            }
+            EditorGUI.indentLevel--;
+        }
+
+        private static void DrawInlineContributionBody(IAgentCoreSettingsContribution contribution)
+        {
+            // Render only the contribution body — its title/description are conveyed by the
+            // surrounding component card to avoid double-labelling.
+            try
+            {
+                contribution.DrawGUI();
+            }
+            catch (Exception ex)
+            {
+                EditorGUILayout.HelpBox($"Failed to draw extension settings '{contribution.Id}': {ex.Message}", MessageType.Warning);
+            }
         }
 
         private static void SetComponentEnabled(OptionalComponentInfo component, bool enabled)
@@ -366,77 +424,31 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
         }
 
-        // ── Version Control ──
+        // ── Other Extension Settings (contributions without an owner component) ──
 
-        private static void DrawVersionControlCard(AgentCoreSettingsContext context)
+        private static void DrawOtherExtensionSettingsCard(AgentCoreSettingsContext context)
         {
-            var vcsEnabled = OptionalComponentManager.IsVcsEnabled();
+            // Contributions that explicitly belong to an optional component are rendered
+            // inline inside their component card (see DrawInlineComponentSettings).
+            // This card only collects orphan contributions (OwnerComponentId == null).
+            var orphanContributions = AgentCoreExtensionRegistry.Settings
+                .Where(c => c != null && string.IsNullOrEmpty(c.OwnerComponentId))
+                .OrderBy(c => c.Order)
+                .ToList();
 
-            if (!vcsEnabled)
+            if (orphanContributions.Count == 0)
             {
-                context.Ui.DrawCard(
-                    "Version Control",
-                    "Version Control settings are available after enabling the VCS optional component above.",
-                    () =>
-                    {
-                        EditorGUILayout.HelpBox("VCS component is currently disabled. Enable it in Optional Components to configure version control settings.", MessageType.Info);
-                    });
-                return;
-            }
-
-            // VCS enabled — render settings via the registered contribution
-            var contribution = AgentCoreExtensionRegistry.Settings.FirstOrDefault(c => c.Id == "vcs-settings");
-            if (contribution == null)
-            {
-                context.Ui.DrawCard(
-                    "Version Control",
-                    "VCS component is enabled but its settings contribution could not be found.",
-                    () =>
-                    {
-                        EditorGUILayout.HelpBox("VCS settings contribution not found. Try recompiling scripts.", MessageType.Warning);
-                    });
+                // Hide the card entirely when nothing to show — keeps the page focused on
+                // the structurally meaningful sections (Components, Tool Visibility).
                 return;
             }
 
             context.Ui.DrawCard(
-                "Version Control",
-                "Configuration for the Git / SVN / Perforce component.",
+                "Other Extension Settings",
+                "Settings contributed by extensions that are not bound to a specific optional component.",
                 () =>
                 {
-                    try
-                    {
-                        contribution.DrawGUI();
-                    }
-                    catch (Exception ex)
-                    {
-                        EditorGUILayout.HelpBox($"Failed to draw VCS settings: {ex.Message}", MessageType.Warning);
-                    }
-                });
-        }
-
-        // ── Extension Settings (contributions) ──
-
-        private static void DrawExtensionSettingsCard(AgentCoreSettingsContext context)
-        {
-            var contributions = AgentCoreExtensionRegistry.Settings;
-            // Exclude VCS contribution since it's already drawn in its own card
-            var nonVcsContributions = contributions.Where(c => c.Id != "vcs-settings").ToList();
-
-            if (nonVcsContributions.Count == 0)
-            {
-                context.Ui.DrawCard(
-                    "Extension Settings",
-                    "No additional optional component currently contributes settings.",
-                    null);
-                return;
-            }
-
-            context.Ui.DrawCard(
-                "Extension Settings",
-                "Settings provided by other enabled AgentCore optional components.",
-                () =>
-                {
-                    foreach (var contribution in nonVcsContributions)
+                    foreach (var contribution in orphanContributions)
                     {
                         DrawSettingsContribution(context, contribution);
                         EditorGUILayout.Space(4);

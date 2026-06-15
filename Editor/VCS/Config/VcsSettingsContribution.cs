@@ -29,6 +29,11 @@ namespace AgentCore.Editor.Components.VCS.Config
         public int Order => 300;
 
         /// <summary>
+        /// Belongs to the VCS optional component so the settings render inline inside the component card.
+        /// </summary>
+        public string OwnerComponentId => "vcs";
+
+        /// <summary>
         /// Draws Version Control settings controls.
         /// </summary>
         public void DrawGUI()

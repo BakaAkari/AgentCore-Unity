@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9] - 2026-06-15
+
+### Changed
+- **Tools & Extensions 设置页布局重构**：把每个可选组件渲染为自包含卡片（开关 + Define + 内联设置折叠区），消除"开关与详细设置被其他组件夹在中间"的体验断裂。
+  - VCS 详细设置不再单独占一张卡，改为内联在 "Optional Components → Version Control" 卡片内的 Settings 折叠区，与开关物理相邻。
+  - 独立的 "Version Control" 设置卡已移除；Indexing 等未提供 contribution 的组件在卡内显示一行说明，告知"通过 AgentCore Hub 配置"。
+  - 原 "Extension Settings" 卡更名为 "Other Extension Settings"，仅在存在不归属任何组件的 contribution 时才显示，否则整张卡隐藏，让页面更聚焦。
+- `IAgentCoreSettingsContribution` 接口新增 `OwnerComponentId` 属性，contribution 通过返回 component id（如 `"vcs"`）声明归属，未归属时返回 null。
+- `VcsSettingsContribution` 显式实现 `OwnerComponentId => "vcs"`。
+
 ## [0.9.8] - 2026-06-12
 
 ### Changed

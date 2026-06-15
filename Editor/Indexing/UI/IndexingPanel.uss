@@ -1,0 +1,191 @@
+/* ========================================
+   Code Indexing Panel Styles
+   Palette aligned with VCS / Chat / Knowledge UI
+   ======================================== */
+
+.indexing-panel {
+    flex-grow: 1;
+    padding: 0;
+    background-color: #2b2b2b;
+}
+
+.indexing-panel .indexing-main-scroll-view {
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+.indexing-panel .indexing-main-scroll-view .unity-scroll-view__content-container {
+    padding: 16px;
+    flex-grow: 0;
+}
+
+/* ── Panel Header ── */
+.indexing-panel .panel-header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom-width: 1px;
+    border-bottom-color: #3a3a3a;
+    flex-shrink: 0;
+}
+
+.indexing-panel .panel-title {
+    font-size: 16px;
+    -unity-font-style: bold;
+    color: #d4d4d4;
+    flex-grow: 1;
+}
+
+.indexing-panel .indexing-header-actions {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* ── Status Message ── */
+.indexing-panel .indexing-status-label {
+    margin-bottom: 12px;
+    padding: 8px 10px;
+    background-color: #252525;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #3a3a3a;
+    white-space: normal;
+    flex-shrink: 0;
+}
+
+.indexing-panel .indexing-status-ok {
+    color: #6ec97e;
+    border-color: #3a5a3e;
+}
+
+.indexing-panel .indexing-status-error {
+    color: #e07070;
+    border-color: #5a3a3a;
+}
+
+/* ── Sections ── */
+.indexing-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background-color: #333333;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #3f3f3f;
+    flex-shrink: 0;
+}
+
+.indexing-section-header {
+    font-size: 11px;
+    -unity-font-style: bold;
+    color: #888888;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom-width: 1px;
+    border-bottom-color: #3f3f3f;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.indexing-section-content {
+    padding-top: 4px;
+}
+
+/* ── Label Rows ── */
+.indexing-label-row {
+    flex-direction: row;
+    align-items: flex-start;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+}
+
+.indexing-label-key {
+    font-size: 11px;
+    color: #888888;
+    width: 120px;
+    flex-shrink: 0;
+    -unity-font-style: normal;
+}
+
+.indexing-label-value {
+    font-size: 11px;
+    color: #c8c8c8;
+    flex-grow: 1;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Help Text ── */
+.indexing-help-text {
+    font-size: 11px;
+    color: #888888;
+    white-space: normal;
+    margin-top: 6px;
+    padding: 4px 6px;
+    background-color: #2a2a2a;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.indexing-help-text.indexing-status-error {
+    color: #e07070;
+    background-color: #2e2020;
+    border-width: 1px;
+    border-color: #5a3a3a;
+}
+
+/* ── Stats Content ── */
+.indexing-stats-content {
+    flex-grow: 0;
+}
+
+/* ── Buttons ── */
+.indexing-button {
+    padding: 5px 14px;
+    margin-right: 6px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #555555;
+    background-color: #404040;
+    color: #d4d4d4;
+    font-size: 12px;
+    cursor: link;
+    flex-shrink: 0;
+}
+
+.indexing-button:hover {
+    background-color: #4a4a4a;
+    border-color: #666666;
+}
+
+.indexing-button:active {
+    background-color: #353535;
+}
+
+.indexing-button:disabled {
+    color: #666666;
+    background-color: #353535;
+    border-color: #444444;
+    cursor: arrow;
+}
+
+.indexing-danger-button {
+    border-color: #7a3a3a;
+    color: #e07070;
+}
+
+.indexing-danger-button:hover {
+    background-color: #4a2a2a;
+    border-color: #8a4a4a;
+}
+
+.indexing-button-row {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}

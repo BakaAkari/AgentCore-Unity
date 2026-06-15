@@ -26,6 +26,14 @@ namespace AgentCore.Editor.Extensions
         int Order { get; }
 
         /// <summary>
+        /// Gets the optional component identifier this contribution belongs to.
+        /// When non-null, the contribution is rendered inline inside the matching
+        /// optional component card (see <see cref="OptionalComponentInfo.Id"/>).
+        /// When null, the contribution falls back to the generic "Other Extension Settings" card.
+        /// </summary>
+        string OwnerComponentId { get; }
+
+        /// <summary>
         /// Draws this contribution using the active settings GUI context.
         /// </summary>
         void DrawGUI();
