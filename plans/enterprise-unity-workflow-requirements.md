@@ -343,6 +343,18 @@ Role 表示该 Root 或文件在 AgentCore 中的安全策略。
 - 支持 SVN 分线隔离。
 - 搜索结果必须返回 scope、root、role、branch、read-only 信息。
 
+#### 7.1.1 后台静默 + 增量化要求（2026-06-15 新增）
+
+企业级 Unity 项目的代码量庞大，每次 SVN/git 同步都会带来批量文件变更。如果索引采用同步阻塞式触发，开发者每次 pull 后都会面临数十秒到数分钟的 UI 阻断，体感上索引能力反而成了负担。因此索引必须满足：
+
+- **后台执行**：索引任务在 ThreadPool/`Task.Run` 上跑，不占用 Unity 主线程帧时间。
+- **增量优先**：基于上游 VCS pull 或 `AssetPostprocessor` 提供的 dirty 文件集精确重新索引，而不是每次都全量扫描。
+- **静默呈现**：UI 层不打开模态、不抢占焦点，仅以 Hub 头部 ChipBadge / IndexingPanel 状态徽章和 Console 日志体现进度。
+- **失败可恢复**：单文件失败不影响其他文件；连续失败超阈值后自动 Disabled，并向用户提示。
+- **跨 Domain Reload**：dirty 集合持久化到 `Library/agentcore-indexing-dirty.json`，编译后自动续跑，不丢失变更。
+
+详细方案见 [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md)（对应 ROADMAP §3.1 / Phase 7，目标版本 v1.1.0；原 6.2.6 在 v1.0.0 验收时识别为后续优化项，已派生至 Phase 7）。
+
 ### 7.2 VCS 组件
 
 现有 VCS 组件需要从“Unity 项目根 VCS”升级为“SVN WorkspaceRoot VCS”。

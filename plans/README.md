@@ -1,6 +1,6 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-06-11 | **当前版本**: v0.9.5 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-06-16 | **当前版本**: v1.0.0（Phase 6 验收完成）| **下一目标**: Phase 7（v1.1.0 后台静默 + 增量索引）/ Phase 8（MCP 对外互操作，可并行）| **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
@@ -10,8 +10,10 @@
 
 | 文档 | 用途 | 状态 |
 |------|------|------|
-| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6-7 的开发路线图、任务清单和 ADR | 活跃维护 |
-| [**rules-system-plan.md**](rules-system-plan.md) | **规则系统设计方案（v0.9.6）** — `.agentcore/rules.md` 分层规则文件支持 + 自动注入 System Prompt；对应 ROADMAP 6.4.1 + 6.4.2 | 待确认，编码前对齐 |
+| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6 验收闭环、Phase 7（对内扩展）/ Phase 8（MCP 对外）任务清单和 ADR | 活跃维护 |
+| [**indexing-background-incremental-design.md**](indexing-background-incremental-design.md) | **后台静默 + 增量索引设计方案（Phase 7 §3.1，v1.1.0）** — DirtyTracker / CoalescingScheduler / BackgroundIndexService / IndexingStatusBus 三层调度；解决 git pull 后阻断式 reindex 痛点；对应 ROADMAP 7.1.1 ~ 7.1.7 | 用户已确认核心决策（Q1/Q5/Q9/Q10），编码前对齐完成，等待复审进入 Phase A |
+| [**mcp-server-feasibility.md**](mcp-server-feasibility.md) | **MCP Server 可行性方案（Phase 8 §3.x）** — 让外部 IDE / CLI / Agent chat 平台通过 MCP 协议调用 Unity 工具；与 Phase 7 Plugin 系统形成"对外/对内"对照（见 ADR-13）；对应 ROADMAP 8.1.1 ~ 8.1.7 | 设计基线完成，待启动 |
+| [**rules-system-plan.md**](rules-system-plan.md) | ~~规则系统设计方案~~ | ⚠️ **已废弃**（见 ROADMAP ADR-10，rules.md 与 PROJECT.md 功能重叠，v0.9.7 完全移除） |
 | [**enterprise-unity-workflow-requirements.md**](enterprise-unity-workflow-requirements.md) | **企业级 Unity 项目适配需求基准** — 记录大规模地图/模式/资源包/SVN 分线工作流；后续代码索引、VCS、RAG、Memory、工具系统等功能设计的上游依据 | 需求基准，持续参考 |
 
 ---

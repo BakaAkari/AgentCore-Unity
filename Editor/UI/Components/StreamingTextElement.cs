@@ -569,7 +569,12 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>
         /// 清空所有文本内容并隐藏光标。
         /// </summary>
-        public void Clear()
+        /// <remarks>
+        /// 注意：此方法清空的是文本内容（_currentText / _textLabel.text），
+        /// 与 <see cref="VisualElement.Clear"/>（清空子元素集合）语义不同，
+        /// 因此显式重命名为 ClearText 以避免方法隐藏（CS0108）。
+        /// </remarks>
+        public void ClearText()
         {
             _currentText = "";
             _textLabel.text = "";

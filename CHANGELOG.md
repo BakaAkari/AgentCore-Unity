@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-16
+
+> **Phase 6 验收完成里程碑**。基于 v0.9.x 系列在真实 Unity 项目中的持续实战使用作为验收依据（详见 ROADMAP.md ADR-11）。本版本以版本号、文档对齐与 Phase 7 / Phase 8 派生定位为主，并合并两处来自 v0.9.x 实战中沉淀的源码层健壮性收尾修复。后续派生项目：Phase 7（对内）后台静默 + 增量索引（v1.1.0）、Plugin / Extension 系统、产品化分发；Phase 8（对外）MCP Server 互操作。
+
+### Changed
+- **版本号**: `0.9.9` → `1.0.0`，标记 Phase 6（智能化与体验）验收完成。
+- **ROADMAP.md 主导方向重排**:
+  - 头部状态更新为 "Phase 6 验收完成（v1.0.0），下一阶段 Phase 7（对内）+ Phase 8（对外）平行推进"。
+  - §0.4 当前项目快照升级到 v1.0.0；新增 "Phase 6 验收" 行。
+  - §0.5 历史 Phase 表新增 Phase 6 行（标记 `[x]`）；所有历史 Phase 增加状态列。
+  - §1 战略目标表拆分为 Phase 6（已完成）/ Phase 7（对内）/ Phase 8（对外，与 Phase 7 平行）三行。
+  - §2 Phase 6 任务全部标记完成；6.2.6 后台静默 + 增量索引迁移到 Phase 7 §3.1；6.5.1 Diff 视图改为外部 VCS 工具委托方案；6.5.2/6.5.3 主题/快捷键判定为低 ROI 不纳入。
+  - §3 拆为 Phase 7（§3.1 后台索引 + §3.2 Plugin / Extension + §3.3 产品化分发）和 Phase 8（§3.x MCP 对外互操作 7 项任务）。
+  - §5 风险评估更新：移除已废弃的 SmartToolRecommender 风险；新增后台索引脏队列、Domain Reload 状态丢失、MCP 跨进程攻击面、MCP 协议演进、Plugin 崩溃 5 条新风险。
+  - §6 文档索引新增 [`indexing-background-incremental-design.md`](plans/indexing-background-incremental-design.md) 和 [`mcp-server-feasibility.md`](plans/mcp-server-feasibility.md) 两条上游设计文档。
+  - §7 下一步行动建议刷新为 Phase 7 §3.1 / Phase 8 §3.x.1~4 / Phase 7 §3.3.1 / Phase 7 §3.2 四条。
+- **新增 ADR-11**: v1.0.0 验收以"用户实战使用"为准，而非新增 QA 流程。
+- **新增 ADR-12**: 文件变更 Diff 视图采用外部 VCS 工具委托方案（TortoiseSVN / P4V / `git difftool`），不在 Editor 内自建 side-by-side 视图。
+- **新增 ADR-13**: MCP Server 设为独立 Phase 8，与 Phase 7 形成"对外/对内"对照，平行推进。
+- **`mcp-server-feasibility.md`**: §9 ROADMAP 关系章节更新为"独立 Phase 8（与 Phase 7 平行）"。
+- **`StreamingTextElement.Clear()` 重命名为 `ClearText()`**: 原方法名隐藏了 `VisualElement.Clear()`（清空子元素集合），语义不同；改名以消除歧义并修复 CS0108 隐藏告警。已扫描整个 `Editor/` 下无外部调用方，重命名零破坏（仍归属 v1.0.0 的 MAJOR 升级，不需额外补丁）。
+
+### Fixed
+- **`AgentCoreSettingsUi.DrawCard`**: 用 `try/finally` 包裹 `BeginVertical`/`EndVertical`，并在内层 `try/catch` 中保护用户提供的 `drawContent` 回调。回调异常不再破坏 IMGUI layout 平衡，异常会被记录到 Console 并以 `HelpBox` 提示，避免单卡片异常污染整个 Settings 页面。
+
+### Notes
+- 本版本主要为文档收尾 + 两处 `Editor/` 源码健壮性修复；不引入新功能模块，亦不修改任何工具行为或对话流程。
+- Phase 7 §3.1 后台静默 + 增量索引设计已就绪（[`indexing-background-incremental-design.md`](plans/indexing-background-incremental-design.md)），将作为 v1.1.0 的首个对齐 → 编码任务（参见 `AGENTS.md` §12.4 编码前对齐确认清单）。
+- Phase 8 §3.x MCP Server 与 Phase 7 平行推进，互不阻塞。
+
 ## [0.9.9] - 2026-06-15
 
 ### Changed
@@ -14,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 原 "Extension Settings" 卡更名为 "Other Extension Settings"，仅在存在不归属任何组件的 contribution 时才显示，否则整张卡隐藏，让页面更聚焦。
 - `IAgentCoreSettingsContribution` 接口新增 `OwnerComponentId` 属性，contribution 通过返回 component id（如 `"vcs"`）声明归属，未归属时返回 null。
 - `VcsSettingsContribution` 显式实现 `OwnerComponentId => "vcs"`。
+
+### Fixed
+- **`AgentCoreSettingsUi.DrawCard` 的 IMGUI layout 失衡**：内容回调（`drawContent`）抛异常会导致 `EndVertical` 不被调用，触发 Unity Console 频繁报错 `EndLayoutGroup: BeginLayoutGroup must be called first.`。现用 `try/finally` 包裹保证 `EndVertical` 始终执行，回调内异常被捕获并以 `HelpBox` 错误形式显示在卡片中，同时通过 `Debug.LogException` 输出到 Console。
+- **`StreamingTextElement.Clear()` 方法隐藏基类警告（CS0108）**：`StreamingTextElement` 继承 `VisualElement`，自身的 `Clear()`（清空文本内容）与基类 `Clear()`（清空子元素）语义不同，造成意图混淆。现重命名为 `ClearText()`，明确语义并消除编译警告。该方法目前无外部调用方，重命名安全。
 
 ## [0.9.8] - 2026-06-12
 

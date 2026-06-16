@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v0.9.7 | **更新日期**: 2026-06-12 | **状态**: 执行中（当前 v0.9.7）
+> **版本**: v1.0.0 | **更新日期**: 2026-06-16 | **状态**: Phase 6 验收完成（v1.0.0），下一阶段为 Phase 7（索引体验深化）+ Phase 8（MCP 对外互操作）平行推进
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,32 +36,34 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v0.9.6)
+### 0.4 当前项目快照 (v1.0.0)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 0.9.6 (2026-06-11) |
+| **版本** | 1.0.0 (2026-06-16) — Phase 6 验收完成里程碑 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
-| **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) → Rules(workspace+project) — 已完整 |
-| **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md / rules.md（两层） |
-| **规则系统** | `RulesLoader` 两层加载（`.agentcore/rules.md` + `AgentCore/rules.md`）；自动注入 System Prompt；Settings UI 支持启用/禁用和文件管理 |
-| **UI 框架** | UI Toolkit 动态 Hub 架构；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航 |
+| **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
+| **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
+| **UI 框架** | UI Toolkit 动态 Hub 架构；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制）；SOUL.md §15 主动调用规则已就绪 |
-| **Indexing 组件** | Roslyn 符号索引（JSONL 后端，`#if AGENTCORE_SQLITE` 可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制）；Full Index 修复已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪 |
+| **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制）；Full Index 已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪；**当前为同步阻塞触发，Phase 7 将改造为后台静默 + 增量索引**（v1.1.0） |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
-| **测试覆盖** | 5 个测试文件，90+ test cases |
+| **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 128K（适配现代大 context LLM） |
+| **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
+| **Phase 6 验收** | 完成 — 见 ADR-11 |
 
 ### 0.5 已完成的历史 Phase
 
-| Phase | 版本 | 主题 |
-|-------|------|------|
-| Phase 1 | v0.1.0 | 能对话 — LLM 集成、Bootstrap、Chat UI |
-| Phase 2 | v0.2.0 | 能做事 — Tool Calling（unity-mcp 桥接，已废弃） |
-| Phase 2.5 | v0.3.0 | 原生工具系统替代 unity-mcp |
-| Phase 3 | v0.3.1 | 能记忆 — 会话管理、mem0、LightRAG |
-| Phase 4 | v0.3.2~v0.3.7 | 更好用 — UX 打磨、工具补齐 |
-| Phase 5 | v0.4.0~v0.9.2 | 夯实基础 — 测试框架、RAG 补齐、架构拆分、上下文压缩、VCS 组件、Settings 重构、Workspace 基础设施、代码索引 Phase 1 |
+| Phase | 版本 | 主题 | 状态 |
+|-------|------|------|------|
+| Phase 1 | v0.1.0 | 能对话 — LLM 集成、Bootstrap、Chat UI | [x] |
+| Phase 2 | v0.2.0 | 能做事 — Tool Calling（unity-mcp 桥接，已废弃） | [x] |
+| Phase 2.5 | v0.3.0 | 原生工具系统替代 unity-mcp | [x] |
+| Phase 3 | v0.3.1 | 能记忆 — 会话管理、mem0、LightRAG | [x] |
+| Phase 4 | v0.3.2~v0.3.7 | 更好用 — UX 打磨、工具补齐 | [x] |
+| Phase 5 | v0.4.0~v0.9.2 | 夯实基础 — 测试框架、RAG 补齐、架构拆分、上下文压缩、VCS 组件、Settings 重构、Workspace 基础设施、代码索引 Phase 1 | [x] |
+| Phase 6 | v0.9.3~v1.0.0 | 智能化与体验 — 索引深化、VCS Panel、规则系统（已废弃，见 ADR-10）、Settings shell 化、Per-Component 设置卡片 | [x] |
 
 > 详细历史计划见 `_archive/` 目录。
 
@@ -70,14 +72,16 @@
 ## 1. 战略目标
 
 ```
-当前 (0.9.x): 代码库理解 → 规则系统 → 智能推荐
-中期 (1.0.x):  生态化 → 可扩展 → 产品化
+已完成 (≤ 1.0.0): 代码库理解 → Workspace 基础设施 → VCS 主动调用 → 索引主动调用 → Settings shell 化 → Phase 6 验收
+派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ 兼容用户原本 IDE/CLI 习惯（MCP）
+中期 (1.x):        Phase 7 内部扩展生态（Plugin/插件） + Phase 8 对外互操作（MCP Server）
 ```
 
-| 阶段 | 版本 | 核心目标 | 关键成果 |
-|------|------|---------|---------|
-| **Phase 6** | 0.9.x ~ 1.0.x | 智能化增强、场景深化 | 依赖图 + 规则系统 + VCS TreeView + 工具推荐 |
-| **Phase 7** | 1.0.x+ | 生态与分发 | 文档站 + 示例项目 + 插件市场就绪 |
+| 阶段 | 版本 | 定位 | 核心目标 | 关键成果 | 状态 |
+|------|------|------|---------|---------|------|
+| **Phase 6** | 0.9.x ~ 1.0.0 | 智能化与体验 | 索引深化、VCS Panel、Settings shell、Per-Component 卡片 | 见 §0.4 / §0.5 | [x] 已完成 |
+| **Phase 7** | 1.0.x ~ 1.x | 内部扩展与索引体验深化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Plugin/Extension 系统、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + 用户可自定义工具 + 可分发产品 | [-] 设计中 |
+| **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中 |
 
 ---
 
@@ -85,10 +89,11 @@
 
 **主题**: 上下文管理、代码库理解、规则系统 — 基于企业级 Unity 项目适配基准
 
-### 2.1 P0 — 代码库索引深化（最高优先级）
+### 2.1 P0 — 代码库索引深化（已完成范围）
 
 > **前置条件**: WorkspaceRoot / UnityRoot / Scope 基础设施已完成（v0.9.0）；文件级索引 + 符号检索已完成（v0.9.1）。
 > **架构决策**: 完全本地化单层架构（SQLite 符号索引），放弃向量数据库，放弃骨架文档。
+> **派生事项**: 6.2.6（后台静默 + 增量索引）已迁移至 Phase 7（v1.1.0），不再属于 Phase 6 验收范围。
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
@@ -97,6 +102,7 @@
 | 6.2.3 | **SQLite 迁移 + 依赖图构建** | SQLite 替代 JSONL 作为默认后端；SyntaxTree 级 C# 类型依赖提取；`search_code` 新增 5 个 action（get_dependencies、find_usages、get_symbol_context、search_text、get_backend_info）；FTS5 全文搜索；`IndexStoreFactory` 自动降级 | [x] v0.9.3 |
 | 6.2.4 | **Full Index Bug 修复** | `CodebaseIndexer` 重建 workspace 时遗漏 `UnityRoot` 字段导致 0 files/0 symbols；修复后验证：298 files, 6453 symbols | [x] v0.9.5 |
 | 6.2.5 | **Agent 主动调用规则（SOUL.md §14）** | `search_code` 对话开始协议、强制预查场景、搜索策略、索引新鲜度规则；`TOOLS.md.template` 补充对话开始工作流 | [x] v0.9.5 |
+| 6.2.6 | ~~**后台静默 + 增量索引**~~ | ~~Phase 6 内任务~~ — 在 v1.0.0 验收过程中识别为后续优化项，迁移至 **Phase 7（v1.1.0）**，详见 §3.1 与 ADR-11 / ADR-13；设计文档 [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) | [>] 已迁移至 Phase 7 |
 
 ### 2.2 P0 — VCS Panel 体验提升
 
@@ -117,13 +123,13 @@
 | 6.4.3 | ~~**SmartToolRecommender**~~ | ~~基于对话上下文和当前任务推荐可用工具；UI 显示推荐理由~~ | [!] 已废弃（见 ADR-9） |
 | 6.4.4 | ~~**响应式建议**~~ | ~~LLM 响应末尾附带"下一步建议"（如"是否需要运行测试？"）~~ | [!] 已废弃（见 ADR-9） |
 
-### 2.4 P2 — 体验优化（低优先级）
+### 2.4 P2 — 体验优化（已闭环）
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
-| 6.5.1 | **文件变更 Diff 视图** | 代码修改的 side-by-side 对比视图（简化版） | [ ] |
-| 6.5.2 | **主题系统** | 深色/浅色主题切换 | [ ] |
-| 6.5.3 | **快捷键自定义** | 用户可自定义聊天窗口快捷键 | [ ] |
+| 6.5.1 | **文件变更 Diff 视图（外部委托）** | 不在 Editor 内自建 side-by-side 视图；改为调用宿主 VCS 的原生 diff 工具（TortoiseSVN / P4V / `git difftool`），由 `version_control` 工具提供 `open_diff` action 触发；详见 ADR-12 | [x] v1.0.0（外部委托方案） |
+| 6.5.2 | **主题系统** | 深色/浅色主题切换 — 评估后判定为低 ROI，不纳入 Phase 6/7 范围；如未来需要再单独评估 | [!] 不纳入 |
+| 6.5.3 | **快捷键自定义** | 用户可自定义聊天窗口快捷键 — 同上，低 ROI，不纳入 Phase 6/7 范围 | [!] 不纳入 |
 
 ### 2.5 Phase 6 里程碑
 
@@ -133,23 +139,72 @@ v0.9.4 — Indexing/VCS Settings UI 修复 + SQLite 兼容性修复 ✅
 v0.9.5 — Full Index Bug 修复（验证通过）+ Agent 主动调用规则（SOUL.md §14/§15）✅
 v0.9.6 — 规则系统（.agentcore/rules.md + 分层注入）✅
 v0.9.7 — 废弃 Rules System（与 PROJECT.md 功能重叠，见 ADR-10）✅
-v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
+v0.9.8/0.9.9 — Settings shell + Per-Component 卡片、Workspace 基础设施收尾、Indexing/VCS 主动调用规则验证 ✅
+v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 diff 委托方案闭环；6.2.6 后台静默 + 增量索引识别为派生项 → Phase 7）✅
 ```
 
 ---
 
-## 3. Phase 7 — 生态与产品化 (v1.0.x+)
+## 3. Phase 7 — 内部扩展与索引体验深化（对内 / v1.0.x ~ v1.x）
 
-**主题**: 从开发工具转变为可分发、可扩展的产品
+**主题**: 从"功能完整的开发工具"演化为"可分发、可扩展、零感知"的产品。Phase 7 聚焦**对内**——索引体验、扩展机制、产品化分发，全部围绕 AgentCore 自身。MCP 对外互操作单独走 §3.x Phase 8。
+
+### 3.1 P0 — 后台静默 + 增量索引（v1.1.0，从 Phase 6 派生）
+
+> **触发原因**: v1.0.0 实战验收发现现有索引为同步阻塞式触发，影响 Editor 响应；用户提出需要静默 + 增量形式。
+> **设计文档**: [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md)
+> **范围**: 仅改造现有索引体验，不引入新存储/新协议。
+
+| # | 任务 | 说明 | 状态 |
+|---|------|------|------|
+| 7.1.1 | **AssetPostprocessor 主触发源** | `OnPostprocessAllAssets` 替代当前同步触发；imported / deleted / moved 全覆盖 | [ ] |
+| 7.1.2 | **DirtyTracker 持久化** | `Library/agentcore-indexing-dirty.json` 跨 Domain Reload 保留脏文件队列 | [ ] |
+| 7.1.3 | **CoalescingScheduler** | 合并 + 去抖 + yield gate；避免短时间内重复全量扫描 | [ ] |
+| 7.1.4 | **BackgroundIndexService** | `Task.Run` 后台执行，每 N 文件 yield，不阻塞 Editor 主线程 | [ ] |
+| 7.1.5 | **CodebaseIndexer.RunTargetedIncrementalAsync** | 跳过 ScanAllFiles，按 dirty/deleted 集合定向更新 SQLite | [ ] |
+| 7.1.6 | **IndexingStatusBus + Hub Badge** | 状态枚举 Idle/Pending/Running/Failed/Disabled；Hub 会话头部右侧 ChipBadge 静默呈现 | [ ] |
+| 7.1.7 | **SOUL.md §14 / TOOLS.md.template 增补** | LLM 感知"索引可能正在后台更新"的规则，避免在 Pending 状态强行依赖陈旧结果 | [ ] |
+
+### 3.2 P1 — Plugin / Extension 系统（对内扩展）
+
+> **定位**: 允许用户在不修改 AgentCore 源码的前提下自定义工具脚本并动态加载（Editor 级别）。
+> **与 MCP 的边界**: Plugin = **对内**（用户在 Unity 项目内扩展 AgentCore 行为）；MCP = **对外**（外部 IDE/CLI 调用 AgentCore）；两者不互相替代。
 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| 7.1.1 | **UPM 发布流程** | 自动化打包、版本标签、发布检查清单 | P0 | [ ] |
-| 7.1.2 | **文档网站** | 使用 Docusaurus/VitePress 搭建静态文档站（托管于 GitHub Pages） | P1 | [ ] |
-| 7.1.3 | **示例项目** | 完整示例：3D 平台跳跃游戏从零开发（演示 AgentCore 全部能力） | P1 | [ ] |
-| 7.1.4 | **Plugin/Extension 系统** | 允许用户自定义工具脚本并动态加载（Editor 级别热插拔） | P2 | [ ] |
-| 7.1.5 | **多 LLM 后端** | 支持 Claude、Gemini、本地 Ollama 等（统一接口） | P2 | [ ] |
-| 7.1.6 | **Unity Asset Store 提交** | 整理元数据、截图、描述文案，完成 Asset Store 提交 | P2 | [ ] |
+| 7.2.1 | **Plugin 加载契约** | 复用现有 `[AgentTool]` + `IAgentTool` + `ToolAutoDiscovery`；定义"用户工具程序集"扫描规则与隔离策略 | P1 | [ ] |
+| 7.2.2 | **Plugin 设置面板** | Settings 中列出已发现的用户工具，支持启用/禁用、查看元数据 | P1 | [ ] |
+| 7.2.3 | **示例 Plugin 模板** | 提供 Hello World 级别的用户工具模板仓库 | P2 | [ ] |
+
+### 3.3 P1 — 产品化与分发
+
+| # | 任务 | 说明 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| 7.3.1 | **UPM 发布流程** | 自动化打包、版本标签、发布检查清单 | P0 | [ ] |
+| 7.3.2 | **文档网站** | 使用 Docusaurus/VitePress 搭建静态文档站（托管于 GitHub Pages） | P1 | [ ] |
+| 7.3.3 | **示例项目** | 完整示例：3D 平台跳跃游戏从零开发（演示 AgentCore 全部能力） | P1 | [ ] |
+| 7.3.4 | **多 LLM 后端** | 支持 Claude、Gemini、本地 Ollama 等（统一接口） | P2 | [ ] |
+| 7.3.5 | **Unity Asset Store 提交** | 整理元数据、截图、描述文案，完成 Asset Store 提交 | P2 | [ ] |
+
+---
+
+## 3.x Phase 8 — MCP 对外互操作（对外 / 与 Phase 7 平行）
+
+**主题**: 通过 [Model Context Protocol](https://modelcontextprotocol.io) 把 AgentCore 已有的工具集（Native / Cloud / FileSystem / Indexing / VCS）暴露给外部 IDE / CLI / Agent 平台，**兼容用户原本的开发习惯**。
+**触发原因**: v1.0.0 验收过程中识别——用户希望在不离开自己惯用的 IDE/CLI 工作流的前提下使用 AgentCore 能力。
+**与 Phase 7 的边界**: Phase 7 = 对内（Plugin / 索引 / 分发），Phase 8 = 对外（MCP Server）；两个 Phase 平行推进，互不阻塞。
+**设计文档**: [`mcp-server-feasibility.md`](mcp-server-feasibility.md)（可行性分析与初步设计）
+**架构决策**: 详见 ADR-13（MCP 独立 Phase + 对外暴露定位）。
+
+| # | 任务 | 说明 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| 8.1.1 | **MCP Server 协议骨架** | JSON-RPC 2.0 + initialize/tools/list/tools/call 三件套；先支持 stdio 传输 | P0 | [-] 设计中 |
+| 8.1.2 | **AgentCore Tool ↔ MCP Tool 适配层** | `IAgentTool` → MCP `tools/list` schema 映射；`ExecuteAsync` → `tools/call` 桥接；保留 `RequiresMainThread` / 风险等级语义 | P0 | [ ] |
+| 8.1.3 | **生命周期与进程模型** | Editor 内 host vs. 独立进程 host 二选一决策；Domain Reload 期间的请求处理策略 | P0 | [ ] |
+| 8.1.4 | **安全策略** | Workspace 边界校验、写操作确认、敏感工具白名单；与现有 `WorkspacePathPolicy` 对齐 | P0 | [ ] |
+| 8.1.5 | **HTTP / SSE / Streamable HTTP 传输** | 在 stdio 稳定后扩展远程传输，便于与远端 IDE/Agent 平台对接 | P1 | [ ] |
+| 8.1.6 | **客户端兼容性验证** | 至少覆盖 Claude Desktop / Cursor / Continue / 自定义 CLI 四类典型客户端 | P1 | [ ] |
+| 8.1.7 | **配套文档与示例** | "如何在 X 客户端中接入 AgentCore MCP Server"系列教程；nuget/npm 配套包（如需要） | P1 | [ ] |
 
 ---
 
@@ -245,15 +300,72 @@ v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
   - `SOUL.md §15` 新增 VCS 主动调用规则（主动只读查询 + 自然语言映射 + 写操作确认 + VCS 类型感知）
   - `TOOLS.md.template` `search_code` 章节补充对话开始工作流
 
+### ADR-11: v1.0.0 验收以"用户实战使用"为准，而非新增 QA 流程
+
+**状态**: `已决策 — 采用实战验收` | **日期**: 2026-06-16
+
+- **决策**: Phase 6 收尾不再走"专门一轮 Round 1~4 全量回归测试"流程，改以**用户在真实项目中持续使用 v0.9.x ~ v0.9.9** 累积的实战反馈作为 v1.0.0 的验收依据
+- **原因**:
+  - v0.9.x 系列累计 9 个补丁版本，每个版本均经过用户在真实 Unity 项目中的使用验证；新增 QA 轮次的边际收益已经很低
+  - 用户作为唯一最终用户兼 PO，对功能完整度和稳定性有第一手判断
+  - 实战反馈已经识别出真正需要的优化方向（后台静默 + 增量索引、MCP 对外互操作），这些进入 v1.0.0 之后的派生 Phase
+- **影响**:
+  - Phase 6 §2.5 里程碑表更新为"v1.0.0 — Phase 6 完成里程碑（用户实战验收通过）"
+  - 6.5.1（Diff 视图）改为外部委托方案闭环（见 ADR-12）
+  - 6.5.2/6.5.3（主题、快捷键）评估后判定为低 ROI，不纳入 Phase 6/7 范围
+  - 6.2.6（后台静默 + 增量索引）从 Phase 6 派生为 Phase 7 §3.1（v1.1.0）
+- **不影响**: 后续 Phase 7 / Phase 8 的具体功能仍然遵循 `AGENTS.md` §12.6 的 Round 1~4 验收流程
+
+### ADR-12: 文件变更 Diff 视图采用外部 VCS 工具委托方案
+
+**状态**: `已决策 — 委托外部 diff 工具` | **日期**: 2026-06-16
+
+- **决策**: 6.5.1 文件变更 Diff 视图**不在 Editor 内自建 side-by-side 视图**；改为由 `version_control` 工具新增 `open_diff` action，委托宿主 VCS 的原生 diff 工具呈现：
+  - SVN → 调用 TortoiseSVN `TortoiseProc.exe /command:diff` 或等效平台命令
+  - Perforce → 调用 P4V / `p4 diff2` / `p4 diff` 命令
+  - Git → 调用 `git difftool` / `git diff`（用户已配置的外部 diff tool）
+- **原因**:
+  - 用户已经在真实工作流中熟悉了自己 VCS 客户端的 diff 体验（TortoiseSVN / P4V / VS Code Diff 等），自建视图会形成"另一个需要切换的工具"
+  - 自建 side-by-side 视图意味着重新实现行级 diff 算法、语法高亮、Unity 资源 diff 兼容（.unity / .prefab / .asset 的 YAML diff 等），工程成本远超收益
+  - AgentCore 的核心定位是"Editor 内 AI Agent + 工具调用"，不是"VCS 客户端"；与 ADR-1（不实现 Markdown 渲染）属于同类决策（不重复造已有生态的轮子）
+- **影响**:
+  - `version_control` 工具新增 `open_diff` action（参数：path、revision1、revision2 或 working-vs-head）
+  - `VcsSettings` 新增 diff tool 偏好配置（auto / external command / VS Code 等），与现有 `WorkspaceVcsType` 联动
+  - SOUL.md §15 增补"用户要求查看变更"时优先调用 `open_diff` 而非 `read_file` 重读
+  - 文档站补充"如何配置外部 diff 工具"指南
+- **拒绝替代方案**:
+  - "在 Editor 内自建简化版 side-by-side 视图" — 与 ADR-12 主决策直接冲突
+  - "嵌入 monaco-diff / VS Code diff webview" — Editor 不支持 webview，且引入额外依赖
+
+### ADR-13: MCP Server 设为独立 Phase 8，与 Plugin 系统形成"对外/对内"对照
+
+**状态**: `已决策 — 独立 Phase 平行推进` | **日期**: 2026-06-16
+
+- **决策**: 将 MCP（Model Context Protocol）Server 能力提升为独立的 **Phase 8**，与 Phase 7（内部扩展与索引体验深化）平行推进，而非作为 Phase 7 内的一个子任务
+- **核心理由**:
+  - **对外/对内边界清晰**: Plugin / Extension 系统 = 用户在 Unity 项目内扩展 AgentCore（**对内**）；MCP Server = 把 AgentCore 工具暴露给外部 IDE / CLI / Agent 平台（**对外**）。两者解决的是不同方向的扩展性问题，不互相替代
+  - **触发原因不同**: Phase 7 §3.1 后台索引派生于"v1.0.0 实战验收识别的性能优化项"；Phase 8 派生于"用户希望兼容自己原本的 IDE/CLI 工作流"。两个需求独立产生，应独立编排
+  - **风险特征不同**: MCP 涉及跨进程协议、安全边界（写操作 / Workspace 边界）、客户端兼容性矩阵；与 Phase 7 内部任务的风险栈完全不同，混在一起会污染优先级判断
+  - **可平行**: MCP 适配层主要是对 `IAgentTool` / `ToolAutoDiscovery` 的桥接，对 Phase 7 的索引改造代码无强耦合；两条线可平行推进
+- **影响**:
+  - ROADMAP §1 战略目标新增 Phase 8 行；§3 拆为 Phase 7（§3.1 ~ §3.3）+ Phase 8（§3.x 独立章节）
+  - `mcp-server-feasibility.md` §9 ROADMAP 关系章节明确"独立 Phase 8"
+  - 风险评估（§5）新增 MCP 跨进程安全 / 客户端兼容性两条风险
+- **拒绝替代方案**:
+  - "把 MCP Server 作为 Phase 7 的 7.x 子任务" — 边界不清，会被 Phase 7 的产品化任务（UPM / 文档站）挤压优先级
+  - "v1.0.0 之前直接合入 Phase 6" — Phase 6 已通过实战验收完成，回灌新协议层会破坏验收基线
+
 ---
 
 ## 5. 风险评估
 
 | 风险 | 可能性 | 影响 | 缓解措施 |
 |------|--------|------|---------|
-| 依赖图构建导致索引时间过长 | 中 | 中 | 异步后台执行 + 增量更新 + 可取消 |
-| VCS TreeView 在大型 WorkspaceRoot 下性能问题 | 中 | 中 | 虚拟化列表 + 懒加载子节点 |
-| SmartToolRecommender 推荐不准确 | 中 | 中 | 从规则匹配开始，逐步引入 LLM 辅助判断；提供"忽略推荐"按钮 |
+| 后台增量索引在大型 WorkspaceRoot 下出现脏文件队列堆积 | 中 | 中 | DirtyTracker 持久化 + CoalescingScheduler 去抖 + yield gate；提供"强制 Full Index"兜底入口 |
+| 后台索引在 Domain Reload 期间状态丢失 | 中 | 中 | DirtyTracker 持久化到 `Library/agentcore-indexing-dirty.json`，跨 Domain Reload 保留 |
+| MCP Server 跨进程暴露增加攻击面 | 中 | 高 | 默认仅 stdio + 本机 loopback；HTTP 传输延后；与 `WorkspacePathPolicy` 对齐写操作边界 |
+| MCP 协议演进导致客户端兼容性问题 | 中 | 中 | 遵循 MCP 官方版本协商；至少覆盖 Claude Desktop / Cursor / Continue / 自定义 CLI 四类客户端验证 |
+| Plugin / Extension 系统引入用户工具崩溃 Editor | 低 | 中 | 复用 `ToolAutoDiscovery` 的反射隔离 + 异常包装；Settings 提供"一键禁用所有用户工具"开关 |
 | 示例项目维护成本过高 | 低 | 低 | 示例项目独立仓库，AgentCore 作为 UPM 依赖引入 |
 
 ---
@@ -265,6 +377,8 @@ v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 | [`README.md`](README.md) | 文档导航 | `plans/` 顶层 |
 | [`ROADMAP.md`](ROADMAP.md) | **主导方向文档** | `plans/` 顶层 |
 | [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md) | 企业级 Unity 项目适配需求基准，后续任务上游依据 | `plans/` 顶层 |
+| [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) | **Phase 7 §3.1** 后台静默 + 增量索引详细设计（v1.1.0 上游依据） | `plans/` 顶层 |
+| [`mcp-server-feasibility.md`](mcp-server-feasibility.md) | **Phase 8 §3.x** MCP 对外互操作可行性分析与初步设计 | `plans/` 顶层 |
 | [`vcs-treeview-refactor-plan.md`](_archive/features/vcs-treeview-refactor-plan.md) | ~~已废弃~~ — TreeView 方案废弃，改为扁平列表（v0.9.3 完成），已归档 | `_archive/features/` |
 | [`codebase-indexing-phase2-plan.md`](_archive/features/codebase-indexing-phase2-plan.md) | 已完成（v0.9.3）— SQLite 迁移 + 依赖图 + FTS5，已归档 | `_archive/features/` |
 | **其他已完成计划** | 历史归档 | [`_archive/features/`](_archive/features/) |
@@ -281,11 +395,14 @@ v1.0.0 — Phase 6 完成里程碑（体验优化 + 稳定性验收）
 
 ## 7. 下一步行动建议
 
+> v1.0.0 已发布并通过用户实战验收。Phase 6 收尾，下一步进入 Phase 7（对内）+ Phase 8（对外）平行推进期。
+
 | 推荐度 | 任务 | 原因 |
 |--------|------|------|
-| 🔥 | **v0.9.7 完整功能测试验收** | v0.9.6 规则系统完成，整体功能已趋于完整，需要系统性 Round 1~4 测试验收，确保核心链路稳定 |
-| 💡 | **6.5.1 文件变更 Diff 视图** | 测试通过后，VCS 工具已完善，Diff 视图可提升代码审查体验 |
-| 💡 | **6.5.2/6.5.3 主题 + 快捷键** | 体验优化，测试通过后按需推进 |
+| 🔥 | **Phase 7 §3.1 后台静默 + 增量索引（v1.1.0）** | v1.0.0 实战验收最直接的痛点；设计文档 [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) 已就绪，进入"用户对齐 → 编码"流程（参见 `AGENTS.md` §12.4）；不引入新存储/新协议，风险可控 |
+| 🔥 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作是 v1.0.0 验收期间识别出的强需求；可与 Phase 7 平行推进；先落地 stdio + tools/list + tools/call + 安全策略，不做远程传输 |
+| 💡 | **Phase 7 §3.3.1 UPM 发布流程（自动化打包）** | v1.0.0 已是稳定里程碑，建议尽早把发布流程沉淀为脚本，避免后续每个补丁版本都手动打包 |
+| 💡 | **Phase 7 §3.2 Plugin / Extension 系统** | 与 MCP 形成"对内/对外"对照；建议在后台索引落地（v1.1.0）后启动设计 |
 
 ---
 

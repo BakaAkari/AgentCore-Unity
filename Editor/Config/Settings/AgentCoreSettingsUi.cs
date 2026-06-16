@@ -60,16 +60,34 @@ namespace AgentCore.Editor.Config.Settings
         public void DrawCard(string title, string description, Action drawContent)
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
-            DrawHelpText(description);
-
-            if (!string.IsNullOrWhiteSpace(description))
+            try
             {
-                EditorGUILayout.Space(4);
-            }
+                EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+                DrawHelpText(description);
 
-            drawContent?.Invoke();
-            EditorGUILayout.EndVertical();
+                if (!string.IsNullOrWhiteSpace(description))
+                {
+                    EditorGUILayout.Space(4);
+                }
+
+                try
+                {
+                    drawContent?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    // 防御性处理：内容回调异常不能破坏外层 layout 平衡。
+                    // 记录异常但保证 EndVertical 仍然在 finally 中执行。
+                    UnityEngine.Debug.LogException(ex);
+                    EditorGUILayout.HelpBox(
+                        $"绘制此卡片内容时发生异常：{ex.Message}\n详细信息见 Console。",
+                        UnityEditor.MessageType.Error);
+                }
+            }
+            finally
+            {
+                EditorGUILayout.EndVertical();
+            }
         }
 
         /// <summary>
