@@ -437,7 +437,8 @@ AgentCore 的工具系统几乎与 MCP 是 1:1 映射：
 
 - 本文档即"设计层"产物
 - 用户 Review 确认后进入"代码实现"阶段
-- MCP Phase 1（最小可用）完成 → 升级 Minor 版本（基线 v1.0.0，预计 → `v1.x.0`，与 Phase 7 并行不冲突）
+- 代码实现前必须先满足 [`llm-agent-architecture-remediation-plan.md`](llm-agent-architecture-remediation-plan.md:1) 的治理层 G.1/G.2/G.3：Tool Risk Policy + WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权/拆分、Lazy Tool Discovery / ActiveToolScope
+- MCP Phase 1（最小可用）完成 → 升级 Minor 版本（基线 v1.0.0，预计 → `v1.x.0`，与 Phase 7 在产品规划上并行；实现受治理层安全前置约束）
 - 同步更新 `package.json` / `CHANGELOG.md` / `ROADMAP.md`（参见 AGENTS.md §12.5）
 
 ### 8.4 编码硬规则（参考 [`AGENTS.md`](../AGENTS.md:1) §7）
@@ -446,6 +447,8 @@ AgentCore 的工具系统几乎与 MCP 是 1:1 映射：
 - HTTP 调用使用 [`HttpClientFactory`](../Editor/Utils/HttpClientFactory.cs:1) 模式（虽然这里是 Server 端，但客户端测试连接复用）
 - JSON 处理统一走 [`JsonHelper`](../Editor/Utils/JsonHelper.cs:1)
 - 工具调用一律走 [`ToolCallDispatcher`](../Editor/Tools/ToolCallDispatcher.cs:1)，不绕过
+- MCP `tools/list` 不能默认暴露全部内部工具，必须经 ActiveToolScope / Capability Scope 过滤
+- MCP `tools/call` 必须复用统一 Tool Risk Policy、WorkspacePathPolicy、确认策略和 Operation Journal，不得在桥接层重新实现一套安全逻辑
 - 错误处理：`HttpListener` 异常不能拖垮 Unity，需顶层 try-catch + 日志
 
 ---
@@ -455,9 +458,9 @@ AgentCore 的工具系统几乎与 MCP 是 1:1 映射：
 已正式登记为独立 Phase，参见 [`plans/ROADMAP.md`](ROADMAP.md:1) §3.x：
 
 - **Phase 名称**：`Phase 8 — MCP 对外互操作（对外）`
-- **与 Phase 7 关系**：Phase 7（Plugin / 后台索引）= **对内扩展**；Phase 8（MCP）= **对外暴露**。两者并行，互不阻塞。详见 ADR-13。
-- **依赖**：当前的 Tools / Workspace / Optional Components 基础设施已就绪（v1.0.0 验收完成）
-- **不依赖**：Indexing 后台增量、Plugin 系统、Enterprise Workflow（独立可单跑）
+- **与 Phase 7 关系**：Phase 7（Plugin / 后台索引）= **对内扩展**；Phase 8（MCP）= **对外暴露**。两者在产品规划上并行；MCP 实现必须先满足治理层安全前置条件。详见 ADR-13 / ADR-14。
+- **依赖**：当前的 Tools / Workspace / Optional Components 基础设施已就绪（v1.0.0 验收完成）；实现前还依赖治理层 G.1/G.2/G.3。
+- **不依赖**：Indexing 后台增量、Plugin 系统、Enterprise Workflow（独立可单跑，但不得绕过治理层）
 - **任务条目**：8.1.1 ~ 8.1.7（McpServerHost / McpToolBridge / 风险分级 / Settings UI / 多 IDE 配置 / 测试 / 文档），见 ROADMAP §3.x
 - **触发条件**：用户对外部 IDE / CLI / Agent chat 平台调用 Unity 工具的需求达到稳定优先级时启动；不与 v1.0.0 验收阻塞
 
@@ -485,16 +488,18 @@ AgentCore 的工具系统几乎与 MCP 是 1:1 映射：
 
 ### 10.3 推荐的执行顺序
 
-1. **第 1 步：用户 Review 本文档**，决定是否纳入 ROADMAP
-2. **第 2 步：补充设计文档**（用户确认大方向后），细化：
+1. **第 1 步：用户 Review 本文档**，确认 MCP 仍作为 Phase 8 保留，但实现受治理层约束
+2. **第 2 步：完成治理层前置设计/实现**，至少包括 Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权/拆分、ActiveToolScope
+3. **第 3 步：补充 MCP 设计文档**（用户确认大方向后），细化：
    - `McpProtocolHandler` 的 method 路由表
    - 工具风险分级表（哪些工具默认 Low / Medium / High）
+   - MCP `tools/list` 的 Capability Scope 过滤规则
    - Settings UI 草图
    - 多 IDE 配置 JSON 模板
-3. **第 3 步：Phase 1 实现**（8-10 天）
-4. **第 4 步：用户测试**（4 轮，按 [`AGENTS.md`](../AGENTS.md:1) §12.6）
-5. **第 5 步：版本号同步更新**（package.json / CHANGELOG / ROADMAP）
-6. **第 6 步：评估是否进入 Phase 2**
+4. **第 4 步：Phase 1 实现**（8-10 天）
+5. **第 5 步：用户测试**（4 轮，按 [`AGENTS.md`](../AGENTS.md:1) §12.6）
+6. **第 6 步：版本号同步更新**（package.json / CHANGELOG / ROADMAP）
+7. **第 7 步：评估是否进入 Phase 2**
 
 ### 10.4 如果暂不实施，至少应做的事
 

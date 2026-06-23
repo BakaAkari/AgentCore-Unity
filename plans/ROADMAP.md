@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.0.0 | **更新日期**: 2026-06-16 | **状态**: Phase 6 验收完成（v1.0.0），下一阶段为 Phase 7（索引体验深化）+ Phase 8（MCP 对外互操作）平行推进
+> **版本**: v1.0.0 | **更新日期**: 2026-06-23 | **状态**: Phase 6 验收完成（v1.0.0）；下一步先执行 LLM/Agent 架构安全收口，Phase 7（索引体验深化）与 Phase 8（MCP 对外互操作）仍为待开发产品模块
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -11,7 +11,7 @@
 
 1. **用户提出需求** → 明确要做什么、优先级、边界
 2. **AI 评估需求** → 对照本路线图确定属于哪个 Phase / 任务
-3. **文档细化** → 如需新功能，先写/更新 `plans/xxx-feature-plan.md` 详细设计
+3. **文档细化** → 如需新功能，先写/更新 `plans/xxx-feature-plan.md` 详细设计；涉及工具暴露、自治能力、MCP 或高风险操作时，必须同时对齐 `llm-agent-architecture-remediation-plan.md`
 4. **用户对齐确认** → 确认设计文档（参见 `AGENTS.md` §12.4 编码前对齐确认清单）
 5. **代码实现** → 按确认后的设计编码
 6. **版本同步** → 更新 `package.json` + `CHANGELOG.md` + 本文件任务状态
@@ -73,6 +73,7 @@
 
 ```
 已完成 (≤ 1.0.0): 代码库理解 → Workspace 基础设施 → VCS 主动调用 → 索引主动调用 → Settings shell 化 → Phase 6 验收
+治理层 (1.0.x):    LLM/Agent 架构安全收口（Tool Risk Policy / WorkspacePathPolicy 强制接入 / Lazy Tool Discovery / CompletionGate）
 派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ 兼容用户原本 IDE/CLI 习惯（MCP）
 中期 (1.x):        Phase 7 内部扩展生态（Plugin/插件） + Phase 8 对外互操作（MCP Server）
 ```
@@ -80,6 +81,7 @@
 | 阶段 | 版本 | 定位 | 核心目标 | 关键成果 | 状态 |
 |------|------|------|---------|---------|------|
 | **Phase 6** | 0.9.x ~ 1.0.0 | 智能化与体验 | 索引深化、VCS Panel、Settings shell、Per-Component 卡片 | 见 §0.4 / §0.5 | [x] 已完成 |
+| **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery、CompletionGate、Operation Journal | 为 Phase 7/8 的工具扩展与对外暴露提供硬边界 | [-] 设计中 |
 | **Phase 7** | 1.0.x ~ 1.x | 内部扩展与索引体验深化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Plugin/Extension 系统、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + 用户可自定义工具 + 可分发产品 | [-] 设计中 |
 | **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中 |
 
@@ -145,6 +147,25 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 ---
 
+## 2.x LLM/Agent 架构安全收口（Phase 7/8 前置治理层）
+
+**主题**: 在继续增加工具、扩大自治能力或对外暴露工具前，先把 AgentCore 的工具边界、上下文预算、验证闭环和执行审计收紧。该治理层不是第三个产品模块，而是 Phase 7 / Phase 8 的前置架构约束。
+
+**准则文档**: [`llm-agent-architecture-remediation-plan.md`](llm-agent-architecture-remediation-plan.md)
+
+| # | 任务 | 说明 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| G.1 | **Tool Risk Policy + WorkspacePathPolicy 强制接入** | 所有工具调用统一经过风险分级、能力授权、路径边界和确认策略；禁止工具各自绕过安全策略 | P0 | [-] 设计中 |
+| G.2 | **ExecuteCodeTool 降权/拆分** | 默认禁用或拆分为只读查询与高风险执行；高风险执行必须显式授权和审计 | P0 | [ ] |
+| G.3 | **Lazy Tool Discovery / ActiveToolScope** | 不再每轮默认暴露全部工具 schema；按任务阶段、类别和能力范围渐进暴露 | P0 | [ ] |
+| G.4 | **ContextWindowManager / Bootstrap 预算收口** | 降低长驻 prompt 与工具 schema 对上下文的挤占；避免 Context Rot 和 Lost-in-the-Middle | P1 | [ ] |
+| G.5 | **CompletionGate + Operation Journal** | 最终回复前检查工具执行、文件变更、错误和未完成高风险操作；Domain Reload 后可恢复/审计 | P1 | [ ] |
+| G.6 | **Evidence Pipeline / Planner-Executor-Verifier 分层** | 对复杂任务引入证据缓存、任务账本和验证层，减少多步误差累积 | P2 | [ ] |
+
+**执行规则**: 新增工具、Plugin、MCP、文件写操作扩大化、自动执行能力增强等任务，必须先完成 G.1；涉及外部调用方的 Phase 8 至少需要 G.1/G.2/G.3 作为实现前置条件。
+
+---
+
 ## 3. Phase 7 — 内部扩展与索引体验深化（对内 / v1.0.x ~ v1.x）
 
 **主题**: 从"功能完整的开发工具"演化为"可分发、可扩展、零感知"的产品。Phase 7 聚焦**对内**——索引体验、扩展机制、产品化分发，全部围绕 AgentCore 自身。MCP 对外互操作单独走 §3.x Phase 8。
@@ -154,6 +175,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 > **触发原因**: v1.0.0 实战验收发现现有索引为同步阻塞式触发，影响 Editor 响应；用户提出需要静默 + 增量形式。
 > **设计文档**: [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md)
 > **范围**: 仅改造现有索引体验，不引入新存储/新协议。
+> **治理约束**: Phase 7 §3.1 可与治理层并行设计，但实现时不得扩大默认工具暴露或绕过 `llm-agent-architecture-remediation-plan.md` 的安全策略。
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
@@ -192,7 +214,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 **主题**: 通过 [Model Context Protocol](https://modelcontextprotocol.io) 把 AgentCore 已有的工具集（Native / Cloud / FileSystem / Indexing / VCS）暴露给外部 IDE / CLI / Agent 平台，**兼容用户原本的开发习惯**。
 **触发原因**: v1.0.0 验收过程中识别——用户希望在不离开自己惯用的 IDE/CLI 工作流的前提下使用 AgentCore 能力。
-**与 Phase 7 的边界**: Phase 7 = 对内（Plugin / 索引 / 分发），Phase 8 = 对外（MCP Server）；两个 Phase 平行推进，互不阻塞。
+**与 Phase 7 的边界**: Phase 7 = 对内（Plugin / 索引 / 分发），Phase 8 = 对外（MCP Server）；两个 Phase 在产品规划上平行推进，但 Phase 8 的实现必须先满足治理层 G.1/G.2/G.3 的安全前置条件。
 **设计文档**: [`mcp-server-feasibility.md`](mcp-server-feasibility.md)（可行性分析与初步设计）
 **架构决策**: 详见 ADR-13（MCP 独立 Phase + 对外暴露定位）。
 
@@ -346,7 +368,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
   - **对外/对内边界清晰**: Plugin / Extension 系统 = 用户在 Unity 项目内扩展 AgentCore（**对内**）；MCP Server = 把 AgentCore 工具暴露给外部 IDE / CLI / Agent 平台（**对外**）。两者解决的是不同方向的扩展性问题，不互相替代
   - **触发原因不同**: Phase 7 §3.1 后台索引派生于"v1.0.0 实战验收识别的性能优化项"；Phase 8 派生于"用户希望兼容自己原本的 IDE/CLI 工作流"。两个需求独立产生，应独立编排
   - **风险特征不同**: MCP 涉及跨进程协议、安全边界（写操作 / Workspace 边界）、客户端兼容性矩阵；与 Phase 7 内部任务的风险栈完全不同，混在一起会污染优先级判断
-  - **可平行**: MCP 适配层主要是对 `IAgentTool` / `ToolAutoDiscovery` 的桥接，对 Phase 7 的索引改造代码无强耦合；两条线可平行推进
+  - **可平行**: MCP 适配层主要是对 `IAgentTool` / `ToolAutoDiscovery` 的桥接，对 Phase 7 的索引改造代码无强耦合；两条线可在产品规划上平行推进，但 MCP 实现不得绕过治理层的工具风险策略、能力授权和 Workspace 边界
 - **影响**:
   - ROADMAP §1 战略目标新增 Phase 8 行；§3 拆为 Phase 7（§3.1 ~ §3.3）+ Phase 8（§3.x 独立章节）
   - `mcp-server-feasibility.md` §9 ROADMAP 关系章节明确"独立 Phase 8"
@@ -354,6 +376,21 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 - **拒绝替代方案**:
   - "把 MCP Server 作为 Phase 7 的 7.x 子任务" — 边界不清，会被 Phase 7 的产品化任务（UPM / 文档站）挤压优先级
   - "v1.0.0 之前直接合入 Phase 6" — Phase 6 已通过实战验收完成，回灌新协议层会破坏验收基线
+
+### ADR-14: LLM/Agent 架构修复准则作为 Phase 7/8 前置治理层
+
+**状态**: `已决策 — 先安全收口再扩展能力` | **日期**: 2026-06-23
+
+- **决策**: 将 [`llm-agent-architecture-remediation-plan.md`](llm-agent-architecture-remediation-plan.md) 设为 Phase 7/8 之前必须对齐的架构治理准则。它不是独立产品 Phase，而是所有后续工具扩展、自动化执行、Plugin 与 MCP 对外暴露的前置约束。
+- **核心理由**:
+  - 当前 AgentCore 已具备文件、代码执行、VCS、索引和云端工具能力，继续扩展前必须先建立统一 Tool Risk Policy、WorkspacePathPolicy 强制接入、能力授权和审计闭环。
+  - MCP 会把内部工具暴露给外部 IDE/CLI/Agent 平台，若未先收紧工具边界，会放大 prompt injection、越权写入和误选工具风险。
+  - Lazy Tool Discovery 与 CompletionGate 是降低工具 schema tax、上下文污染和静默失败的基础设施，不应在工具数量继续增长后再补。
+- **影响**:
+  - §1 战略目标新增治理层。
+  - §2.x 新增 LLM/Agent 架构安全收口任务表。
+  - Phase 7/8 保持产品模块定位，但实现顺序受治理层约束。
+  - §7 下一步行动建议改为优先执行治理层 G.1。
 
 ---
 
@@ -363,7 +400,10 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 |------|--------|------|---------|
 | 后台增量索引在大型 WorkspaceRoot 下出现脏文件队列堆积 | 中 | 中 | DirtyTracker 持久化 + CoalescingScheduler 去抖 + yield gate；提供"强制 Full Index"兜底入口 |
 | 后台索引在 Domain Reload 期间状态丢失 | 中 | 中 | DirtyTracker 持久化到 `Library/agentcore-indexing-dirty.json`，跨 Domain Reload 保留 |
-| MCP Server 跨进程暴露增加攻击面 | 中 | 高 | 默认仅 stdio + 本机 loopback；HTTP 传输延后；与 `WorkspacePathPolicy` 对齐写操作边界 |
+| 工具能力继续扩张但缺少统一风险策略 | 高 | 高 | 先落地 Tool Risk Policy、ToolCapability、ActiveToolScope，并在 `ToolCallDispatcher` 强制执行 |
+| 高风险文件/代码执行绕过 Workspace 边界或确认流程 | 中 | 高 | 所有写入、删除、移动、复制、执行代码经 `WorkspacePathPolicy` 与确认策略；`ExecuteCodeTool` 降权/拆分 |
+| 工具 schema 与长驻 prompt 过大导致上下文污染和误选工具 | 高 | 中 | Lazy Tool Discovery、Bootstrap 预算收口、ContextWindowManager 策略修复 |
+| MCP Server 跨进程暴露增加攻击面 | 中 | 高 | 默认仅 stdio + 本机 loopback；HTTP 传输延后；实现前先完成治理层 G.1/G.2/G.3，并与 `WorkspacePathPolicy` 对齐写操作边界 |
 | MCP 协议演进导致客户端兼容性问题 | 中 | 中 | 遵循 MCP 官方版本协商；至少覆盖 Claude Desktop / Cursor / Continue / 自定义 CLI 四类客户端验证 |
 | Plugin / Extension 系统引入用户工具崩溃 Editor | 低 | 中 | 复用 `ToolAutoDiscovery` 的反射隔离 + 异常包装；Settings 提供"一键禁用所有用户工具"开关 |
 | 示例项目维护成本过高 | 低 | 低 | 示例项目独立仓库，AgentCore 作为 UPM 依赖引入 |
@@ -377,8 +417,9 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | [`README.md`](README.md) | 文档导航 | `plans/` 顶层 |
 | [`ROADMAP.md`](ROADMAP.md) | **主导方向文档** | `plans/` 顶层 |
 | [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md) | 企业级 Unity 项目适配需求基准，后续任务上游依据 | `plans/` 顶层 |
+| [`llm-agent-architecture-remediation-plan.md`](llm-agent-architecture-remediation-plan.md) | **治理层** LLM/Agent 架构安全收口最终准则；Phase 7/8 工具扩展与 MCP 前置约束 | `plans/` 顶层 |
 | [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) | **Phase 7 §3.1** 后台静默 + 增量索引详细设计（v1.1.0 上游依据） | `plans/` 顶层 |
-| [`mcp-server-feasibility.md`](mcp-server-feasibility.md) | **Phase 8 §3.x** MCP 对外互操作可行性分析与初步设计 | `plans/` 顶层 |
+| [`mcp-server-feasibility.md`](mcp-server-feasibility.md) | **Phase 8 §3.x** MCP 对外互操作可行性分析与初步设计；实现受治理层 G.1/G.2/G.3 约束 | `plans/` 顶层 |
 | [`vcs-treeview-refactor-plan.md`](_archive/features/vcs-treeview-refactor-plan.md) | ~~已废弃~~ — TreeView 方案废弃，改为扁平列表（v0.9.3 完成），已归档 | `_archive/features/` |
 | [`codebase-indexing-phase2-plan.md`](_archive/features/codebase-indexing-phase2-plan.md) | 已完成（v0.9.3）— SQLite 迁移 + 依赖图 + FTS5，已归档 | `_archive/features/` |
 | **其他已完成计划** | 历史归档 | [`_archive/features/`](_archive/features/) |
@@ -395,14 +436,15 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 ## 7. 下一步行动建议
 
-> v1.0.0 已发布并通过用户实战验收。Phase 6 收尾，下一步进入 Phase 7（对内）+ Phase 8（对外）平行推进期。
+> v1.0.0 已发布并通过用户实战验收。Phase 7/8 仍是后续两个产品模块，但下一步先执行 LLM/Agent 架构安全收口，避免在工具数量和对外暴露继续增长后再补安全边界。
 
-| 推荐度 | 任务 | 原因 |
+| 优先级 | 任务 | 原因 |
 |--------|------|------|
-| 🔥 | **Phase 7 §3.1 后台静默 + 增量索引（v1.1.0）** | v1.0.0 实战验收最直接的痛点；设计文档 [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) 已就绪，进入"用户对齐 → 编码"流程（参见 `AGENTS.md` §12.4）；不引入新存储/新协议，风险可控 |
-| 🔥 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作是 v1.0.0 验收期间识别出的强需求；可与 Phase 7 平行推进；先落地 stdio + tools/list + tools/call + 安全策略，不做远程传输 |
-| 💡 | **Phase 7 §3.3.1 UPM 发布流程（自动化打包）** | v1.0.0 已是稳定里程碑，建议尽早把发布流程沉淀为脚本，避免后续每个补丁版本都手动打包 |
-| 💡 | **Phase 7 §3.2 Plugin / Extension 系统** | 与 MCP 形成"对内/对外"对照；建议在后台索引落地（v1.1.0）后启动设计 |
+| P0 | **治理层 G.1 Tool Risk Policy + WorkspacePathPolicy 强制接入** | 后续所有新增工具、Plugin、MCP 和文件写操作扩大化都依赖统一风险策略；这是继续扩展 Agent 能力前的硬前置 |
+| P0 | **治理层 G.2/G.3 ExecuteCodeTool 降权 + Lazy Tool Discovery** | 直接降低高风险执行、工具 schema tax、误选工具和上下文污染风险；也是 MCP 对外暴露前置条件 |
+| P1 | **Phase 7 §3.1 后台静默 + 增量索引（v1.1.0）** | v1.0.0 实战验收最直接的体验痛点；可与治理层并行设计，但实现不得扩大默认工具暴露 |
+| P1 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作需求成立；产品规划可与 Phase 7 平行，但编码需先满足治理层 G.1/G.2/G.3 |
+| P2 | **Phase 7 §3.3.1 UPM 发布流程（自动化打包）** | v1.0.0 已是稳定里程碑，发布流程可沉淀为脚本，但不应抢占安全收口优先级 |
 
 ---
 

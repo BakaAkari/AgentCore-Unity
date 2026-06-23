@@ -3,6 +3,7 @@
 > 状态: DRAFT (设计阶段, 未编码)
 > 目标版本: **v1.1.0**（Phase 7 §3.1，从 Phase 6 派生；详见 ROADMAP §3.1 与 ADR-11）
 > 关联: `Editor/Indexing/Core/CodebaseIndexer.cs`, `Editor/Indexing/UI/IndexingPanel.cs`
+> 治理约束: 本设计可与 LLM/Agent 架构安全收口并行推进，但实现不得扩大默认工具暴露、绕过 WorkspacePathPolicy，或与 `llm-agent-architecture-remediation-plan.md` 的 Tool Risk Policy / ActiveToolScope 方向冲突。
 
 ---
 

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **LLM/Agent 架构安全收口准则**：新增并纳入 [`plans/llm-agent-architecture-remediation-plan.md`](plans/llm-agent-architecture-remediation-plan.md)，作为后续工具扩展、MCP、Plugin、文件写入自动化和 Agent 自治增强的前置治理文档。
+
+### Changed
+- **开发方向文档同步**：更新 [`plans/ROADMAP.md`](plans/ROADMAP.md)、[`plans/README.md`](plans/README.md)、[`AGENTS.md`](AGENTS.md) 与 [`plans/mcp-server-feasibility.md`](plans/mcp-server-feasibility.md)，明确 Phase 7 / Phase 8 仍是两个待开发产品模块，但实现前必须优先完成 Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权和 Lazy Tool Discovery 等治理层 P0 收口。
+- **MCP 启动条件收紧**：Phase 8 仍保持对外互操作定位，但不再表述为无条件“互不阻塞”；编码前必须满足治理层 G.1/G.2/G.3。
+
 ## [1.0.0] - 2026-06-16
 
 > **Phase 6 验收完成里程碑**。基于 v0.9.x 系列在真实 Unity 项目中的持续实战使用作为验收依据（详见 ROADMAP.md ADR-11）。本版本以版本号、文档对齐与 Phase 7 / Phase 8 派生定位为主，并合并两处来自 v0.9.x 实战中沉淀的源码层健壮性收尾修复。后续派生项目：Phase 7（对内）后台静默 + 增量索引（v1.1.0）、Plugin / Extension 系统、产品化分发；Phase 8（对外）MCP Server 互操作。
@@ -32,8 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 - 本版本主要为文档收尾 + 两处 `Editor/` 源码健壮性修复；不引入新功能模块，亦不修改任何工具行为或对话流程。
-- Phase 7 §3.1 后台静默 + 增量索引设计已就绪（[`indexing-background-incremental-design.md`](plans/indexing-background-incremental-design.md)），将作为 v1.1.0 的首个对齐 → 编码任务（参见 `AGENTS.md` §12.4 编码前对齐确认清单）。
-- Phase 8 §3.x MCP Server 与 Phase 7 平行推进，互不阻塞。
+- Phase 7 §3.1 后台静默 + 增量索引设计已就绪（[`indexing-background-incremental-design.md`](plans/indexing-background-incremental-design.md)），但实现不得绕过后续治理层安全规则。
+- Phase 8 §3.x MCP Server 与 Phase 7 在产品规划上平行；编码前需满足治理层工具风险、Workspace 边界和能力范围前置条件。
 
 ## [0.9.9] - 2026-06-15
 

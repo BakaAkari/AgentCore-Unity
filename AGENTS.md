@@ -695,6 +695,7 @@ AI 修复 Bug / 用户确认通过
 - **禁止跳过文档对齐直接编码**。大功能必须经用户确认设计文档后方可实现。
 - **禁止一次性提交大量未验证代码**。按功能模块分批实现、分批测试。
 - **禁止修改版本号不同步文档**。版本号变更必须伴随 CHANGELOG 和 ROADMAP 更新。
+- **禁止绕过 LLM/Agent 治理层扩展能力**。新增工具、扩大默认工具暴露、MCP、Plugin、文件写入自动化或代码执行能力变更，必须先对齐 `plans/llm-agent-architecture-remediation-plan.md`。
 
 ### 12.2 版本号管理规则（SemVer）
 
@@ -716,7 +717,8 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 | 层级 | 文件 | 维护者 | 更新时机 | 作用 |
 |------|------|--------|---------|------|
 | **方向层** | `plans/ROADMAP.md` | AI + 用户共同 | 需求变更、Phase 完成 | 长期规划，用户在此阶段干预方向 |
-| **设计层** | `plans/xxx-feature-plan.md` | AI | 功能编码前 | 单个功能的详细设计方案，用户对齐后确认 |
+| **治理层** | `plans/llm-agent-architecture-remediation-plan.md` | AI + 用户共同 | 工具边界、自治能力、MCP/Plugin、上下文治理变更前 | LLM/Agent 架构安全收口准则；Phase 7/8 的前置约束 |
+| **设计层** | `plans/xxx-feature-plan.md` | AI | 功能编码前 | 单个功能的详细设计方案，用户对齐后确认；不得与治理层冲突 |
 | **规范层** | `AGENTS.md` | AI | 架构规则变更 | 编码硬约束，所有代码必须遵守 |
 | **变更层** | `CHANGELOG.md` | AI | 每次版本发布 | 用户可见的变更记录，按 SemVer 分组 |
 | **规范层** | `README.md` | AI | 重大功能交付 | 项目对外描述，保持简洁 |
@@ -733,7 +735,7 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 | **变更日志草稿** | CHANGELOG 条目预览（Added/Changed/Fixed） |
 | **验收标准** | 功能完成后的测试 checklist（至少 3 条） |
 | **风险点** | 可能引入回归的地方、需要特别测试的场景 |
-| **文档影响** | 是否需要更新 SOUL.md / TOOLS.md.template / AGENTS.md |
+| **文档影响** | 是否需要更新 SOUL.md / TOOLS.md.template / AGENTS.md / ROADMAP / remediation plan |
 
 **例外**：纯 Bug 修复（单行修改、参数修正等）可跳过对齐，但仍需更新 CHANGELOG。
 
@@ -743,7 +745,7 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 
 1. **`package.json`** — 修改 `"version"` 字段
 2. **`CHANGELOG.md`** — 在顶部新增版本节，记录变更内容
-3. **`ROADMAP.md`** — 将对应任务标记为 `[DONE]`，更新里程碑状态
+3. **`ROADMAP.md`** — 将对应任务标记为 `[x]`，更新里程碑状态
 4. **（如适用）`AGENTS.md`** — 如果本次变更引入了新的架构规则或编码约束
 5. **（如适用）`README.md`** — 如果新增了用户可见的核心功能
 
@@ -799,6 +801,7 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 - **禁止** 在 Bug 修复轮次中混入新功能开发
 - **禁止** 未经用户确认删除或重命名现有工具/文件
 - **禁止** 使用未经项目验证的第三方依赖或 NuGet 包
+- **禁止** 在完成 Tool Risk Policy + WorkspacePathPolicy 强制接入前，把内部工具通过 MCP/Plugin/默认工具列表扩大暴露
 
 ---
 
