@@ -19,8 +19,7 @@ namespace AgentCore.Editor.Tools.Safety
     /// </list>
     /// </para>
     /// <para>
-    /// 默认交互应由 ChatWindow 内嵌确认 UI 提供，避免阻塞式系统弹窗依赖 Unity 位于前台。
-    /// <see cref="DialogToolConfirmationProvider"/> 仅保留为兼容和后备实现。
+    /// 默认交互由 ChatWindow 内嵌确认 UI 提供，避免阻塞式系统弹窗依赖 Unity 位于前台。
     /// </para>
     /// </summary>
     public interface IToolConfirmationProvider

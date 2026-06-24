@@ -49,7 +49,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// <summary>
         /// 工具风险等级（G.1 治理层）。
         /// <para>未显式声明时，<see cref="Safety.ToolRiskPolicy"/> 视为 <see cref="ToolRiskLevel.Medium"/>。</para>
-        /// <para>声明 <see cref="ToolRiskLevel.CodeExecution"/> 的工具会被无条件强制确认。</para>
+        /// <para>当前宽松策略下风险等级仅用于审计展示；删除类 action 仍会触发确认。</para>
         /// </summary>
         public ToolRiskLevel RiskLevel { get; set; } = ToolRiskLevel.Medium;
 
@@ -60,10 +60,9 @@ namespace AgentCore.Editor.Tools.Infrastructure
         public ToolCapability Capabilities { get; set; } = ToolCapability.None;
 
         /// <summary>
-        /// 是否强制要求用户确认（G.1 治理层）。
+        /// 工具声明的确认偏好（G.1 治理层）。
         /// <para>
-        /// 即便风险等级不高，如果声明 <c>true</c>，<see cref="Safety.ToolRiskPolicy"/> 也会要求用户确认。
-        /// 用于"操作虽然小但必须留痕"的工具（如修改 AgentCore 自身配置）。
+        /// 当前宽松策略下本字段仅用于审计展示；删除类 action 仍由 <see cref="Safety.ToolRiskPolicy"/> 强制确认。
         /// </para>
         /// </summary>
         public bool RequiresConfirmation { get; set; } = false;

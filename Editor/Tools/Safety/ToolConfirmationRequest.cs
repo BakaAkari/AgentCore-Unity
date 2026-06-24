@@ -50,6 +50,9 @@ namespace AgentCore.Editor.Tools.Safety
         /// </summary>
         public IReadOnlyList<string> Targets { get; }
 
+        /// <summary>确认后允许提供给 UI 的短期信任范围。</summary>
+        public IReadOnlyList<ToolConfirmationTrustScope> AllowedTrustScopes { get; }
+
         public ToolConfirmationRequest(
             string toolName,
             string action,
@@ -58,7 +61,8 @@ namespace AgentCore.Editor.Tools.Safety
             string description,
             IReadOnlyList<string> reasons,
             IReadOnlyDictionary<string, string> parameterSummary,
-            IReadOnlyList<string> targets)
+            IReadOnlyList<string> targets,
+            IReadOnlyList<ToolConfirmationTrustScope> allowedTrustScopes = null)
         {
             ToolName = toolName ?? throw new ArgumentNullException(nameof(toolName));
             Action = action ?? string.Empty;
@@ -68,6 +72,7 @@ namespace AgentCore.Editor.Tools.Safety
             Reasons = reasons ?? Array.Empty<string>();
             ParameterSummary = parameterSummary ?? new Dictionary<string, string>();
             Targets = targets ?? Array.Empty<string>();
+            AllowedTrustScopes = allowedTrustScopes ?? new[] { ToolConfirmationTrustScope.Once };
         }
     }
 }

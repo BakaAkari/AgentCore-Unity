@@ -539,6 +539,14 @@
     background-color: #8a4848;
 }
 
+.tool-confirmation-button--trust {
+    background-color: #4c668f;
+}
+
+.tool-confirmation-button--trust:hover {
+    background-color: #5a78a6;
+}
+
 .tool-confirmation-button--approve {
     background-color: #4f7f45;
 }

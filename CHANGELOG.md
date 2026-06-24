@@ -21,13 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 全量工具分类标注：12 Specialized + 10 Extended + 7 Utility + 2 Scripting + 1 Meta + 2 Cloud + 1 VCS + 1 Indexing → OnDemand；`execute_code` → Restricted；核心工具（场景/GameObject/组件/文件/脚本/资产/控制台/Bootstrap 等）保持 AlwaysVisible。
 - **Settings 开关**：`toolScopingEnabled` 字段控制整体开关，默认启用；关闭后回退到全量暴露行为。
 - **内嵌工具确认 UI**：ChatWindow 新增非模态工具审批面板与确认队列，工具执行需要用户确认时不再依赖系统级阻塞弹窗。
+- **短期信任授权**：删除类工具确认面板新增 Session 级短期信任，同一工具、action、目标集合在当前 ChatWindow 生命周期内可直接通过。
 
 ### Changed
 - **版本号**: `1.0.3` → `1.1.0`，标记治理层 G.2 / G.3 与 Phase 7 §3.1 后台静默 + 增量索引完成（Minor 升级：新增渐进暴露能力与索引体验深化）。
 - **AgentCoreSettings**: `CurrentVersion` 升至 10；新增 `toolScopingEnabled` 字段。
 - **ToolMetadata**: 新增 `Visibility` 属性，`WithRiskAndVisibility()` 方法。
 - **ToolAutoDiscovery**: 自动读取 `[AgentTool].Visibility` 并传递到 ToolMetadata。
-- **工具确认默认路径**: `AgentLoop` 改为注入 `IToolConfirmationProvider`，ChatWindow 默认使用内嵌确认提供者；`DialogToolConfirmationProvider` 保留为兼容/后备实现。
+- **工具确认策略**: `AgentLoop` 改为注入 `IToolConfirmationProvider`，ChatWindow 默认使用内嵌确认提供者；移除阻塞式 Dialog 确认路径。VCS 友好策略下读写与工具执行默认通过，删除类 action 仍需确认。
 
 ### Notes
 - Phase 7 §3.1 保持在 v1.1.0 内交付：不扩大默认工具暴露，不引入新存储/新协议，索引数据仍为本地 SQLite/JSONL 后端。

@@ -18,6 +18,8 @@ namespace AgentCore.Editor.UI
         private const int MaxConfirmationItems = 6;
         private const int MaxConfirmationValueLength = 180;
 
+        private readonly HashSet<string> _trustedToolConfirmations = new HashSet<string>(StringComparer.Ordinal);
+
         private sealed class PendingToolConfirmation
         {
             public ToolConfirmationRequest Request;
@@ -37,6 +39,11 @@ namespace AgentCore.Editor.UI
             if (request == null || ct.IsCancellationRequested)
             {
                 return Task.FromResult(false);
+            }
+
+            if (IsToolConfirmationTrusted(request))
+            {
+                return Task.FromResult(true);
             }
 
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -84,6 +91,12 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
+            if (IsToolConfirmationTrusted(pending.Request))
+            {
+                CompletePendingToolConfirmation(pending, true, updateUi: false);
+                return;
+            }
+
             if (_toolConfirmationPanel == null)
             {
                 CompletePendingToolConfirmation(pending, false, updateUi: false);
@@ -106,6 +119,12 @@ namespace AgentCore.Editor.UI
                 var next = _pendingToolConfirmations.Dequeue();
                 if (next != null && !next.Completion.Task.IsCompleted)
                 {
+                    if (IsToolConfirmationTrusted(next.Request))
+                    {
+                        CompletePendingToolConfirmation(next, true, updateUi: false);
+                        continue;
+                    }
+
                     _activeToolConfirmation = next;
                     RenderToolConfirmation(next);
                     return;
@@ -160,6 +179,14 @@ namespace AgentCore.Editor.UI
             reject.AddToClassList("tool-confirmation-button");
             reject.AddToClassList("tool-confirmation-button--reject");
             buttons.Add(reject);
+
+            if (CanTrustForSession(request))
+            {
+                var trust = new Button(() => ResolvePendingToolConfirmationWithTrust(pending)) { text = "Trust Session" };
+                trust.AddToClassList("tool-confirmation-button");
+                trust.AddToClassList("tool-confirmation-button--trust");
+                buttons.Add(trust);
+            }
 
             var approve = new Button(() => ResolvePendingToolConfirmation(pending, true)) { text = "Approve" };
             approve.AddToClassList("tool-confirmation-button");
@@ -242,6 +269,16 @@ namespace AgentCore.Editor.UI
             CompletePendingToolConfirmation(pending, approved, updateUi: true);
         }
 
+        private void ResolvePendingToolConfirmationWithTrust(PendingToolConfirmation pending)
+        {
+            if (pending?.Request != null)
+            {
+                _trustedToolConfirmations.Add(BuildTrustKey(pending.Request));
+            }
+
+            CompletePendingToolConfirmation(pending, true, updateUi: true);
+        }
+
         private void ScheduleResolvePendingToolConfirmation(PendingToolConfirmation pending, bool approved)
         {
             if (pending == null)
@@ -309,7 +346,51 @@ namespace AgentCore.Editor.UI
                 CompletePendingToolConfirmation(_pendingToolConfirmations.Dequeue(), false, updateUi: false);
             }
 
+            _trustedToolConfirmations.Clear();
             HideToolConfirmationPanel();
+        }
+
+        private bool IsToolConfirmationTrusted(ToolConfirmationRequest request)
+        {
+            return request != null && _trustedToolConfirmations.Contains(BuildTrustKey(request));
+        }
+
+        private static bool CanTrustForSession(ToolConfirmationRequest request)
+        {
+            if (request?.AllowedTrustScopes == null)
+            {
+                return false;
+            }
+
+            foreach (var scope in request.AllowedTrustScopes)
+            {
+                if (scope == ToolConfirmationTrustScope.SessionExactTarget)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string BuildTrustKey(ToolConfirmationRequest request)
+        {
+            var sb = new StringBuilder();
+            sb.Append(NormalizeTrustPart(request.ToolName));
+            sb.Append('|').Append(NormalizeTrustPart(request.Action));
+            sb.Append('|').Append(request.Risk.ToolRisk);
+            sb.Append('|').Append(request.Risk.PathRisk);
+            sb.Append('|').Append(request.Risk.Capabilities);
+
+            if (request.Targets != null)
+            {
+                foreach (var target in request.Targets)
+                {
+                    sb.Append('|').Append(NormalizeTrustPart(target));
+                }
+            }
+
+            return sb.ToString();
         }
 
         private static string BuildRiskText(ToolConfirmationRequest request)
@@ -326,6 +407,13 @@ namespace AgentCore.Editor.UI
             sb.Append(" · Path: ").Append(risk.PathRisk);
             sb.Append(" · Capabilities: ").Append(risk.Capabilities);
             return sb.ToString();
+        }
+
+        private static string NormalizeTrustPart(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? string.Empty
+                : value.Trim().Replace('\\', '/').ToLowerInvariant();
         }
 
         private static string Truncate(string value, int maxLength)

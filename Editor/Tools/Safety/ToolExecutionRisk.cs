@@ -31,11 +31,11 @@ namespace AgentCore.Editor.Tools.Safety
 
         /// <summary>
         /// 工具元数据是否声明了 <c>RequiresConfirmation</c>。
-        /// 即使最终 RiskLevel 不算高，也会被本字段强制升级到 RequireConfirmation。
+        /// 当前宽松策略下本字段用于审计展示，不再单独强制升级到 RequireConfirmation。
         /// </summary>
         public bool RequiresConfirmationByDeclaration { get; }
 
-        /// <summary>是否包含 <see cref="ToolCapability.ExecuteCode"/> — 任何情况下都强制确认。</summary>
+        /// <summary>是否包含 <see cref="ToolCapability.ExecuteCode"/>。</summary>
         public bool IsCodeExecution { get; }
 
         /// <summary>是否触达外部网络。用于审计与未来的"离线模式"策略。</summary>

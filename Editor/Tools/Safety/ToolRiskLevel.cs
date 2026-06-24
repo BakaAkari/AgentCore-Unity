@@ -60,7 +60,7 @@ namespace AgentCore.Editor.Tools.Safety
         /// <summary>
         /// 任意代码执行 — 等同于在工程域内运行未审计代码。
         /// <para>例：execute_code、运行外部脚本、动态加载 DLL。</para>
-        /// <para>始终强制确认，永远不应被静默放行。</para>
+        /// <para>当前宽松策略允许执行，仅保留为审计风险等级。</para>
         /// </summary>
         CodeExecution = 6
     }
