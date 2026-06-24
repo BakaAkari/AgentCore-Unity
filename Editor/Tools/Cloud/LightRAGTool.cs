@@ -22,6 +22,7 @@ namespace AgentCore.Editor.Tools.Cloud
     [AgentTool("manage_knowledge",
         Description = "管理项目知识库。支持查询(query)、索引文本(index_text)、索引文件(index_file)、批量索引文件夹(index_folder)、自动索引项目文档(index_project_docs)、列出文档(list_documents)、删除文档(delete_document)、查询索引进度(check_index_status)。知识库基于 LightRAG 提供图谱增强的检索能力。",
         Category = "Cloud",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = false,
         RiskLevel = ToolRiskLevel.External,
         Capabilities = ToolCapability.NetworkAccess)]

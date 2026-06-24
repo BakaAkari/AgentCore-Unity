@@ -22,7 +22,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
         Category = "extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Low,
-        Capabilities = ToolCapability.ReadProject)]
+        Capabilities = ToolCapability.ReadProject,
+        Visibility = ToolVisibility.OnDemand)]
     public class ManageProfilerTool : IAgentTool
     {
         #region Schema

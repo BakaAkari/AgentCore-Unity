@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_physics",
         Description = "Manage physics settings, colliders, rigidbodies, and joints",
         Category = "specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManagePhysicsTool : IAgentTool
     {

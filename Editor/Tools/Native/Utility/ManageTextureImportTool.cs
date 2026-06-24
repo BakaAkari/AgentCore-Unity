@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("manage_texture_import",
         Description = "Inspect and configure TextureImporter settings for texture assets",
         Category = "Utility",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageTextureImportTool : IAgentTool
     {

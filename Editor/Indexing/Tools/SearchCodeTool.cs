@@ -32,6 +32,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     [AgentTool("search_code",
         Description = "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、全文搜索（FTS5）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储（SQLite），不提交 VCS。",
         Category = "Indexing",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = false,
         MayModifyScripts = false)]
     public sealed class SearchCodeTool : IAgentTool

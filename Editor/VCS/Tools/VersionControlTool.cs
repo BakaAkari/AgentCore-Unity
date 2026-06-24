@@ -15,6 +15,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
     [AgentTool("version_control",
         Description = "Manage version control system (SVN/Perforce/Git). Supports read-only queries (status, log, diff, blame) and guarded write operations (stage, commit, revert, cleanup, resolve, ignore, remove, branch). Write operations require user confirmation.",
         Category = "VersionControl",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         MayModifyScripts = false)]
     public class VersionControlTool : IAgentTool

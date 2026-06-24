@@ -23,7 +23,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
         Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
-        Capabilities = ToolCapability.ExecuteCode | ToolCapability.ModifyScripts)]
+        Capabilities = ToolCapability.ExecuteCode | ToolCapability.ModifyScripts,
+        Visibility = ToolVisibility.OnDemand)]
     public class ManageTestTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

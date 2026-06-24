@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_audio",
         Description = "Manage audio sources, listeners, and audio settings",
         Category = "specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageAudioTool : IAgentTool
     {

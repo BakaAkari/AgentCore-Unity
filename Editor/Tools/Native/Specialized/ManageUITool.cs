@@ -19,6 +19,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_ui",
         Description = "Manage Unity UI elements including Canvas, Text, Image, Button and other UI components",
         Category = "specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageUITool : IAgentTool
     {

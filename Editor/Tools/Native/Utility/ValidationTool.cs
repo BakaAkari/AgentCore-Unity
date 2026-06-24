@@ -22,6 +22,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("validate",
         Description = "Validate scene and project quality: check for missing references, duplicate names, missing components, empty GameObjects, layer/tag issues, and performance concerns. Returns structured issue reports with severity levels.",
         Category = "Utility",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         MayModifyScripts = false,
         RiskLevel = ToolRiskLevel.ReadOnly,

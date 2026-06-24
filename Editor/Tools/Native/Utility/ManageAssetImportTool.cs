@@ -17,6 +17,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("manage_asset_import",
         Description = "Manage generic AssetImporter settings, labels, bundles, dependencies, and reimport operations",
         Category = "Utility",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageAssetImportTool : IAgentTool
     {

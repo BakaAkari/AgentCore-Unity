@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("manage_animation",
         Description = "Manage animation clips and Animator controllers",
         Category = "Animation",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageAnimationTool : IAgentTool
     {

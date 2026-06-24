@@ -68,6 +68,21 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// </summary>
         public bool RequiresConfirmation { get; set; } = false;
 
+        // ---------------------------------------------------------------
+        // G.3 ActiveToolScope — 工具可见性
+        // 默认 AlwaysVisible，现有工具无需修改即可保持向后兼容。
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// 工具对 LLM 的可见性级别（G.3 ActiveToolScope）。
+        /// <para>
+        /// <see cref="ToolVisibility.AlwaysVisible"/> — 每轮都发送给 LLM（默认）。
+        /// <see cref="ToolVisibility.OnDemand"/> — LLM 通过 request_tools 激活后才可见。
+        /// <see cref="ToolVisibility.Restricted"/> — 仅在用户显式启用且 LLM 请求后才可见。
+        /// </para>
+        /// </summary>
+        public ToolVisibility Visibility { get; set; } = ToolVisibility.AlwaysVisible;
+
         public AgentToolAttribute(string name)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));

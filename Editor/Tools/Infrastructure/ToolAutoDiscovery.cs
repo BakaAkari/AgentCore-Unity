@@ -150,10 +150,11 @@ namespace AgentCore.Editor.Tools.Infrastructure
                     ?? throw new InvalidOperationException(
                         $"Tool '{inner.GetType().FullName}' returned null Metadata.");
 
-                _metadata = baseMeta.WithRisk(
+                _metadata = baseMeta.WithRiskAndVisibility(
                     attr.RiskLevel,
                     attr.Capabilities,
-                    attr.RequiresConfirmation);
+                    attr.RequiresConfirmation,
+                    attr.Visibility);
             }
 
             public ToolMetadata Metadata => _metadata;

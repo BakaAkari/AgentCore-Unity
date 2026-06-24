@@ -29,15 +29,19 @@ namespace AgentCore.Editor.Core
         {
             try
             {
-                // 使用 BuildAllEnabled() 过滤掉被禁用的工具
-                var definitions = ToolDefinitionBuilder.BuildAllEnabled();
+                // G.3 ActiveToolScope: 通过 ToolScopeResolver 解析当前应暴露的工具
+                // 当 toolScopingEnabled=true 时，仅暴露 AlwaysVisible + 已激活的 OnDemand 分类
+                // 当 toolScopingEnabled=false 时，退化为旧行为（所有非 Restricted 工具）
+                var visibleMetadata = ToolScopeResolver.ResolveVisibleTools(_toolScopeState);
+                var definitions = ToolDefinitionBuilder.BuildFromMetadata(visibleMetadata);
+
                 if (definitions == null || definitions.Count == 0)
                 {
                     Debug.Log("[AgentCore] No tools available, LLM will run in pure chat mode.");
                     return null;
                 }
 
-                Debug.Log($"[AgentCore] Built {definitions.Count} tool definitions for LLM.");
+                Debug.Log($"[AgentCore] Built {definitions.Count} tool definitions for LLM (scope-resolved).");
                 return definitions;
             }
             catch (Exception ex)

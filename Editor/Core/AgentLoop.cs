@@ -124,6 +124,9 @@ namespace AgentCore.Editor.Core
         /// <summary>文件变更追踪器 - 追踪当前会话中工具调用产生的文件变更</summary>
         private FileChangeTracker _fileChangeTracker;
 
+        /// <summary>工具作用域状态 - 追踪当前会话中 LLM 已激活的 OnDemand 分类（G.3 ActiveToolScope）</summary>
+        private ToolScopeState _toolScopeState;
+
         /// <summary>工具结果压缩器 - 自动压缩过长的工具输出</summary>
         private ToolResultCompressor _toolResultCompressor;
 
@@ -269,6 +272,10 @@ namespace AgentCore.Editor.Core
             {
                 Debug.LogWarning($"[AgentCore] Failed to restore compression metrics: {ex.Message}");
             }
+
+            // G.3 ActiveToolScope: 初始化工具作用域状态并注入到 RequestToolsTool
+            _toolScopeState = new ToolScopeState();
+            AgentCore.Editor.Tools.Native.Meta.RequestToolsTool.SetScopeState(_toolScopeState);
 
             _isInitialized = true;
 

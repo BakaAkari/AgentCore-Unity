@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
     [AgentTool("execute_menu_item",
         Description = "Execute Unity Editor menu items by path, and list available menu items",
         Category = "meta",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.ExecuteCode)]

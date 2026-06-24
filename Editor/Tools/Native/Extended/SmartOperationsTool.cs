@@ -18,7 +18,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("smart_operations",
         Description = "Smart batch operations for GameObjects: align, distribute, snap, randomize transforms, replace objects, and select by criteria",
         Category = "Extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        Visibility = ToolVisibility.OnDemand)]
     public class SmartOperationsTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

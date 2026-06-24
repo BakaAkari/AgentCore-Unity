@@ -19,7 +19,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_navmesh",
         Description = "Manage NavMesh baking, agents, and navigation settings",
         Category = "extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        Visibility = ToolVisibility.OnDemand)]
     public class ManageNavMeshTool : IAgentTool
     {
         #region Schema

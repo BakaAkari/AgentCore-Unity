@@ -19,7 +19,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_tags_layers",
         Description = "Manage Unity tags, layers, and sorting layers",
         Category = "extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        Visibility = ToolVisibility.OnDemand)]
     public class ManageTagsLayersTool : IAgentTool
     {
         #region Schema

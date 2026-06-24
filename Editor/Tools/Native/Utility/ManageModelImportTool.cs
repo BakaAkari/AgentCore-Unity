@@ -17,6 +17,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("manage_model_import",
         Description = "Inspect and configure ModelImporter settings for 3D model assets",
         Category = "Utility",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageModelImportTool : IAgentTool
     {

@@ -21,6 +21,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_timeline",
         Description = "Manage Unity Timeline: create timeline assets, add/remove tracks, add clips, set bindings, control playback. Requires com.unity.timeline package.",
         Category = "Specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageTimelineTool : IAgentTool
     {

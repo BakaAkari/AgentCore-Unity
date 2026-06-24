@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_graphics",
         Description = "Manage rendering and graphics settings including cameras, render settings, and quality levels",
         Category = "specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageGraphicsTool : IAgentTool
     {

@@ -17,7 +17,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_input",
         Description = "Manage Unity Input settings and input axes configuration",
         Category = "extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        Visibility = ToolVisibility.OnDemand)]
     public class ManageInputTool : IAgentTool
     {
         #region Schema

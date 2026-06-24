@@ -19,6 +19,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_probuilder",
         Description = "Create and edit ProBuilder meshes using optional ProBuilder package APIs. Supports shape creation, vertex/face/edge editing, UV projection, mesh operations, and ProBuilder-specific tools like extrude, bevel, bridge, and weld.",
         Category = "Specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageProBuilderTool : IAgentTool
     {

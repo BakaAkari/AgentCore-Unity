@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.0.3 | **更新日期**: 2026-06-24 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1 全面完成（v1.0.3，Tool Risk Policy + WorkspacePathPolicy 强制接入），Phase 7（索引体验深化）与 Phase 8（MCP 对外互操作）仍为待开发产品模块
+> **版本**: v1.1.0 | **更新日期**: 2026-06-24 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0，Tool Risk Policy + WorkspacePathPolicy 强制接入 + ExecuteCode 降权 + ActiveToolScope 渐进暴露），Phase 7（索引体验深化）与 Phase 8（MCP 对外互操作）仍为待开发产品模块
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,23 +36,24 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.0.3)
+### 0.4 当前项目快照 (v1.1.0)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.0.3 (2026-06-24) — 治理层 G.1 全面完成（Tool Risk Policy + WorkspacePathPolicy 强制接入，工具调用受风险等级 + 路径位置双重管控） |
-| **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
+| **版本** | 1.1.0 (2026-06-24) — 治理层 G.1~G.3 全面完成（Tool Risk Policy + WorkspacePathPolicy 强制接入 + ExecuteCode 降权 + ActiveToolScope 渐进暴露） |
+| **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
 | **UI 框架** | UI Toolkit 动态 Hub 架构；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
-| **云端服务** | Mem0 + LightRAG 基础连接 — 可用 |
-| **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制）；SOUL.md §15 主动调用规则已就绪 |
-| **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制）；Full Index 已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪；**当前为同步阻塞触发，Phase 7 将改造为后台静默 + 增量索引**（v1.1.0） |
+| **云端服务** | Mem0 + LightRAG 基础连接 — 可用（OnDemand 可见性） |
+| **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪 |
+| **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；Full Index 已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪；**当前为同步阻塞触发，Phase 7 将改造为后台静默 + 增量索引** |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
 | **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 128K（适配现代大 context LLM） |
+| **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
 | **Phase 6 验收** | 完成 — 见 ADR-11 |
-| **治理层进度** | G.1 全面完成（v1.0.3，G.1.a~G.1.e 全部落地）；G.2 / G.3 / G.4 / G.5 / G.6 待开始 |
+| **治理层进度** | G.1~G.3 全面完成（v1.1.0）；G.4 / G.5 / G.6 待开始 |
 
 ### 0.5 已完成的历史 Phase
 
@@ -157,8 +158,8 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
 | G.1 | **Tool Risk Policy + WorkspacePathPolicy 强制接入** | 所有工具调用统一经过风险分级、能力授权、路径边界和确认策略；禁止工具各自绕过安全策略。拆分为 G.1.a 元数据基础设施 / G.1.b 策略评估器 / G.1.c Dispatcher 接入 / G.1.d 高危工具按 Category 细化 / G.1.e WorkspacePathPolicy 强制执行 | P0 | [x] 完成 v1.0.3 — G.1.a~G.1.e 全部落地 |
-| G.2 | **ExecuteCodeTool 降权/拆分** | 默认禁用或拆分为只读查询与高风险执行；高风险执行必须显式授权和审计 | P0 | [ ] |
-| G.3 | **Lazy Tool Discovery / ActiveToolScope** | 不再每轮默认暴露全部工具 schema；按任务阶段、类别和能力范围渐进暴露 | P0 | [ ] |
+| G.2 | **ExecuteCodeTool 降权/拆分** | 默认禁用或拆分为只读查询与高风险执行；高风险执行必须显式授权和审计 | P0 | [x] 完成 v1.1.0 — 默认禁用 + Restricted 可见性 + 迁移保留旧用户设置 |
+| G.3 | **Lazy Tool Discovery / ActiveToolScope** | 不再每轮默认暴露全部工具 schema；按任务阶段、类别和能力范围渐进暴露 | P0 | [x] 完成 v1.1.0 — ToolVisibility 三级 + ToolScopeState/Resolver + request_tools 元工具 + 全量工具标注 |
 | G.4 | **ContextWindowManager / Bootstrap 预算收口** | 降低长驻 prompt 与工具 schema 对上下文的挤占；避免 Context Rot 和 Lost-in-the-Middle | P1 | [ ] |
 | G.5 | **CompletionGate + Operation Journal** | 最终回复前检查工具执行、文件变更、错误和未完成高风险操作；Domain Reload 后可恢复/审计 | P1 | [ ] |
 | G.6 | **Evidence Pipeline / Planner-Executor-Verifier 分层** | 对复杂任务引入证据缓存、任务账本和验证层，减少多步误差累积 | P2 | [ ] |

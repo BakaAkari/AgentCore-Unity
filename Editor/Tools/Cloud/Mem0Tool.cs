@@ -19,6 +19,7 @@ namespace AgentCore.Editor.Tools.Cloud
     [AgentTool("manage_memory",
         Description = "管理长期记忆。支持添加(add)、搜索(search)、列出(list)、删除(delete)记忆。记忆会跨会话持久化存储在 mem0 服务中。",
         Category = "Cloud",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = false,
         RiskLevel = ToolRiskLevel.External,
         Capabilities = ToolCapability.NetworkAccess)]

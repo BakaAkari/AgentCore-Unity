@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 9;
+        private const int CurrentVersion = 10;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -134,7 +134,10 @@ namespace AgentCore.Editor.Config
         public List<string> disabledToolCategories = new List<string>();
 
         [Tooltip("禁用的单个工具名称列表（不会发送给 LLM）")]
-        public List<string> disabledTools = new List<string>();
+        public List<string> disabledTools = new List<string> { "execute_code" };
+
+        [Tooltip("启用工具作用域管理（G.3 ActiveToolScope）— 按需暴露工具，降低 token 消耗")]
+        public bool toolScopingEnabled = true;
 
         /// <summary>
         /// 检查指定工具是否被禁用。
@@ -326,6 +329,13 @@ namespace AgentCore.Editor.Config
                 }
             }
 
+            // v9 → v10: execute_code 默认禁用（仅影响新安装；已有用户保持其现有配置不变）
+            // 不修改已有用户的 disabledTools — 他们如果主动启用了 execute_code 则保持启用
+            if (settingsVersion < 10)
+            {
+                Debug.Log("[AgentCore] Settings migrated v9→v10: execute_code now default-disabled for new installs (existing config preserved)");
+            }
+
             settingsVersion = CurrentVersion;
             Save(true);
         }
@@ -355,7 +365,8 @@ namespace AgentCore.Editor.Config
             lightragEnabled = false;
             lightragEndpoint = "http://localhost:9621";
             disabledToolCategories = new List<string>();
-            disabledTools = new List<string>();
+            disabledTools = new List<string> { "execute_code" };
+            toolScopingEnabled = true;
             compressionEnabled = true;
             useSeparateCompressionLLM = false;
             compressionLLMEndpoint = "";

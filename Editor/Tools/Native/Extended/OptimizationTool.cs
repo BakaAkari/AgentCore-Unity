@@ -24,7 +24,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
         Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
-        Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene)]
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene,
+        Visibility = ToolVisibility.OnDemand)]
     public class OptimizationTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

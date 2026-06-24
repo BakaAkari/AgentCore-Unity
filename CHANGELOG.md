@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-24
+
+### Added
+- **治理层 G.2 — ExecuteCodeTool 降权**：`execute_code` 工具新装默认禁用（加入 `disabledTools` 列表）；标记为 `Visibility = ToolVisibility.Restricted`，即使用户手动启用也不会默认暴露给 LLM，需通过 `request_tools` 主动激活。v9→v10 迁移逻辑保留旧用户的原有配置不受影响。
+- **治理层 G.3 — ActiveToolScope / Lazy Tool Discovery**：
+  - 新增 [`ToolVisibility`](Editor/Tools/Infrastructure/ToolVisibility.cs:1) 三级枚举（AlwaysVisible / OnDemand / Restricted），通过 `[AgentTool]` 特性的 `Visibility` 属性声明。
+  - 新增 [`ToolScopeState`](Editor/Tools/ToolScopeState.cs:1) 会话级分类激活状态管理。
+  - 新增 [`ToolScopeResolver`](Editor/Tools/ToolScopeResolver.cs:1) 根据 Visibility + ScopeState + Settings 解析当前应暴露的工具列表。
+  - 新增 [`request_tools`](Editor/Tools/Native/Meta/RequestToolsTool.cs:1) 元工具（AlwaysVisible），LLM 通过 `list` 查看可用分类、通过 `activate` 激活按需工具。
+  - `AgentLoop.BuildToolDefinitions()` 改为通过 `ToolScopeResolver` 解析，不再暴露全部工具。
+  - 全量工具分类标注：12 Specialized + 10 Extended + 7 Utility + 2 Scripting + 1 Meta + 2 Cloud + 1 VCS + 1 Indexing → OnDemand；`execute_code` → Restricted；核心工具（场景/GameObject/组件/文件/脚本/资产/控制台/Bootstrap 等）保持 AlwaysVisible。
+- **Settings 开关**：`toolScopingEnabled` 字段控制整体开关，默认启用；关闭后回退到全量暴露行为。
+
+### Changed
+- **版本号**: `1.0.3` → `1.1.0`，标记治理层 G.2 + G.3 完成（Minor 升级：新增渐进暴露能力）。
+- **AgentCoreSettings**: `CurrentVersion` 升至 10；新增 `toolScopingEnabled` 字段。
+- **ToolMetadata**: 新增 `Visibility` 属性，`WithRiskAndVisibility()` 方法。
+- **ToolAutoDiscovery**: 自动读取 `[AgentTool].Visibility` 并传递到 ToolMetadata。
+
+### Notes
+- G.2 + G.3 合并为 v1.1.0 发布：G.2 是 G.3 的子集（execute_code 的 Restricted 可见性依赖 G.3 的 ToolVisibility 机制）。
+- 工具作用域在 `ResetConversation()` 时自动重置（通过 `Initialize()` 重新创建 `ToolScopeState`）。
+- 按需工具的分类名称取自 `[AgentTool].Category`（不区分大小写），LLM 可通过 `request_tools list` 查看完整分类列表及工具数量。
+- 关闭 `toolScopingEnabled` 后 `ToolScopeResolver` 回退为返回所有启用工具（等效旧行为）。
+
 ## [1.0.3] - 2026-06-24
 
 ### Added

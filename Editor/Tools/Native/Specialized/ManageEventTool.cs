@@ -23,6 +23,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         Description = "Manage UnityEvent persistent listeners — get/add/remove listeners, list events on components, " +
                       "set listener call state, get listener count, and invoke events via reflection.",
         Category = "Specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageEventTool : IAgentTool
     {

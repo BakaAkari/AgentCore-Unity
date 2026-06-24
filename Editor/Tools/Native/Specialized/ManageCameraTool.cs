@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_camera",
         Description = "Create, configure, inspect, align, and render Unity Cameras",
         Category = "Specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageCameraTool : IAgentTool
     {

@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("manage_material",
         Description = "Create, modify, inspect, and batch-manage materials. Supports shader info retrieval including Shader Graph identification.",
         Category = "Material",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageMaterialTool : IAgentTool
     {

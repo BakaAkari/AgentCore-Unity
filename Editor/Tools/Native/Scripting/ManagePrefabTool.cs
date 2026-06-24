@@ -17,6 +17,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
     [AgentTool("manage_prefab",
         Description = "Manage Unity Prefabs — create, instantiate, get info, unpack, apply overrides, and revert",
         Category = "Scripting",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene)]

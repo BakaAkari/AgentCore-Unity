@@ -22,6 +22,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_ui_toolkit",
         Description = "Manage Unity UI Toolkit (UIElements): create/edit UXML documents and USS stylesheets, configure UIDocument components, query elements, manage PanelSettings, and generate UI Toolkit code templates. Use this for the new Unity UI system (not legacy uGUI).",
         Category = "Specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         MayModifyScripts = false)]
     public class ManageUIToolkitTool : IAgentTool

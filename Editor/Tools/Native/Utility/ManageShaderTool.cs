@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("manage_shader",
         Description = "Inspect and manage shaders - list available shaders, get shader info, find shader properties",
         Category = "Shader",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageShaderTool : IAgentTool
     {

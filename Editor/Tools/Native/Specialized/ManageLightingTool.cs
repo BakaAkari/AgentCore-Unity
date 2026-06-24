@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_lighting",
         Description = "Manage lights, lightmapping, and lighting settings in the scene",
         Category = "specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageLightingTool : IAgentTool
     {

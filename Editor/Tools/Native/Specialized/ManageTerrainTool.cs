@@ -19,6 +19,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_terrain",
         Description = "Manage Unity Terrain: create, sculpt heightmaps (perlin/smooth/flatten), add texture layers, paint textures, and place trees",
         Category = "Specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageTerrainTool : IAgentTool
     {

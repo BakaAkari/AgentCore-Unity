@@ -22,7 +22,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.BuildPlayer | ToolCapability.ModifyProjectSettings,
-        RequiresConfirmation = true)]
+        RequiresConfirmation = true,
+        Visibility = ToolVisibility.OnDemand)]
     public class ManageBuildTool : IAgentTool
     {
         #region Schema

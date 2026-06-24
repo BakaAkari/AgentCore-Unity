@@ -20,6 +20,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     [AgentTool("manage_cinemachine",
         Description = "Manage Cinemachine virtual cameras: create, configure body/aim/lens/noise, set targets, priorities, and setup CinemachineBrain. Requires com.unity.cinemachine package.",
         Category = "Specialized",
+        Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageCinemachineTool : IAgentTool
     {

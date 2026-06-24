@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 
@@ -55,6 +56,12 @@ namespace AgentCore.Editor.Tools
         public bool RequiresConfirmation { get; }
 
         /// <summary>
+        /// 工具对 LLM 的可见性级别（G.3 ActiveToolScope）。
+        /// 默认为 <see cref="ToolVisibility.AlwaysVisible"/>。
+        /// </summary>
+        public ToolVisibility Visibility { get; }
+
+        /// <summary>
         /// 创建工具元数据实例（向后兼容构造）。
         /// <para>
         /// 现有工具仍可使用本构造；风险字段会被赋予安全默认值
@@ -101,7 +108,8 @@ namespace AgentCore.Editor.Tools
             bool requiresMainThread,
             ToolRiskLevel riskLevel,
             ToolCapability capabilities,
-            bool requiresConfirmation)
+            bool requiresConfirmation,
+            ToolVisibility visibility = ToolVisibility.AlwaysVisible)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = description ?? throw new ArgumentNullException(nameof(description));
@@ -111,8 +119,16 @@ namespace AgentCore.Editor.Tools
             RiskLevel = riskLevel;
             Capabilities = capabilities;
             RequiresConfirmation = requiresConfirmation;
+            Visibility = visibility;
         }
 
+        /// <summary>
+        /// 基于现有 ToolMetadata 克隆出一份附带风险字段的新实例。
+        /// <para>
+        /// <c>ToolAutoDiscovery</c> 在注册时使用：工具类的 <c>Metadata</c> 仍由旧构造创建，
+        /// 由 Discovery 用本方法附加 Attribute 上的风险声明，无需修改工具实现代码。
+        /// </para>
+        /// </summary>
         /// <summary>
         /// 基于现有 ToolMetadata 克隆出一份附带风险字段的新实例。
         /// <para>
@@ -133,7 +149,32 @@ namespace AgentCore.Editor.Tools
                 RequiresMainThread,
                 riskLevel,
                 capabilities,
-                requiresConfirmation);
+                requiresConfirmation,
+                Visibility);
+        }
+
+        /// <summary>
+        /// 基于现有 ToolMetadata 克隆出附带风险字段和可见性的新实例（G.3 ActiveToolScope）。
+        /// <para>
+        /// <c>ToolAutoDiscovery</c> 在注册时使用，同时透传 Attribute 上的风险声明和可见性声明。
+        /// </para>
+        /// </summary>
+        public ToolMetadata WithRiskAndVisibility(
+            ToolRiskLevel riskLevel,
+            ToolCapability capabilities,
+            bool requiresConfirmation,
+            ToolVisibility visibility)
+        {
+            return new ToolMetadata(
+                Name,
+                Description,
+                Category,
+                ParametersSchema,
+                RequiresMainThread,
+                riskLevel,
+                capabilities,
+                requiresConfirmation,
+                visibility);
         }
     }
 

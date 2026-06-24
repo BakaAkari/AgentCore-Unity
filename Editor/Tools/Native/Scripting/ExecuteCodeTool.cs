@@ -20,6 +20,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
     [AgentTool("execute_code",
         Description = "Execute simple C# expressions via reflection — static method calls, property reads, and Unity API queries",
         Category = "Scripting",
+        Visibility = ToolVisibility.Restricted,
         RequiresMainThread = true,
         MayModifyScripts = false,
         RiskLevel = ToolRiskLevel.CodeExecution,
