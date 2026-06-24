@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -22,7 +23,9 @@ namespace AgentCore.Editor.Tools.Native.Utility
         Description = "Validate scene and project quality: check for missing references, duplicate names, missing components, empty GameObjects, layer/tag issues, and performance concerns. Returns structured issue reports with severity levels.",
         Category = "Utility",
         RequiresMainThread = true,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        RiskLevel = ToolRiskLevel.ReadOnly,
+        Capabilities = ToolCapability.ReadProject)]
     public class ValidationTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

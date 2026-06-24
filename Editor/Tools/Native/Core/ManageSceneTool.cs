@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -16,7 +17,8 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Manage Unity scenes - list, create, open, save, and get hierarchy.
     /// Directly calls Unity Editor API as part of the native tool system.
     /// </summary>
-    [AgentTool("manage_scene", Description = "Manage Unity scenes - list, create, open, save, and get hierarchy", Category = "Scene", RequiresMainThread = true)]
+    [AgentTool("manage_scene", Description = "Manage Unity scenes - list, create, open, save, and get hierarchy", Category = "Scene", RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene | ToolCapability.WriteProjectFiles)]
     public class ManageSceneTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

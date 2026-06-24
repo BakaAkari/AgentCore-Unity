@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Build;
@@ -22,7 +23,9 @@ namespace AgentCore.Editor.Tools.Native.Utility
         Description = "Read Unity Editor Console logs (errors/warnings/messages), get system/environment info, list loaded assemblies, manage scripting define symbols, and access log files. Essential for diagnosing script issues and project configuration.",
         Category = "Utility",
         RequiresMainThread = true,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        RiskLevel = ToolRiskLevel.ReadOnly,
+        Capabilities = ToolCapability.ReadProject)]
     public class ReadConsoleTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

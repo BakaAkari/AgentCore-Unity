@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.PackageManager;
@@ -21,7 +22,10 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_package",
         Description = "Manage Unity packages: list installed, search registry, install/remove packages, get info, check versions, and inspect dependencies via Unity Package Manager.",
         Category = "Extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.InstallPackages,
+        RequiresConfirmation = true)]
     public class ManagePackageTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

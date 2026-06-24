@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditorInternal;
@@ -18,7 +19,8 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Directly calls Unity Editor API as part of the native tool system.
     /// Uses SerializedObject/SerializedProperty for robust property modification.
     /// </summary>
-    [AgentTool("manage_component", Description = "Add, remove, modify, and inspect components on GameObjects", Category = "Component", RequiresMainThread = true)]
+    [AgentTool("manage_component", Description = "Add, remove, modify, and inspect components on GameObjects", Category = "Component", RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene)]
     public class ManageComponentTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

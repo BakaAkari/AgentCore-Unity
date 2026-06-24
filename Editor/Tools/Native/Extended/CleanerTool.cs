@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -20,7 +21,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("cleaner",
         Description = "Find unused assets, duplicate files, missing references/scripts, empty folders, large assets, asset usage info, and dependency trees. Helps clean up and maintain Unity projects.",
         Category = "Extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ReadProject | ToolCapability.DeleteProjectFiles | ToolCapability.ModifyScene)]
     public class CleanerTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

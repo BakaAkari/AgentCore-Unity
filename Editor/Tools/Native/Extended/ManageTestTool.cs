@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -20,7 +21,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_test",
         Description = "Run and manage Unity Test Runner tests (EditMode and PlayMode). Supports listing, running, cancelling tests and creating test scripts/fixtures.",
         Category = "Extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ExecuteCode | ToolCapability.ModifyScripts)]
     public class ManageTestTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

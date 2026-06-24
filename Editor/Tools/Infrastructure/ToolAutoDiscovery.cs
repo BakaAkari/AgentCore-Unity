@@ -1,5 +1,9 @@
 using System;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using AgentCore.Editor.Tools.Safety;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace AgentCore.Editor.Tools.Infrastructure
@@ -100,10 +104,15 @@ namespace AgentCore.Editor.Tools.Infrastructure
             // 创建实例
             var tool = (IAgentTool)Activator.CreateInstance(type);
 
-            // 注册到 ToolRegistry
-            ToolRegistry.Instance.Register(tool);
+            // G.1 治理层：把 [AgentTool] 上声明的风险字段透传到 ToolMetadata。
+            // 工具类的 Metadata 属性通常用旧构造创建（风险字段为默认值），
+            // 这里用 RiskEnrichedTool 装饰器覆盖 Metadata，确保 ToolRegistry 中的元数据反映 Attribute 声明。
+            var enriched = new RiskEnrichedTool(tool, attr);
 
-            Debug.Log($"[AgentCore] Registered native tool: {attr.Name} [{attr.Category}]");
+            // 注册到 ToolRegistry
+            ToolRegistry.Instance.Register(enriched);
+
+            Debug.Log($"[AgentCore] Registered native tool: {attr.Name} [{attr.Category}] risk={attr.RiskLevel}");
         }
 
         /// <summary>
@@ -116,6 +125,42 @@ namespace AgentCore.Editor.Tools.Infrastructure
                 _initialized = false;
                 DiscoveredCount = 0;
                 ToolRegistry.Instance.Clear();
+            }
+        }
+
+        /// <summary>
+        /// G.1 治理层 — IAgentTool 装饰器：用 [AgentTool] 特性上声明的风险字段
+        /// 覆盖工具自身 Metadata 中的风险字段，<b>不修改</b>工具本身的执行逻辑。
+        /// <para>
+        /// 这样 51 个现有工具无需任何改动即可继承 Attribute 上的风险声明，
+        /// 同时为未来在工具类内部主动构造完整 ToolMetadata 留出迁移路径。
+        /// </para>
+        /// </summary>
+        private sealed class RiskEnrichedTool : IAgentTool
+        {
+            private readonly IAgentTool _inner;
+            private readonly ToolMetadata _metadata;
+
+            public RiskEnrichedTool(IAgentTool inner, AgentToolAttribute attr)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                if (attr == null) throw new ArgumentNullException(nameof(attr));
+
+                var baseMeta = inner.Metadata
+                    ?? throw new InvalidOperationException(
+                        $"Tool '{inner.GetType().FullName}' returned null Metadata.");
+
+                _metadata = baseMeta.WithRisk(
+                    attr.RiskLevel,
+                    attr.Capabilities,
+                    attr.RequiresConfirmation);
+            }
+
+            public ToolMetadata Metadata => _metadata;
+
+            public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
+            {
+                return _inner.ExecuteAsync(parameters, cancellationToken);
             }
         }
     }

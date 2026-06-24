@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -17,7 +18,9 @@ namespace AgentCore.Editor.Tools.Native.Meta
     [AgentTool("batch_execute",
         Description = "Execute multiple tool calls in sequence as a batch operation for efficiency",
         Category = "meta",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.BatchExecute)]
     public class BatchExecuteTool : IAgentTool
     {
         #region Schema

@@ -701,8 +701,8 @@ Domain Reload 后：
 ## 16. 首批可直接创建的任务清单
 
 - [ ] 修复工具分类大小写不一致，并将禁用逻辑改为大小写不敏感。
-- [ ] 新增 ToolRiskLevel / ToolCapability / RequiresConfirmation 元数据。
-- [ ] [`ToolCallDispatcher.DispatchAsync()`](Editor/Tools/ToolCallDispatcher.cs:163) 增加统一 ToolPolicy 检查。
+- [x] 新增 ToolRiskLevel / ToolCapability / RequiresConfirmation 元数据。（v1.0.1 G.1.a）
+- [x] [`ToolCallDispatcher.DispatchAsync()`](Editor/Tools/ToolCallDispatcher.cs:197) 增加统一 ToolPolicy 检查。（v1.0.2 G.1.c）
 - [ ] [`ManageFileTool`](Editor/Tools/FileSystem/ManageFileTool.cs:1) 接入 [`WorkspacePathPolicy`](Editor/Workspace/Safety/WorkspacePathPolicy.cs:1)，delete/write/move/copy 加确认。
 - [ ] [`ExecuteCodeTool`](Editor/Tools/Native/Scripting/ExecuteCodeTool.cs:1) 改为默认禁用或只读 allowlist。
 - [ ] batch_execute 改为复用 [`ToolCallDispatcher.DispatchAsync()`](Editor/Tools/ToolCallDispatcher.cs:163)，不直接执行 tool.ExecuteAsync。

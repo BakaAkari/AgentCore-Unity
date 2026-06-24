@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 
 namespace AgentCore.Editor.Tools.FileSystem
@@ -28,7 +29,9 @@ namespace AgentCore.Editor.Tools.FileSystem
                       "For C# scripts use manage_script; for Unity asset operations use manage_asset.",
         Category = "FileSystem",
         RequiresMainThread = false,
-        MayModifyScripts = true)]
+        MayModifyScripts = true,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles)]
     public class ManageFileTool : IAgentTool
     {
         /// <summary>

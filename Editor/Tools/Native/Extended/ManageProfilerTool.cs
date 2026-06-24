@@ -9,6 +9,7 @@ using UnityEngine.Profiling;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Tools.Native.Extended
 {
@@ -19,7 +20,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_profiler",
         Description = "Access Unity Profiler data for performance analysis and optimization",
         Category = "extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Low,
+        Capabilities = ToolCapability.ReadProject)]
     public class ManageProfilerTool : IAgentTool
     {
         #region Schema

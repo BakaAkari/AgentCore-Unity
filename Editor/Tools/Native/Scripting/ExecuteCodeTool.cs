@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -20,7 +21,10 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         Description = "Execute simple C# expressions via reflection — static method calls, property reads, and Unity API queries",
         Category = "Scripting",
         RequiresMainThread = true,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        RiskLevel = ToolRiskLevel.CodeExecution,
+        Capabilities = ToolCapability.ExecuteCode,
+        RequiresConfirmation = true)]
     public class ExecuteCodeTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -13,7 +14,8 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Search for GameObjects in the scene by name, tag, component, or layer.
     /// Directly calls Unity Editor API as part of the native tool system.
     /// </summary>
-    [AgentTool("find_gameobjects", Description = "Search for GameObjects in the scene by name, tag, component, or layer", Category = "GameObject", RequiresMainThread = true)]
+    [AgentTool("find_gameobjects", Description = "Search for GameObjects in the scene by name, tag, component, or layer", Category = "GameObject", RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.ReadOnly, Capabilities = ToolCapability.ReadProject)]
     public class FindGameObjectsTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Bootstrap;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -21,7 +22,9 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
                       "Changes take effect in the NEXT conversation (Bootstrap loads at conversation start).",
         Category = "Bootstrap",
         RequiresMainThread = true,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ModifyAgentConfig)]
     public class ManageWorkspaceConfigTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

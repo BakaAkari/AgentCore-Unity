@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -15,7 +16,8 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Create, modify, delete, and inspect GameObjects in the scene.
     /// Directly calls Unity Editor API as part of the native tool system.
     /// </summary>
-    [AgentTool("manage_gameobject", Description = "Create, modify, delete, and inspect GameObjects in the scene", Category = "GameObject", RequiresMainThread = true)]
+    [AgentTool("manage_gameobject", Description = "Create, modify, delete, and inspect GameObjects in the scene", Category = "GameObject", RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene)]
     public class ManageGameObjectTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

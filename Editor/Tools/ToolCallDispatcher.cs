@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using AgentCore.Editor.Utils;
+using AgentCore.Editor.Workspace.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -23,6 +25,7 @@ namespace AgentCore.Editor.Tools
     ///   <item>原始的 LLM tool_call 请求（<see cref="ToolCall"/>）</item>
     ///   <item>工具执行结果（<see cref="ToolResult"/>）</item>
     ///   <item>工具名称和执行耗时</item>
+    ///   <item>治理层策略决策（<see cref="ToolPolicyDecision"/>，可选）</item>
     /// </list>
     /// </para>
     /// <para>
@@ -45,18 +48,29 @@ namespace AgentCore.Editor.Tools
         public double ExecutionTimeMs { get; }
 
         /// <summary>
+        /// 治理层策略决策。
+        /// <para>
+        /// <c>null</c> 表示工具在策略评估前就已失败（如未知工具、参数解析失败）。
+        /// 非 null 时可用于审计事件发射。
+        /// </para>
+        /// </summary>
+        public ToolPolicyDecision? Decision { get; }
+
+        /// <summary>
         /// 创建工具调用结果实例。
         /// </summary>
         /// <param name="toolCall">原始的 LLM tool_call 请求</param>
         /// <param name="result">工具执行结果</param>
         /// <param name="toolName">工具名称</param>
         /// <param name="executionTimeMs">执行耗时（毫秒）</param>
-        public ToolCallResult(ToolCall toolCall, ToolResult result, string toolName, double executionTimeMs)
+        /// <param name="decision">治理层策略决策（可选）</param>
+        public ToolCallResult(ToolCall toolCall, ToolResult result, string toolName, double executionTimeMs, ToolPolicyDecision? decision = null)
         {
             ToolCall = toolCall ?? throw new ArgumentNullException(nameof(toolCall));
             Result = result ?? throw new ArgumentNullException(nameof(result));
             ToolName = toolName ?? string.Empty;
             ExecutionTimeMs = executionTimeMs;
+            Decision = decision;
         }
 
         /// <summary>
@@ -80,7 +94,8 @@ namespace AgentCore.Editor.Tools
         public override string ToString()
         {
             var status = Result.Success ? "OK" : "FAIL";
-            return $"ToolCallResult[{ToolName}] {status} ({ExecutionTimeMs:F1}ms)";
+            var policyTag = Decision.HasValue ? $" [{Decision.Value.Outcome}]" : "";
+            return $"ToolCallResult[{ToolName}] {status}{policyTag} ({ExecutionTimeMs:F1}ms)";
         }
     }
 
@@ -96,6 +111,7 @@ namespace AgentCore.Editor.Tools
     ///   <item>从 <see cref="ToolCall.Function"/>.<see cref="FunctionCall.Name"/> 解析工具名称</item>
     ///   <item>从 <see cref="ToolRegistry"/> 查找对应的 <see cref="IAgentTool"/></item>
     ///   <item>解析 <see cref="FunctionCall.Arguments"/>（JSON string → JObject）</item>
+    ///   <item>通过 <see cref="ToolRiskPolicy"/> 评估策略决策（Allow / RequireConfirmation / Block）</item>
     ///   <item>如果工具需要主线程执行，通过 <see cref="EditorApplication.delayCall"/> 调度</item>
     ///   <item>调用 <see cref="IAgentTool.ExecuteAsync"/> 并包装为 <see cref="ToolCallResult"/></item>
     /// </list>
@@ -106,6 +122,7 @@ namespace AgentCore.Editor.Tools
     ///   <item>工具调用<b>串行执行</b>（Unity Editor 不支持并行操作场景对象）</item>
     ///   <item>参数解析容错：无效 JSON 返回错误结果而非抛出异常</item>
     ///   <item>未知工具返回错误结果而非抛出异常</item>
+    ///   <item>治理层策略：Block → 直接拒绝；RequireConfirmation → 请求用户确认；Allow → 直接执行</item>
     /// </list>
     /// </para>
     /// </summary>
@@ -116,12 +133,24 @@ namespace AgentCore.Editor.Tools
         /// <summary>日志前缀</summary>
         private const string LogPrefix = "[AgentCore] ToolCallDispatcher: ";
 
+        /// <summary>策略阻断时返回给 LLM 的提示后缀</summary>
+        private const string BlockedSuffix = " Do not retry without changing approach.";
+
         #endregion
 
         #region 私有字段
 
         /// <summary>工具注册表引用</summary>
         private readonly ToolRegistry _registry;
+
+        /// <summary>
+        /// 用户确认提供器。
+        /// <para>
+        /// <c>null</c> 为 fail-safe 模式：任何 RequireConfirmation 决策都将自动拒绝。
+        /// 正常使用时应通过构造函数注入 <see cref="DialogToolConfirmationProvider"/> 或其他实现。
+        /// </para>
+        /// </summary>
+        private readonly IToolConfirmationProvider _confirmationProvider;
 
         #endregion
 
@@ -131,10 +160,14 @@ namespace AgentCore.Editor.Tools
         /// 创建工具调用分发器实例。
         /// </summary>
         /// <param name="registry">工具注册表，用于查找工具实例</param>
+        /// <param name="confirmationProvider">
+        /// 用户确认提供器。传 null 为 fail-safe 模式（RequireConfirmation 时自动拒绝）。
+        /// </param>
         /// <exception cref="ArgumentNullException">registry 为 null 时抛出</exception>
-        public ToolCallDispatcher(ToolRegistry registry)
+        public ToolCallDispatcher(ToolRegistry registry, IToolConfirmationProvider confirmationProvider = null)
         {
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            _confirmationProvider = confirmationProvider;
         }
 
         #endregion
@@ -150,6 +183,8 @@ namespace AgentCore.Editor.Tools
         ///   <item>从 <see cref="ToolRegistry"/> 查找对应的 <see cref="IAgentTool"/></item>
         ///   <item>如果找不到，返回错误结果</item>
         ///   <item>解析 <c>toolCall.Function.Arguments</c>（JSON string → JObject）</item>
+        ///   <item>Schema 参数预校验</item>
+        ///   <item>治理层策略评估（<see cref="ToolRiskPolicy.Evaluate"/>）</item>
         ///   <item>如果工具需要主线程执行，使用 <see cref="TaskCompletionSource{T}"/> + <see cref="EditorApplication.delayCall"/> 调度</item>
         ///   <item>调用 <c>tool.ExecuteAsync(parameters, ct)</c></item>
         ///   <item>包装为 <see cref="ToolCallResult"/> 返回</item>
@@ -217,7 +252,62 @@ namespace AgentCore.Editor.Tools
                     );
                 }
 
-                // 4. 执行工具
+                // 4. 治理层策略评估 (G.1)
+                var action = ExtractActionFromParameters(parameters);
+                var paramSummary = BuildParameterSummary(parameters);
+                var pathRisk = ToolPathRiskResolver.Resolve(parameters, tool.Metadata, out var pathTargets);
+                var decision = ToolRiskPolicy.Evaluate(
+                    tool.Metadata,
+                    pathRisk,
+                    toolName,
+                    action,
+                    paramSummary,
+                    pathTargets);
+
+                switch (decision.Outcome)
+                {
+                    case ToolPolicyOutcome.Block:
+                    {
+                        stopwatch.Stop();
+                        var reasons = decision.Reasons != null ? string.Join("; ", decision.Reasons) : "Blocked by policy";
+                        var blockMsg = $"Tool '{toolName}' blocked: {reasons}.{BlockedSuffix}";
+                        Debug.LogWarning($"{LogPrefix}{blockMsg}");
+                        return new ToolCallResult(
+                            toolCall,
+                            ToolResult.Fail(blockMsg, stopwatch.Elapsed.TotalMilliseconds),
+                            toolName,
+                            stopwatch.Elapsed.TotalMilliseconds,
+                            decision
+                        );
+                    }
+
+                    case ToolPolicyOutcome.RequireConfirmation:
+                    {
+                        var confirmed = await RequestUserConfirmationAsync(decision, ct);
+                        if (!confirmed)
+                        {
+                            stopwatch.Stop();
+                            var rejectMsg = $"Tool '{toolName}' rejected by user.{BlockedSuffix}";
+                            Debug.Log($"{LogPrefix}{rejectMsg}");
+                            return new ToolCallResult(
+                                toolCall,
+                                ToolResult.Fail(rejectMsg, stopwatch.Elapsed.TotalMilliseconds),
+                                toolName,
+                                stopwatch.Elapsed.TotalMilliseconds,
+                                decision
+                            );
+                        }
+                        // 用户确认通过，继续执行
+                        break;
+                    }
+
+                    case ToolPolicyOutcome.Allow:
+                    default:
+                        // 直接放行
+                        break;
+                }
+
+                // 5. 执行工具
                 Debug.Log($"{LogPrefix}Executing tool '{toolName}' (mainThread={tool.Metadata.RequiresMainThread})");
 
                 ToolResult result;
@@ -238,7 +328,8 @@ namespace AgentCore.Editor.Tools
                     toolCall,
                     result,
                     toolName,
-                    stopwatch.Elapsed.TotalMilliseconds
+                    stopwatch.Elapsed.TotalMilliseconds,
+                    decision
                 );
             }
             catch (OperationCanceledException)
@@ -270,56 +361,48 @@ namespace AgentCore.Editor.Tools
         #region 批量分发
 
         /// <summary>
-        /// 批量分发执行多个 <see cref="ToolCall"/>（顺序执行，不并行）。
+        /// 批量分发执行多个 <see cref="ToolCall"/>。
         /// <para>
-        /// Unity Editor 不支持并行操作场景对象，因此所有工具调用严格按顺序执行。
-        /// 如果 <see cref="CancellationToken"/> 被取消，将停止执行剩余的工具调用。
+        /// 按顺序逐个调用 <see cref="DispatchAsync"/>，收集所有结果。
+        /// 单个工具失败不影响其他工具的执行。
         /// </para>
         /// </summary>
-        /// <param name="toolCalls">LLM 返回的工具调用请求列表</param>
+        /// <param name="toolCalls">工具调用请求列表</param>
         /// <param name="ct">取消令牌</param>
-        /// <returns>所有工具调用结果的列表</returns>
-        /// <exception cref="ArgumentNullException">toolCalls 为 null 时抛出</exception>
+        /// <returns>工具调用结果列表（顺序与输入一致）</returns>
         public async Task<List<ToolCallResult>> DispatchAllAsync(
-            List<ToolCall> toolCalls,
+            IReadOnlyList<ToolCall> toolCalls,
             CancellationToken ct = default)
         {
-            if (toolCalls == null)
-                throw new ArgumentNullException(nameof(toolCalls));
+            if (toolCalls == null || toolCalls.Count == 0)
+                return new List<ToolCallResult>();
 
             var results = new List<ToolCallResult>(toolCalls.Count);
 
-            Debug.Log($"{LogPrefix}Dispatching {toolCalls.Count} tool call(s)...");
-
-            foreach (var tc in toolCalls)
+            // 串行执行（Unity Editor 不支持并行操作场景对象）
+            foreach (var toolCall in toolCalls)
             {
-                if (ct.IsCancellationRequested)
-                {
-                    Debug.LogWarning($"{LogPrefix}Cancellation requested, skipping remaining {toolCalls.Count - results.Count} tool call(s)");
-                    break;
-                }
-
-                var result = await DispatchAsync(tc, ct);
+                ct.ThrowIfCancellationRequested();
+                var result = await DispatchAsync(toolCall, ct);
                 results.Add(result);
             }
 
-            Debug.Log($"{LogPrefix}Dispatched {results.Count}/{toolCalls.Count} tool call(s) — " +
-                       $"success: {CountSuccessful(results)}, failed: {CountFailed(results)}");
+            var successCount = CountSuccessful(results);
+            var failCount = CountFailed(results);
+            Debug.Log($"{LogPrefix}Batch dispatch completed: {toolCalls.Count} calls, {successCount} success, {failCount} failed");
 
             return results;
         }
 
         #endregion
 
-        #region 结果转换
+        #region 消息转换
 
         /// <summary>
-        /// 将单个 <see cref="ToolCallResult"/> 转换为 <c>role="tool"</c> 的 <see cref="ChatMessage"/>，
-        /// 用于发回 LLM 继续对话。
+        /// 将单个 <see cref="ToolCallResult"/> 转换为 <c>role="tool"</c> 的 <see cref="ChatMessage"/>。
         /// </summary>
         /// <param name="result">工具调用结果</param>
         /// <returns>role="tool" 的 ChatMessage</returns>
-        /// <exception cref="ArgumentNullException">result 为 null 时抛出</exception>
         public static ChatMessage ToToolMessage(ToolCallResult result)
         {
             if (result == null)
@@ -329,16 +412,14 @@ namespace AgentCore.Editor.Tools
         }
 
         /// <summary>
-        /// 将多个 <see cref="ToolCallResult"/> 转换为 <see cref="ChatMessage"/> 列表，
-        /// 用于批量发回 LLM。
+        /// 将多个 <see cref="ToolCallResult"/> 转换为 <c>role="tool"</c> 的 <see cref="ChatMessage"/> 列表。
         /// </summary>
         /// <param name="results">工具调用结果列表</param>
         /// <returns>role="tool" 的 ChatMessage 列表</returns>
-        /// <exception cref="ArgumentNullException">results 为 null 时抛出</exception>
         public static List<ChatMessage> ToToolMessages(List<ToolCallResult> results)
         {
-            if (results == null)
-                throw new ArgumentNullException(nameof(results));
+            if (results == null || results.Count == 0)
+                return new List<ChatMessage>();
 
             var messages = new List<ChatMessage>(results.Count);
             foreach (var result in results)
@@ -416,6 +497,89 @@ namespace AgentCore.Editor.Tools
             };
 
             return await tcs.Task;
+        }
+
+        /// <summary>
+        /// 请求用户确认工具执行。
+        /// <para>
+        /// 如果 <see cref="_confirmationProvider"/> 为 null（fail-safe 模式），直接返回 false（拒绝）。
+        /// </para>
+        /// </summary>
+        /// <param name="decision">策略决策（必须包含 ConfirmationRequest）</param>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>true = 用户确认执行；false = 用户拒绝或超时</returns>
+        private async Task<bool> RequestUserConfirmationAsync(ToolPolicyDecision decision, CancellationToken ct)
+        {
+            if (_confirmationProvider == null)
+            {
+                // Fail-safe: 无提供器时自动拒绝
+                Debug.LogWarning($"{LogPrefix}No confirmation provider configured. Fail-safe: rejecting RequireConfirmation decision.");
+                return false;
+            }
+
+            if (decision.ConfirmationRequest == null)
+            {
+                // 防御性检查：RequireConfirmation 必须携带 request
+                Debug.LogError($"{LogPrefix}RequireConfirmation decision without ConfirmationRequest. Rejecting.");
+                return false;
+            }
+
+            return await _confirmationProvider.RequestConfirmationAsync(decision.ConfirmationRequest, ct);
+        }
+
+        /// <summary>
+        /// 从工具参数中提取 action 字段（用于策略评估）。
+        /// 大多数 AgentCore 工具使用 "action" 作为分发键。
+        /// </summary>
+        /// <param name="parameters">已解析的工具参数</param>
+        /// <returns>action 值，不存在时返回空字符串</returns>
+        private static string ExtractActionFromParameters(JObject parameters)
+        {
+            if (parameters == null) return string.Empty;
+            var actionToken = parameters["action"];
+            if (actionToken == null) return string.Empty;
+            return actionToken.Type == JTokenType.String ? actionToken.Value<string>() ?? string.Empty : string.Empty;
+        }
+
+        /// <summary>
+        /// 从工具参数构建摘要字典（用于策略评估和审计日志）。
+        /// <para>
+        /// 只取顶层 string/number/boolean 值，跳过嵌套对象和数组以控制摘要大小。
+        /// 值超过 100 字符时会截断。
+        /// </para>
+        /// </summary>
+        /// <param name="parameters">已解析的工具参数</param>
+        /// <returns>参数名 → 值摘要的只读字典</returns>
+        private static IReadOnlyDictionary<string, string> BuildParameterSummary(JObject parameters)
+        {
+            if (parameters == null || !parameters.HasValues)
+                return new Dictionary<string, string>(0);
+
+            var summary = new Dictionary<string, string>(parameters.Count);
+            foreach (var prop in parameters.Properties())
+            {
+                switch (prop.Value.Type)
+                {
+                    case JTokenType.String:
+                    case JTokenType.Integer:
+                    case JTokenType.Float:
+                    case JTokenType.Boolean:
+                        var val = prop.Value.ToString();
+                        summary[prop.Name] = val.Length > 100 ? val.Substring(0, 100) + "..." : val;
+                        break;
+                    case JTokenType.Array:
+                        var arr = (JArray)prop.Value;
+                        summary[prop.Name] = $"[array, {arr.Count} items]";
+                        break;
+                    case JTokenType.Object:
+                        summary[prop.Name] = "[object]";
+                        break;
+                    default:
+                        // Null, Undefined 等 — 跳过
+                        break;
+                }
+            }
+            return summary;
         }
 
         /// <summary>

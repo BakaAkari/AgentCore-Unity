@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.0.0 | **更新日期**: 2026-06-23 | **状态**: Phase 6 验收完成（v1.0.0）；下一步先执行 LLM/Agent 架构安全收口，Phase 7（索引体验深化）与 Phase 8（MCP 对外互操作）仍为待开发产品模块
+> **版本**: v1.0.3 | **更新日期**: 2026-06-24 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1 全面完成（v1.0.3，Tool Risk Policy + WorkspacePathPolicy 强制接入），Phase 7（索引体验深化）与 Phase 8（MCP 对外互操作）仍为待开发产品模块
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,11 +36,11 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.0.0)
+### 0.4 当前项目快照 (v1.0.3)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.0.0 (2026-06-16) — Phase 6 验收完成里程碑 |
+| **版本** | 1.0.3 (2026-06-24) — 治理层 G.1 全面完成（Tool Risk Policy + WorkspacePathPolicy 强制接入，工具调用受风险等级 + 路径位置双重管控） |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
@@ -52,6 +52,7 @@
 | **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 128K（适配现代大 context LLM） |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
 | **Phase 6 验收** | 完成 — 见 ADR-11 |
+| **治理层进度** | G.1 全面完成（v1.0.3，G.1.a~G.1.e 全部落地）；G.2 / G.3 / G.4 / G.5 / G.6 待开始 |
 
 ### 0.5 已完成的历史 Phase
 
@@ -155,7 +156,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| G.1 | **Tool Risk Policy + WorkspacePathPolicy 强制接入** | 所有工具调用统一经过风险分级、能力授权、路径边界和确认策略；禁止工具各自绕过安全策略 | P0 | [-] 设计中 |
+| G.1 | **Tool Risk Policy + WorkspacePathPolicy 强制接入** | 所有工具调用统一经过风险分级、能力授权、路径边界和确认策略；禁止工具各自绕过安全策略。拆分为 G.1.a 元数据基础设施 / G.1.b 策略评估器 / G.1.c Dispatcher 接入 / G.1.d 高危工具按 Category 细化 / G.1.e WorkspacePathPolicy 强制执行 | P0 | [x] 完成 v1.0.3 — G.1.a~G.1.e 全部落地 |
 | G.2 | **ExecuteCodeTool 降权/拆分** | 默认禁用或拆分为只读查询与高风险执行；高风险执行必须显式授权和审计 | P0 | [ ] |
 | G.3 | **Lazy Tool Discovery / ActiveToolScope** | 不再每轮默认暴露全部工具 schema；按任务阶段、类别和能力范围渐进暴露 | P0 | [ ] |
 | G.4 | **ContextWindowManager / Bootstrap 预算收口** | 降低长驻 prompt 与工具 schema 对上下文的挤占；避免 Context Rot 和 Lost-in-the-Middle | P1 | [ ] |

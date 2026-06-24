@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 
 namespace AgentCore.Editor.Tools
@@ -13,6 +14,11 @@ namespace AgentCore.Editor.Tools
     /// 这是 AgentCore 内部的工具描述格式，与 <c>ToolDefinition</c>（OpenAI API 格式）分离，
     /// 以实现工具系统与 LLM 具体格式的解耦。Step 3 的 <c>ToolDefinitionBuilder</c> 负责
     /// <c>ToolMetadata</c> → <c>ToolDefinition</c> 的转换。
+    /// </para>
+    /// <para>
+    /// G.1 治理层扩展：新增 <see cref="RiskLevel"/> / <see cref="Capabilities"/> /
+    /// <see cref="RequiresConfirmation"/> 三个风险字段，由 <c>ToolAutoDiscovery</c> 从
+    /// <c>[AgentTool]</c> 特性自动透传。所有字段都有默认值，现有工具无需修改即可保持兼容。
     /// </para>
     /// </summary>
     public class ToolMetadata
@@ -33,7 +39,27 @@ namespace AgentCore.Editor.Tools
         public bool RequiresMainThread { get; }
 
         /// <summary>
-        /// 创建工具元数据实例。
+        /// 工具风险等级（G.1 治理层）。未显式声明时默认为
+        /// <see cref="ToolRiskLevel.Medium"/>，由 <see cref="ToolRiskPolicy"/> 评估时合并使用。
+        /// </summary>
+        public ToolRiskLevel RiskLevel { get; }
+
+        /// <summary>
+        /// 工具实际触达的能力位（G.1 治理层）。默认为 <see cref="ToolCapability.None"/>。
+        /// </summary>
+        public ToolCapability Capabilities { get; }
+
+        /// <summary>
+        /// 是否强制要求用户确认（G.1 治理层）。默认为 <c>false</c>。
+        /// </summary>
+        public bool RequiresConfirmation { get; }
+
+        /// <summary>
+        /// 创建工具元数据实例（向后兼容构造）。
+        /// <para>
+        /// 现有工具仍可使用本构造；风险字段会被赋予安全默认值
+        /// （<see cref="ToolRiskLevel.Medium"/> / <see cref="ToolCapability.None"/> / 不强制确认）。
+        /// </para>
         /// </summary>
         /// <param name="name">工具名称，全局唯一</param>
         /// <param name="description">工具描述</param>
@@ -47,12 +73,67 @@ namespace AgentCore.Editor.Tools
             string category,
             JObject parametersSchema,
             bool requiresMainThread = true)
+            : this(
+                name,
+                description,
+                category,
+                parametersSchema,
+                requiresMainThread,
+                ToolRiskLevel.Medium,
+                ToolCapability.None,
+                requiresConfirmation: false)
+        {
+        }
+
+        /// <summary>
+        /// 创建工具元数据实例（G.1 治理层完整构造）。
+        /// <para>
+        /// 通常由 <c>ToolAutoDiscovery</c> 从 <c>[AgentTool]</c> 特性自动构造；
+        /// 实现 <c>IAgentTool</c> 的工具类一般无需直接调用本构造，由旧构造 + Attribute 透传即可。
+        /// </para>
+        /// </summary>
+        /// <exception cref="ArgumentNullException">name 或 description 为 null 时抛出</exception>
+        public ToolMetadata(
+            string name,
+            string description,
+            string category,
+            JObject parametersSchema,
+            bool requiresMainThread,
+            ToolRiskLevel riskLevel,
+            ToolCapability capabilities,
+            bool requiresConfirmation)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = description ?? throw new ArgumentNullException(nameof(description));
             Category = category ?? "default";
             ParametersSchema = parametersSchema ?? new JObject();
             RequiresMainThread = requiresMainThread;
+            RiskLevel = riskLevel;
+            Capabilities = capabilities;
+            RequiresConfirmation = requiresConfirmation;
+        }
+
+        /// <summary>
+        /// 基于现有 ToolMetadata 克隆出一份附带风险字段的新实例。
+        /// <para>
+        /// <c>ToolAutoDiscovery</c> 在注册时使用：工具类的 <c>Metadata</c> 仍由旧构造创建，
+        /// 由 Discovery 用本方法附加 Attribute 上的风险声明，无需修改工具实现代码。
+        /// </para>
+        /// </summary>
+        public ToolMetadata WithRisk(
+            ToolRiskLevel riskLevel,
+            ToolCapability capabilities,
+            bool requiresConfirmation)
+        {
+            return new ToolMetadata(
+                Name,
+                Description,
+                Category,
+                ParametersSchema,
+                RequiresMainThread,
+                riskLevel,
+                capabilities,
+                requiresConfirmation);
         }
     }
 

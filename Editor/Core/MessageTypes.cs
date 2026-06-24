@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using System.Linq;
+using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Core
 {
@@ -81,7 +82,23 @@ namespace AgentCore.Editor.Core
         // === Phase 4.5 新增 ===
 
         /// <summary>文件变更列表更新（工具执行后触发）</summary>
-        FileChangesUpdated
+        FileChangesUpdated,
+
+        // === G.1 治理层新增 ===
+
+        /// <summary>
+        /// 工具执行前需要用户确认（<see cref="ToolPolicyOutcome.RequireConfirmation"/>）。
+        /// UI 层应展示 <see cref="AgentEvent.ConfirmationRequest"/> 的内容，但实际确认交互由
+        /// <see cref="IToolConfirmationProvider"/> 在 dispatcher 内完成；本事件用于审计/追踪。
+        /// </summary>
+        ToolConfirmationRequested,
+
+        /// <summary>
+        /// 工具被治理层硬阻断（<see cref="ToolPolicyOutcome.Block"/>），不会执行。
+        /// 例如对 Unity Hub Root 或 Package Root 的写操作。
+        /// UI 层应显式提示用户为何被阻断（<see cref="AgentEvent.Policy"/>.Reasons）。
+        /// </summary>
+        ToolBlocked
     }
 
     #endregion
@@ -146,6 +163,20 @@ namespace AgentCore.Editor.Core
         public List<FileChangeSummary> FileChanges { get; }
 
         /// <summary>
+        /// 治理层评估结果（<see cref="AgentEventType.ToolConfirmationRequested"/> 与
+        /// <see cref="AgentEventType.ToolBlocked"/> 时有值）。
+        /// 包含 Outcome / Risk / Reasons，用于 UI 展示判定依据与审计。
+        /// </summary>
+        public ToolPolicyDecision? Policy { get; }
+
+        /// <summary>
+        /// 工具确认请求详情（<see cref="AgentEventType.ToolConfirmationRequested"/> 时有值）。
+        /// 实际的确认 UI 交互由 <see cref="IToolConfirmationProvider"/> 完成，
+        /// 本字段仅作为事件总线上的快照，供日志/审计/侧栏面板使用。
+        /// </summary>
+        public ToolConfirmationRequest ConfirmationRequest { get; }
+
+        /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
         private AgentEvent(
@@ -161,7 +192,9 @@ namespace AgentCore.Editor.Core
             int maxRounds = 0,
             double executionTimeMs = 0,
             ErrorDetail detail = null,
-            List<FileChangeSummary> fileChanges = null)
+            List<FileChangeSummary> fileChanges = null,
+            ToolPolicyDecision? policy = null,
+            ToolConfirmationRequest confirmationRequest = null)
         {
             Type = type;
             State = state;
@@ -176,6 +209,8 @@ namespace AgentCore.Editor.Core
             ExecutionTimeMs = executionTimeMs;
             Detail = detail;
             FileChanges = fileChanges;
+            Policy = policy;
+            ConfirmationRequest = confirmationRequest;
         }
 
         #region Phase 1 工厂方法
@@ -348,6 +383,64 @@ namespace AgentCore.Editor.Core
             return new AgentEvent(
                 AgentEventType.FileChangesUpdated,
                 fileChanges: changes
+            );
+        }
+
+        #endregion
+
+        #region G.1 治理层工厂方法
+
+        /// <summary>
+        /// 创建工具确认请求事件（治理层评估为 <see cref="ToolPolicyOutcome.RequireConfirmation"/>）。
+        /// 该事件仅作为审计/UI 快照，实际确认交互由 dispatcher 内的 <see cref="IToolConfirmationProvider"/> 完成。
+        /// </summary>
+        /// <param name="toolName">工具名称</param>
+        /// <param name="toolCallId">LLM tool_call id</param>
+        /// <param name="decision">治理层评估结果</param>
+        /// <param name="messageId">关联消息 ID</param>
+        /// <returns>工具确认请求事件</returns>
+        public static AgentEvent ToolConfirmationRequested(
+            string toolName,
+            string toolCallId,
+            ToolPolicyDecision decision,
+            string messageId = null)
+        {
+            return new AgentEvent(
+                AgentEventType.ToolConfirmationRequested,
+                toolName: toolName,
+                toolCallId: toolCallId,
+                messageId: messageId,
+                policy: decision,
+                confirmationRequest: decision.ConfirmationRequest
+            );
+        }
+
+        /// <summary>
+        /// 创建工具阻断事件（治理层评估为 <see cref="ToolPolicyOutcome.Block"/>）。
+        /// 该工具不会执行，对应的 ToolResult 会被构造为 Fail 并返回 LLM。
+        /// </summary>
+        /// <param name="toolName">工具名称</param>
+        /// <param name="toolCallId">LLM tool_call id</param>
+        /// <param name="decision">治理层评估结果（包含阻断原因）</param>
+        /// <param name="messageId">关联消息 ID</param>
+        /// <returns>工具阻断事件</returns>
+        public static AgentEvent ToolBlocked(
+            string toolName,
+            string toolCallId,
+            ToolPolicyDecision decision,
+            string messageId = null)
+        {
+            string reasonText = (decision.Reasons != null && decision.Reasons.Count > 0)
+                ? string.Join("; ", decision.Reasons)
+                : "blocked by governance policy";
+
+            return new AgentEvent(
+                AgentEventType.ToolBlocked,
+                toolName: toolName,
+                toolCallId: toolCallId,
+                toolResult: reasonText,
+                messageId: messageId,
+                policy: decision
             );
         }
 

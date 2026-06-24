@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -17,7 +18,9 @@ namespace AgentCore.Editor.Tools.Native.Meta
     [AgentTool("execute_menu_item",
         Description = "Execute Unity Editor menu items by path, and list available menu items",
         Category = "meta",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.ExecuteCode)]
     public class ExecuteMenuItemTool : IAgentTool
     {
         #region Schema

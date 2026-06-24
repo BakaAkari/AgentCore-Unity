@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Tools.Native.Extended
 {
@@ -18,7 +19,10 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_build",
         Description = "Manage build settings, build targets, and trigger builds",
         Category = "extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.BuildPlayer | ToolCapability.ModifyProjectSettings,
+        RequiresConfirmation = true)]
     public class ManageBuildTool : IAgentTool
     {
         #region Schema

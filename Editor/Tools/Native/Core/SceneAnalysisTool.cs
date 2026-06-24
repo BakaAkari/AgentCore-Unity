@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -24,7 +25,9 @@ namespace AgentCore.Editor.Tools.Native.Core
     [AgentTool("scene_analysis",
         Description = "Analyze the current Unity scene: summarize, health_check, component_stats, find_hotspots, hierarchy_tree, spatial_query, materials_overview, performance_hints, project_info, dependency_analyze. Read-only analysis — does not modify the scene.",
         Category = "Core",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.ReadOnly,
+        Capabilities = ToolCapability.ReadProject)]
     public class SceneAnalysisTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

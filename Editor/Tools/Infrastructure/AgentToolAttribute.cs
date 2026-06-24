@@ -1,4 +1,5 @@
 using System;
+using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Tools.Infrastructure
 {
@@ -38,6 +39,34 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// 用于 AgentLoop 的编译等待逻辑
         /// </summary>
         public bool MayModifyScripts { get; set; } = false;
+
+        // ---------------------------------------------------------------
+        // G.1 治理层 — 工具风险元数据
+        // 所有字段都带默认值，未声明的工具自动被视为 Medium 风险。
+        // 现有 51 个工具无需修改即可继续编译。
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// 工具风险等级（G.1 治理层）。
+        /// <para>未显式声明时，<see cref="Safety.ToolRiskPolicy"/> 视为 <see cref="ToolRiskLevel.Medium"/>。</para>
+        /// <para>声明 <see cref="ToolRiskLevel.CodeExecution"/> 的工具会被无条件强制确认。</para>
+        /// </summary>
+        public ToolRiskLevel RiskLevel { get; set; } = ToolRiskLevel.Medium;
+
+        /// <summary>
+        /// 工具实际触达的能力位（G.1 治理层）。
+        /// <para>用于审计、MCP 暴露过滤、确认面板呈现。</para>
+        /// </summary>
+        public ToolCapability Capabilities { get; set; } = ToolCapability.None;
+
+        /// <summary>
+        /// 是否强制要求用户确认（G.1 治理层）。
+        /// <para>
+        /// 即便风险等级不高，如果声明 <c>true</c>，<see cref="Safety.ToolRiskPolicy"/> 也会要求用户确认。
+        /// 用于"操作虽然小但必须留痕"的工具（如修改 AgentCore 自身配置）。
+        /// </para>
+        /// </summary>
+        public bool RequiresConfirmation { get; set; } = false;
 
         public AgentToolAttribute(string name)
         {

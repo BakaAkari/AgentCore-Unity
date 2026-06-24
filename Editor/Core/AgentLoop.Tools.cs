@@ -8,6 +8,7 @@ using AgentCore.Editor.Core.Compression;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -197,6 +198,29 @@ namespace AgentCore.Editor.Core
                 callInfo.Result = enhancedContent;
 
                 assistantTurn.ToolCalls.Add(callInfo);
+
+                // G.1 治理层审计事件（D8=a: 仅 RequireConfirmation / Block）
+                if (result.Decision.HasValue)
+                {
+                    var decision = result.Decision.Value;
+                    switch (decision.Outcome)
+                    {
+                        case ToolPolicyOutcome.RequireConfirmation:
+                            EmitEvent(AgentEvent.ToolConfirmationRequested(
+                                result.ToolName,
+                                result.ToolCall.Id,
+                                decision,
+                                assistantTurn.Id));
+                            break;
+                        case ToolPolicyOutcome.Block:
+                            EmitEvent(AgentEvent.ToolBlocked(
+                                result.ToolName,
+                                result.ToolCall.Id,
+                                decision,
+                                assistantTurn.Id));
+                            break;
+                    }
+                }
 
                 // 发送工具调用结果事件
                 if (result.Result.Success)

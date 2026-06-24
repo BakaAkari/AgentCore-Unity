@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -21,7 +22,9 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         Description = "Manage C# scripts — read, write, create, delete, list, get info, analyze API, find references, add methods/fields",
         Category = "Scripting",
         RequiresMainThread = true,
-        MayModifyScripts = true)]
+        MayModifyScripts = true,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.ModifyScripts | ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles)]
     public class ManageScriptTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

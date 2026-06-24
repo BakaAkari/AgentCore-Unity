@@ -312,6 +312,7 @@ namespace AgentCore.Editor.Tools.Cloud
 开发新工具时，必须逐项确认：
 
 - [ ] **[AgentTool] 特性** — Name, Description, Category, RequiresMainThread, MayModifyScripts 全部正确
+- [ ] **风险声明（G.1）** — `RiskLevel`、`Capabilities`、`RequiresConfirmation` 三个属性已按工具实际能力显式声明（未声明则默认 `Medium` / `None` / `false`）；高危工具（写文件、删除、执行代码、VCS 写入、安装包、构建）必须显式声明，不得依赖默认值
 - [ ] **Metadata 属性** — 与 [AgentTool] 特性的值完全一致
 - [ ] **_parametersSchema** — JSON Schema 格式正确，required 字段完整
 - [ ] **命名空间** — `AgentCore.Editor.Tools.<Type>.<Category>` 格式

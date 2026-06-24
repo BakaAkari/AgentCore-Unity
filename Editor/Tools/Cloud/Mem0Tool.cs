@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Cloud;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 
 namespace AgentCore.Editor.Tools.Cloud
@@ -18,7 +19,9 @@ namespace AgentCore.Editor.Tools.Cloud
     [AgentTool("manage_memory",
         Description = "管理长期记忆。支持添加(add)、搜索(search)、列出(list)、删除(delete)记忆。记忆会跨会话持久化存储在 mem0 服务中。",
         Category = "Cloud",
-        RequiresMainThread = false)]
+        RequiresMainThread = false,
+        RiskLevel = ToolRiskLevel.External,
+        Capabilities = ToolCapability.NetworkAccess)]
     public class Mem0Tool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

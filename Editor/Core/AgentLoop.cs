@@ -1,4 +1,5 @@
 using System;
+using AgentCore.Editor.Tools.Safety;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -162,7 +163,9 @@ namespace AgentCore.Editor.Core
         public AgentLoop(ILLMClient llmClient)
         {
             _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
-            _dispatcher = new ToolCallDispatcher(ToolRegistry.Instance);
+            _dispatcher = new ToolCallDispatcher(
+                ToolRegistry.Instance,
+                new DialogToolConfirmationProvider());
         }
 
         #endregion

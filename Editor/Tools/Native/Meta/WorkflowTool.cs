@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -21,7 +22,9 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Description = "Workflow automation for Unity Editor: batch rename/tag/layer operations on GameObjects, multi-scene processing, asset batch operations, snapshot/restore scene state, find-and-replace in scene hierarchy, and bulk component operations. Use for repetitive editor tasks that would otherwise require many individual tool calls.",
         Category = "Meta",
         RequiresMainThread = true,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.BatchExecute)]
     public class WorkflowTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

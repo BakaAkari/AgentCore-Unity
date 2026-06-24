@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -21,7 +22,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("optimization",
         Description = "Analyze scene performance bottlenecks, batch-optimize textures/meshes/audio settings, manage static flags and LOD groups, find duplicate materials, and detect overdraw risks.",
         Category = "Extended",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene)]
     public class OptimizationTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

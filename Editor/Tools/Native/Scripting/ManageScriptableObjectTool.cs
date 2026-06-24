@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -21,7 +22,9 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         Description = "Manage ScriptableObject assets — create, get/set properties, find, duplicate, delete, export/import JSON. " +
                       "Uses SerializedObject for reliable property access.",
         Category = "Scripting",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles)]
     public class ManageScriptableObjectTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

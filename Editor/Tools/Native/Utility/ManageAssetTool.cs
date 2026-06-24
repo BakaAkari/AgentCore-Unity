@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -18,7 +19,9 @@ namespace AgentCore.Editor.Tools.Native.Utility
     [AgentTool("manage_asset",
         Description = "Manage Unity assets - search, create, delete, move, copy, and get info",
         Category = "Asset",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles)]
     public class ManageAssetTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

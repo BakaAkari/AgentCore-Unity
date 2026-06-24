@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -20,7 +21,9 @@ namespace AgentCore.Editor.Tools.Native.Meta
     [AgentTool("manage_editor",
         Description = "Manage Unity Editor state and project settings. Use 'get_info' to check editor status/connection (returns Unity version, platform, play state, active scene, render pipeline, etc.). Other actions: play_mode, focus_window, get_selection, set_selection, refresh, get_project_settings, set_project_setting",
         Category = "meta",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ModifyProjectSettings)]
     public class ManageEditorTool : IAgentTool
     {
         #region Schema

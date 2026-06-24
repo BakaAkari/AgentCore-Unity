@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -16,7 +17,9 @@ namespace AgentCore.Editor.Tools.Native.Scripting
     [AgentTool("manage_prefab",
         Description = "Manage Unity Prefabs — create, instantiate, get info, unpack, apply overrides, and revert",
         Category = "Scripting",
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene)]
     public class ManagePrefabTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

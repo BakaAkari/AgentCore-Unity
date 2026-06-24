@@ -5,14 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.3] - 2026-06-24
+
+### Added
+- **治理层 G.1.d — 高危工具风险声明细化**：26 个工具文件的 `[AgentTool]` 特性全部显式声明 `RiskLevel`、`Capabilities`、`RequiresConfirmation`。高危工具（`manage_script` write/create/delete、`execute_code`、`manage_build` build、`manage_package` install/remove 等）现在会触发用户确认弹窗或直接拦截。
+- **治理层 G.1.e — WorkspacePathPolicy 真正接入**：新增 [`ToolPathRiskResolver`](Editor/Tools/Safety/ToolPathRiskResolver.cs:1) 静态类，在工具执行前自动从参数中嗅探路径类字段（`path`、`file_path`、`script_path`、`asset_path` 等 16 种），解析为绝对路径后通过 [`WorkspacePathService.TryGetRootInfo()`](Editor/Workspace/WorkspacePathService.cs:48) 查找所属 WorkspaceRoot，再经 [`WorkspacePathPolicy.GetRisk()`](Editor/Workspace/Safety/WorkspacePathPolicy.cs:12) 映射为 `WorkspaceOperationRisk`。返回所有路径中的最坏风险等级。
+- **ToolCallDispatcher 路径风险集成**：[`ToolCallDispatcher.DispatchAsync()`](Editor/Tools/ToolCallDispatcher.cs:258) 在策略评估前调用 `ToolPathRiskResolver.Resolve()`，将真实路径风险传入 [`ToolRiskPolicy.Evaluate()`](Editor/Tools/Safety/ToolRiskPolicy.cs:51) 的完整重载（含 `pathRisk` + `targets` 参数）。写入引擎代码/商业插件/只读引用等受保护区域的工具调用现在会被升级为 RequireConfirmation 或 Block。
+
+### Changed
+- **版本号**: `1.0.2` → `1.0.3`，标记治理层 G.1 全面完成（G.1.a ~ G.1.e）。
+- **ToolCallDispatcher 策略评估调用**：从短重载 `Evaluate(metadata, toolName, action, paramSummary)` 切换为完整重载 `Evaluate(metadata, pathRisk, toolName, action, paramSummary, pathTargets)`，路径风险不再默认为 `Safe`。
+
+### Notes
+- G.1 治理层（Tool Risk Policy + WorkspacePathPolicy 强制接入）全部子任务已完成。所有工具调用现在同时受工具自身风险等级 + 目标路径位置双重管控。
+- `ToolPathRiskResolver` 仅对声明了写入能力（`WriteProjectFiles | DeleteProjectFiles | ModifyScripts | ModifyAssets`）的工具执行路径嗅探；只读工具快速返回 `Safe`，零性能开销。
+- 当 `WorkspaceContext` 尚未初始化时（首次 Editor 启动、解析中），路径风险退化为 `Safe`（fail-open），不阻塞正常操作。
+
+## [1.0.2] - 2026-06-24
+
+### Added
+- **治理层 G.1.c — ToolCallDispatcher 策略执行接入**：[`ToolCallDispatcher.DispatchAsync()`](Editor/Tools/ToolCallDispatcher.cs:197) 在 schema 校验通过后、工具执行前统一调用 [`ToolRiskPolicy.Evaluate()`](Editor/Tools/Safety/ToolRiskPolicy.cs:179)，根据决策结果走三条路径：Allow（直通执行）、RequireConfirmation（弹窗确认）、Block（直接拒绝）。工具行为首次受到统一治理管控。
+- **IToolConfirmationProvider 接口**：新增 [`IToolConfirmationProvider`](Editor/Tools/Safety/IToolConfirmationProvider.cs:1) 抽象，定义 `RequestConfirmationAsync(ToolConfirmationRequest, CancellationToken)` → `bool` 契约；支持生产环境和测试环境的不同确认策略。
+- **DialogToolConfirmationProvider**：新增 [`DialogToolConfirmationProvider`](Editor/Tools/Safety/DialogToolConfirmationProvider.cs:1)，生产环境默认实现。通过 `EditorApplication.delayCall` + `TaskCompletionSource` 将 `EditorUtility.DisplayDialog` 阻塞调用正确 marshal 到主线程；超时 60 秒自动拒绝；null provider fail-safe 为自动拒绝。
+- **AutoToolConfirmationProvider**：新增 [`AutoToolConfirmationProvider`](Editor/Tools/Safety/AutoToolConfirmationProvider.cs:1)，测试/自动化场景用，构造时传入固定 `bool` 决定一律 Allow 或一律 Reject。
+- **ToolCallResult.Decision 扩展**：[`ToolCallResult`](Editor/Tools/ToolCallDispatcher.cs:35) 新增可空 `ToolPolicyDecision? Decision` 属性，承载每次调用的策略评估结果，供 AgentLoop 审计事件使用。
+- **AgentEventType 审计事件**：[`MessageTypes.cs`](Editor/Core/MessageTypes.cs:46) 新增 `ToolConfirmationRequested` / `ToolBlocked` 两个事件类型及对应工厂方法 [`AgentEvent.ToolConfirmationRequested()`](Editor/Core/MessageTypes.cs:402) / [`AgentEvent.ToolBlocked()`](Editor/Core/MessageTypes.cs:427)；UI 层可据此展示确认弹窗记录或阻断审计日志。
+- **AgentLoop 审计事件发射**：[`AgentLoop.Tools.cs`](Editor/Core/AgentLoop.Tools.cs:66) 在工具结果循环中，对 `RequireConfirmation` / `Block` 决策主动 `EmitEvent`，Allow 静默不发（减噪）。
+
+### Changed
+- **版本号**: `1.0.1` → `1.0.2`，标记治理层 G.1.c 落地 — ToolCallDispatcher 全面接入策略评估。
+- **ToolCallDispatcher 构造函数**：新增可选第二参数 `IToolConfirmationProvider provider = null`；AgentLoop 初始化时注入 `DialogToolConfirmationProvider`。
+- **ToolCallDispatcher.ToString() 输出**：policy 拒绝的调用在摘要中显示 `[POLICY:RequireConfirmation-Rejected]` 或 `[POLICY:Blocked]` 标签。
+- **用户拒绝反馈消息**：追加固定后缀 `" Do not retry without changing approach."`，引导 LLM 不盲目重试被拒操作。
+- **ROADMAP §0.4 / §2.x**：G.1.c 标记为已完成，G.1 整体状态更新为"G.1.a/b/c 已落地 v1.0.2"。
+
+### Notes
+- 本版本 **首次激活工具调用治理管道**。所有工具调用现在统一经过风险评估。当前默认 RiskLevel 为 `Medium`（Allow），因此大部分工具行为无感知变化；G.1.d 将细化 High/Destructive/CodeExecution 声明后，相关工具才会触发确认弹窗。
+- `pathRisk` 参数当前默认传 `WorkspaceOperationRisk.Safe`（真实 WorkspacePathPolicy 接入在 G.1.e）。
+- 确认超时 60 秒 = 自动拒绝 + LLM 收到 Fail 结果。
+
+## [1.0.1] - 2026-06-23
 
 ### Added
 - **LLM/Agent 架构安全收口准则**：新增并纳入 [`plans/llm-agent-architecture-remediation-plan.md`](plans/llm-agent-architecture-remediation-plan.md)，作为后续工具扩展、MCP、Plugin、文件写入自动化和 Agent 自治增强的前置治理文档。
+- **治理层 G.1.a — Tool Risk Metadata 基础设施**：新增 [`Editor/Tools/Safety/`](Editor/Tools/Safety/) 目录，包含 [`ToolRiskLevel`](Editor/Tools/Safety/ToolRiskLevel.cs:1)（7 级风险枚举：ReadOnly / Low / Medium / High / Destructive / External / CodeExecution）、[`ToolCapability`](Editor/Tools/Safety/ToolCapability.cs:1)（14 位 `[Flags]` 能力枚举：ReadProject / WriteProjectFiles / DeleteProjectFiles / ModifyScene / ModifyAssets / ModifyScripts / ExecuteCode / InstallPackages / BuildPlayer / NetworkAccess / VersionControlWrite / BatchExecute / ModifyProjectSettings / ModifyAgentConfig）、[`ToolExecutionRisk`](Editor/Tools/Safety/ToolExecutionRisk.cs:1)（合并 ToolRiskLevel + ToolCapability + WorkspaceOperationRisk 的 readonly struct）、[`ToolPolicyDecision`](Editor/Tools/Safety/ToolPolicyDecision.cs:1)（Allow / RequireConfirmation / Block 决策结构）、[`ToolConfirmationRequest`](Editor/Tools/Safety/ToolConfirmationRequest.cs:1)（UI 二次确认载荷）。
+- **治理层 G.1.a — Attribute / Metadata 扩展**：[`AgentToolAttribute`](Editor/Tools/Infrastructure/AgentToolAttribute.cs:1) 新增 `RiskLevel`（默认 `Medium`）、`Capabilities`（默认 `None`）、`RequiresConfirmation`（默认 `false`）三个属性；[`ToolMetadata`](Editor/Tools/IAgentTool.cs:24) 增加 G.1 构造重载并保留原 5 参数构造函数与默认值，新增 `WithRisk(...)` 克隆方法用于装饰器透传，全部向后兼容现有 51 个工具实现。
+- **治理层 G.1.a — RiskEnrichedTool 装饰器**：[`ToolAutoDiscovery.RegisterToolType`](Editor/Tools/Infrastructure/ToolAutoDiscovery.cs:88) 引入私有装饰器 `RiskEnrichedTool`，自动把 `[AgentTool]` 上的 RiskLevel / Capabilities / RequiresConfirmation 透传到 `IAgentTool.Metadata`，无需修改任何现有工具源码即可在 ToolRegistry 中携带风险元数据。
+- **治理层 G.1.b — ToolRiskPolicy 评估器**：新增 [`Editor/Tools/Safety/ToolRiskPolicy.cs`](Editor/Tools/Safety/ToolRiskPolicy.cs:1)，纯函数式策略评估器，合并工具风险（ToolRiskLevel + ToolCapability + RequiresConfirmation 声明）与路径风险（WorkspacePathPolicy → WorkspaceOperationRisk）形成统一 ToolPolicyDecision；置信阈值为 `RiskLevel >= High` 或 `WorkspaceOperationRisk >= MediumRisk`，并对 Delete / ModifyScripts / InstallPackages / BuildPlayer / VersionControlWrite / ModifyAgentConfig 等高敏能力强制要求二次确认；`IsCodeExecution` 始终走二次确认；`WorkspaceOperationRisk.Blocked` 直接 Block。该评估器不依赖任何 UI 状态，可被 Dispatcher / Headless / 未来 MCP / 测试复用。
 
 ### Changed
+- **版本号**: `1.0.0` → `1.0.1`，标记治理层 G.1.a / G.1.b 落地（基础设施 + 策略评估器），尚未接入 Dispatcher 执行链路。
 - **开发方向文档同步**：更新 [`plans/ROADMAP.md`](plans/ROADMAP.md)、[`plans/README.md`](plans/README.md)、[`AGENTS.md`](AGENTS.md) 与 [`plans/mcp-server-feasibility.md`](plans/mcp-server-feasibility.md)，明确 Phase 7 / Phase 8 仍是两个待开发产品模块，但实现前必须优先完成 Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权和 Lazy Tool Discovery 等治理层 P0 收口。
-- **MCP 启动条件收紧**：Phase 8 仍保持对外互操作定位，但不再表述为无条件“互不阻塞”；编码前必须满足治理层 G.1/G.2/G.3。
+- **MCP 启动条件收紧**：Phase 8 仍保持对外互操作定位，但不再表述为无条件"互不阻塞"；编码前必须满足治理层 G.1/G.2/G.3。
+- **ROADMAP §2.x 治理层进度**：G.1 标记为"实现中（G.1.a / G.1.b 已完成，G.1.c Dispatcher 接入待编译验证后启动）"。
+
+### Notes
+- 本次版本仅完成 G.1.a / G.1.b 的代码骨架与策略评估器，**尚未接入 [`ToolCallDispatcher`](Editor/Tools/ToolCallDispatcher.cs:1)**，因此目前所有工具行为与 v1.0.0 保持一致（不影响线上 Agent 行为）。
+- G.1.c（Dispatcher 接入）/ G.1.d（按 Category 细化高危工具风险声明）/ G.1.e（WorkspacePathPolicy 强制执行）将在编译验证通过后逐步推进。
+- 默认风险等级策略：未在 `[AgentTool]` 中显式声明 RiskLevel 的工具按 `Medium` 处理；按 Category 的精细化下调（如 ReadOnly 类工具）将在 G.1.d 阶段完成。
 
 ## [1.0.0] - 2026-06-16
 
