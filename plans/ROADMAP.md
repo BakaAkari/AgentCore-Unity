@@ -181,13 +181,13 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
-| 7.1.1 | **AssetPostprocessor 主触发源** | `OnPostprocessAllAssets` 替代当前同步触发；imported / deleted / moved 全覆盖 | [ ] |
-| 7.1.2 | **DirtyTracker 持久化** | `Library/agentcore-indexing-dirty.json` 跨 Domain Reload 保留脏文件队列 | [ ] |
-| 7.1.3 | **CoalescingScheduler** | 合并 + 去抖 + yield gate；避免短时间内重复全量扫描 | [ ] |
-| 7.1.4 | **BackgroundIndexService** | `Task.Run` 后台执行，每 N 文件 yield，不阻塞 Editor 主线程 | [ ] |
-| 7.1.5 | **CodebaseIndexer.RunTargetedIncrementalAsync** | 跳过 ScanAllFiles，按 dirty/deleted 集合定向更新 SQLite | [ ] |
-| 7.1.6 | **IndexingStatusBus + Hub Badge** | 状态枚举 Idle/Pending/Running/Failed/Disabled；Hub 会话头部右侧 ChipBadge 静默呈现 | [ ] |
-| 7.1.7 | **SOUL.md §14 / TOOLS.md.template 增补** | LLM 感知"索引可能正在后台更新"的规则，避免在 Pending 状态强行依赖陈旧结果 | [ ] |
+| 7.1.1 | **AssetPostprocessor 主触发源** | `OnPostprocessAllAssets` 替代当前同步触发；imported / deleted / moved 全覆盖 | [x] |
+| 7.1.2 | **DirtyTracker 持久化** | `Library/agentcore-indexing-dirty.json` 跨 Domain Reload 保留脏文件队列 | [x] |
+| 7.1.3 | **CoalescingScheduler** | 合并 + 去抖 + yield gate；避免短时间内重复全量扫描 | [x] |
+| 7.1.4 | **BackgroundIndexService** | `Task.Run` 后台执行，每 N 文件 yield，不阻塞 Editor 主线程 | [x] |
+| 7.1.5 | **CodebaseIndexer.RunTargetedIncrementalAsync** | 跳过 ScanAllFiles，按 dirty/deleted 集合定向更新 SQLite | [x] |
+| 7.1.6 | **IndexingStatusBus + Hub Badge** | 状态枚举 Idle/Pending/Running/Failed/Disabled；Hub 会话头部右侧 ChipBadge 静默呈现 | [x] |
+| 7.1.7 | **SOUL.md §14 / TOOLS.md.template 增补** | LLM 感知"索引可能正在后台更新"的规则，避免在 Pending 状态强行依赖陈旧结果 | [x] |
 
 ### 3.2 P1 — Plugin / Extension 系统（对内扩展）
 

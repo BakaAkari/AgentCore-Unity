@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using AgentCore.Editor.Components.Indexing.Config;
 using AgentCore.Editor.Components.Indexing.Core;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Config;
@@ -15,7 +16,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
     /// Full Index / Incremental / Clear Index operations.
     /// Mounted into the AgentCore Hub via <see cref="IndexingPanelContribution"/>.
     /// </summary>
-    public sealed class IndexingPanel : VisualElement
+    public sealed class IndexingPanel : VisualElement, IDisposable
     {
         // ── USS class names ──────────────────────────────────────────────────────
         private const string RootClass        = "indexing-panel";
@@ -47,6 +48,9 @@ namespace AgentCore.Editor.Components.Indexing.UI
         private Button _incrementalButton;
         private Button _clearButton;
         private Button _refreshStatsButton;
+        private Label _backgroundStatusLabel;
+        private Toggle _autoIndexToggle;
+        private Button _pauseAutoIndexButton;
 
         // ── Constructor ──────────────────────────────────────────────────────────
 
@@ -57,6 +61,16 @@ namespace AgentCore.Editor.Components.Indexing.UI
         {
             AddToClassList(RootClass);
             BuildUI();
+            IndexingStatusBus.StatusChanged += OnBackgroundStatusChanged;
+            ApplyBackgroundStatus(IndexingStatusBus.Current);
+        }
+
+        /// <summary>
+        /// Releases subscriptions held by this panel.
+        /// </summary>
+        public void Dispose()
+        {
+            IndexingStatusBus.StatusChanged -= OnBackgroundStatusChanged;
         }
 
         // ── Public lifecycle (called by contribution) ────────────────────────────
@@ -110,6 +124,9 @@ namespace AgentCore.Editor.Components.Indexing.UI
             _statusLabel.style.display = DisplayStyle.None;
             mainScroll.Add(_statusLabel);
 
+            // ── Background Auto Index ──
+            mainScroll.Add(BuildBackgroundIndexSection());
+
             // ── LLM Reference ──
             mainScroll.Add(BuildLlmReferenceSection());
 
@@ -124,6 +141,37 @@ namespace AgentCore.Editor.Components.Indexing.UI
         }
 
         // ── Section builders ─────────────────────────────────────────────────────
+
+        private VisualElement BuildBackgroundIndexSection()
+        {
+            var section = CreateSection("BACKGROUND INDEXING");
+            var content = section.Q<VisualElement>(className: SectionContentClass);
+
+            _backgroundStatusLabel = new Label();
+            _backgroundStatusLabel.AddToClassList("indexing-background-status");
+            content.Add(_backgroundStatusLabel);
+
+            var controls = new VisualElement();
+            controls.AddToClassList(ButtonRowClass);
+
+            _autoIndexToggle = new Toggle("Auto Index");
+            _autoIndexToggle.AddToClassList("indexing-auto-toggle");
+            _autoIndexToggle.value = IndexingSettings.instance.EffectiveAutoSettings.AutoIndexEnabled;
+            _autoIndexToggle.RegisterValueChangedCallback(OnAutoIndexToggleChanged);
+            controls.Add(_autoIndexToggle);
+
+            _pauseAutoIndexButton = new Button(OnPauseAutoIndexClicked);
+            _pauseAutoIndexButton.AddToClassList(ButtonClass);
+            controls.Add(_pauseAutoIndexButton);
+
+            content.Add(controls);
+
+            var help = new Label("Auto Index silently batches changed source files after the editor is idle. Session pause does not change saved settings.");
+            help.AddToClassList(HelpTextClass);
+            content.Add(help);
+
+            return section;
+        }
 
         private VisualElement BuildLlmReferenceSection()
         {
@@ -314,6 +362,111 @@ namespace AgentCore.Editor.Components.Indexing.UI
                     _cachedStats.LastIncrementalIndexAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")));
         }
 
+        // ── Background status rendering ──────────────────────────────────────────
+
+        private void OnBackgroundStatusChanged(IndexingStatusSnapshot snapshot)
+        {
+            schedule.Execute(() => ApplyBackgroundStatus(snapshot));
+        }
+
+        private void ApplyBackgroundStatus(IndexingStatusSnapshot snapshot)
+        {
+            if (_backgroundStatusLabel == null)
+                return;
+
+            _backgroundStatusLabel.RemoveFromClassList(StatusOkClass);
+            _backgroundStatusLabel.RemoveFromClassList(StatusErrorClass);
+            _backgroundStatusLabel.RemoveFromClassList("indexing-status-warn");
+
+            var autoEnabled = IndexingSettings.instance.EffectiveAutoSettings.AutoIndexEnabled;
+            var paused = BackgroundIndexService.SessionPaused;
+
+            if (_autoIndexToggle != null && _autoIndexToggle.value != autoEnabled)
+                _autoIndexToggle.SetValueWithoutNotify(autoEnabled);
+
+            if (_pauseAutoIndexButton != null)
+            {
+                _pauseAutoIndexButton.text = paused ? "Resume Session" : "Pause Session";
+                _pauseAutoIndexButton.tooltip = paused
+                    ? "Resume background indexing for this editor session."
+                    : "Pause background indexing until the editor reloads or resumes manually.";
+            }
+
+            if (!autoEnabled)
+            {
+                _backgroundStatusLabel.text = "Auto Index: disabled in Indexing settings.";
+                _backgroundStatusLabel.AddToClassList("indexing-status-warn");
+                return;
+            }
+
+            if (paused)
+            {
+                _backgroundStatusLabel.text = "Auto Index: paused for this editor session.";
+                _backgroundStatusLabel.AddToClassList("indexing-status-warn");
+                return;
+            }
+
+            if (snapshot == null)
+            {
+                _backgroundStatusLabel.text = "Auto Index: idle.";
+                _backgroundStatusLabel.AddToClassList(StatusOkClass);
+                return;
+            }
+
+            switch (snapshot.State)
+            {
+                case IndexingBackgroundState.Pending:
+                    _backgroundStatusLabel.text = snapshot.DirtyFileCount > 0
+                        ? $"Auto Index: pending ({snapshot.DirtyFileCount} dirty files)."
+                        : "Auto Index: pending.";
+                    _backgroundStatusLabel.AddToClassList("indexing-status-warn");
+                    break;
+
+                case IndexingBackgroundState.Running:
+                    _backgroundStatusLabel.text = snapshot.TotalFiles > 0
+                        ? $"Auto Index: running ({snapshot.ProcessedFiles}/{snapshot.TotalFiles})."
+                        : "Auto Index: running.";
+                    _backgroundStatusLabel.AddToClassList("indexing-status-warn");
+                    break;
+
+                case IndexingBackgroundState.Failed:
+                    _backgroundStatusLabel.text = string.IsNullOrEmpty(snapshot.LastError)
+                        ? "Auto Index: failed, retry scheduled."
+                        : $"Auto Index: failed, retry scheduled — {snapshot.LastError}";
+                    _backgroundStatusLabel.AddToClassList(StatusErrorClass);
+                    break;
+
+                case IndexingBackgroundState.Disabled:
+                    _backgroundStatusLabel.text = string.IsNullOrEmpty(snapshot.LastError)
+                        ? "Auto Index: disabled."
+                        : $"Auto Index: disabled — {snapshot.LastError}";
+                    _backgroundStatusLabel.AddToClassList(StatusErrorClass);
+                    break;
+
+                default:
+                    _backgroundStatusLabel.text = snapshot.LastSuccessAt.HasValue
+                        ? $"Auto Index: idle. Last success {snapshot.LastSuccessAt.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss}."
+                        : "Auto Index: idle.";
+                    _backgroundStatusLabel.AddToClassList(StatusOkClass);
+                    break;
+            }
+        }
+
+        private void OnAutoIndexToggleChanged(ChangeEvent<bool> evt)
+        {
+            var settings = IndexingSettings.instance;
+            settings.EffectiveAutoSettings.AutoIndexEnabled = evt.newValue;
+            settings.SaveSettings();
+            BackgroundIndexService.RequestRun();
+            ApplyBackgroundStatus(IndexingStatusBus.Current);
+        }
+
+        private void OnPauseAutoIndexClicked()
+        {
+            BackgroundIndexService.SetSessionPaused(!BackgroundIndexService.SessionPaused);
+            ApplyBackgroundStatus(IndexingStatusBus.Current);
+        }
+
         // ── Button handlers ──────────────────────────────────────────────────────
 
         private void OnRefreshStatsClicked()
@@ -412,6 +565,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 if (result.IsCompleted && result.IsSuccess)
                 {
                     var ms = result.ElapsedSeconds * 1000.0;
+                    BackgroundIndexService.RequestRun();
                     ShowStatus($"Done — {result.ProcessedFiles} files, {result.ExtractedSymbols} symbols ({ms:F0} ms)", false);
                 }
                 else if (result.IsCompleted && !result.IsSuccess)

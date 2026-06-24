@@ -359,6 +359,188 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
+        /// 执行针对性增量索引（Targeted Incremental）。
+        /// 仅处理调用方显式提供的脏文件和删除文件路径，不执行全盘扫描。
+        /// 适用于 BackgroundIndexService 从 DirtyTracker 接收到具体变更列表的场景。
+        ///
+        /// 如果尚未建立全量索引（无 last_full_index_at 元数据），返回失败进度且
+        /// <see cref="IndexingProgress.ErrorMessage"/> 为 "NO_FULL_INDEX"，
+        /// 调用方应据此决定是否触发全量索引。
+        /// </summary>
+        /// <param name="changedPaths">新增或修改的文件绝对路径列表（可为空集合）。</param>
+        /// <param name="deletedPaths">已删除的文件绝对路径列表（可为空集合）。</param>
+        /// <param name="yieldEveryNFiles">每处理 N 个文件后执行一次 Task.Yield()，
+        /// 实现协作式调度，避免长时间阻塞。0 表示不让步。</param>
+        /// <param name="onProgress">进度回调（可为 null）。</param>
+        /// <param name="ct">取消令牌。</param>
+        /// <returns>最终进度快照。</returns>
+        public async Task<IndexingProgress> RunTargetedIncrementalAsync(
+            IReadOnlyList<string> changedPaths,
+            IReadOnlyList<string> deletedPaths,
+            int yieldEveryNFiles = 5,
+            Action<IndexingProgress> onProgress = null,
+            CancellationToken ct = default)
+        {
+            var progress = IndexingProgress.CreateStarted(IndexingPhase.Initializing);
+            ReportProgress(onProgress, progress);
+
+            try
+            {
+                // 0. 参数校验
+                changedPaths ??= Array.Empty<string>();
+                deletedPaths ??= Array.Empty<string>();
+
+                if (changedPaths.Count == 0 && deletedPaths.Count == 0)
+                {
+                    // 无变更，直接返回成功
+                    var empty = IndexingProgress.CreateCompleted(progress);
+                    ReportProgress(onProgress, empty);
+                    return empty;
+                }
+
+                // 1. 解析 workspace
+                ct.ThrowIfCancellationRequested();
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var workspaceId = await _store.UpsertWorkspaceAsync(workspace, ct);
+                workspace = new IndexWorkspace
+                {
+                    Id = workspaceId,
+                    Fingerprint = workspace.Fingerprint,
+                    WorkspaceRoot = workspace.WorkspaceRoot,
+                    UnityRoot = workspace.UnityRoot,
+                    UnityRootRelativePath = workspace.UnityRootRelativePath,
+                    DisplayName = workspace.DisplayName,
+                    VcsType = workspace.VcsType,
+                    VcsRootPath = workspace.VcsRootPath,
+                    VcsUrl = workspace.VcsUrl,
+                    RepositoryRoot = workspace.RepositoryRoot,
+                    BranchId = workspace.BranchId,
+                    Revision = workspace.Revision,
+                };
+
+                // 2. 检查是否已有全量索引（无则拒绝执行）
+                var lastFullIndex = await _store.GetMetadataAsync(workspaceId, MetaKeyLastFullIndex, ct);
+                var storedVersion = await _store.GetMetadataAsync(workspaceId, MetaKeyIndexVersion, ct);
+
+                if (string.IsNullOrEmpty(lastFullIndex) || storedVersion != CurrentIndexVersion)
+                {
+                    var noIndex = IndexingProgress.CreateFailed(progress, "NO_FULL_INDEX");
+                    ReportProgress(onProgress, noIndex);
+                    return noIndex;
+                }
+
+                // 3. 解析 Roots（用于确定每个文件归属哪个 Root）
+                ct.ThrowIfCancellationRequested();
+                var roots = _rootResolver.Resolve(workspace);
+                var enabledRoots = roots.Where(r => r.IsEnabled).ToList();
+
+                foreach (var root in enabledRoots)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var rootId = await _store.UpsertRootAsync(workspaceId, root, ct);
+                    root.Id = rootId;
+                    root.WorkspaceId = workspaceId;
+                }
+
+                // 4. 处理删除的文件
+                progress.Phase = IndexingPhase.IncrementalIndexing;
+                progress.TotalFiles = changedPaths.Count + deletedPaths.Count;
+                ReportProgress(onProgress, progress);
+
+                int processedCount = 0;
+
+                foreach (var deletedPath in deletedPaths)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var normalizedPath = deletedPath.Replace('\\', '/');
+
+                    var existingFile = await _store.GetFileByPathAsync(workspaceId, normalizedPath, ct);
+                    if (existingFile != null)
+                    {
+                        await _store.DeleteDependenciesByFileAsync(existingFile.Id, ct);
+                        await _store.DeleteSymbolsByFileAsync(existingFile.Id, ct);
+                        await _store.DeleteFileAsync(existingFile.Id, ct);
+                    }
+
+                    processedCount++;
+                    progress.ProcessedFiles = processedCount;
+                    ReportProgress(onProgress, progress);
+
+                    // 协作式让步
+                    if (yieldEveryNFiles > 0 && processedCount % yieldEveryNFiles == 0)
+                        await Task.Yield();
+                }
+
+                // 5. 处理新增/修改的文件
+                foreach (var changedPath in changedPaths)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var normalizedPath = changedPath.Replace('\\', '/');
+                    progress.CurrentFile = normalizedPath;
+
+                    // 确定文件所属 Root
+                    var matchedRoot = FindRootForPath(normalizedPath, enabledRoots);
+                    if (matchedRoot == null)
+                    {
+                        // 文件不属于任何启用的 Root，跳过
+                        progress.SkippedFiles++;
+                        processedCount++;
+                        progress.ProcessedFiles = processedCount;
+                        ReportProgress(onProgress, progress);
+                        continue;
+                    }
+
+                    progress.CurrentRoot = matchedRoot.RootPath;
+
+                    // 如果文件已存在于索引中，先删除旧记录
+                    var oldFile = await _store.GetFileByPathAsync(workspaceId, normalizedPath, ct);
+                    if (oldFile != null)
+                    {
+                        await _store.DeleteDependenciesByFileAsync(oldFile.Id, ct);
+                        await _store.DeleteSymbolsByFileAsync(oldFile.Id, ct);
+                    }
+
+                    // 重新索引（IndexFileAsync 内部会检查文件大小和存在性）
+                    await IndexFileAsync(workspaceId, matchedRoot, normalizedPath, workspace, progress, ct);
+
+                    processedCount++;
+                    progress.ProcessedFiles = processedCount;
+                    ReportProgress(onProgress, progress);
+
+                    // 协作式让步
+                    if (yieldEveryNFiles > 0 && processedCount % yieldEveryNFiles == 0)
+                        await Task.Yield();
+                }
+
+                // 6. 持久化元数据
+                progress.Phase = IndexingPhase.Persisting;
+                ReportProgress(onProgress, progress);
+
+                await _store.SetMetadataAsync(workspaceId, MetaKeyLastIncrementalIndex,
+                    DateTime.UtcNow.ToString("O"), ct);
+
+                // 7. 完成
+                var completed = IndexingProgress.CreateCompleted(progress);
+                ReportProgress(onProgress, completed);
+                return completed;
+            }
+            catch (OperationCanceledException)
+            {
+                progress.Phase = IndexingPhase.Completed;
+                var failed = IndexingProgress.CreateFailed(progress, "Targeted incremental indexing was cancelled.");
+                ReportProgress(onProgress, failed);
+                return failed;
+            }
+            catch (Exception ex)
+            {
+                var failed = IndexingProgress.CreateFailed(progress, $"Targeted incremental indexing failed: {ex.Message}");
+                ReportProgress(onProgress, failed);
+                UnityEngine.Debug.LogError($"[CodebaseIndexer] Targeted incremental indexing failed: {ex}");
+                return failed;
+            }
+        }
+
+        /// <summary>
         /// 获取当前 workspace 的索引统计信息。
         /// </summary>
         /// <param name="ct">取消令牌。</param>
@@ -806,6 +988,32 @@ namespace AgentCore.Editor.Components.Indexing.Core
             return normalizedFile.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
                 ? normalizedFile.Substring(normalizedRoot.Length)
                 : normalizedFile;
+        }
+
+        /// <summary>
+        /// 为给定文件路径找到其所属的 IndexRoot。
+        /// 匹配规则：文件路径以 Root 路径为前缀（忽略大小写、统一正斜杠）。
+        /// 当多个 Root 匹配时，返回最长前缀匹配（最具体的 Root）。
+        /// </summary>
+        private static IndexRoot FindRootForPath(string normalizedFilePath, IReadOnlyList<IndexRoot> roots)
+        {
+            IndexRoot bestMatch = null;
+            int bestLength = 0;
+
+            foreach (var root in roots)
+            {
+                var normalizedRoot = root.RootPath.Replace('\\', '/').TrimEnd('/') + '/';
+                if (normalizedFilePath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (normalizedRoot.Length > bestLength)
+                    {
+                        bestLength = normalizedRoot.Length;
+                        bestMatch = root;
+                    }
+                }
+            }
+
+            return bestMatch;
         }
 
         /// <summary>

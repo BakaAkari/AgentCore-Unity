@@ -6,6 +6,7 @@ using AgentCore.Editor.Extensions;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
 using AgentCore.Editor.UI.Components;
+using AgentCore.Editor.Tools.Safety;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -98,6 +99,18 @@ namespace AgentCore.Editor.UI
 
         /// <summary>状态标签</summary>
         private Label _statusLabel;
+
+        /// <summary>工具栏扩展状态元素。</summary>
+        private readonly List<VisualElement> _toolbarStatusElements = new List<VisualElement>();
+
+        /// <summary>工具确认面板。</summary>
+        private VisualElement _toolConfirmationPanel;
+
+        /// <summary>待处理工具确认请求队列。</summary>
+        private readonly Queue<PendingToolConfirmation> _pendingToolConfirmations = new Queue<PendingToolConfirmation>();
+
+        /// <summary>当前展示中的工具确认请求。</summary>
+        private PendingToolConfirmation _activeToolConfirmation;
 
         /// <summary>文件变更汇总面板</summary>
         private FileChangeSummaryPanel _fileChangeSummaryPanel;
@@ -241,6 +254,7 @@ namespace AgentCore.Editor.UI
 
             // 3.6 初始化 Hub 动态扩展面板
             InitializeHubPanels();
+            MountToolbarStatusContributions();
 
             // 3.7 创建 Hub Rail 并插入到 main-body 首位
             _hubRail = new HubRail(CreateHubModuleDefinitions(), ChatModuleId);
@@ -284,6 +298,9 @@ namespace AgentCore.Editor.UI
                 {
                     chatArea.Insert(inputIndex, _fileChangeSummaryPanel);
                 }
+
+                // 6.75 创建内嵌工具确认面板，避免系统弹窗依赖 Unity 前台窗口。
+                InitializeToolConfirmationPanel(chatArea, inputArea);
 
                 // 6.8 Phase 6.0.4: 创建上下文使用情况面板并插入到 input-area 之前（在文件变更面板之后）
                 _contextUsagePanel = new ContextUsagePanel();
@@ -351,6 +368,8 @@ namespace AgentCore.Editor.UI
             _messageListManager?.DetachScrollView();
             _messageListManager = null;
 
+            ClearPendingToolConfirmations();
+            DisposeToolbarStatusContributions();
             DisposeHubPanels();
 
             _messageBubbles.Clear();
@@ -373,7 +392,8 @@ namespace AgentCore.Editor.UI
                 var llmClient = new OpenAICompatibleClient();
 
                 // 创建 AgentLoop
-                _agentLoop = new AgentLoop(llmClient);
+                var confirmationProvider = new DelegatingToolConfirmationProvider(RequestEmbeddedToolConfirmationAsync);
+                _agentLoop = new AgentLoop(llmClient, confirmationProvider);
                 _agentLoop.OnAgentEvent += HandleAgentEvent;
 
                 // 初始化（加载 Bootstrap 上下文）

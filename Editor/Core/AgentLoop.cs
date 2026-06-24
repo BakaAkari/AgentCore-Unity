@@ -162,13 +162,14 @@ namespace AgentCore.Editor.Core
         /// 创建 Agent Loop 实例。
         /// </summary>
         /// <param name="llmClient">LLM 客户端实例（通过依赖注入传入）</param>
+        /// <param name="confirmationProvider">工具确认提供者；为 null 时使用 fail-safe 自动拒绝语义。</param>
         /// <exception cref="ArgumentNullException">当 llmClient 为 null 时抛出</exception>
-        public AgentLoop(ILLMClient llmClient)
+        public AgentLoop(ILLMClient llmClient, IToolConfirmationProvider confirmationProvider = null)
         {
             _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
             _dispatcher = new ToolCallDispatcher(
                 ToolRegistry.Instance,
-                new DialogToolConfirmationProvider());
+                confirmationProvider);
         }
 
         #endregion

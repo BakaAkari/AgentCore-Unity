@@ -88,8 +88,7 @@ namespace AgentCore.Editor.Core
 
         /// <summary>
         /// 工具执行前需要用户确认（<see cref="ToolPolicyOutcome.RequireConfirmation"/>）。
-        /// UI 层应展示 <see cref="AgentEvent.ConfirmationRequest"/> 的内容，但实际确认交互由
-        /// <see cref="IToolConfirmationProvider"/> 在 dispatcher 内完成；本事件用于审计/追踪。
+        /// 实际确认交互由 <see cref="IToolConfirmationProvider"/> 完成；本事件用于审计/追踪。
         /// </summary>
         ToolConfirmationRequested,
 
@@ -171,7 +170,7 @@ namespace AgentCore.Editor.Core
 
         /// <summary>
         /// 工具确认请求详情（<see cref="AgentEventType.ToolConfirmationRequested"/> 时有值）。
-        /// 实际的确认 UI 交互由 <see cref="IToolConfirmationProvider"/> 完成，
+        /// 实际确认交互由 <see cref="IToolConfirmationProvider"/> 完成，
         /// 本字段仅作为事件总线上的快照，供日志/审计/侧栏面板使用。
         /// </summary>
         public ToolConfirmationRequest ConfirmationRequest { get; }

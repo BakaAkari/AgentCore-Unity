@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.0] - 2026-06-24
 
 ### Added
+- **Phase 7 §3.1 — 后台静默 + 增量索引**：Code Indexing 新增后台自动增量链路，包含 `AssetPostprocessor` 变更触发、`Library/agentcore-indexing-dirty.json` 脏队列持久化、静默合并调度、`BackgroundIndexService` 后台执行和 `CodebaseIndexer.RunTargetedIncrementalAsync` 定向增量更新。
+- **Indexing 状态可观测性**：新增 `IndexingStatusBus`、ChatWindow 工具栏状态 Chip、Code Indexing Panel 的 Auto Index 开关与 Session Pause/Resume 控制，后台索引 Pending/Running/Failed/Disabled 状态不阻塞 Chat 输入。
+- **`search_code` 状态查询**：新增 `status` action，返回后台索引状态、dirty 数量、进度、最后错误、最后成功时间、连续失败次数和 session pause 状态；`SOUL.md` 与 `TOOLS.md.template` 已更新为后台索引感知工作流。
 - **治理层 G.2 — ExecuteCodeTool 降权**：`execute_code` 工具新装默认禁用（加入 `disabledTools` 列表）；标记为 `Visibility = ToolVisibility.Restricted`，即使用户手动启用也不会默认暴露给 LLM，需通过 `request_tools` 主动激活。v9→v10 迁移逻辑保留旧用户的原有配置不受影响。
 - **治理层 G.3 — ActiveToolScope / Lazy Tool Discovery**：
   - 新增 [`ToolVisibility`](Editor/Tools/Infrastructure/ToolVisibility.cs:1) 三级枚举（AlwaysVisible / OnDemand / Restricted），通过 `[AgentTool]` 特性的 `Visibility` 属性声明。
@@ -17,14 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `AgentLoop.BuildToolDefinitions()` 改为通过 `ToolScopeResolver` 解析，不再暴露全部工具。
   - 全量工具分类标注：12 Specialized + 10 Extended + 7 Utility + 2 Scripting + 1 Meta + 2 Cloud + 1 VCS + 1 Indexing → OnDemand；`execute_code` → Restricted；核心工具（场景/GameObject/组件/文件/脚本/资产/控制台/Bootstrap 等）保持 AlwaysVisible。
 - **Settings 开关**：`toolScopingEnabled` 字段控制整体开关，默认启用；关闭后回退到全量暴露行为。
+- **内嵌工具确认 UI**：ChatWindow 新增非模态工具审批面板与确认队列，工具执行需要用户确认时不再依赖系统级阻塞弹窗。
 
 ### Changed
-- **版本号**: `1.0.3` → `1.1.0`，标记治理层 G.2 + G.3 完成（Minor 升级：新增渐进暴露能力）。
+- **版本号**: `1.0.3` → `1.1.0`，标记治理层 G.2 / G.3 与 Phase 7 §3.1 后台静默 + 增量索引完成（Minor 升级：新增渐进暴露能力与索引体验深化）。
 - **AgentCoreSettings**: `CurrentVersion` 升至 10；新增 `toolScopingEnabled` 字段。
 - **ToolMetadata**: 新增 `Visibility` 属性，`WithRiskAndVisibility()` 方法。
 - **ToolAutoDiscovery**: 自动读取 `[AgentTool].Visibility` 并传递到 ToolMetadata。
+- **工具确认默认路径**: `AgentLoop` 改为注入 `IToolConfirmationProvider`，ChatWindow 默认使用内嵌确认提供者；`DialogToolConfirmationProvider` 保留为兼容/后备实现。
 
 ### Notes
+- Phase 7 §3.1 保持在 v1.1.0 内交付：不扩大默认工具暴露，不引入新存储/新协议，索引数据仍为本地 SQLite/JSONL 后端。
 - G.2 + G.3 合并为 v1.1.0 发布：G.2 是 G.3 的子集（execute_code 的 Restricted 可见性依赖 G.3 的 ToolVisibility 机制）。
 - 工具作用域在 `ResetConversation()` 时自动重置（通过 `Initialize()` 重新创建 `ToolScopeState`）。
 - 按需工具的分类名称取自 `[AgentTool].Category`（不区分大小写），LLM 可通过 `request_tools list` 查看完整分类列表及工具数量。

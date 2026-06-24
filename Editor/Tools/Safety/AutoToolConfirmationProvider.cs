@@ -12,7 +12,7 @@ namespace AgentCore.Editor.Tools.Safety
     /// 2. CI 环境下避免阻塞主线程；
     /// 3. 显式声明"当前会话信任所有 RequireConfirmation 工具"或"全部拒绝"的极端策略。
     ///
-    /// 注意：生产环境（用户日常使用）应使用 <see cref="DialogToolConfirmationProvider"/>，
+    /// 注意：生产环境（用户日常使用）应使用 ChatWindow 内嵌确认 UI，
     /// 这里只作为可注入的替代实现，不会成为默认值。
     /// </summary>
     public sealed class AutoToolConfirmationProvider : IToolConfirmationProvider

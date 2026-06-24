@@ -15,6 +15,7 @@ namespace AgentCore.Editor.Extensions
         private static readonly List<IAgentCorePanelContribution> _panels = new List<IAgentCorePanelContribution>();
         private static readonly List<IAgentCoreSettingsContribution> _settings = new List<IAgentCoreSettingsContribution>();
         private static readonly List<IAgentCoreSettingsPage> _pages = new List<IAgentCoreSettingsPage>();
+        private static readonly List<IAgentCoreStatusContribution> _statuses = new List<IAgentCoreStatusContribution>();
         private static bool _isInitialized;
 
         /// <summary>
@@ -55,6 +56,18 @@ namespace AgentCore.Editor.Extensions
         }
 
         /// <summary>
+        /// Gets all discovered toolbar status contributions ordered by their declared order and identifier.
+        /// </summary>
+        public static IReadOnlyList<IAgentCoreStatusContribution> Statuses
+        {
+            get
+            {
+                EnsureInitialized();
+                return _statuses;
+            }
+        }
+
+        /// <summary>
         /// Clears cached contributions and rescans all currently loaded assemblies.
         /// </summary>
         public static void Refresh()
@@ -62,6 +75,7 @@ namespace AgentCore.Editor.Extensions
             _panels.Clear();
             _settings.Clear();
             _pages.Clear();
+            _statuses.Clear();
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -74,6 +88,7 @@ namespace AgentCore.Editor.Extensions
             SortAndDeduplicate(_panels, contribution => contribution.Id);
             SortAndDeduplicate(_settings, contribution => contribution.Id);
             SortAndDeduplicate(_pages, page => page.Id);
+            SortAndDeduplicate(_statuses, contribution => contribution.Id);
             _isInitialized = true;
         }
 
@@ -127,6 +142,11 @@ namespace AgentCore.Editor.Extensions
                     TryCreateContribution(type, _pages);
                 }
             }
+
+            if (typeof(IAgentCoreStatusContribution).IsAssignableFrom(type))
+            {
+                TryCreateContribution(type, _statuses);
+            }
         }
 
         private static void TryCreateContribution<TContribution>(Type type, List<TContribution> target)
@@ -172,6 +192,8 @@ namespace AgentCore.Editor.Extensions
                     return settings.Order;
                 case IAgentCoreSettingsPage page:
                     return page.Order;
+                case IAgentCoreStatusContribution status:
+                    return status.Order;
                 default:
                     return 0;
             }

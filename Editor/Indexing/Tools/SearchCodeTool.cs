@@ -18,6 +18,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     /// 代码库索引与符号搜索工具。
     ///
     /// 支持的 action：
+    ///   status             — 获取后台索引状态
     ///   resolve_workspace  — 获取当前 WorkspaceRoot、UnityRoot、fingerprint、VCS、root 摘要
     ///   list_roots         — 列出当前索引根目录和 Scope
     ///   index_full         — 全量索引所有 enabled roots
@@ -44,7 +45,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
   ""properties"": {
     ""action"": {
       ""type"": ""string"",
-      ""enum"": [""resolve_workspace"", ""list_roots"", ""index_full"", ""index_scope"", ""index_incremental"", ""search_symbol"", ""search_text"", ""list_namespaces"", ""get_file_symbols"", ""get_stats"", ""clear_index"", ""get_dependencies"", ""find_usages"", ""get_symbol_context"", ""get_backend_info""],
+      ""enum"": [""status"", ""resolve_workspace"", ""list_roots"", ""index_full"", ""index_scope"", ""index_incremental"", ""search_symbol"", ""search_text"", ""list_namespaces"", ""get_file_symbols"", ""get_stats"", ""clear_index"", ""get_dependencies"", ""find_usages"", ""get_symbol_context"", ""get_backend_info""],
       ""description"": ""要执行的操作""
     },
     ""query"": {
@@ -161,6 +162,10 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
                 switch (action)
                 {
+                    case "status":
+                        response = HandleStatus();
+                        break;
+
                     case "resolve_workspace":
                         response = HandleResolveWorkspace();
                         break;
@@ -223,7 +228,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: resolve_workspace, list_roots, index_full, index_scope, index_incremental, search_symbol, search_text, list_namespaces, get_file_symbols, get_stats, clear_index, get_dependencies, find_usages, get_symbol_context, get_backend_info");
+                            $"Unknown action: '{action}'. Valid actions: status, resolve_workspace, list_roots, index_full, index_scope, index_incremental, search_symbol, search_text, list_namespaces, get_file_symbols, get_stats, clear_index, get_dependencies, find_usages, get_symbol_context, get_backend_info");
                         break;
                 }
             }
@@ -237,6 +242,26 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         }
 
         // ── Action Handlers ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// status — 获取当前后台索引状态。
+        /// </summary>
+        private static ToolResponse HandleStatus()
+        {
+            var snapshot = IndexingStatusBus.Current;
+            return ToolResponse.OkWithData(new
+            {
+                state = snapshot.State.ToString(),
+                dirty_file_count = snapshot.DirtyFileCount,
+                processed_files = snapshot.ProcessedFiles,
+                total_files = snapshot.TotalFiles,
+                current_file = snapshot.CurrentFile,
+                last_error = snapshot.LastError,
+                last_success_at = snapshot.LastSuccessAt?.ToString("O"),
+                consecutive_failures = snapshot.ConsecutiveFailures,
+                session_paused = BackgroundIndexService.SessionPaused,
+            }, $"后台索引状态：{snapshot.State}");
+        }
 
         /// <summary>
         /// resolve_workspace — 获取当前 WorkspaceRoot、UnityRoot、fingerprint、VCS、root 摘要。

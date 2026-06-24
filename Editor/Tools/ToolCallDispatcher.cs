@@ -147,7 +147,7 @@ namespace AgentCore.Editor.Tools
         /// 用户确认提供器。
         /// <para>
         /// <c>null</c> 为 fail-safe 模式：任何 RequireConfirmation 决策都将自动拒绝。
-        /// 正常使用时应通过构造函数注入 <see cref="DialogToolConfirmationProvider"/> 或其他实现。
+        /// 正常使用时应通过构造函数注入 ChatWindow 内嵌确认提供者或其他实现。
         /// </para>
         /// </summary>
         private readonly IToolConfirmationProvider _confirmationProvider;

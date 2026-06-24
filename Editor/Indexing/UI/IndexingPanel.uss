@@ -44,6 +44,29 @@
     flex-shrink: 0;
 }
 
+.indexing-panel .indexing-background-status {
+    font-size: 11px;
+    color: #c8c8c8;
+    margin-bottom: 8px;
+    white-space: normal;
+}
+
+.indexing-panel .indexing-status-warn {
+    color: #d0b878;
+    border-color: #5a5034;
+}
+
+.indexing-panel .indexing-auto-toggle {
+    margin-right: 12px;
+    color: #d4d4d4;
+    flex-shrink: 0;
+}
+
+.indexing-panel .indexing-auto-toggle .unity-toggle__label {
+    color: #d4d4d4;
+    font-size: 12px;
+}
+
 /* ── Status Message ── */
 .indexing-panel .indexing-status-label {
     margin-bottom: 12px;

@@ -25,6 +25,61 @@ namespace AgentCore.Editor.UI
         #region Hub 模块切换
 
         /// <summary>
+        /// 挂载工具栏状态扩展。
+        /// </summary>
+        private void MountToolbarStatusContributions()
+        {
+            DisposeToolbarStatusContributions();
+
+            var toolbar = rootVisualElement.Q<VisualElement>("toolbar");
+            if (toolbar == null)
+                return;
+
+            var insertIndex = _statusLabel != null ? toolbar.IndexOf(_statusLabel) : toolbar.childCount;
+            foreach (var contribution in AgentCoreExtensionRegistry.Statuses)
+            {
+                if (contribution == null)
+                    continue;
+
+                try
+                {
+                    var element = contribution.CreateStatusElement();
+                    if (element == null)
+                        continue;
+
+                    element.name = string.IsNullOrWhiteSpace(element.name)
+                        ? $"{contribution.Id}-status"
+                        : element.name;
+                    toolbar.Insert(Math.Max(0, insertIndex), element);
+                    insertIndex++;
+                    _toolbarStatusElements.Add(element);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] Failed to create toolbar status contribution '{contribution.Id}': {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 释放工具栏状态扩展资源。
+        /// </summary>
+        private void DisposeToolbarStatusContributions()
+        {
+            foreach (var element in _toolbarStatusElements)
+            {
+                if (element is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+
+                element?.RemoveFromHierarchy();
+            }
+
+            _toolbarStatusElements.Clear();
+        }
+
+        /// <summary>
         /// 创建当前窗口可用的 Hub 模块定义。
         /// </summary>
         /// <returns>Hub 模块定义列表。</returns>

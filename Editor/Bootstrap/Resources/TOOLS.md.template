@@ -282,6 +282,7 @@
 - **Want to add/remove a scripting define?** → `read_console` (action: `set_scripting_define`)
 - **Want to set up advanced Cinemachine cameras?** → `manage_cinemachine` (action: `create_freelook`, `create_state_driven`, `create_clearshot`, `create_sequencer`)
 - **Want to extrude/bevel ProBuilder faces?** → `manage_probuilder` (action: `extrude_faces`, `bevel_edges`)
+- **Want to check whether code indexing is currently updating?** → `search_code` (action: `status`)
 - **Want to find a C# class/interface definition?** → `search_code` (action: `search_symbol`)
 - **Want to browse project namespaces?** → `search_code` (action: `list_namespaces`)
 - **Want to see all symbols in a file?** → `search_code` (action: `get_file_symbols`)
@@ -344,21 +345,26 @@
   - 注意：知识库服务需要在 Settings 面板中配置 LightRAG 端点地址；索引操作是异步的，处理完成后方可查询
 
 ### 代码库索引与符号检索
-- `search_code` — 基于 Roslyn 的 C# 符号索引，支持全量/增量索引、多维度符号查询、依赖图分析和 FTS5 全文搜索（需启用 Code Indexing 可选组件）
+- `search_code` — 基于 Roslyn 的 C# 符号索引，支持后台异步增量索引、多维度符号查询、依赖图分析和 FTS5 全文搜索（需启用 Code Indexing 可选组件）
+  - 代码索引默认在文件变更后约 2 秒后台自动更新；后台索引中读路径不阻塞，可继续查询（基于上次成功的快照）。
   - **工作流**：
     - **对话开始时的标准工作流**（每次对话开始，若用户请求涉及 C# 代码或项目结构时执行）：
       1. 调用 `get_stats` 检查索引是否存在（Total Files > 0）
-      2. 如果索引存在，调用 `index_incremental` 同步最近的文件变更
-      3. 如果索引为空（Total Files = 0），提示用户先在 Project Settings > AgentCore > Indexing 运行 Full Index
-      4. 不要因为等待索引而阻塞对话——继续处理用户请求，索引完成后再使用
-    - **常规工作流**：首次使用先 `index_full` 建立索引，后续用 `index_incremental` 保持更新，再用 `search_symbol` 或 `search_text` 查询
+      2. 如果索引存在，调用 `status` 检查后台索引是否 Pending / Running / Failed / Disabled
+      3. 如果后台索引 Pending / Running，继续处理用户请求，不阻塞 Chat 输入，必要时提示用户结果来自上次成功快照
+      4. 如果索引为空（Total Files = 0），提示用户先在 Project Settings > AgentCore > Indexing 运行 Full Index
+      5. 不要因为等待索引而阻塞对话——继续处理用户请求，索引完成后再使用
+    - **常规工作流**：首次使用先 `index_full` 建立索引，后续由后台 Auto Index 自动保持更新；只有用户明确要求立即刷新时才调用 `index_incremental`
+  - `status`: 查询后台索引状态
+    - 返回字段：`state`（Idle/Pending/Running/Failed/Disabled）、`dirty_file_count`、`processed_files`、`total_files`、`current_file`、`last_error`、`last_success_at`、`consecutive_failures`、`session_paused`
+    - 用途：当新类/新方法搜不到、或刚执行 git pull / svn update / 大量文件变更后，判断索引是否仍在后台更新
   - `resolve_workspace`: 查看当前工作区信息（WorkspaceRoot、UnityRoot、WorkspaceHash）
   - `list_roots`: 列出所有已发现的索引根目录（含 scope_type、role、path、file_count）
-  - `index_full`: 全量索引 — 清空并重建所有根目录的符号数据库（同时提取依赖图）
+  - `index_full`: 全量索引 — 清空并重建所有根目录的符号数据库（同时提取依赖图）；通常不要主动调用，作为用户明确要求的逃生口
     - 可选参数：`max_file_size_bytes`（默认 1MB）
   - `index_scope`: 局部全量索引 — 只索引指定范围的根目录
     - 参数：`scope_type`（UnityProject/VcsWorkspace/ResourcePackage/UserConfigured）或 `scope_name`（根目录名称）或 `root_id`（根目录 ID）
-  - `index_incremental`: 增量索引 — 只重新索引自上次以来修改过的文件（速度快，适合频繁调用）
+  - `index_incremental`: 增量索引 — 强制立即刷新；通常不要主动调用，后台调度会自动处理
   - `search_symbol`: 按名称/类型/命名空间搜索符号（支持模糊/正则）
     - 参数：`query`（必填，搜索关键词），`symbol_type`（可选：class/interface/struct/enum/method/property/field/event/delegate/constructor），`namespace`（可选，命名空间前缀过滤），`scope_type`（可选，限定索引范围），`limit`（可选，默认 50，最大 200）
     - 返回：每条结果包含 `name`、`full_name`、`symbol_type`、`namespace`、`file_path`、`line_number`、`declaration_snippet`、`accessibility`、`base_types`
@@ -391,5 +397,5 @@
     - 查找哪些地方引用了 PlayerController → `find_usages`（type_name: "PlayerController"）
     - 全面了解某个类的上下文 → `get_symbol_context`（full_name: "MyNamespace.MyClass"）
     - 项目初始化时建立索引 → `index_full`
-    - 每次对话开始时快速更新 → `index_incremental`
+    - 每次对话开始时检查后台刷新状态 → `status`
   - 注意：需要在 Extensions 设置页启用 Code Indexing 组件（define: AGENTCORE_INDEXING）；索引数据默认存储在 `{WorkspaceRoot}/.agentcore/index/codebase.db`（SQLite），不需要提交到版本控制

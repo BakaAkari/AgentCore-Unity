@@ -19,8 +19,8 @@ namespace AgentCore.Editor.Tools.Safety
     /// </list>
     /// </para>
     /// <para>
-    /// G.1.c 阶段的默认实现是 <see cref="DialogToolConfirmationProvider"/>，
-    /// 使用 <c>EditorUtility.DisplayDialog</c> 阻塞式弹窗。非阻塞 UI 推迟到 G.5。
+    /// 默认交互应由 ChatWindow 内嵌确认 UI 提供，避免阻塞式系统弹窗依赖 Unity 位于前台。
+    /// <see cref="DialogToolConfirmationProvider"/> 仅保留为兼容和后备实现。
     /// </para>
     /// </summary>
     public interface IToolConfirmationProvider

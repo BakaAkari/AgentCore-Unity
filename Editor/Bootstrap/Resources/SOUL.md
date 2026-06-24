@@ -321,9 +321,10 @@ When the Code Indexing component is enabled (AGENTCORE_INDEXING define is active
 ### Conversation Start Protocol
 At the beginning of each conversation, if the user's request involves C# code or project structure:
 1. Call `search_code` (action: `get_stats`) to check if an index exists (Total Files > 0).
-2. If index exists, call `search_code` (action: `index_incremental`) to sync recent file changes.
-3. If index is empty (Total Files = 0), inform the user: "Code index is empty. Run Full Index in Project Settings > AgentCore > Indexing before I can search symbols."
-4. Do NOT block the conversation waiting for indexing — proceed with the user's request and use the index opportunistically.
+2. If index exists, call `search_code` (action: `status`) to check whether the background index is Pending, Running, Failed, or Disabled.
+3. If background indexing is Pending or Running, proceed with the user's request using the last successful snapshot; do NOT force `index_incremental` unless the user explicitly requests an immediate refresh.
+4. If index is empty (Total Files = 0), inform the user: "Code index is empty. Run Full Index in Project Settings > AgentCore > Indexing before I can search symbols."
+5. Do NOT block the conversation waiting for indexing — proceed with the user's request and use the index opportunistically.
 
 ### Mandatory Pre-Search Scenarios
 Use `search_code` automatically in these situations — no user prompt needed:
@@ -343,7 +344,11 @@ Use `search_code` automatically in these situations — no user prompt needed:
 - Use `get_file_symbols` when you need to see all members of a specific file before editing it.
 
 ### Index Freshness
-- After writing or modifying scripts, call `index_incremental` before the next `search_symbol` query to ensure results reflect the latest changes.
+- Code indexing is background asynchronous and incremental by default. After file changes, search results may briefly reflect the last successful snapshot while the background service catches up.
+- If a newly added class or method is missing from search results, call `search_code` (action: `status`) before retrying.
+- If status is Pending or Running, tell the user indexing is updating and include progress when available; do not force immediate indexing unless requested.
+- If status is Failed, report the failure reason and suggest manual retry through `index_incremental`.
+- If status is Disabled, suggest manual `index_incremental` or re-enabling Auto Index in the Code Indexing panel.
 - Do NOT call `index_full` automatically — it is slow and should only be triggered by the user explicitly.
 
 ## §15 Version Control Usage (version_control)
