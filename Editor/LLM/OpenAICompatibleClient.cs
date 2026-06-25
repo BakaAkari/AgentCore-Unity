@@ -44,7 +44,7 @@ namespace AgentCore.Editor.LLM
                 MaxTokens = settings.maxTokens
             };
 
-            var json = JsonHelper.Serialize(request);
+            var json = RequestEnrichment.BuildEnrichedJson(request, settings);
             var url = settings.GetChatCompletionsUrl();
 
             Debug.Log($"[AgentCore] LLM request: {url} model={settings.llmModel} messages={messages.Count}");
@@ -102,7 +102,7 @@ namespace AgentCore.Editor.LLM
                 MaxTokens = settings.maxTokens
             };
 
-            var json = JsonHelper.Serialize(request);
+            var json = RequestEnrichment.BuildEnrichedJson(request, settings);
             var url = settings.GetChatCompletionsUrl();
 
             Debug.Log($"[AgentCore] LLM stream request: {url} model={settings.llmModel} messages={messages.Count}");

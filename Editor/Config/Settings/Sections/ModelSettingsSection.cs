@@ -94,6 +94,71 @@ namespace AgentCore.Editor.Config.Settings.Sections
                 EditorGUILayout.Space(6);
                 DrawConnectionActions(context);
             });
+
+            EditorGUILayout.Space(8);
+            DrawRequestEnrichment(context);
+        }
+
+        private void DrawRequestEnrichment(AgentCoreSettingsContext context)
+        {
+            var settings = context.Settings;
+
+            context.Ui.DrawCard("Request Enrichment", "Configure additional parameters injected into every LLM request. Enables reasoning/thinking chain output from supported models (Claude, DeepSeek, etc.).", () =>
+            {
+                EditorGUI.BeginChangeCheck();
+
+                settings.enableReasoningOutput = EditorGUILayout.Toggle(
+                    new GUIContent("Enable Reasoning Output", "向请求注入 reasoning 参数，触发模型返回思维链（reasoning_content）。支持 OpenRouter、Claude API 等。"),
+                    settings.enableReasoningOutput);
+
+                using (new EditorGUI.DisabledGroupScope(!settings.enableReasoningOutput))
+                {
+                    EditorGUI.indentLevel++;
+
+                    // Reasoning Effort 下拉选择
+                    var effortOptions = new[] { "(default)", "low", "medium", "high" };
+                    var currentEffort = string.IsNullOrWhiteSpace(settings.reasoningEffort) ? 0
+                        : System.Array.IndexOf(effortOptions, settings.reasoningEffort.Trim().ToLowerInvariant());
+                    if (currentEffort < 0) currentEffort = 0;
+
+                    var newEffort = EditorGUILayout.Popup(
+                        new GUIContent("Reasoning Effort", "推理努力级别。default = 不指定，由模型自行决定。high = 更深入推理但更慢。"),
+                        currentEffort, effortOptions);
+                    settings.reasoningEffort = newEffort == 0 ? "" : effortOptions[newEffort];
+
+                    settings.reasoningMaxTokens = EditorGUILayout.IntField(
+                        new GUIContent("Reasoning Max Tokens", "推理过程最大 token 数。0 = 不限制，由模型决定。"),
+                        settings.reasoningMaxTokens);
+                    settings.reasoningMaxTokens = Mathf.Max(0, settings.reasoningMaxTokens);
+
+                    EditorGUI.indentLevel--;
+                }
+
+                EditorGUILayout.Space(4);
+                EditorGUILayout.LabelField("Extra Request Body (JSON)", EditorStyles.boldLabel);
+                EditorGUILayout.HelpBox(
+                    "Advanced: raw JSON merged into every LLM request. Use for provider-specific parameters not covered above. Must be a valid JSON object (e.g. {\"top_p\": 0.9}).",
+                    MessageType.None);
+                settings.extraRequestBody = EditorGUILayout.TextArea(settings.extraRequestBody, GUILayout.MinHeight(48));
+
+                // 验证 JSON 格式
+                if (!string.IsNullOrWhiteSpace(settings.extraRequestBody))
+                {
+                    try
+                    {
+                        Newtonsoft.Json.Linq.JObject.Parse(settings.extraRequestBody);
+                    }
+                    catch (Newtonsoft.Json.JsonReaderException)
+                    {
+                        EditorGUILayout.HelpBox("Invalid JSON format. This will be ignored at runtime.", MessageType.Warning);
+                    }
+                }
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    settings.SaveSettings();
+                }
+            });
         }
 
         private void DrawModelSelector(AgentCoreSettingsContext context)

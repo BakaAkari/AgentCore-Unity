@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 10;
+        private const int CurrentVersion = 11;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -193,6 +193,21 @@ namespace AgentCore.Editor.Config
         [Tooltip("Workspace 配置版本（内部使用，用于检测 workspace.json 变更）")]
         public int workspaceConfigVersion = 0;
 
+        // --- 请求增强配置 ---
+        [Header("Request Enrichment")]
+        [Tooltip("启用 Reasoning 输出（向 LLM 请求中注入 reasoning 参数，触发思维链返回）")]
+        public bool enableReasoningOutput = true;
+
+        [Tooltip("推理努力级别（low/medium/high），留空表示不指定（由模型决定）")]
+        public string reasoningEffort = "";
+
+        [Tooltip("推理最大 token 数（0 = 不限制，由模型决定）")]
+        public int reasoningMaxTokens = 0;
+
+        [Tooltip("额外请求体 JSON（深度合并到每个 LLM 请求中，高级用户自定义参数）")]
+        [TextArea(3, 8)]
+        public string extraRequestBody = "";
+
         // --- UI 偏好 ---
         [Header("UI Preferences")]
         [Tooltip("启用流式输出")]
@@ -336,6 +351,12 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v9→v10: execute_code now default-disabled for new installs (existing config preserved)");
             }
 
+            // v10 → v11: 新增 Request Enrichment 字段（enableReasoningOutput 默认开启，其余使用声明时默认值）
+            if (settingsVersion < 11)
+            {
+                Debug.Log("[AgentCore] Settings migrated v10→v11: request enrichment fields initialized (reasoning output enabled by default)");
+            }
+
             settingsVersion = CurrentVersion;
             Save(true);
         }
@@ -378,6 +399,10 @@ namespace AgentCore.Editor.Config
             workspaceRootOverride = "";
             unityRootRelativePathOverride = "";
             workspaceConfigVersion = 0;
+            enableReasoningOutput = true;
+            reasoningEffort = "";
+            reasoningMaxTokens = 0;
+            extraRequestBody = "";
             streamingEnabled = true;
             showToolCallDetails = true;
             settingsVersion = CurrentVersion;
