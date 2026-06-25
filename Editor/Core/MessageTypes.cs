@@ -97,7 +97,13 @@ namespace AgentCore.Editor.Core
         /// 例如对 Unity Hub Root 或 Package Root 的写操作。
         /// UI 层应显式提示用户为何被阻断（<see cref="AgentEvent.Policy"/>.Reasons）。
         /// </summary>
-        ToolBlocked
+        ToolBlocked,
+
+        /// <summary>收到 reasoning / planning trace token</summary>
+        ReasoningToken,
+
+        /// <summary>reasoning / planning trace 已完成</summary>
+        ReasoningCompleted
     }
 
     #endregion
@@ -175,6 +181,9 @@ namespace AgentCore.Editor.Core
         /// </summary>
         public ToolConfirmationRequest ConfirmationRequest { get; }
 
+        /// <summary>Reasoning / planning trace 来源。</summary>
+        public ThinkingTraceSource ReasoningSource { get; }
+
         /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
@@ -193,7 +202,8 @@ namespace AgentCore.Editor.Core
             ErrorDetail detail = null,
             List<FileChangeSummary> fileChanges = null,
             ToolPolicyDecision? policy = null,
-            ToolConfirmationRequest confirmationRequest = null)
+            ToolConfirmationRequest confirmationRequest = null,
+            ThinkingTraceSource reasoningSource = ThinkingTraceSource.None)
         {
             Type = type;
             State = state;
@@ -210,6 +220,7 @@ namespace AgentCore.Editor.Core
             FileChanges = fileChanges;
             Policy = policy;
             ConfirmationRequest = confirmationRequest;
+            ReasoningSource = reasoningSource;
         }
 
         #region Phase 1 工厂方法
@@ -233,6 +244,30 @@ namespace AgentCore.Editor.Core
         public static AgentEvent StreamToken(string token, string messageId)
         {
             return new AgentEvent(AgentEventType.StreamToken, content: token, messageId: messageId);
+        }
+
+        /// <summary>
+        /// 创建 reasoning / planning trace token 事件。
+        /// </summary>
+        /// <param name="token">单个 reasoning token 文本</param>
+        /// <param name="messageId">所属消息的唯一标识</param>
+        /// <param name="source">reasoning 来源</param>
+        /// <returns>reasoning token 事件</returns>
+        public static AgentEvent ReasoningToken(string token, string messageId, ThinkingTraceSource source)
+        {
+            return new AgentEvent(AgentEventType.ReasoningToken, content: token, messageId: messageId, reasoningSource: source);
+        }
+
+        /// <summary>
+        /// 创建 reasoning / planning trace 完成事件。
+        /// </summary>
+        /// <param name="messageId">消息唯一标识</param>
+        /// <param name="durationMs">耗时毫秒</param>
+        /// <param name="source">reasoning 来源</param>
+        /// <returns>reasoning 完成事件</returns>
+        public static AgentEvent ReasoningCompleted(string messageId, double durationMs, ThinkingTraceSource source)
+        {
+            return new AgentEvent(AgentEventType.ReasoningCompleted, messageId: messageId, executionTimeMs: durationMs, reasoningSource: source);
         }
 
         /// <summary>
@@ -508,6 +543,46 @@ namespace AgentCore.Editor.Core
 
     #endregion
 
+    #region Thinking trace 枚举
+
+    /// <summary>
+    /// Thinking trace 来源类型。
+    /// </summary>
+    public enum ThinkingTraceSource
+    {
+        /// <summary>无 thinking trace。</summary>
+        None,
+
+        /// <summary>来自 provider API 的结构化 reasoning 字段。</summary>
+        StructuredReasoning,
+
+        /// <summary>来自普通 assistant content 中的可见规划 trace。</summary>
+        VisiblePlanningTrace,
+
+        /// <summary>同一轮内同时包含结构化 reasoning 与可见规划 trace。</summary>
+        Mixed
+    }
+
+    /// <summary>
+    /// 可见规划 trace 抽取状态。
+    /// </summary>
+    public enum VisiblePlanningTraceState
+    {
+        /// <summary>未检测到 planning marker。</summary>
+        None,
+
+        /// <summary>已检测到 THINKING marker，正在等待 ACTION marker。</summary>
+        Buffering,
+
+        /// <summary>已完成抽取。</summary>
+        Completed,
+
+        /// <summary>marker 不合法或疑似示例，停止抽取。</summary>
+        Invalid
+    }
+
+    #endregion
+
     #region 对话轮次记录
 
     /// <summary>
@@ -524,8 +599,23 @@ namespace AgentCore.Editor.Core
         /// <summary>角色标识：&quot;user&quot; / &quot;assistant&quot; / &quot;system&quot;</summary>
         public string Role { get; }
 
-        /// <summary>消息内容（可变，流式输出时逐步追加）</summary>
+        /// <summary>最终回复气泡内容；不得包含已抽取的 thinking / planning trace。</summary>
         public string Content { get; set; }
+
+        /// <summary>完整 thinking / reasoning 内容；不进入 LLM 消息历史。</summary>
+        public string Reasoning { get; set; }
+
+        /// <summary>thinking / reasoning 来源。</summary>
+        public ThinkingTraceSource ReasoningSource { get; set; }
+
+        /// <summary>reasoning / planning trace 耗时（毫秒）。</summary>
+        public double ReasoningDurationMs { get; set; }
+
+        /// <summary>原始 assistant content，仅用于审计/恢复，不进入 LLM 上下文。</summary>
+        public string RawAssistantContent { get; set; }
+
+        /// <summary>可见规划 trace 解析状态。</summary>
+        public VisiblePlanningTraceState PlanningTraceState { get; set; }
 
         /// <summary>消息创建时间戳</summary>
         // P3-1 fix: 使用 internal set 代替反射设置 backing field
@@ -547,6 +637,11 @@ namespace AgentCore.Editor.Core
             Id = Guid.NewGuid().ToString();
             Role = role;
             Content = content ?? "";
+            Reasoning = string.Empty;
+            ReasoningSource = ThinkingTraceSource.None;
+            ReasoningDurationMs = 0;
+            RawAssistantContent = string.Empty;
+            PlanningTraceState = VisiblePlanningTraceState.None;
             Timestamp = DateTime.UtcNow;
             IsStreaming = false;
         }

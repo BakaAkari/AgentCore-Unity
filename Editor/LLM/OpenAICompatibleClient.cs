@@ -140,6 +140,10 @@ namespace AgentCore.Editor.LLM
                         onChunk?.Invoke(chunk);
                         break;
 
+                    case StreamChunkType.ReasoningToken:
+                        onChunk?.Invoke(chunk);
+                        break;
+
                     case StreamChunkType.ToolCallDelta:
                         // 拼接工具调用的增量 JSON（Phase 2 完整使用）
                         AccumulateToolCallDelta(chunk.ToolCallDelta, toolCallBuilders);

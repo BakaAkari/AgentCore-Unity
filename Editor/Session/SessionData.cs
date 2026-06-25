@@ -321,6 +321,26 @@ namespace AgentCore.Editor.Session
         [JsonProperty("content")]
         public string Content { get; set; }
 
+        /// <summary>ThinkingDrawer 内容；不进入 LLM 上下文。</summary>
+        [JsonProperty("reasoning", NullValueHandling = NullValueHandling.Ignore)]
+        public string Reasoning { get; set; }
+
+        /// <summary>ThinkingDrawer 来源。</summary>
+        [JsonProperty("reasoning_source", NullValueHandling = NullValueHandling.Ignore)]
+        public ThinkingTraceSource ReasoningSource { get; set; }
+
+        /// <summary>reasoning / planning trace 耗时（毫秒）。</summary>
+        [JsonProperty("reasoning_duration_ms", NullValueHandling = NullValueHandling.Ignore)]
+        public double ReasoningDurationMs { get; set; }
+
+        /// <summary>原始 assistant content，仅用于审计/恢复，不进入 LLM 上下文。</summary>
+        [JsonProperty("raw_assistant_content", NullValueHandling = NullValueHandling.Ignore)]
+        public string RawAssistantContent { get; set; }
+
+        /// <summary>可见规划 trace 解析状态。</summary>
+        [JsonProperty("planning_trace_state", NullValueHandling = NullValueHandling.Ignore)]
+        public VisiblePlanningTraceState PlanningTraceState { get; set; }
+
         /// <summary>时间戳（UTC ISO 8601）</summary>
         [JsonProperty("timestamp")]
         public DateTime Timestamp { get; set; }
@@ -341,6 +361,11 @@ namespace AgentCore.Editor.Session
                 Id = turn.Id,
                 Role = turn.Role,
                 Content = turn.Content,
+                Reasoning = string.IsNullOrEmpty(turn.Reasoning) ? null : turn.Reasoning,
+                ReasoningSource = turn.ReasoningSource,
+                ReasoningDurationMs = turn.ReasoningDurationMs,
+                RawAssistantContent = string.IsNullOrEmpty(turn.RawAssistantContent) ? null : turn.RawAssistantContent,
+                PlanningTraceState = turn.PlanningTraceState,
                 Timestamp = turn.Timestamp
             };
 
@@ -370,7 +395,14 @@ namespace AgentCore.Editor.Session
         /// </summary>
         public ConversationTurn ToConversationTurn()
         {
-            var turn = new ConversationTurn(Role, Content);
+            var turn = new ConversationTurn(Role, Content)
+            {
+                Reasoning = Reasoning ?? string.Empty,
+                ReasoningSource = ReasoningSource,
+                ReasoningDurationMs = ReasoningDurationMs,
+                RawAssistantContent = RawAssistantContent ?? string.Empty,
+                PlanningTraceState = PlanningTraceState
+            };
 
             // 通过 internal set 直接恢复原始 Id 和 Timestamp，
             // 这样 UI 层的 MessageBubble 字典可以正确关联

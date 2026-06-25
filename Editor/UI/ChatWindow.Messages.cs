@@ -43,6 +43,7 @@ namespace AgentCore.Editor.UI
                 var turn = history[i];
                 if (turn.Role == "assistant" && turn.IsStreaming)
                 {
+                    _currentAssistantTurnId = turn.Id;
                     if (!_messageBubbles.ContainsKey(turn.Id))
                     {
                         AddAssistantMessageBubble(turn.Id);
@@ -58,10 +59,61 @@ namespace AgentCore.Editor.UI
         /// <param name="messageId">消息唯一标识</param>
         private void AddAssistantMessageBubble(string messageId)
         {
-            var bubble = new MessageBubble(messageId, "assistant", "", isStreaming: true);
+            var turnView = EnsureAssistantTurnView(messageId);
+            var bubble = turnView.EnsureBubble(messageId, "", isStreaming: true);
             _messageBubbles[messageId] = bubble;
-            _messageListManager?.AddItem(bubble);
+            _currentAssistantTurnId = messageId;
             ScrollToBottom(force: true); // 新消息气泡添加，强制滚动到底部
+        }
+
+        /// <summary>
+        /// 确保 assistant turn 视图容器存在。
+        /// </summary>
+        /// <param name="messageId">assistant turn ID。</param>
+        /// <returns>assistant turn 视图。</returns>
+        private AssistantTurnView EnsureAssistantTurnView(string messageId)
+        {
+            if (string.IsNullOrEmpty(messageId)) return null;
+
+            if (_assistantTurnViews.TryGetValue(messageId, out var existing))
+                return existing;
+
+            var turnView = new AssistantTurnView(messageId);
+            _assistantTurnViews[messageId] = turnView;
+            _messageListManager?.AddItem(turnView);
+            return turnView;
+        }
+
+        /// <summary>
+        /// 追加 reasoning token 到对应 assistant turn 的 ThinkingDrawer。
+        /// </summary>
+        /// <param name="token">reasoning token。</param>
+        /// <param name="messageId">assistant turn ID。</param>
+        /// <param name="source">reasoning 来源。</param>
+        private void AppendReasoningToken(string token, string messageId, ThinkingTraceSource source)
+        {
+            if (string.IsNullOrEmpty(messageId) || string.IsNullOrEmpty(token)) return;
+
+            var turnView = EnsureAssistantTurnView(messageId);
+            turnView?.ThinkingDrawer.AppendReasoning(token, source);
+            _currentAssistantTurnId = messageId;
+            ScrollToBottom();
+        }
+
+        /// <summary>
+        /// 标记 ThinkingDrawer 完成。
+        /// </summary>
+        /// <param name="messageId">assistant turn ID。</param>
+        /// <param name="durationMs">累计耗时毫秒。</param>
+        /// <param name="source">reasoning 来源。</param>
+        private void CompleteReasoning(string messageId, double durationMs, ThinkingTraceSource source)
+        {
+            if (string.IsNullOrEmpty(messageId)) return;
+
+            if (_assistantTurnViews.TryGetValue(messageId, out var turnView))
+            {
+                turnView.ThinkingDrawer.Complete(durationMs, source);
+            }
         }
 
         /// <summary>
@@ -186,8 +238,10 @@ namespace AgentCore.Editor.UI
         {
             _messageListManager?.Clear();
             _messageBubbles.Clear();
+            _assistantTurnViews.Clear();
             _activeToolCards.Clear();
             _currentToolCallGroup = null;
+            _currentAssistantTurnId = null;
             _toolCallCounter = 0;
 
             // Phase 4.5: 清空文件变更面板
@@ -209,6 +263,7 @@ namespace AgentCore.Editor.UI
             // 清空现有 UI
             _messageListManager?.Clear();
             _messageBubbles.Clear();
+            _assistantTurnViews.Clear();
             _activeToolCards.Clear();
 
             var history = _agentLoop.ConversationHistory;
@@ -231,10 +286,11 @@ namespace AgentCore.Editor.UI
                 }
                 else if (turn.Role == "assistant")
                 {
-                    // 助手消息气泡（已完成状态，非流式）
-                    var bubble = new MessageBubble(turn.Id, "assistant", turn.Content);
+                    // 助手消息使用固定 turn 容器：ThinkingDrawer -> ToolCallGroup -> MessageBubble
+                    var turnView = EnsureAssistantTurnView(turn.Id);
+                    turnView.RestoreThinking(turn);
+                    var bubble = turnView.EnsureBubble(turn.Id, turn.Content, isStreaming: false);
                     _messageBubbles[turn.Id] = bubble;
-                    _messageListManager?.AddItem(bubble);
 
                     // 恢复工具调用卡片（统一放入分组容器）
                     if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
@@ -264,8 +320,8 @@ namespace AgentCore.Editor.UI
 
                         // 历史工具调用全部完成，通知分组更新统计并折叠
                         restoreGroup.NotifyToolStatusChanged();
-                        _messageListManager?.AddItem(restoreGroup);
-                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: ToolCallGroup 已通过 MessageListManager 添加");
+                        turnView.SetToolGroup(restoreGroup);
+                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: ToolCallGroup 已恢复到 AssistantTurnView");
 
                         // 助手消息后结束分组
                         restoreGroup = null;
@@ -275,6 +331,7 @@ namespace AgentCore.Editor.UI
 
             // 清除临时分组引用
             _currentToolCallGroup = null;
+            _currentAssistantTurnId = null;
 
             // 滚动到底部（RebuildMessageBubbles 完成后强制滚动）
             ScrollToBottom(force: true);

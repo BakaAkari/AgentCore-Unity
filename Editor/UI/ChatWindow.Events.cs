@@ -35,10 +35,19 @@ namespace AgentCore.Editor.UI
                     AppendStreamToken(evt.Content, evt.MessageId);
                     break;
 
+                case AgentEventType.ReasoningToken:
+                    AppendReasoningToken(evt.Content, evt.MessageId, evt.ReasoningSource);
+                    break;
+
+                case AgentEventType.ReasoningCompleted:
+                    CompleteReasoning(evt.MessageId, evt.ExecutionTimeMs, evt.ReasoningSource);
+                    break;
+
                 case AgentEventType.AssistantMessage:
                     FinalizeAssistantMessage(evt.Content, evt.MessageId);
                     // 助手消息完成后，结束当前工具调用分组（下次工具调用创建新分组）
                     _currentToolCallGroup = null;
+                    _currentAssistantTurnId = null;
                     // 消息完成后精准更新当前会话标题（避免重建整个列表导致排序跳动）
                     UpdateCurrentSessionTitle();
                     break;

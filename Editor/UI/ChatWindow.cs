@@ -66,6 +66,12 @@ namespace AgentCore.Editor.UI
         /// <summary>消息气泡字典，按 MessageId 索引</summary>
         private readonly Dictionary<string, MessageBubble> _messageBubbles = new();
 
+        /// <summary>assistant turn 视图字典，按 MessageId 索引</summary>
+        private readonly Dictionary<string, AssistantTurnView> _assistantTurnViews = new();
+
+        /// <summary>当前正在流式输出的 assistant turn ID。</summary>
+        private string _currentAssistantTurnId;
+
         /// <summary>活跃的工具调用卡片字典，按 ToolCallId 索引（支持同名工具多次调用）</summary>
         private readonly Dictionary<string, ToolCallCard> _activeToolCards = new();
 

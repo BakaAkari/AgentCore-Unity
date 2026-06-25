@@ -45,7 +45,6 @@ namespace AgentCore.Editor.Core
             while (currentRound < maxRounds)
             {
                 currentRound++;
-                EmitEvent(AgentEvent.LoopRoundStarted(currentRound, maxRounds));
 
                 if (ct.IsCancellationRequested)
                 {
@@ -53,8 +52,10 @@ namespace AgentCore.Editor.Core
                     break;
                 }
 
-                // 调用 LLM（流式）
+                // 调用 LLM（流式）。先进入 Thinking 以确保 ChatWindow 已创建 AssistantTurnView，
+                // 再发 LoopRoundStarted，避免 ToolCallGroup 降级挂到根消息列表。
                 SetState(AgentState.Thinking);
+                EmitEvent(AgentEvent.LoopRoundStarted(currentRound, maxRounds));
                 var assistantMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
 
                 if (ct.IsCancellationRequested)
@@ -73,8 +74,9 @@ namespace AgentCore.Editor.Core
                     break;
                 }
 
-                // 有 tool_calls — 执行工具
+                // 有 tool_calls — 执行工具。写入 LLM 历史前必须清洗可见规划 trace，避免 thinking 泄漏到上下文。
                 Debug.Log($"[AgentCore]{logPrefix} Round {currentRound}: LLM returned {assistantMessage.ToolCalls.Count} tool call(s).");
+                PrepareAssistantMessageForHistory(assistantMessage, assistantTurn);
                 _messages.Add(assistantMessage);
 
                 SetState(AgentState.ExecutingTool);
@@ -195,15 +197,18 @@ namespace AgentCore.Editor.Core
         /// <param name="assistantTurn">当前助手对话轮次</param>
         private void HandleFinalResponse(ChatMessage assistantMessage, ConversationTurn assistantTurn)
         {
+            CompleteReasoningIfNeeded(assistantTurn);
+
             // 标记流式结束
             assistantTurn.IsStreaming = false;
 
-            // 将完整的助手消息添加到 LLM 历史
+            // 将完整的助手消息添加到 LLM 历史；RawAssistantContent 仅留在 ConversationTurn。
             if (assistantMessage != null)
             {
+                PrepareAssistantMessageForHistory(assistantMessage, assistantTurn);
                 _messages.Add(assistantMessage);
 
-                // 确保 UI 轮次内容与 LLM 返回一致
+                // 确保 UI 轮次内容与清洗后的 LLM 历史一致
                 if (!string.IsNullOrEmpty(assistantMessage.Content))
                 {
                     assistantTurn.Content = assistantMessage.Content;
@@ -211,7 +216,7 @@ namespace AgentCore.Editor.Core
             }
             else
             {
-                // 兜底：如果返回 null，使用流式累积的内容
+                // 兜底：如果返回 null，使用流式累积的已清洗内容
                 _messages.Add(ChatMessage.Assistant(assistantTurn.Content));
             }
 
@@ -224,6 +229,115 @@ namespace AgentCore.Editor.Core
 
             // 发送完整助手消息事件
             EmitEvent(AgentEvent.AssistantMessage(assistantTurn.Content, assistantTurn.Id));
+            ResetReasoningRuntimeState();
+        }
+
+        /// <summary>
+        /// 清洗 assistant message 中的可见规划 trace，并把原始内容保存在 UI/session 层。
+        /// </summary>
+        /// <param name="assistantMessage">LLM 返回的 assistant message。</param>
+        /// <param name="assistantTurn">当前助手对话轮次。</param>
+        private void PrepareAssistantMessageForHistory(ChatMessage assistantMessage, ConversationTurn assistantTurn)
+        {
+            if (assistantMessage == null || assistantTurn == null)
+                return;
+
+            var rawContent = assistantMessage.Content ?? string.Empty;
+            if (!string.IsNullOrEmpty(rawContent))
+            {
+                assistantTurn.RawAssistantContent = rawContent;
+            }
+
+            var finalResult = VisiblePlanningTraceExtractor.FinalizeContent(rawContent);
+            assistantTurn.PlanningTraceState = finalResult.State;
+
+            if (!string.IsNullOrEmpty(finalResult.Reasoning))
+            {
+                var previousReasoning = assistantTurn.Reasoning ?? string.Empty;
+                var mergedReasoning = MergeReasoningText(previousReasoning, finalResult.Reasoning);
+                var appendedReasoning = GetAppendedReasoning(previousReasoning, mergedReasoning, finalResult.Reasoning);
+
+                assistantTurn.Reasoning = mergedReasoning;
+                assistantTurn.ReasoningSource = MergeReasoningSource(assistantTurn.ReasoningSource, ThinkingTraceSource.VisiblePlanningTrace);
+                EmitFinalizedReasoningIfNeeded(assistantTurn, appendedReasoning);
+            }
+
+            if (finalResult.State == VisiblePlanningTraceState.Completed)
+            {
+                assistantMessage.Content = finalResult.Content;
+                assistantTurn.Content = finalResult.Content;
+            }
+            else if (!string.IsNullOrEmpty(rawContent))
+            {
+                assistantTurn.Content = rawContent;
+            }
+        }
+
+        /// <summary>
+        /// 发送最终兜底抽取到的 reasoning 内容，确保非流式可见规划 trace 也能立即更新 ThinkingDrawer。
+        /// </summary>
+        /// <param name="assistantTurn">当前助手对话轮次。</param>
+        /// <param name="appendedReasoning">本次最终抽取新增的 reasoning 文本。</param>
+        private void EmitFinalizedReasoningIfNeeded(ConversationTurn assistantTurn, string appendedReasoning)
+        {
+            if (assistantTurn == null || string.IsNullOrEmpty(appendedReasoning))
+                return;
+
+            EmitEvent(AgentEvent.ReasoningToken(appendedReasoning, assistantTurn.Id, assistantTurn.ReasoningSource));
+
+            if (_reasoningActive)
+            {
+                CompleteReasoningIfNeeded(assistantTurn);
+                return;
+            }
+
+            EmitEvent(AgentEvent.ReasoningCompleted(assistantTurn.Id, assistantTurn.ReasoningDurationMs, assistantTurn.ReasoningSource));
+        }
+
+        /// <summary>
+        /// 获取最终兜底抽取相对已有 reasoning 的新增文本，避免重复发送 UI 事件。
+        /// </summary>
+        /// <param name="previous">已有 reasoning 文本。</param>
+        /// <param name="merged">合并后的 reasoning 文本。</param>
+        /// <param name="fallback">无法计算差量时使用的兜底文本。</param>
+        /// <returns>本次新增的 reasoning 文本。</returns>
+        private static string GetAppendedReasoning(string previous, string merged, string fallback)
+        {
+            if (string.IsNullOrEmpty(merged)) return string.Empty;
+            if (string.IsNullOrEmpty(previous)) return merged;
+            if (string.Equals(previous, merged, StringComparison.Ordinal)) return string.Empty;
+            if (merged.StartsWith(previous, StringComparison.Ordinal))
+            {
+                return merged.Substring(previous.Length).TrimStart('\r', '\n');
+            }
+
+            return fallback ?? string.Empty;
+        }
+
+        /// <summary>
+        /// 合并已流式抽取与最终兜底抽取的 reasoning 文本，避免重复追加同一段内容。
+        /// </summary>
+        /// <param name="current">当前 reasoning 文本。</param>
+        /// <param name="next">新增 reasoning 文本。</param>
+        /// <returns>合并后的 reasoning 文本。</returns>
+        private static string MergeReasoningText(string current, string next)
+        {
+            if (string.IsNullOrEmpty(next)) return current ?? string.Empty;
+            if (string.IsNullOrEmpty(current)) return next;
+            if (current.Contains(next)) return current;
+            return current + "\n" + next;
+        }
+
+        /// <summary>
+        /// 重置当前 LLM 调用的 reasoning 运行态。
+        /// </summary>
+        private void ResetReasoningRuntimeState()
+        {
+            _reasoningStartedUtc = null;
+            _reasoningActive = false;
+            _reasoningCompleted = false;
+            _activeReasoningSource = ThinkingTraceSource.None;
+            _visiblePlanningTraceExtractor.Reset();
         }
 
         /// <summary>

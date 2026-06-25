@@ -69,6 +69,21 @@ namespace AgentCore.Editor.Core
         /// <summary>最后一条 assistant 部分内容（用于 streaming 中断恢复）</summary>
         [SerializeField] private string _lastAssistantContent;
 
+        /// <summary>最后一条 assistant reasoning 内容（用于 ThinkingDrawer 恢复）</summary>
+        [SerializeField] private string _lastAssistantReasoning;
+
+        /// <summary>最后一条 assistant reasoning 来源</summary>
+        [SerializeField] private ThinkingTraceSource _lastAssistantReasoningSource = ThinkingTraceSource.None;
+
+        /// <summary>最后一条 assistant reasoning 耗时（毫秒）</summary>
+        [SerializeField] private double _lastAssistantReasoningDurationMs;
+
+        /// <summary>最后一条 assistant 原始 content，仅用于恢复 UI/session</summary>
+        [SerializeField] private string _lastAssistantRawContent;
+
+        /// <summary>最后一条 assistant 可见规划 trace 状态</summary>
+        [SerializeField] private VisiblePlanningTraceState _lastAssistantPlanningTraceState = VisiblePlanningTraceState.None;
+
         /// <summary>编译是否成功（afterAssemblyReload 时设置）</summary>
         [SerializeField] private bool _compilationSucceeded;
 
@@ -130,6 +145,21 @@ namespace AgentCore.Editor.Core
         /// <summary>最后一条 assistant 部分内容（用于 streaming 中断恢复）</summary>
         public string LastAssistantContent => _lastAssistantContent;
 
+        /// <summary>最后一条 assistant reasoning 内容（用于 ThinkingDrawer 恢复）</summary>
+        public string LastAssistantReasoning => _lastAssistantReasoning;
+
+        /// <summary>最后一条 assistant reasoning 来源</summary>
+        public ThinkingTraceSource LastAssistantReasoningSource => _lastAssistantReasoningSource;
+
+        /// <summary>最后一条 assistant reasoning 耗时（毫秒）</summary>
+        public double LastAssistantReasoningDurationMs => _lastAssistantReasoningDurationMs;
+
+        /// <summary>最后一条 assistant 原始 content，仅用于恢复 UI/session</summary>
+        public string LastAssistantRawContent => _lastAssistantRawContent;
+
+        /// <summary>最后一条 assistant 可见规划 trace 状态</summary>
+        public VisiblePlanningTraceState LastAssistantPlanningTraceState => _lastAssistantPlanningTraceState;
+
         /// <summary>编译是否成功</summary>
         public bool CompilationSucceeded => _compilationSucceeded;
 
@@ -176,6 +206,11 @@ namespace AgentCore.Editor.Core
         /// <param name="pendingUserMessage">最后一条用户消息（可为 null）</param>
         /// <param name="lastAssistantContent">最后一条 assistant 部分内容（可为 null）</param>
         /// <param name="interruptedToolCallId">被中断的 tool_call ID（可为 null）</param>
+        /// <param name="lastAssistantReasoning">最后一条 assistant reasoning 内容（可为 null）</param>
+        /// <param name="lastAssistantReasoningSource">最后一条 assistant reasoning 来源</param>
+        /// <param name="lastAssistantReasoningDurationMs">最后一条 assistant reasoning 耗时（毫秒）</param>
+        /// <param name="lastAssistantRawContent">最后一条 assistant 原始 content（可为 null）</param>
+        /// <param name="lastAssistantPlanningTraceState">最后一条 assistant 可见规划 trace 状态</param>
         public void MarkInterrupted(
             string sessionId,
             InterruptPhase phase,
@@ -183,7 +218,12 @@ namespace AgentCore.Editor.Core
             bool hadPendingToolCalls = false,
             string pendingUserMessage = null,
             string lastAssistantContent = null,
-            string interruptedToolCallId = null)
+            string interruptedToolCallId = null,
+            string lastAssistantReasoning = null,
+            ThinkingTraceSource lastAssistantReasoningSource = ThinkingTraceSource.None,
+            double lastAssistantReasoningDurationMs = 0,
+            string lastAssistantRawContent = null,
+            VisiblePlanningTraceState lastAssistantPlanningTraceState = VisiblePlanningTraceState.None)
         {
             _wasInterrupted = true;
             _interruptedSessionId = sessionId;
@@ -194,6 +234,11 @@ namespace AgentCore.Editor.Core
             _pendingUserMessage = pendingUserMessage ?? string.Empty;
             _lastAssistantContent = lastAssistantContent ?? string.Empty;
             _interruptedToolCallId = interruptedToolCallId ?? string.Empty;
+            _lastAssistantReasoning = lastAssistantReasoning ?? string.Empty;
+            _lastAssistantReasoningSource = lastAssistantReasoningSource;
+            _lastAssistantReasoningDurationMs = Math.Max(0, lastAssistantReasoningDurationMs);
+            _lastAssistantRawContent = lastAssistantRawContent ?? string.Empty;
+            _lastAssistantPlanningTraceState = lastAssistantPlanningTraceState;
 
             // 编译结果在 afterAssemblyReload 时设置，此处先重置
             _compilationSucceeded = false;
@@ -309,6 +354,11 @@ namespace AgentCore.Editor.Core
             _hadPendingToolCalls = false;
             _pendingUserMessage = string.Empty;
             _lastAssistantContent = string.Empty;
+            _lastAssistantReasoning = string.Empty;
+            _lastAssistantReasoningSource = ThinkingTraceSource.None;
+            _lastAssistantReasoningDurationMs = 0;
+            _lastAssistantRawContent = string.Empty;
+            _lastAssistantPlanningTraceState = VisiblePlanningTraceState.None;
             _compilationSucceeded = false;
             _compilationErrors = string.Empty;
             _interruptedToolCallId = string.Empty;

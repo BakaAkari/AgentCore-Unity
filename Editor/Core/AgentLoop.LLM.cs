@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -63,6 +64,9 @@ namespace AgentCore.Editor.Core
             var messagesSnapshot = ContextWindowManager.TrimToFit(
                 _messages, maxTokens, reserveTokens);
 
+            // 每次 LLM 调用重新识别可见规划 trace；reasoning 内容保留在同一个 assistant turn 中追加。
+            _visiblePlanningTraceExtractor.Reset();
+
             // 切换到 Streaming 状态
             SetState(AgentState.Streaming);
 
@@ -100,15 +104,15 @@ namespace AgentCore.Editor.Core
             switch (chunk.Type)
             {
                 case StreamChunkType.ContentToken:
-                    // 追加 token 到助手轮次内容
-                    if (!string.IsNullOrEmpty(chunk.Content))
-                    {
-                        assistantTurn.Content += chunk.Content;
-                        EmitEvent(AgentEvent.StreamToken(chunk.Content, assistantTurn.Id));
-                    }
+                    HandleContentToken(chunk.Content, assistantTurn);
+                    break;
+
+                case StreamChunkType.ReasoningToken:
+                    AppendReasoningToken(chunk.ReasoningContent, assistantTurn, ThinkingTraceSource.StructuredReasoning);
                     break;
 
                 case StreamChunkType.Done:
+                    CompleteReasoningIfNeeded(assistantTurn);
                     // 流式完成，由 SendMessageAsync 的后续逻辑处理
                     Debug.Log($"[AgentCore] Stream completed. Finish reason: {chunk.FinishReason}");
                     break;
@@ -120,12 +124,105 @@ namespace AgentCore.Editor.Core
                     break;
 
                 case StreamChunkType.ToolCallDelta:
+                    CompleteReasoningIfNeeded(assistantTurn);
                     // Phase 2：ToolCallDelta 由 OpenAICompatibleClient 内部累积，
                     // 最终通过 Done 事件返回完整的 tool_calls 列表。
                     // 此处仅记录日志用于调试。
                     Debug.Log($"[AgentCore] Received ToolCallDelta: {chunk.ToolCallDelta?.Function?.Name ?? "(accumulating)"}");
                     break;
             }
+        }
+
+        /// <summary>
+        /// 处理普通 content token，并抽取开头的可见规划 trace。
+        /// </summary>
+        /// <param name="content">普通 content token。</param>
+        /// <param name="assistantTurn">当前助手对话轮次。</param>
+        private void HandleContentToken(string content, ConversationTurn assistantTurn)
+        {
+            if (string.IsNullOrEmpty(content) || assistantTurn == null)
+                return;
+
+            var delta = _visiblePlanningTraceExtractor.Append(content);
+            assistantTurn.PlanningTraceState = delta.State;
+
+            if (!string.IsNullOrEmpty(delta.ReasoningContent))
+            {
+                AppendReasoningToken(delta.ReasoningContent, assistantTurn, ThinkingTraceSource.VisiblePlanningTrace);
+            }
+
+            if (!string.IsNullOrEmpty(delta.VisibleContent))
+            {
+                CompleteReasoningIfNeeded(assistantTurn);
+                assistantTurn.Content += delta.VisibleContent;
+                EmitEvent(AgentEvent.StreamToken(delta.VisibleContent, assistantTurn.Id));
+            }
+        }
+
+        /// <summary>
+        /// 追加 reasoning / planning trace token 到当前 assistant turn。
+        /// </summary>
+        /// <param name="token">reasoning token。</param>
+        /// <param name="assistantTurn">当前助手对话轮次。</param>
+        /// <param name="source">reasoning 来源。</param>
+        private void AppendReasoningToken(string token, ConversationTurn assistantTurn, ThinkingTraceSource source)
+        {
+            if (string.IsNullOrEmpty(token) || assistantTurn == null)
+                return;
+
+            BeginReasoningIfNeeded(assistantTurn, source);
+            assistantTurn.Reasoning += token;
+            EmitEvent(AgentEvent.ReasoningToken(token, assistantTurn.Id, assistantTurn.ReasoningSource));
+        }
+
+        /// <summary>
+        /// 标记当前 assistant turn 开始接收 reasoning / planning trace。
+        /// </summary>
+        /// <param name="assistantTurn">当前助手对话轮次。</param>
+        /// <param name="source">reasoning 来源。</param>
+        private void BeginReasoningIfNeeded(ConversationTurn assistantTurn, ThinkingTraceSource source)
+        {
+            if (!_reasoningActive)
+            {
+                _reasoningStartedUtc = DateTime.UtcNow;
+                _reasoningActive = true;
+                _reasoningCompleted = false;
+            }
+
+            _activeReasoningSource = MergeReasoningSource(_activeReasoningSource, source);
+            assistantTurn.ReasoningSource = MergeReasoningSource(assistantTurn.ReasoningSource, source);
+        }
+
+        /// <summary>
+        /// 完成当前 assistant turn 的 reasoning 计时并发送完成事件。
+        /// </summary>
+        /// <param name="assistantTurn">当前助手对话轮次。</param>
+        private void CompleteReasoningIfNeeded(ConversationTurn assistantTurn)
+        {
+            if (assistantTurn == null || !_reasoningActive || _reasoningCompleted)
+                return;
+
+            var started = _reasoningStartedUtc ?? DateTime.UtcNow;
+            var elapsedMs = Math.Max(0, (DateTime.UtcNow - started).TotalMilliseconds);
+            assistantTurn.ReasoningDurationMs += elapsedMs;
+            _reasoningActive = false;
+            _reasoningCompleted = true;
+            _reasoningStartedUtc = null;
+            EmitEvent(AgentEvent.ReasoningCompleted(assistantTurn.Id, assistantTurn.ReasoningDurationMs, assistantTurn.ReasoningSource));
+        }
+
+        /// <summary>
+        /// 合并 reasoning 来源。
+        /// </summary>
+        /// <param name="current">当前来源。</param>
+        /// <param name="next">新增来源。</param>
+        /// <returns>合并后的来源。</returns>
+        private static ThinkingTraceSource MergeReasoningSource(ThinkingTraceSource current, ThinkingTraceSource next)
+        {
+            if (next == ThinkingTraceSource.None) return current;
+            if (current == ThinkingTraceSource.None) return next;
+            if (current == next) return current;
+            return ThinkingTraceSource.Mixed;
         }
     }
 }

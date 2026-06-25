@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.1.0 | **更新日期**: 2026-06-24 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0，Tool Risk Policy + WorkspacePathPolicy 强制接入 + ExecuteCode 降权 + ActiveToolScope 渐进暴露），Phase 7（索引体验深化）与 Phase 8（MCP 对外互操作）仍为待开发产品模块
+> **版本**: v1.2.0 | **更新日期**: 2026-06-25 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0），Phase 7 后续 Plugin / 产品化与 Phase 8（MCP 对外互操作）仍为待开发产品模块
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,21 +36,22 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.1.0)
+### 0.4 当前项目快照 (v1.2.0)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.1.0 (2026-06-24) — 治理层 G.1~G.3 全面完成（Tool Risk Policy + WorkspacePathPolicy 强制接入 + ExecuteCode 降权 + ActiveToolScope 渐进暴露） |
+| **版本** | 1.2.0 (2026-06-25) — Chat UI / ThinkingDrawer 双来源 reasoning 可观测性完成（Structured Reasoning + Visible Planning Trace + AssistantTurnView 固定布局） |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
-| **UI 框架** | UI Toolkit 动态 Hub 架构；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
+| **UI 框架** | UI Toolkit 动态 Hub 架构；Chat 使用 AssistantTurnView 固定 assistant 轮次布局（ThinkingDrawer → ToolCallGroup → MessageBubble）；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用（OnDemand 可见性） |
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪 |
 | **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；Full Index 已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪；**当前为同步阻塞触发，Phase 7 将改造为后台静默 + 增量索引** |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
 | **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 128K（适配现代大 context LLM） |
 | **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
+| **Reasoning 可观测性** | ThinkingDrawer 默认折叠；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 可见规划 trace 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages` |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
 | **Phase 6 验收** | 完成 — 见 ADR-11 |
 | **治理层进度** | G.1~G.3 全面完成（v1.1.0）；G.4 / G.5 / G.6 待开始 |
@@ -76,7 +77,7 @@
 ```
 已完成 (≤ 1.0.0): 代码库理解 → Workspace 基础设施 → VCS 主动调用 → 索引主动调用 → Settings shell 化 → Phase 6 验收
 治理层 (1.0.x):    LLM/Agent 架构安全收口（Tool Risk Policy / WorkspacePathPolicy 强制接入 / Lazy Tool Discovery / CompletionGate）
-派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ 兼容用户原本 IDE/CLI 习惯（MCP）
+派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ Chat UI / ThinkingDrawer 可观测性（v1.2.0）→ 兼容用户原本 IDE/CLI 习惯（MCP）
 中期 (1.x):        Phase 7 内部扩展生态（Plugin/插件） + Phase 8 对外互操作（MCP Server）
 ```
 
@@ -84,7 +85,7 @@
 |------|------|------|---------|---------|------|
 | **Phase 6** | 0.9.x ~ 1.0.0 | 智能化与体验 | 索引深化、VCS Panel、Settings shell、Per-Component 卡片 | 见 §0.4 / §0.5 | [x] 已完成 |
 | **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery、CompletionGate、Operation Journal | 为 Phase 7/8 的工具扩展与对外暴露提供硬边界 | [-] 设计中 |
-| **Phase 7** | 1.0.x ~ 1.x | 内部扩展与索引体验深化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Plugin/Extension 系统、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + 用户可自定义工具 + 可分发产品 | [-] 设计中 |
+| **Phase 7** | 1.0.x ~ 1.x | 内部扩展、索引体验深化与 Chat 可观测性（**对内**） | 后台静默 + 增量索引（v1.1.0）、Chat UI / ThinkingDrawer（v1.2.0）、Plugin/Extension 系统、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + reasoning 可审计 + 用户可自定义工具 + 可分发产品 | [-] 设计中 |
 | **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中 |
 
 ---
@@ -168,9 +169,9 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 ---
 
-## 3. Phase 7 — 内部扩展与索引体验深化（对内 / v1.0.x ~ v1.x）
+## 3. Phase 7 — 内部扩展、索引体验深化与 Chat 可观测性（对内 / v1.0.x ~ v1.x）
 
-**主题**: 从"功能完整的开发工具"演化为"可分发、可扩展、零感知"的产品。Phase 7 聚焦**对内**——索引体验、扩展机制、产品化分发，全部围绕 AgentCore 自身。MCP 对外互操作单独走 §3.x Phase 8。
+**主题**: 从"功能完整的开发工具"演化为"可分发、可扩展、零感知、可审计"的产品。Phase 7 聚焦**对内**——索引体验、Chat reasoning 可观测性、扩展机制、产品化分发，全部围绕 AgentCore 自身。MCP 对外互操作单独走 §3.x Phase 8。
 
 ### 3.1 P0 — 后台静默 + 增量索引（v1.1.0，从 Phase 6 派生）
 
@@ -189,26 +190,41 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | 7.1.6 | **IndexingStatusBus + Hub Badge** | 状态枚举 Idle/Pending/Running/Failed/Disabled；Hub 会话头部右侧 ChipBadge 静默呈现 | [x] |
 | 7.1.7 | **SOUL.md §14 / TOOLS.md.template 增补** | LLM 感知"索引可能正在后台更新"的规则，避免在 Pending 状态强行依赖陈旧结果 | [x] |
 
-### 3.2 P1 — Plugin / Extension 系统（对内扩展）
+### 3.2 P0 — Chat UI / ThinkingDrawer 可观测性（v1.2.0）
+
+> **触发原因**: 多模型切换测试发现 provider 结构化 reasoning 字段不统一，且 Claude / GPT 类模型可能通过上下文规则输出 `---THINKING---` / `---ACTION---` 可见规划 trace；原 Chat UI 会把流式中间内容与最终回复混在同一气泡，无法稳定审计 LLM 决策过程。
+> **设计文档**: [`thinking-drawer-design.md`](thinking-drawer-design.md)
+> **范围**: 仅改造 Chat UI 与 LLM 响应解析/持久化链路；不新增外部协议、不扩大工具暴露、不把 reasoning 注入后续 LLM 上下文。
+
+| # | 任务 | 说明 | 状态 |
+|---|------|------|------|
+| 7.2.1 | **ThinkingDrawer UI** | 默认折叠；标题显示 `思考中 · Ns` / `思考完成 · Xs`；展开时 set text，折叠时清空 label | [x] v1.2.0 |
+| 7.2.2 | **AssistantTurnView 固定顺序** | 每个 assistant turn 固定为 ThinkingDrawer → ToolCallGroup → MessageBubble，历史会话重建保持同序 | [x] v1.2.0 |
+| 7.2.3 | **Structured Reasoning 抽取** | 从 provider 原始 SSE JSON 中自适应读取 `reasoning_content` / `reasoning` / `thinking` / `thought` / `reasoning_text` / reasoning content block | [x] v1.2.0 |
+| 7.2.4 | **Visible Planning Trace 抽取** | 默认开启；严格识别内容开头 `---THINKING---` 与 `---ACTION---`；代码块/引用/不完整 marker 不抽取 | [x] v1.2.0 |
+| 7.2.5 | **LLM 上下文隔离** | `RawAssistantContent` 持久化到 ConversationTurn / Session / DomainReloadState；写入 `_messages` 前只保留清洗后的 assistant content | [x] v1.2.0 |
+| 7.2.6 | **Domain Reload 恢复兼容** | Streaming 中断时恢复 reasoning/raw/planning state 到 UI/session，LLM 历史仅注入清洗后的可见内容 | [x] v1.2.0 |
+
+### 3.3 P1 — Plugin / Extension 系统（对内扩展）
 
 > **定位**: 允许用户在不修改 AgentCore 源码的前提下自定义工具脚本并动态加载（Editor 级别）。
 > **与 MCP 的边界**: Plugin = **对内**（用户在 Unity 项目内扩展 AgentCore 行为）；MCP = **对外**（外部 IDE/CLI 调用 AgentCore）；两者不互相替代。
 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| 7.2.1 | **Plugin 加载契约** | 复用现有 `[AgentTool]` + `IAgentTool` + `ToolAutoDiscovery`；定义"用户工具程序集"扫描规则与隔离策略 | P1 | [ ] |
-| 7.2.2 | **Plugin 设置面板** | Settings 中列出已发现的用户工具，支持启用/禁用、查看元数据 | P1 | [ ] |
-| 7.2.3 | **示例 Plugin 模板** | 提供 Hello World 级别的用户工具模板仓库 | P2 | [ ] |
+| 7.3.1 | **Plugin 加载契约** | 复用现有 `[AgentTool]` + `IAgentTool` + `ToolAutoDiscovery`；定义"用户工具程序集"扫描规则与隔离策略 | P1 | [ ] |
+| 7.3.2 | **Plugin 设置面板** | Settings 中列出已发现的用户工具，支持启用/禁用、查看元数据 | P1 | [ ] |
+| 7.3.3 | **示例 Plugin 模板** | 提供 Hello World 级别的用户工具模板仓库 | P2 | [ ] |
 
-### 3.3 P1 — 产品化与分发
+### 3.4 P1 — 产品化与分发
 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| 7.3.1 | **UPM 发布流程** | 自动化打包、版本标签、发布检查清单 | P0 | [ ] |
-| 7.3.2 | **文档网站** | 使用 Docusaurus/VitePress 搭建静态文档站（托管于 GitHub Pages） | P1 | [ ] |
-| 7.3.3 | **示例项目** | 完整示例：3D 平台跳跃游戏从零开发（演示 AgentCore 全部能力） | P1 | [ ] |
-| 7.3.4 | **多 LLM 后端** | 支持 Claude、Gemini、本地 Ollama 等（统一接口） | P2 | [ ] |
-| 7.3.5 | **Unity Asset Store 提交** | 整理元数据、截图、描述文案，完成 Asset Store 提交 | P2 | [ ] |
+| 7.4.1 | **UPM 发布流程** | 自动化打包、版本标签、发布检查清单 | P0 | [ ] |
+| 7.4.2 | **文档网站** | 使用 Docusaurus/VitePress 搭建静态文档站（托管于 GitHub Pages） | P1 | [ ] |
+| 7.4.3 | **示例项目** | 完整示例：3D 平台跳跃游戏从零开发（演示 AgentCore 全部能力） | P1 | [ ] |
+| 7.4.4 | **多 LLM 后端** | 支持 Claude、Gemini、本地 Ollama 等（统一接口） | P2 | [ ] |
+| 7.4.5 | **Unity Asset Store 提交** | 整理元数据、截图、描述文案，完成 Asset Store 提交 | P2 | [ ] |
 
 ---
 

@@ -263,6 +263,8 @@ namespace AgentCore.Editor.LLM
     {
         /// <summary>文本内容 token</summary>
         ContentToken,
+        /// <summary>结构化 reasoning token</summary>
+        ReasoningToken,
         /// <summary>工具调用增量（Phase 2 使用）</summary>
         ToolCallDelta,
         /// <summary>流结束</summary>
@@ -281,6 +283,9 @@ namespace AgentCore.Editor.LLM
         /// <summary>文本 token（Type == ContentToken 时有值）</summary>
         public string Content { get; set; }
 
+        /// <summary>结构化 reasoning token（Type == ReasoningToken 时有值）</summary>
+        public string ReasoningContent { get; set; }
+
         /// <summary>工具调用增量（Type == ToolCallDelta 时有值）</summary>
         public ToolCall ToolCallDelta { get; set; }
 
@@ -293,6 +298,9 @@ namespace AgentCore.Editor.LLM
         // 工厂方法
         public static StreamChunk Token(string content) =>
             new() { Type = StreamChunkType.ContentToken, Content = content };
+
+        public static StreamChunk Reasoning(string content) =>
+            new() { Type = StreamChunkType.ReasoningToken, ReasoningContent = content };
 
         public static StreamChunk ToolDelta(ToolCall delta) =>
             new() { Type = StreamChunkType.ToolCallDelta, ToolCallDelta = delta };

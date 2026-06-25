@@ -22,9 +22,18 @@ namespace AgentCore.Editor.UI
         {
             if (_currentToolCallGroup == null)
             {
-                _currentToolCallGroup = new ToolCallGroup();
-                _messageListManager?.AddItem(_currentToolCallGroup);
-                Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 新建 ToolCallGroup, 通过 MessageListManager 添加");
+                if (!string.IsNullOrEmpty(_currentAssistantTurnId))
+                {
+                    var turnView = EnsureAssistantTurnView(_currentAssistantTurnId);
+                    _currentToolCallGroup = turnView?.EnsureToolGroup();
+                    Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 新建 ToolCallGroup, 添加到 AssistantTurnView");
+                }
+                else
+                {
+                    _currentToolCallGroup = new ToolCallGroup();
+                    _messageListManager?.AddItem(_currentToolCallGroup);
+                    Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 无 assistant turn，降级添加到 MessageListManager");
+                }
             }
             return _currentToolCallGroup;
         }

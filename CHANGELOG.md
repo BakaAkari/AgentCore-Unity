@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-25
+
+### Added
+- **Chat UI / ThinkingDrawer**：新增默认折叠的 [`ThinkingDrawer`](Editor/UI/Components/ThinkingDrawer.cs:1)，按 assistant turn 保留 reasoning / planning trace，标题显示 `思考中 · Ns` / `思考完成 · Xs`，展开时懒加载文本、折叠时清空 label 以降低长文本 UI 成本。
+- **AssistantTurnView 固定布局**：新增 [`AssistantTurnView`](Editor/UI/Components/AssistantTurnView.cs:1)，统一 assistant 轮次顺序为 ThinkingDrawer → ToolCallGroup → MessageBubble，避免 reasoning、工具调用和最终回复在消息流中错序。
+- **双来源 reasoning 提取**：新增 [`ReasoningFieldExtractor`](Editor/LLM/ReasoningFieldExtractor.cs:1) 与 [`VisiblePlanningTraceExtractor`](Editor/Core/VisiblePlanningTraceExtractor.cs:1)，同时支持 provider 结构化 reasoning 字段和 `---THINKING---` / `---ACTION---` 可见规划 trace。
+- **Reasoning 事件链路**：[`MessageTypes.cs`](Editor/Core/MessageTypes.cs:46) 新增 `ReasoningToken` / `ReasoningCompleted` 事件与 `ThinkingTraceSource`、`VisiblePlanningTraceState`，[`StreamingResponseParser`](Editor/LLM/StreamingResponseParser.cs:1) 在原始 SSE chunk 中自适应抽取 reasoning token。
+- **会话与 Domain Reload 持久化**：`ConversationTurn` / `SessionData` / `DomainReloadState` 新增 `Reasoning`、`ReasoningSource`、`ReasoningDurationMs`、`RawAssistantContent`、`PlanningTraceState`，用于 UI/session/archive 审计。
+
+### Changed
+- **版本号**: `1.1.0` → `1.2.0`，标记 Chat UI / ThinkingDrawer 双来源 reasoning 可观测性完成。
+- **LLM 上下文安全**：结构化 reasoning 不再进入 assistant final content；可见规划 trace 在写入 `_messages` 前清洗，`RawAssistantContent` 仅持久化到 `ConversationTurn` / session，不进入后续 LLM 上下文。
+- **工具调用 UI 归属**：`RunToolCallLoopAsync` 先进入 Thinking 状态再发 `LoopRoundStarted`，确保 `ToolCallGroup` 绑定到当前 `AssistantTurnView`，不再降级挂到根消息列表。
+- **Domain Reload Streaming 恢复**：Streaming 中断恢复时只将清洗后的 assistant 可见内容写回 `_messages`，reasoning 与 raw content 仅恢复到 UI/session 层。
+
+### Notes
+- Visible Planning Trace 默认开启，只有内容开头严格匹配 `---THINKING---` 且存在 `---ACTION---` 时才抽取；代码块/引用示例和不完整 marker 保留为普通内容，避免误删回复。
+- `RawAssistantContent` 是审计/恢复字段，不属于 LLM 历史；后续压缩、恢复或导出路径不得把该字段拼回 `_messages`。
+
 ## [1.1.0] - 2026-06-24
 
 ### Added

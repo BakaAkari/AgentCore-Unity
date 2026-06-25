@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Utils;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace AgentCore.Editor.LLM
@@ -86,6 +87,16 @@ namespace AgentCore.Editor.LLM
         /// </summary>
         private void ParseChunkJson(string json, Action<StreamChunk> onChunk)
         {
+            JObject rawChunk = null;
+            try
+            {
+                rawChunk = JObject.Parse(json);
+            }
+            catch
+            {
+                // Typed deserialization below will surface the parsing error through the caller.
+            }
+
             var chunk = JsonHelper.Deserialize<ChatCompletionChunk>(json);
             if (chunk?.Choices == null || chunk.Choices.Count == 0) return;
 
@@ -93,6 +104,12 @@ namespace AgentCore.Editor.LLM
             var delta = choice.Delta;
 
             if (delta == null) return;
+
+            var reasoning = ReasoningFieldExtractor.ExtractFromChunk(rawChunk);
+            if (!string.IsNullOrEmpty(reasoning))
+            {
+                onChunk?.Invoke(StreamChunk.Reasoning(reasoning));
+            }
 
             // 文本内容 token
             if (!string.IsNullOrEmpty(delta.Content))

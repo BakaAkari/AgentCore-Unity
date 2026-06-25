@@ -136,6 +136,21 @@ namespace AgentCore.Editor.Core
         /// <summary>压缩统计指标</summary>
         private CompressionMetrics _compressionMetrics;
 
+        /// <summary>可见规划 trace 提取器；仅用于当前 assistant turn 的流式 content 清洗。</summary>
+        private readonly VisiblePlanningTraceExtractor _visiblePlanningTraceExtractor = new VisiblePlanningTraceExtractor();
+
+        /// <summary>当前 assistant turn 的 reasoning 计时起点。</summary>
+        private DateTime? _reasoningStartedUtc;
+
+        /// <summary>当前 assistant turn 是否正在接收 reasoning / planning trace。</summary>
+        private bool _reasoningActive;
+
+        /// <summary>当前 assistant turn 是否已经发出 reasoning 完成事件。</summary>
+        private bool _reasoningCompleted;
+
+        /// <summary>当前 assistant turn 的 reasoning 来源。</summary>
+        private ThinkingTraceSource _activeReasoningSource = ThinkingTraceSource.None;
+
         /// <summary>默认系统提示词（Bootstrap 加载失败时的兜底方案）</summary>
         private const string DefaultSystemPrompt = "你是一个 Unity 开发助手。请用中文回复用户的问题，帮助他们解决 Unity 开发中遇到的问题。";
 

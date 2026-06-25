@@ -138,11 +138,23 @@ namespace AgentCore.Editor.Core
 
             // 5. Phase 2: 提取最后一条 assistant 部分内容（从 ConversationTurns 中获取流式累积内容）
             string lastAssistantContent = null;
+            string lastAssistantReasoning = null;
+            ThinkingTraceSource lastAssistantReasoningSource = ThinkingTraceSource.None;
+            double lastAssistantReasoningDurationMs = 0;
+            string lastAssistantRawContent = null;
+            VisiblePlanningTraceState lastAssistantPlanningTraceState = VisiblePlanningTraceState.None;
             for (int i = _conversationTurns.Count - 1; i >= 0; i--)
             {
-                if (_conversationTurns[i].Role == "assistant" && !string.IsNullOrEmpty(_conversationTurns[i].Content))
+                var turn = _conversationTurns[i];
+                if (turn.Role == "assistant" &&
+                    (!string.IsNullOrEmpty(turn.Content) || !string.IsNullOrEmpty(turn.Reasoning)))
                 {
-                    lastAssistantContent = _conversationTurns[i].Content;
+                    lastAssistantContent = turn.Content;
+                    lastAssistantReasoning = turn.Reasoning;
+                    lastAssistantReasoningSource = turn.ReasoningSource;
+                    lastAssistantReasoningDurationMs = turn.ReasoningDurationMs;
+                    lastAssistantRawContent = turn.RawAssistantContent;
+                    lastAssistantPlanningTraceState = turn.PlanningTraceState;
                     break;
                 }
             }
@@ -156,7 +168,12 @@ namespace AgentCore.Editor.Core
                 hadPendingToolCalls,
                 pendingUserMessage,
                 lastAssistantContent,
-                interruptedToolCallId
+                interruptedToolCallId,
+                lastAssistantReasoning,
+                lastAssistantReasoningSource,
+                lastAssistantReasoningDurationMs,
+                lastAssistantRawContent,
+                lastAssistantPlanningTraceState
             );
 
             // 7. Phase 4.5: 保存文件变更追踪数据到 DomainReloadState
@@ -271,6 +288,11 @@ namespace AgentCore.Editor.Core
             var lastToolName = reloadState.LastToolName;
             var interruptedToolCallId = reloadState.InterruptedToolCallId;
             var lastAssistantContent = reloadState.LastAssistantContent;
+            var lastAssistantReasoning = reloadState.LastAssistantReasoning;
+            var lastAssistantReasoningSource = reloadState.LastAssistantReasoningSource;
+            var lastAssistantReasoningDurationMs = reloadState.LastAssistantReasoningDurationMs;
+            var lastAssistantRawContent = reloadState.LastAssistantRawContent;
+            var lastAssistantPlanningTraceState = reloadState.LastAssistantPlanningTraceState;
             var compilationSucceeded = reloadState.CompilationSucceeded;
             var compilationErrors = reloadState.CompilationErrors;
 
@@ -285,7 +307,14 @@ namespace AgentCore.Editor.Core
             switch (phase)
             {
                 case InterruptPhase.Streaming:
-                    ResumeFromStreaming(recoveryMessage, lastAssistantContent);
+                    ResumeFromStreaming(
+                        recoveryMessage,
+                        lastAssistantContent,
+                        lastAssistantReasoning,
+                        lastAssistantReasoningSource,
+                        lastAssistantReasoningDurationMs,
+                        lastAssistantRawContent,
+                        lastAssistantPlanningTraceState);
                     break;
 
                 case InterruptPhase.ExecutingTool:
@@ -361,26 +390,46 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
-        /// 从 Streaming 中断恢复：注入 assistant 部分内容和系统消息，重新调用 LLM。
+        /// 从 Streaming 中断恢复：注入已清洗 assistant 部分内容和系统消息，重新调用 LLM。
         /// </summary>
         /// <param name="recoveryMessage">恢复系统消息</param>
-        /// <param name="lastAssistantContent">中断前的 assistant 部分内容</param>
-        private void ResumeFromStreaming(string recoveryMessage, string lastAssistantContent)
+        /// <param name="lastAssistantContent">中断前的 assistant 可见内容</param>
+        /// <param name="lastAssistantReasoning">中断前的 reasoning / planning trace 内容</param>
+        /// <param name="lastAssistantReasoningSource">中断前的 reasoning 来源</param>
+        /// <param name="lastAssistantReasoningDurationMs">中断前的 reasoning 用时</param>
+        /// <param name="lastAssistantRawContent">中断前的 assistant 原始内容</param>
+        /// <param name="lastAssistantPlanningTraceState">中断前的可见规划 trace 状态</param>
+        private void ResumeFromStreaming(
+            string recoveryMessage,
+            string lastAssistantContent,
+            string lastAssistantReasoning,
+            ThinkingTraceSource lastAssistantReasoningSource,
+            double lastAssistantReasoningDurationMs,
+            string lastAssistantRawContent,
+            VisiblePlanningTraceState lastAssistantPlanningTraceState)
         {
             Debug.Log("[AgentCore] ResumeFromStreaming: Injecting recovery message and re-calling LLM.");
 
-            // 如果有 assistant 部分内容，添加到消息历史中
-            if (!string.IsNullOrEmpty(lastAssistantContent))
+            var recoveredAssistantTurn = RestoreInterruptedAssistantTurn(
+                lastAssistantContent,
+                lastAssistantReasoning,
+                lastAssistantReasoningSource,
+                lastAssistantReasoningDurationMs,
+                lastAssistantRawContent,
+                lastAssistantPlanningTraceState);
+
+            // 如果有 assistant 部分可见内容，添加到消息历史中。RawAssistantContent 与 Reasoning 永不进入 _messages。
+            if (recoveredAssistantTurn != null && !string.IsNullOrEmpty(recoveredAssistantTurn.Content))
             {
-                // 检查消息历史末尾是否已经有这条 assistant 消息（避免重复）
+                var cleanContent = recoveredAssistantTurn.Content;
                 bool alreadyHasAssistant = _messages.Count > 0 &&
                     _messages[_messages.Count - 1].Role == "assistant" &&
-                    _messages[_messages.Count - 1].Content == lastAssistantContent;
+                    _messages[_messages.Count - 1].Content == cleanContent;
 
                 if (!alreadyHasAssistant)
                 {
-                    _messages.Add(ChatMessage.Assistant(lastAssistantContent));
-                    Debug.Log($"[AgentCore] ResumeFromStreaming: Added partial assistant content ({lastAssistantContent.Length} chars).");
+                    _messages.Add(ChatMessage.Assistant(cleanContent));
+                    Debug.Log($"[AgentCore] ResumeFromStreaming: Added sanitized partial assistant content ({cleanContent.Length} chars).");
                 }
             }
 
@@ -389,6 +438,57 @@ namespace AgentCore.Editor.Core
 
             // 触发新的 LLM 调用（通过 SendMessageAsync 的内部机制）
             TriggerResumeLLMCall();
+        }
+
+        /// <summary>
+        /// 还原 Domain Reload 前被中断的 assistant 轮次，仅用于 UI/session 审计。
+        /// </summary>
+        /// <param name="content">已清洗的可见内容。</param>
+        /// <param name="reasoning">reasoning / planning trace 内容。</param>
+        /// <param name="source">reasoning 来源。</param>
+        /// <param name="durationMs">reasoning 用时。</param>
+        /// <param name="rawContent">原始 assistant 内容。</param>
+        /// <param name="planningTraceState">可见规划 trace 状态。</param>
+        /// <returns>恢复出的 assistant 轮次；无内容时返回 null。</returns>
+        private ConversationTurn RestoreInterruptedAssistantTurn(
+            string content,
+            string reasoning,
+            ThinkingTraceSource source,
+            double durationMs,
+            string rawContent,
+            VisiblePlanningTraceState planningTraceState)
+        {
+            if (string.IsNullOrEmpty(content) && string.IsNullOrEmpty(reasoning) && string.IsNullOrEmpty(rawContent))
+                return null;
+
+            var cleanContent = content ?? string.Empty;
+            var raw = rawContent ?? string.Empty;
+
+            if (!string.IsNullOrEmpty(raw))
+            {
+                var finalResult = VisiblePlanningTraceExtractor.FinalizeContent(raw);
+                if (finalResult.State == VisiblePlanningTraceState.Completed)
+                {
+                    cleanContent = finalResult.Content;
+                    reasoning = MergeReasoningText(reasoning, finalResult.Reasoning);
+                    source = MergeReasoningSource(source, ThinkingTraceSource.VisiblePlanningTrace);
+                    planningTraceState = finalResult.State;
+                }
+            }
+
+            var turn = new ConversationTurn("assistant", cleanContent)
+            {
+                IsStreaming = false,
+                Reasoning = reasoning ?? string.Empty,
+                ReasoningSource = source,
+                ReasoningDurationMs = Math.Max(0, durationMs),
+                RawAssistantContent = raw,
+                PlanningTraceState = planningTraceState
+            };
+
+            _conversationTurns.Add(turn);
+            SessionManager.Instance.MarkDirty();
+            return turn;
         }
 
         /// <summary>
