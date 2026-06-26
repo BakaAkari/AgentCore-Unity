@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.2.0 | **更新日期**: 2026-06-25 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0），Phase 7 后续 Plugin / 产品化与 Phase 8（MCP 对外互操作）仍为待开发产品模块
+> **版本**: v1.2.1 | **更新日期**: 2026-06-26 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1），Phase 7 后续 Plugin / 产品化与 Phase 8（MCP 对外互操作）仍为待开发产品模块
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,11 +36,11 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.2.0)
+### 0.4 当前项目快照 (v1.2.1)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.2.0 (2026-06-25) — Chat UI / ThinkingDrawer 双来源 reasoning 可观测性完成（Structured Reasoning + Visible Planning Trace + AssistantTurnView 固定布局） |
+| **版本** | 1.2.1 (2026-06-26) — Request Enrichment 修复 reasoning 触发；ThinkingDrawer 端到端可用 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
@@ -51,7 +51,7 @@
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
 | **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 128K（适配现代大 context LLM） |
 | **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
-| **Reasoning 可观测性** | ThinkingDrawer 默认折叠；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 可见规划 trace 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages` |
+| **Reasoning 可观测性** | ThinkingDrawer 默认折叠；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 可见规划 trace 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages`；Request Enrichment 自动注入 `reasoning` 参数触发代理返回 reasoning_content |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
 | **Phase 6 验收** | 完成 — 见 ADR-11 |
 | **治理层进度** | G.1~G.3 全面完成（v1.1.0）；G.4 / G.5 / G.6 待开始 |
@@ -77,7 +77,7 @@
 ```
 已完成 (≤ 1.0.0): 代码库理解 → Workspace 基础设施 → VCS 主动调用 → 索引主动调用 → Settings shell 化 → Phase 6 验收
 治理层 (1.0.x):    LLM/Agent 架构安全收口（Tool Risk Policy / WorkspacePathPolicy 强制接入 / Lazy Tool Discovery / CompletionGate）
-派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ Chat UI / ThinkingDrawer 可观测性（v1.2.0）→ 兼容用户原本 IDE/CLI 习惯（MCP）
+派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ Chat UI / ThinkingDrawer 可观测性（v1.2.0）→ Request Enrichment 修复 reasoning 触发（v1.2.1）→ 兼容用户原本 IDE/CLI 习惯（MCP）
 中期 (1.x):        Phase 7 内部扩展生态（Plugin/插件） + Phase 8 对外互操作（MCP Server）
 ```
 
@@ -204,6 +204,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | 7.2.4 | **Visible Planning Trace 抽取** | 默认开启；严格识别内容开头 `---THINKING---` 与 `---ACTION---`；代码块/引用/不完整 marker 不抽取 | [x] v1.2.0 |
 | 7.2.5 | **LLM 上下文隔离** | `RawAssistantContent` 持久化到 ConversationTurn / Session / DomainReloadState；写入 `_messages` 前只保留清洗后的 assistant content | [x] v1.2.0 |
 | 7.2.6 | **Domain Reload 恢复兼容** | Streaming 中断时恢复 reasoning/raw/planning state 到 UI/session，LLM 历史仅注入清洗后的可见内容 | [x] v1.2.0 |
+| 7.2.7 | **Request Enrichment — reasoning 触发** | 请求序列化层注入 `reasoning` 参数 + `stream_options`；Settings UI 支持 effort/max_tokens/extra body 配置；修复 ThinkingDrawer 端到端数据链路 | [x] v1.2.1 |
 
 ### 3.3 P1 — Plugin / Extension 系统（对内扩展）
 

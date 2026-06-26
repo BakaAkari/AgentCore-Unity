@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-06-26
+
+### Added
+- **Request Enrichment 架构**：新增 [`RequestEnrichment`](Editor/LLM/RequestEnrichment.cs:1) 静态类，在 JSON 序列化层注入 `stream_options`、`reasoning` 参数和用户自定义 `extraRequestBody`，不污染强类型 `ChatCompletionRequest` 模型。
+- **Reasoning 请求触发**：默认启用 `enableReasoningOutput`，向每次 LLM 请求注入 `"reasoning": {}` 参数，触发 OpenRouter / Claude API 等代理返回 `reasoning_content` 字段（v1.2.0 的 ThinkingDrawer 依赖此字段但从未收到数据，本版本修复）。
+- **Settings UI — Request Enrichment 卡片**：Model Settings 页新增 "Request Enrichment" 配置卡片，包含 Enable Reasoning Output 开关、Reasoning Effort 下拉（default/low/medium/high）、Reasoning Max Tokens、Extra Request Body (JSON) 文本区（带实时格式校验）。
+
+### Fixed
+- **ThinkingDrawer 无数据**：v1.2.0 的 ThinkingDrawer 架构完整但始终无显示 — 根因是 `OpenAICompatibleClient` 的请求体缺少 `reasoning` 参数，代理服务器（OpenRouter 等）不会在响应中返回 `reasoning_content`。现通过 `RequestEnrichment.BuildEnrichedJson()` 替换两处 `JsonHelper.Serialize()` 调用，自动注入必要参数。
+
+### Changed
+- **版本号**: `1.2.0` → `1.2.1`，标记 Request Enrichment 修复 ThinkingDrawer 数据触发。
+- **AgentCoreSettings**: `CurrentVersion` 升至 11；新增 `enableReasoningOutput`（默认 true）、`reasoningEffort`、`reasoningMaxTokens`、`extraRequestBody` 四个字段。
+- **OpenAICompatibleClient**: 非流式（line 47）与流式（line 105）的 `JsonHelper.Serialize(request)` 替换为 `RequestEnrichment.BuildEnrichedJson(request, settings)`。
+
 ## [1.2.0] - 2026-06-25
 
 ### Added
