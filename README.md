@@ -1,158 +1,144 @@
 ﻿# AgentCore Unity
 
-> Unity Editor 内置 AI Agent 插件 — 通过自然语言对话驱动 Unity 开发工作流
+> Unity Editor 内置 AI Agent 插件 — 让 LLM 在真实 Unity Editor 工作流中规划、执行、观察与修正。
 
-## 概述
+AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 的替代品，而是面向 Unity 项目的原生执行层：把模型推理、Unity Editor 状态、工具调用、项目知识、版本控制、代码索引与验证反馈连接成可治理的闭环。
 
-AgentCore Unity 是一个 Unity Editor 插件，提供类 ChatGPT 的对话窗口，让开发者通过自然语言与 AI Agent 交互，完成场景搭建、代码编写、资源管理等 Unity 开发任务。
+## 当前状态
 
-### 核心特性
+- **Package**: `com.agentcore.unity`
+- **Version**: `1.2.1`
+- **Unity**: `2021.3+`
+- **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
+- **Distribution**: UPM package
+- **Status**: Phase 6 已验收；治理层 G.1~G.3、后台增量索引、ThinkingDrawer / reasoning 可观测性、Request Enrichment 已完成；CompletionGate / Evidence Pipeline / Plugin / MCP 仍在后续规划中
 
--  **智能 Agent Loop** — "Loop until final answer" 模式，自主规划和执行多步任务
--  **40+ 内置工具** — 覆盖场景、脚本、资产、物理、UI、地形、相机、动画、构建等 Unity 核心功能，共 335+ 个 actions
--  **自主纠错能力** — 错误即信息、自动编译检查、Console 错误捕获、Fallback 路由
--  **多会话管理** — 标签页式多会话，支持历史记录和上下文恢复
--  **Bootstrap Files** — SOUL/TOOLS/PROJECT/MEMORY/USER 五层系统提示词
--  **UPM 包分发** — 标准 Unity Package Manager 安装
--  **工具自动发现** — 基于 `[AgentTool]` 属性的反射自动注册机制
--  **Domain Reload 恢复** — 脚本修改触发重编译后自动恢复对话上下文
--  **文件变更追踪** — 实时追踪工具调用产生的文件变更，可视化展示增减行数
--  **工具启用/禁用** — Settings 面板中按分类或单个工具控制启用状态
+## 核心能力
 
-## 架构
+### Agent Loop
 
-详见 [plans/ARCHITECTURE.md](plans/ARCHITECTURE.md)
+- OpenAI-compatible Chat Completions 工具调用循环
+- 多轮 tool call：LLM 可规划、调用工具、读取结果并继续执行
+- Fallback routing、自动编译检查、Console 错误捕获与工具结果回灌
+- Domain Reload 恢复：脚本修改触发重编译后恢复会话、pending tool calls、assistant content、reasoning / planning trace 状态
+
+### Unity 原生工具系统
+
+- 基于 `[AgentTool]` + `IAgentTool` 的反射自动发现
+- 当前源码中约 **51 个 AgentTool 声明**，覆盖场景、对象、组件、脚本、Prefab、资源、材质、Shader、导入设置、UI、相机、物理、光照、音频、Timeline、Cinemachine、ProBuilder、构建、测试、清理、优化、文件系统、Memory、LightRAG、Indexing、VCS 等能力域
+- 工具执行统一经过 schema 校验、Dispatcher 分发、主线程调度与异常包装
+
+### Tool Governance
+
+- `ToolRiskPolicy` / `ToolCapability` / `ToolExecutionRisk` / `ToolPolicyDecision` 风险基础设施
+- `ToolPathRiskResolver` + `WorkspacePathPolicy`：根据目标路径所属 Workspace Root 评估风险
+- `ToolCallDispatcher` 已在工具执行前接入路径风险与策略决策
+- 当前策略是 VCS-friendly 宽松默认：Blocked workspace root 会阻断；delete/remove/destroy 类 action 需要确认；其他非删除操作默认放行
+- `execute_code` 默认降权为 Restricted 工具
+
+### Lazy Tool Discovery / ActiveToolScope
+
+- 工具可见性分为 `AlwaysVisible` / `OnDemand` / `Restricted`
+- LLM 默认只看到核心工具与 `request_tools`
+- `request_tools` 元工具支持列出和激活按需工具分类，降低工具 schema tax 和误选工具风险
+- Settings 支持整体关闭 tool scoping，回退到旧的全量非 Restricted 暴露模式
+
+### Workspace / VCS
+
+- WorkspaceRoot / UnityRoot / Scope Root 建模，适配大型商业 Unity 项目、SVN 工作副本、多根目录结构
+- Workspace path policy 区分 editable project code、shared code、workspace package、commercial plugin、custom plugin、engine code、tooling code、generated code、read-only reference 等角色
+- 可选 VCS 组件通过 `AGENTCORE_VCS` 启用，支持 Git / SVN / Perforce 的状态、diff、log、同步、提交等工作流
+
+### Code Indexing
+
+- 可选 Indexing 组件通过 `AGENTCORE_INDEXING` 启用
+- Roslyn 符号索引，支持符号搜索、全文搜索、依赖查询、用法查询、符号上下文聚合
+- SQLite 优先，JSONL fallback
+- 后台静默 + 增量索引：AssetPostprocessor 记录 dirty paths，`BackgroundIndexService` 合并、去抖、后台执行 targeted incremental indexing
+- `search_code` 可查询索引状态、dirty 数量、失败信息和 session pause 状态
+
+### Context / Memory / Knowledge
+
+- Bootstrap 链：`SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user)`
+- Conversation compression 与 tool result compression
+- Context usage UI
+- Mem0 semantic memory 与 LightRAG knowledge base
+- Code Index 按任务召回相关代码证据，而不是一次性读取整个仓库
+
+### Reasoning Observability
+
+- `ThinkingDrawer`：assistant turn 的 reasoning / planning trace 抽屉，默认折叠
+- `AssistantTurnView`：固定 assistant turn 布局为 ThinkingDrawer → ToolCallGroup → MessageBubble
+- 双来源 reasoning 抽取：provider structured reasoning 字段 + `---THINKING---` / `---ACTION---` visible planning trace
+- reasoning / raw assistant content 仅持久化到 UI/session/archive，不进入后续 LLM `_messages`
+- `RequestEnrichment` 在 JSON 请求层注入 `stream_options`、`reasoning` 与用户自定义 `extraRequestBody`，用于触发 OpenRouter 等代理返回 reasoning content
+
+## 架构概览
+
+```text
+com.agentcore.unity/
+├── package.json
+├── AGENTS.md
+├── CHANGELOG.md
+├── README.md
+├── Editor/
+│   ├── AgentCore.Editor.asmdef          # 主 Editor-only 程序集
+│   ├── Bootstrap/                       # SOUL / TOOLS / PROJECT bootstrap
+│   ├── Config/                          # Settings, secure key storage, settings pages
+│   ├── Core/                            # AgentLoop partials, state machine, Domain Reload, compression
+│   ├── Extensions/                      # Hub / Settings / Status contribution host
+│   ├── Indexing/                        # 可选 Code Indexing 组件（AGENTCORE_INDEXING）
+│   ├── LLM/                             # OpenAI-compatible client, streaming parser, request enrichment
+│   ├── Session/                         # Session storage, export, auto memory strategy
+│   ├── Tools/                           # Tool registry, dispatcher, native/cloud/filesystem tools, safety
+│   ├── UI/                              # Chat window, hub, assistant turn views, UI components
+│   ├── VCS/                             # 可选 VCS 组件（AGENTCORE_VCS）
+│   ├── Workspace/                       # Workspace root resolution, path service, path safety
+│   └── Utils/
+└── plans/                               # Roadmap, design docs, ADRs, feature plans
+```
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| UI | Unity UI Toolkit (UXML/USS) |
-| Agent 核心 | C# 9.0 (.NET Standard 2.1) |
-| LLM 通信 | OpenAI-compatible API via LiteLLM |
-| 记忆系统 | Mem0 (语义记忆) + LightRAG (知识库) |
-| Unity 工具 | 原生 C# 工具（反射自动发现 + ToolRegistry） |
-| 包格式 | UPM (Unity Package Manager) |
+| UI | Unity UI Toolkit / IMGUI Settings Provider |
+| Agent 核心 | C# 9.0, async/await, OpenAI-compatible tool calling |
+| LLM 通信 | OpenAI-compatible API，Request Enrichment，streaming parser |
+| 工具系统 | `[AgentTool]` 自动发现，ToolRegistry，ToolCallDispatcher |
+| 治理 | Tool Risk Policy，WorkspacePathPolicy，ActiveToolScope |
+| 代码索引 | Roslyn，SQLite / JSONL，后台增量索引 |
+| 知识系统 | Mem0，LightRAG，PROJECT.md，Code Index |
+| 版本控制 | Git / SVN / Perforce 可选组件 |
+| 包格式 | Unity Package Manager |
 
-## 工具列表 (44 个工具, 335+ actions)
+## 当前开发路线
 
-### Core — 场景与对象操作 (5 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_scene` | 15 | 场景 CRUD、打开/保存/合并、构建场景管理 |
-| `manage_gameobject` | 12 | GameObject 创建/修改/删除/复制，含批量操作和网格排列 |
-| `manage_component` | 11 | 组件添加/移除/属性设置，含批量操作和组件复制 |
-| `find_gameobjects` | — | 按名称/标签/层/组件搜索 GameObject |
-| `scene_analysis` | 10 | 场景分析：健康检查、组件统计、热点分析、依赖分析、性能提示 |
+已完成：
 
-### Meta — 编辑器控制 (3 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_editor` | 8 | 编辑器状态控制（Play/Pause/Stop）、选择、项目设置 |
-| `execute_menu_item` | 3 | 执行/列出/验证 Unity 菜单项 |
-| `batch_execute` | — | 批量执行多个工具调用，支持事务模式 |
+- Phase 1~6：核心 Agent Loop、原生工具系统、Domain Reload、会话管理、Memory / RAG、Workspace、VCS、Code Index、Settings shell、Phase 6 实战验收
+- 治理层 G.1~G.3：Tool Risk Policy / WorkspacePathPolicy 接入、ExecuteCodeTool 降权、Lazy Tool Discovery / ActiveToolScope
+- Phase 7 §3.1：后台静默 + 增量索引
+- Phase 7 §3.2：Chat UI / ThinkingDrawer reasoning 可观测性
+- v1.2.1：Request Enrichment 修复 reasoning 触发
 
-### Scripting — 代码与数据 (4 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_script` | 10 | C# 脚本 CRUD、分析、查找引用、添加方法/字段 |
-| `execute_code` | 1 | 在编辑器中执行任意 C# 表达式 |
-| `manage_prefab` | 6 | 预制体创建/实例化/解包/应用/还原 |
-| `manage_scriptable_object` | 10 | ScriptableObject CRUD、JSON 导入导出、批量设置 |
+后续重点：
 
-### Specialized — 专业领域 (11 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_physics` | 10 | 物理系统：刚体/碰撞体/关节/射线检测/重叠测试 |
-| `manage_lighting` | 6 | 光照创建/修改、烘焙、光照贴图设置 |
-| `manage_graphics` | 5 | 渲染设置、质量设置管理 |
-| `manage_audio` | 7 | 音频源管理、播放控制、音频设置 |
-| `manage_ui` | 9 | uGUI 系统：Canvas/元素创建、布局、组件添加 |
-| `manage_camera` | 9 | 相机创建/配置、对齐视图、渲染到纹理 |
-| `manage_cinemachine` | 10 | Cinemachine 虚拟相机、目标设置、Body/Aim/Noise 配置 |
-| `manage_event` | 8 | UnityEvent 监听器管理、事件调用 |
-| `manage_terrain` | 10 | 地形创建、高度编辑、Perlin 噪声、纹理绘制、树木种植 |
-| `manage_timeline` | 9 | Timeline 创建、轨道/Clip 管理、播放控制 |
-| `manage_probuilder` | 10 | ProBuilder 建模：形状创建、材质设置、网格操作 |
+- G.4：ContextWindowManager / Bootstrap 预算收口
+- G.5：CompletionGate + Operation Journal
+- G.6：Evidence Pipeline / Planner-Executor-Verifier 分层
+- Phase 7：Plugin / Extension 系统、UPM 发布流程、文档站、示例项目
+- Phase 8：MCP Server 对外互操作
 
-### Utility — 资产与资源 (8 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_asset` | 8 | 资产搜索/创建/删除/移动/复制/导入/依赖分析 |
-| `manage_material` | 11 | 材质创建/属性设置/Shader 切换/关键字管理 |
-| `manage_shader` | 8 | Shader 列表/信息/搜索/关键字/属性查询 |
-| `manage_animation` | 9 | 动画控制器信息、参数管理、层权重、Clip 创建 |
-| `manage_asset_import` | 9 | 资产导入器设置、批量重导入、标签管理 |
-| `manage_model_import` | 10 | 3D 模型导入设置、网格/材质/动画/Rig 信息 |
-| `manage_texture_import` | 10 | 纹理导入设置、平台设置、Sprite 设置 |
-| `read_console` | 5 | Unity Console 日志读取：错误/警告/全部/计数/清除 |
+详细方向以 [`plans/ROADMAP.md`](plans/ROADMAP.md) 为准；设计约束见 [`plans/llm-agent-architecture-remediation-plan.md`](plans/llm-agent-architecture-remediation-plan.md)。
 
-### Extended — 扩展功能 (9 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_build` | 10 | 构建设置、目标平台、场景列表、Player 设置 |
-| `manage_input` | 5 | 输入轴管理、按键模拟 |
-| `manage_navmesh` | 9 | 导航网格烘焙/清除、Agent/Obstacle 添加 |
-| `manage_profiler` | 5 | 性能分析：统计/内存/渲染/录制 |
-| `manage_tags_layers` | 9 | 标签/层/排序层管理 |
-| `manage_package` | 9 | UPM 包列表/搜索/安装/移除/版本查询 |
-| `manage_test` | 7 | 测试列表/运行/结果/创建 |
-| `optimization` | 10 | 场景分析、纹理/网格/音频优化、LOD 组 |
-| `cleaner` | 10 | 查找未使用/重复资源、缺失引用、空文件夹 |
-| `smart_operations` | 7 | 对齐/分布/吸附/随机化/替换/按条件选择 |
+## 开发约束
 
-### Cloud — 云端服务 (2 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_memory` | 4 | Mem0 语义记忆：添加/搜索/列出/删除 |
-| `manage_knowledge` | 2 | LightRAG 知识库：查询/索引 |
-
-### FileSystem — 文件操作 (1 个工具)
-| 工具 | Actions | 说明 |
-|------|---------|------|
-| `manage_file` | 9 | 通用文件操作：读写/列目录/搜索内容/复制/移动/删除 |
-
-## 开发状态
-
- **开发中** — v0.5.1 (Phase 5: 夯实基础 — 测试框架 + RAG 补齐)
-
-### 已完成的阶段
--  Phase 1: 核心架构（Agent Loop、LLM 客户端、会话管理）
--  Phase 2: 基础工具系统（场景/对象/组件/脚本/资产）
--  Phase 2.5: 原生工具扩展（物理/光照/UI/音频/构建/导航等）
--  Phase 3: Domain Reload 恢复、上下文窗口管理、Fallback 路由
--  Phase 4: UI 增强（Markdown 格式化、错误重试、工具管理、文件变更追踪）
-
-## 目录结构
-
-```
-com.agentcore.unity/
-├── Editor/
-│   ├── AgentCore.Editor.asmdef
-│   ├── Bootstrap/              # 启动引导与系统提示词
-│   │   └── Resources/          # SOUL.md, TOOLS.md.template
-│   ├── Config/                 # 设置、密钥存储
-│   ├── Core/                   # Agent Loop、状态机、编译监控、文件追踪
-│   ├── LLM/                    # LLM 客户端与流式解析
-│   ├── Session/                # 会话管理、自动记忆
-│   ├── Tools/                  # 工具系统
-│   │   ├── Infrastructure/     # 工具基础设施（属性、自动发现）
-│   │   ├── Native/             # 原生工具实现
-│   │   │   ├── Core/           # 场景/对象/组件/场景分析
-│   │   │   ├── Meta/           # 编辑器控制/批量执行/菜单项
-│   │   │   ├── Scripting/      # 脚本/代码执行/预制体/ScriptableObject
-│   │   │   ├── Specialized/    # 物理/光照/图形/音频/UI/相机/地形/Timeline/Cinemachine/ProBuilder/事件
-│   │   │   ├── Utility/        # 资产/材质/Shader/动画/导入器/Console
-│   │   │   └── Extended/       # 构建/输入/导航/性能/标签层/包管理/测试/优化/清理/智能操作
-│   │   ├── Cloud/              # 云端工具（Mem0 记忆、LightRAG 知识库）
-│   │   └── FileSystem/         # 文件系统工具
-│   ├── UI/                     # Chat Window UI
-│   │   └── Components/         # UI 组件（消息气泡、文件变更面板）
-│   └── Utils/                  # 通用工具类
-├── plans/                      # 设计文档
-├── package.json
-└── README.md
-```
+- 所有源码位于 `Editor/`，主程序集为 Editor-only
+- 主程序集不得引用用户项目程序集或可选组件程序集
+- 新工具必须使用 `[AgentTool]` + `IAgentTool` 自动注册，并声明合适的 risk / capability / visibility
+- 新增高风险执行能力、MCP、Plugin、文件写入自动化或默认工具暴露扩大前，必须先对齐治理层约束
+- 文档和架构规则以 `AGENTS.md`、`plans/ROADMAP.md` 和实际源码为准
 
 ## License
 
