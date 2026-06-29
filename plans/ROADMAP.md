@@ -1,6 +1,6 @@
 ﻿# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.2.1 | **更新日期**: 2026-06-26 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1），Phase 7 后续 Plugin / 产品化与 Phase 8（MCP 对外互操作）仍为待开发产品模块
+> **版本**: v1.2.1 | **更新日期**: 2026-06-29 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；Plugin 系统已归档（见 ADR-15）；后续仅保留 MCP Server（Phase 8）与产品化分发两个待开发方向
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -54,7 +54,7 @@
 | **Reasoning 可观测性** | ThinkingDrawer 默认折叠；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 可见规划 trace 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages`；Request Enrichment 自动注入 `reasoning` 参数触发代理返回 reasoning_content |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
 | **Phase 6 验收** | 完成 — 见 ADR-11 |
-| **治理层进度** | G.1~G.3 全面完成（v1.1.0）；G.4 / G.5 / G.6 待开始 |
+| **治理层进度** | G.1~G.3 全面完成（v1.1.0）；G.4~G.6 已归档（经分析评估为非必要，见 §2.x 说明） |
 
 ### 0.5 已完成的历史 Phase
 
@@ -76,17 +76,17 @@
 
 ```
 已完成 (≤ 1.0.0): 代码库理解 → Workspace 基础设施 → VCS 主动调用 → 索引主动调用 → Settings shell 化 → Phase 6 验收
-治理层 (1.0.x):    LLM/Agent 架构安全收口（Tool Risk Policy / WorkspacePathPolicy 强制接入 / Lazy Tool Discovery / CompletionGate）
+治理层 (1.0.x):    LLM/Agent 架构安全收口（Tool Risk Policy / WorkspacePathPolicy 强制接入 / Lazy Tool Discovery）— G.1~G.3 完成
 派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ Chat UI / ThinkingDrawer 可观测性（v1.2.0）→ Request Enrichment 修复 reasoning 触发（v1.2.1）→ 兼容用户原本 IDE/CLI 习惯（MCP）
-中期 (1.x):        Phase 7 内部扩展生态（Plugin/插件） + Phase 8 对外互操作（MCP Server）
+中期 (1.x):        Phase 8 对外互操作（MCP Server）+ 产品化分发（UPM / 文档站 / 示例 / Asset Store）
 ```
 
 | 阶段 | 版本 | 定位 | 核心目标 | 关键成果 | 状态 |
 |------|------|------|---------|---------|------|
 | **Phase 6** | 0.9.x ~ 1.0.0 | 智能化与体验 | 索引深化、VCS Panel、Settings shell、Per-Component 卡片 | 见 §0.4 / §0.5 | [x] 已完成 |
-| **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery、CompletionGate、Operation Journal | 为 Phase 7/8 的工具扩展与对外暴露提供硬边界 | [-] 设计中 |
-| **Phase 7** | 1.0.x ~ 1.x | 内部扩展、索引体验深化与 Chat 可观测性（**对内**） | 后台静默 + 增量索引（v1.1.0）、Chat UI / ThinkingDrawer（v1.2.0）、Plugin/Extension 系统、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + reasoning 可审计 + 用户可自定义工具 + 可分发产品 | [-] 设计中 |
-| **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中 |
+| **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery | G.1~G.3 完成；G.4~G.6 归档（经评估非必要） | [x] 核心完成 |
+| **Phase 7** | 1.0.x ~ 1.x | 索引体验深化、Chat 可观测性与产品化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Chat UI / ThinkingDrawer（v1.2.0）、Request Enrichment（v1.2.1）、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + reasoning 可审计 + 可分发产品 | [>] §3.1/§3.2 完成，§3.4 产品化待启动 |
+| **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中（治理前置 G.1~G.3 已满足） |
 
 ---
 
@@ -161,17 +161,19 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | G.1 | **Tool Risk Policy + WorkspacePathPolicy 强制接入** | 所有工具调用统一经过风险分级、能力授权、路径边界和确认策略；禁止工具各自绕过安全策略。拆分为 G.1.a 元数据基础设施 / G.1.b 策略评估器 / G.1.c Dispatcher 接入 / G.1.d 高危工具按 Category 细化 / G.1.e WorkspacePathPolicy 强制执行 | P0 | [x] 完成 v1.0.3 — G.1.a~G.1.e 全部落地 |
 | G.2 | **ExecuteCodeTool 降权/拆分** | 默认禁用或拆分为只读查询与高风险执行；高风险执行必须显式授权和审计 | P0 | [x] 完成 v1.1.0 — 默认禁用 + Restricted 可见性 + 迁移保留旧用户设置 |
 | G.3 | **Lazy Tool Discovery / ActiveToolScope** | 不再每轮默认暴露全部工具 schema；按任务阶段、类别和能力范围渐进暴露 | P0 | [x] 完成 v1.1.0 — ToolVisibility 三级 + ToolScopeState/Resolver + request_tools 元工具 + 全量工具标注 |
-| G.4 | **ContextWindowManager / Bootstrap 预算收口** | 降低长驻 prompt 与工具 schema 对上下文的挤占；避免 Context Rot 和 Lost-in-the-Middle | P1 | [ ] |
-| G.5 | **CompletionGate + Operation Journal** | 最终回复前检查工具执行、文件变更、错误和未完成高风险操作；Domain Reload 后可恢复/审计 | P1 | [ ] |
-| G.6 | **Evidence Pipeline / Planner-Executor-Verifier 分层** | 对复杂任务引入证据缓存、任务账本和验证层，减少多步误差累积 | P2 | [ ] |
+| G.4 | ~~**ContextWindowManager / Bootstrap 预算收口**~~ | ~~降低长驻 prompt 与工具 schema 对上下文的挤占~~。经分析 G.3 Lazy Discovery 已解决 85% 工具 schema tax 问题；BootstrapLoader 的全量工具列表是 G.3 发现机制的 catalog，属于必要组件；ContextWindowManager 已有 TrimToFit + ConversationCompressor 双重保障 | — | [!] 归档（G.3 已覆盖核心需求） |
+| G.5 | ~~**CompletionGate + Operation Journal**~~ | ~~最终回复前检查工具执行、文件变更、错误和未完成高风险操作~~。经分析 SOUL.md §2 rule 4 已在 prompt 层强制执行"Write → Compile → Check → Fix → Recompile"验证循环；Operation Journal 过度工程化，无实际用户需求推动 | — | [!] 归档（SOUL.md prompt 层已覆盖） |
+| G.6 | ~~**Evidence Pipeline / Planner-Executor-Verifier 分层**~~ | ~~对复杂任务引入证据缓存、任务账本和验证层~~。经分析属于架构宇航员式设计，当前 AgentLoop 的简单 tool loop + SOUL.md 行为约束足以应对现有场景；引入四层分离会打破现有稳定架构 | — | [!] 归档（过早优化，无实际需求） |
 
-**执行规则**: 新增工具、Plugin、MCP、文件写操作扩大化、自动执行能力增强等任务，必须先完成 G.1；涉及外部调用方的 Phase 8 至少需要 G.1/G.2/G.3 作为实现前置条件。
+**执行规则**: 新增工具、MCP、文件写操作扩大化、自动执行能力增强等任务，必须先完成 G.1；涉及外部调用方的 Phase 8 至少需要 G.1/G.2/G.3 作为实现前置条件（已满足）。
+
+> **G.4~G.6 归档决策说明（2026-06-29）**: 经对现有代码深入分析，G.4/G.5/G.6 三项均已被既有机制充分覆盖或属于过度设计。G.3 的 ToolScopeResolver 将 API tool schema 从 50+ 降至 8-15 个（解决 G.4 核心问题）；SOUL.md 的编译验证循环规则在 prompt 层实现了 G.5 的核心意图；G.6 的四层架构在当前产品阶段无实际驱动力。相关设计文档 `llm-agent-architecture-remediation-plan.md` §8-§12 保留作为历史参考，不再作为实现约束。
 
 ---
 
-## 3. Phase 7 — 内部扩展、索引体验深化与 Chat 可观测性（对内 / v1.0.x ~ v1.x）
+## 3. Phase 7 — 索引体验深化、Chat 可观测性与产品化（对内 / v1.0.x ~ v1.x）
 
-**主题**: 从"功能完整的开发工具"演化为"可分发、可扩展、零感知、可审计"的产品。Phase 7 聚焦**对内**——索引体验、Chat reasoning 可观测性、扩展机制、产品化分发，全部围绕 AgentCore 自身。MCP 对外互操作单独走 §3.x Phase 8。
+**主题**: 从"功能完整的开发工具"演化为"可分发、零感知、可审计"的产品。Phase 7 聚焦**对内**——索引体验、Chat reasoning 可观测性、产品化分发，全部围绕 AgentCore 自身。MCP 对外互操作单独走 §3.x Phase 8。
 
 ### 3.1 P0 — 后台静默 + 增量索引（v1.1.0，从 Phase 6 派生）
 
@@ -206,16 +208,15 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | 7.2.6 | **Domain Reload 恢复兼容** | Streaming 中断时恢复 reasoning/raw/planning state 到 UI/session，LLM 历史仅注入清洗后的可见内容 | [x] v1.2.0 |
 | 7.2.7 | **Request Enrichment — reasoning 触发** | 请求序列化层注入 `reasoning` 参数 + `stream_options`；Settings UI 支持 effort/max_tokens/extra body 配置；修复 ThinkingDrawer 端到端数据链路 | [x] v1.2.1 |
 
-### 3.3 P1 — Plugin / Extension 系统（对内扩展）
+### 3.3 ~~P1 — Plugin / Extension 系统（对内扩展）~~ [已归档 — 见 ADR-15]
 
-> **定位**: 允许用户在不修改 AgentCore 源码的前提下自定义工具脚本并动态加载（Editor 级别）。
-> **与 MCP 的边界**: Plugin = **对内**（用户在 Unity 项目内扩展 AgentCore 行为）；MCP = **对外**（外部 IDE/CLI 调用 AgentCore）；两者不互相替代。
+> **归档原因**: 经用户决策（2026-06-29），Plugin 系统不再作为开发目标。现有 `[AgentTool]` + `IAgentTool` + `ToolAutoDiscovery` 机制已天然支持用户在自己项目中通过 Editor asmdef 添加自定义工具（只需标注 `[AgentTool]` 即可被自动发现），无需额外的 Plugin 加载框架。MCP Server 将承担"外部扩展"的角色，覆盖原本 Plugin 的大部分使用场景。
 
 | # | 任务 | 说明 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| 7.3.1 | **Plugin 加载契约** | 复用现有 `[AgentTool]` + `IAgentTool` + `ToolAutoDiscovery`；定义"用户工具程序集"扫描规则与隔离策略 | P1 | [ ] |
-| 7.3.2 | **Plugin 设置面板** | Settings 中列出已发现的用户工具，支持启用/禁用、查看元数据 | P1 | [ ] |
-| 7.3.3 | **示例 Plugin 模板** | 提供 Hello World 级别的用户工具模板仓库 | P2 | [ ] |
+| ~~7.3.1~~ | ~~**Plugin 加载契约**~~ | ~~复用现有 `[AgentTool]` + `IAgentTool` + `ToolAutoDiscovery`；定义"用户工具程序集"扫描规则与隔离策略~~ | — | [!] 归档 |
+| ~~7.3.2~~ | ~~**Plugin 设置面板**~~ | ~~Settings 中列出已发现的用户工具，支持启用/禁用、查看元数据~~ | — | [!] 归档 |
+| ~~7.3.3~~ | ~~**示例 Plugin 模板**~~ | ~~提供 Hello World 级别的用户工具模板仓库~~ | — | [!] 归档 |
 
 ### 3.4 P1 — 产品化与分发
 
@@ -233,7 +234,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 **主题**: 通过 [Model Context Protocol](https://modelcontextprotocol.io) 把 AgentCore 已有的工具集（Native / Cloud / FileSystem / Indexing / VCS）暴露给外部 IDE / CLI / Agent 平台，**兼容用户原本的开发习惯**。
 **触发原因**: v1.0.0 验收过程中识别——用户希望在不离开自己惯用的 IDE/CLI 工作流的前提下使用 AgentCore 能力。
-**与 Phase 7 的边界**: Phase 7 = 对内（Plugin / 索引 / 分发），Phase 8 = 对外（MCP Server）；两个 Phase 在产品规划上平行推进，但 Phase 8 的实现必须先满足治理层 G.1/G.2/G.3 的安全前置条件。
+**与 Phase 7 的边界**: Phase 7 = 对内（索引 / 可观测性 / 产品化分发），Phase 8 = 对外（MCP Server）；两个 Phase 在产品规划上平行推进，Phase 8 的治理前置条件 G.1/G.2/G.3 已满足。
 **设计文档**: [`mcp-server-feasibility.md`](mcp-server-feasibility.md)（可行性分析与初步设计）
 **架构决策**: 详见 ADR-13（MCP 独立 Phase + 对外暴露定位）。
 
@@ -378,18 +379,18 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
   - "在 Editor 内自建简化版 side-by-side 视图" — 与 ADR-12 主决策直接冲突
   - "嵌入 monaco-diff / VS Code diff webview" — Editor 不支持 webview，且引入额外依赖
 
-### ADR-13: MCP Server 设为独立 Phase 8，与 Plugin 系统形成"对外/对内"对照
+### ADR-13: MCP Server 设为独立 Phase 8，对外互操作独立编排
 
-**状态**: `已决策 — 独立 Phase 平行推进` | **日期**: 2026-06-16
+**状态**: `已决策 — 独立 Phase 平行推进` | **日期**: 2026-06-16 | **更新**: 2026-06-29（Plugin 归档后简化描述）
 
-- **决策**: 将 MCP（Model Context Protocol）Server 能力提升为独立的 **Phase 8**，与 Phase 7（内部扩展与索引体验深化）平行推进，而非作为 Phase 7 内的一个子任务
+- **决策**: 将 MCP（Model Context Protocol）Server 能力提升为独立的 **Phase 8**，与 Phase 7（索引体验与产品化）平行推进，而非作为 Phase 7 内的一个子任务
 - **核心理由**:
-  - **对外/对内边界清晰**: Plugin / Extension 系统 = 用户在 Unity 项目内扩展 AgentCore（**对内**）；MCP Server = 把 AgentCore 工具暴露给外部 IDE / CLI / Agent 平台（**对外**）。两者解决的是不同方向的扩展性问题，不互相替代
+  - **对外/对内边界清晰**: Phase 7 = 对内（索引 / 可观测性 / 产品化分发）；MCP Server = 对外（把 AgentCore 工具暴露给外部 IDE / CLI / Agent 平台）
   - **触发原因不同**: Phase 7 §3.1 后台索引派生于"v1.0.0 实战验收识别的性能优化项"；Phase 8 派生于"用户希望兼容自己原本的 IDE/CLI 工作流"。两个需求独立产生，应独立编排
   - **风险特征不同**: MCP 涉及跨进程协议、安全边界（写操作 / Workspace 边界）、客户端兼容性矩阵；与 Phase 7 内部任务的风险栈完全不同，混在一起会污染优先级判断
   - **可平行**: MCP 适配层主要是对 `IAgentTool` / `ToolAutoDiscovery` 的桥接，对 Phase 7 的索引改造代码无强耦合；两条线可在产品规划上平行推进，但 MCP 实现不得绕过治理层的工具风险策略、能力授权和 Workspace 边界
 - **影响**:
-  - ROADMAP §1 战略目标新增 Phase 8 行；§3 拆为 Phase 7（§3.1 ~ §3.3）+ Phase 8（§3.x 独立章节）
+  - ROADMAP §1 战略目标新增 Phase 8 行；§3 拆为 Phase 7（§3.1 ~ §3.4）+ Phase 8（§3.x 独立章节）
   - `mcp-server-feasibility.md` §9 ROADMAP 关系章节明确"独立 Phase 8"
   - 风险评估（§5）新增 MCP 跨进程安全 / 客户端兼容性两条风险
 - **拒绝替代方案**:
@@ -411,6 +412,25 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
   - Phase 7/8 保持产品模块定位，但实现顺序受治理层约束。
   - §7 下一步行动建议改为优先执行治理层 G.1。
 
+### ADR-15: 归档 Plugin 系统 — MCP + 现有 ToolAutoDiscovery 已覆盖需求
+
+**状态**: `已决策 — 归档不实现` | **日期**: 2026-06-29
+
+- **决策**: 将 Phase 7 §3.3 Plugin / Extension 系统从开发计划中归档，不再作为开发目标
+- **核心理由**:
+  - **现有机制已满足**: `[AgentTool]` + `IAgentTool` + `ToolAutoDiscovery` 天然支持用户在自己项目中通过 Editor asmdef 添加自定义工具（标注 `[AgentTool]` 即可被自动发现注册），无需额外 Plugin 框架
+  - **MCP 覆盖外部扩展**: MCP Server（Phase 8）将允许外部 IDE/CLI/Agent 平台调用 AgentCore 工具集，覆盖了 Plugin 系统原本想解决的"从外部扩展 AgentCore 能力"的场景
+  - **ROI 不足**: Plugin 系统需要额外的加载契约设计、隔离策略、设置面板和文档，但实际需求方（用户自己）已经可以直接通过 asmdef 实现同等效果
+- **影响**:
+  - §3.3 任务标记为 `[!] 归档`
+  - Phase 7 描述从"内部扩展、索引体验深化与 Chat 可观测性"简化为"索引体验深化、Chat 可观测性与产品化"
+  - §1 战略目标表移除 Plugin 相关描述
+  - §5 风险评估移除 Plugin 崩溃 Editor 风险条目
+  - ADR-13 标题简化（移除"与 Plugin 系统形成对照"措辞）
+- **不影响**:
+  - 现有 `OptionalComponentManager` / `IAgentCorePanelContribution` / `IAgentCoreSettingsContribution` 扩展机制保持不变（这些是内置可选组件用的，不是用户 Plugin 用的）
+  - 用户仍可通过 Editor asmdef + `[AgentTool]` 自行添加工具（这是框架天然能力，不需要"Plugin 系统"）
+
 ---
 
 ## 5. 风险评估
@@ -424,7 +444,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | 工具 schema 与长驻 prompt 过大导致上下文污染和误选工具 | 高 | 中 | Lazy Tool Discovery、Bootstrap 预算收口、ContextWindowManager 策略修复 |
 | MCP Server 跨进程暴露增加攻击面 | 中 | 高 | 默认仅 stdio + 本机 loopback；HTTP 传输延后；实现前先完成治理层 G.1/G.2/G.3，并与 `WorkspacePathPolicy` 对齐写操作边界 |
 | MCP 协议演进导致客户端兼容性问题 | 中 | 中 | 遵循 MCP 官方版本协商；至少覆盖 Claude Desktop / Cursor / Continue / 自定义 CLI 四类客户端验证 |
-| Plugin / Extension 系统引入用户工具崩溃 Editor | 低 | 中 | 复用 `ToolAutoDiscovery` 的反射隔离 + 异常包装；Settings 提供"一键禁用所有用户工具"开关 |
+| ~~Plugin / Extension 系统引入用户工具崩溃 Editor~~ | — | — | 已归档（见 ADR-15）；用户通过 asmdef 自定义工具仍受 `ToolAutoDiscovery` 异常包装保护 |
 | 示例项目维护成本过高 | 低 | 低 | 示例项目独立仓库，AgentCore 作为 UPM 依赖引入 |
 
 ---
@@ -455,15 +475,14 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 ## 7. 下一步行动建议
 
-> v1.0.0 已发布并通过用户实战验收。Phase 7/8 仍是后续两个产品模块，但下一步先执行 LLM/Agent 架构安全收口，避免在工具数量和对外暴露继续增长后再补安全边界。
+> v1.2.1 已发布。治理层核心（G.1~G.3）已完成，Phase 7 §3.1/§3.2 已交付。后续两个开发方向：MCP Server（Phase 8）和产品化分发（Phase 7 §3.4）。
 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|
-| P0 | **治理层 G.1 Tool Risk Policy + WorkspacePathPolicy 强制接入** | 后续所有新增工具、Plugin、MCP 和文件写操作扩大化都依赖统一风险策略；这是继续扩展 Agent 能力前的硬前置 |
-| P0 | **治理层 G.2/G.3 ExecuteCodeTool 降权 + Lazy Tool Discovery** | 直接降低高风险执行、工具 schema tax、误选工具和上下文污染风险；也是 MCP 对外暴露前置条件 |
-| P1 | **Phase 7 §3.1 后台静默 + 增量索引（v1.1.0）** | v1.0.0 实战验收最直接的体验痛点；可与治理层并行设计，但实现不得扩大默认工具暴露 |
-| P1 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作需求成立；产品规划可与 Phase 7 平行，但编码需先满足治理层 G.1/G.2/G.3 |
-| P2 | **Phase 7 §3.3.1 UPM 发布流程（自动化打包）** | v1.0.0 已是稳定里程碑，发布流程可沉淀为脚本，但不应抢占安全收口优先级 |
+| P0 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作核心需求；治理前置 G.1/G.2/G.3 已满足，可直接启动设计与实现 |
+| P1 | **Phase 8 §3.x MCP Server 传输与兼容性（8.1.5 ~ 8.1.7）** | stdio 稳定后扩展 HTTP/SSE 传输；覆盖 Claude Desktop / Cursor / Continue / CLI 四类客户端 |
+| P1 | **Phase 7 §3.4 产品化 — UPM 发布流程（7.4.1）** | v1.2.1 已是稳定产品，发布流程可沉淀为自动化脚本 |
+| P2 | **Phase 7 §3.4 产品化 — 文档站 + 示例项目（7.4.2 ~ 7.4.5）** | 降低新用户上手门槛；可与 MCP 开发并行推进 |
 
 ---
 

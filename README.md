@@ -11,7 +11,7 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
-- **Status**: Phase 6 已验收；治理层 G.1~G.3、后台增量索引、ThinkingDrawer / reasoning 可观测性、Request Enrichment 已完成；CompletionGate / Evidence Pipeline / Plugin / MCP 仍在后续规划中
+- **Status**: Phase 6 已验收；治理层 G.1~G.3、后台增量索引、ThinkingDrawer / reasoning 可观测性、Request Enrichment 已完成；后续重点为 MCP Server 对外互操作与产品化分发
 
 ## 核心能力
 
@@ -124,11 +124,8 @@ com.agentcore.unity/
 
 后续重点：
 
-- G.4：ContextWindowManager / Bootstrap 预算收口
-- G.5：CompletionGate + Operation Journal
-- G.6：Evidence Pipeline / Planner-Executor-Verifier 分层
-- Phase 7：Plugin / Extension 系统、UPM 发布流程、文档站、示例项目
-- Phase 8：MCP Server 对外互操作
+- Phase 7 §3.4：产品化与分发（UPM 发布流程、文档站、示例项目、Asset Store）
+- Phase 8：MCP Server 对外互操作（McpServerHost / McpToolBridge / 风险分级 / Settings UI / 多 IDE 配置）
 
 详细方向以 [`plans/ROADMAP.md`](plans/ROADMAP.md) 为准；设计约束见 [`plans/llm-agent-architecture-remediation-plan.md`](plans/llm-agent-architecture-remediation-plan.md)。
 

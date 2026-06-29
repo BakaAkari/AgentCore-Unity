@@ -1,6 +1,6 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-06-23 | **当前版本**: v1.0.0（Phase 6 验收完成）| **下一目标**: 先完成 LLM/Agent 架构安全收口，再推进 Phase 7（v1.1.0 后台静默 + 增量索引）/ Phase 8（MCP 对外互操作）| **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-06-29 | **当前版本**: v1.2.1（治理层 G.1~G.3 + Phase 7 §3.1/§3.2 完成）| **下一目标**: Phase 8（MCP Server 对外互操作）+ Phase 7 §3.4（产品化分发）| **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
@@ -13,7 +13,7 @@
 | [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 定义 Phase 6 验收闭环、LLM/Agent 治理层、Phase 7（对内扩展）/ Phase 8（MCP 对外）任务清单和 ADR | 活跃维护 |
 | [**llm-agent-architecture-remediation-plan.md**](llm-agent-architecture-remediation-plan.md) | **LLM/Agent 架构安全收口最终准则** — Tool Risk Policy / WorkspacePathPolicy / Lazy Tool Discovery / CompletionGate / Operation Journal 等后续治理约束；Phase 7/8 的前置依据 | 活跃维护，进入实现前对齐 |
 | [**indexing-background-incremental-design.md**](indexing-background-incremental-design.md) | **后台静默 + 增量索引设计方案（Phase 7 §3.1，v1.1.0）** — DirtyTracker / CoalescingScheduler / BackgroundIndexService / IndexingStatusBus 三层调度；解决 git pull 后阻断式 reindex 痛点；对应 ROADMAP 7.1.1 ~ 7.1.7 | 用户已确认核心决策（Q1/Q5/Q9/Q10），编码前对齐完成，等待复审进入 Phase A；实现不得绕过治理层安全规则 |
-| [**mcp-server-feasibility.md**](mcp-server-feasibility.md) | **MCP Server 可行性方案（Phase 8 §3.x）** — 让外部 IDE / CLI / Agent chat 平台通过 MCP 协议调用 Unity 工具；与 Phase 7 Plugin 系统形成"对外/对内"对照（见 ADR-13）；对应 ROADMAP 8.1.1 ~ 8.1.7 | 设计基线完成，待启动；实现前必须满足治理层 G.1/G.2/G.3 |
+| [**mcp-server-feasibility.md**](mcp-server-feasibility.md) | **MCP Server 可行性方案（Phase 8 §3.x）** — 让外部 IDE / CLI / Agent chat 平台通过 MCP 协议调用 Unity 工具；对应 ROADMAP 8.1.1 ~ 8.1.7（见 ADR-13） | 设计基线完成，待启动；治理层 G.1/G.2/G.3 前置已满足 |
 | [**rules-system-plan.md**](rules-system-plan.md) | ~~规则系统设计方案~~ | ⚠️ **已废弃**（见 ROADMAP ADR-10，rules.md 与 PROJECT.md 功能重叠，v0.9.7 完全移除） |
 | [**enterprise-unity-workflow-requirements.md**](enterprise-unity-workflow-requirements.md) | **企业级 Unity 项目适配需求基准** — 记录大规模地图/模式/资源包/SVN 分线工作流；后续代码索引、VCS、RAG、Memory、工具系统等功能设计的上游依据 | 需求基准，持续参考 |
 
@@ -90,14 +90,14 @@
 ### 对于开发者
 
 1. **开始新功能前** → 查阅 [ROADMAP.md](ROADMAP.md) 确认任务优先级和范围
-2. **涉及工具暴露、自动执行、文件写入、MCP、Plugin 或 Agent 自治增强时** → 优先阅读 [llm-agent-architecture-remediation-plan.md](llm-agent-architecture-remediation-plan.md)，并先满足治理层前置条件
+2. **涉及工具暴露、自动执行、文件写入、MCP 或 Agent 自治增强时** → 优先阅读 [llm-agent-architecture-remediation-plan.md](llm-agent-architecture-remediation-plan.md)，并先满足治理层前置条件
 3. **涉及企业级 Unity 项目、代码索引、VCS、RAG、Memory 或文件工具边界时** → 优先阅读 [enterprise-unity-workflow-requirements.md](enterprise-unity-workflow-requirements.md)
 4. **查找历史决策** → 在 [`_archive/`](_archive/) 中搜索相关计划文档
 
 ### 对于 AI 助手
 
 1. **优先参考活跃文档** — ROADMAP 是当前开发主导文档
-2. **治理层优先** — 涉及工具扩展、MCP、Plugin、文件写入或自治增强时，必须先对齐 `llm-agent-architecture-remediation-plan.md`
+2. **治理层优先** — 涉及工具扩展、MCP、文件写入或自治增强时，必须先对齐 `llm-agent-architecture-remediation-plan.md`
 3. **WorkspaceRoot 规则优先** — 默认以 SVN 工作副本根作为 AgentCore WorkspaceRoot；UnityRoot 只是 WorkspaceRoot 下的 Unity 工程子根
 4. **代码事实优先** — 当文档与实际代码不一致时，以 `Editor/` 下的源码为准
 5. **归档文档仅作历史参考** — 不要基于归档文档推断当前功能状态

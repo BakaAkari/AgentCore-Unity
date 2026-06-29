@@ -458,9 +458,9 @@ AgentCore 的工具系统几乎与 MCP 是 1:1 映射：
 已正式登记为独立 Phase，参见 [`plans/ROADMAP.md`](ROADMAP.md:1) §3.x：
 
 - **Phase 名称**：`Phase 8 — MCP 对外互操作（对外）`
-- **与 Phase 7 关系**：Phase 7（Plugin / 后台索引）= **对内扩展**；Phase 8（MCP）= **对外暴露**。两者在产品规划上并行；MCP 实现必须先满足治理层安全前置条件。详见 ADR-13 / ADR-14。
+- **与 Phase 7 关系**：Phase 7（索引体验深化 + 产品化）= **对内完善**；Phase 8（MCP）= **对外暴露**。两者在产品规划上并行；MCP 实现必须先满足治理层安全前置条件。详见 ADR-13 / ADR-14。
 - **依赖**：当前的 Tools / Workspace / Optional Components 基础设施已就绪（v1.0.0 验收完成）；实现前还依赖治理层 G.1/G.2/G.3。
-- **不依赖**：Indexing 后台增量、Plugin 系统、Enterprise Workflow（独立可单跑，但不得绕过治理层）
+- **不依赖**：Indexing 后台增量、Enterprise Workflow（独立可单跑，但不得绕过治理层）
 - **任务条目**：8.1.1 ~ 8.1.7（McpServerHost / McpToolBridge / 风险分级 / Settings UI / 多 IDE 配置 / 测试 / 文档），见 ROADMAP §3.x
 - **触发条件**：用户对外部 IDE / CLI / Agent chat 平台调用 Unity 工具的需求达到稳定优先级时启动；不与 v1.0.0 验收阻塞
 
@@ -506,7 +506,7 @@ AgentCore 的工具系统几乎与 MCP 是 1:1 映射：
 - 在 ROADMAP 中保留 Phase 8 条目（已登记于 §3.x，状态 [ ] 待启动）
 - 不删除本文档，作为未来启动 Phase 8 时的设计基线
 - 当前迭代避免引入与 MCP 设计冲突的工具命名（如不要新建 `read_file_v2` 之类与 MCP 标准工具名冲突的）
-- Phase 7（Plugin）开发时保留对外接口隔离层，避免内部扩展 API 与未来 MCP 工具桥接代码耦合
+- 产品化开发时保留对外接口隔离层，避免内部扩展 API 与未来 MCP 工具桥接代码耦合
 
 ---
 
