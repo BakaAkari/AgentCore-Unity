@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AgentCore.Editor.Config;
 using AgentCore.Editor.Extensions;
 using AgentCore.Editor.UI.Components;
 using UnityEditor;
@@ -19,6 +20,87 @@ namespace AgentCore.Editor.UI
 
         /// <summary>Chat 模块 ID。</summary>
         private const string ChatModuleId = "chat";
+
+        #endregion
+
+        #region Hub 生命周期
+
+        /// <summary>缓存的面板相关设置快照，用于判断是否需要重建 Hub。</summary>
+        private (bool mem0, bool lightrag) _hubPanelStateSnapshot;
+
+        /// <summary>
+        /// 订阅设置变更事件，用于在服务启用/禁用时动态重建 Hub 面板。
+        /// </summary>
+        private void SubscribeHubSettingsChanged()
+        {
+            _hubPanelStateSnapshot = CaptureHubPanelState();
+            AgentCoreSettings.OnSettingsChanged += OnSettingsChangedRebuildHub;
+        }
+
+        /// <summary>
+        /// 取消订阅设置变更事件。
+        /// </summary>
+        private void UnsubscribeHubSettingsChanged()
+        {
+            AgentCoreSettings.OnSettingsChanged -= OnSettingsChangedRebuildHub;
+        }
+
+        /// <summary>
+        /// 捕获当前影响 Hub 面板可见性的设置状态。
+        /// </summary>
+        private static (bool mem0, bool lightrag) CaptureHubPanelState()
+        {
+            var s = AgentCoreSettings.instance;
+            return (s.mem0Enabled, s.lightragEnabled);
+        }
+
+        /// <summary>
+        /// 设置变更回调：仅当面板相关设置变化时才重建 Hub。
+        /// 避免每次保存设置都执行昂贵的面板重建。
+        /// </summary>
+        private void OnSettingsChangedRebuildHub()
+        {
+            var current = CaptureHubPanelState();
+            if (current == _hubPanelStateSnapshot)
+                return;
+
+            _hubPanelStateSnapshot = current;
+            RebuildHubModules();
+        }
+
+        /// <summary>
+        /// 重建 Hub 模块面板和 Rail 导航。
+        /// 在服务启用/禁用状态变化后调用，动态更新可用面板列表。
+        /// </summary>
+        private void RebuildHubModules()
+        {
+            if (rootVisualElement == null) return;
+
+            // 1. 记住当前激活的模块
+            var previousModuleId = _hubRail?.ActiveModuleId ?? ChatModuleId;
+
+            // 2. 释放旧面板和 Rail
+            DisposeHubPanels();
+            if (_hubRail != null)
+            {
+                _hubRail.OnModuleChanged -= OnHubModuleChanged;
+                _hubRail.RemoveFromHierarchy();
+                _hubRail = null;
+            }
+
+            // 3. 重建面板
+            InitializeHubPanels();
+
+            // 4. 重建 Hub Rail
+            _hubRail = new HubRail(CreateHubModuleDefinitions(), previousModuleId);
+            var mainBody = rootVisualElement.Q<VisualElement>("main-body");
+            mainBody?.Insert(0, _hubRail);
+            _hubRail.OnModuleChanged += OnHubModuleChanged;
+
+            // 5. 切换到之前的模块（如果仍存在），否则回退到 Chat
+            var targetModule = _hubPanels.ContainsKey(previousModuleId) ? previousModuleId : ChatModuleId;
+            SwitchToModule(targetModule);
+        }
 
         #endregion
 

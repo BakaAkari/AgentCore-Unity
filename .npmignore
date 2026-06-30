@@ -41,4 +41,5 @@ desktop.ini
 
 # --- Python 缓存 ---
 __pycache__/
+__pycache__.meta
 *.pyc

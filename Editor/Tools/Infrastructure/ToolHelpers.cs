@@ -373,13 +373,18 @@ namespace AgentCore.Editor.Tools.Infrastructure
         }
 
         /// <summary>
-        /// 规范化资产路径（确保以 Assets/ 开头）
+        /// 规范化资产路径（确保以 Assets/ 或 Packages/ 开头）。
+        /// 对于已经是有效 Unity 资产路径的输入（如 "Assets", "Assets/Textures"）保持不变，
+        /// 对于相对路径（如 "Textures/Enemy.png"）自动添加 "Assets/" 前缀。
         /// </summary>
         public static string NormalizeAssetPath(string path)
         {
             if (string.IsNullOrEmpty(path)) return path;
 
-            path = path.Replace("\\", "/");
+            path = path.Replace("\\", "/").TrimEnd('/');
+
+            // 精确等于根目录名称时直接返回
+            if (path == "Assets" || path == "Packages") return path;
 
             if (!path.StartsWith("Assets/") && !path.StartsWith("Packages/"))
             {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using AgentCore.Editor.Extensions;
 using UnityEditor;
 using UnityEngine;
 
@@ -17,7 +18,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 12;
+        private const int CurrentVersion = 13;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -195,8 +196,8 @@ namespace AgentCore.Editor.Config
 
         // --- 请求增强配置 ---
         [Header("Request Enrichment")]
-        [Tooltip("启用 Reasoning 输出（向 LLM 请求中注入 reasoning 参数，触发思维链返回）")]
-        public bool enableReasoningOutput = true;
+        [Tooltip("启用 Reasoning 输出（向 LLM 请求中注入 reasoning 参数，触发思维链返回）。仅 OpenRouter 等兼容 provider 支持，Bedrock/Ollama 等不支持时须关闭。")]
+        public bool enableReasoningOutput = false;
 
         [Tooltip("推理努力级别（low/medium/high），留空表示不指定（由模型决定）")]
         public string reasoningEffort = "";
@@ -351,10 +352,10 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v9→v10: execute_code now default-disabled for new installs (existing config preserved)");
             }
 
-            // v10 → v11: 新增 Request Enrichment 字段（enableReasoningOutput 默认开启，其余使用声明时默认值）
+            // v10 → v11: 新增 Request Enrichment 字段（enableReasoningOutput 默认关闭，需手动开启）
             if (settingsVersion < 11)
             {
-                Debug.Log("[AgentCore] Settings migrated v10→v11: request enrichment fields initialized (reasoning output enabled by default)");
+                Debug.Log("[AgentCore] Settings migrated v10→v11: request enrichment fields initialized (reasoning output disabled by default, enable in Settings if your provider supports it)");
             }
 
             // v11 → v12: 可选服务默认值对齐（新安装用户 endpoint 为空，autoMemoryEnabled 为 false）
@@ -362,6 +363,30 @@ namespace AgentCore.Editor.Config
             if (settingsVersion < 12)
             {
                 Debug.Log("[AgentCore] Settings migrated v11→v12: optional service defaults aligned (no data migration for existing users)");
+            }
+
+            // v12 → v13: 默认启用 VCS 和 Code Indexing 可选组件
+            if (settingsVersion < 13)
+            {
+                // 使用 delayCall 避免在 ScriptableSingleton OnEnable 期间触发重编译
+                EditorApplication.delayCall += () =>
+                {
+                    bool changed = false;
+                    if (!OptionalComponentManager.IsVcsEnabled())
+                    {
+                        OptionalComponentManager.SetVcsEnabled(true);
+                        changed = true;
+                    }
+                    if (!OptionalComponentManager.IsIndexingEnabled())
+                    {
+                        OptionalComponentManager.SetIndexingEnabled(true);
+                        changed = true;
+                    }
+                    if (changed)
+                    {
+                        Debug.Log("[AgentCore] Settings migrated v12→v13: VCS and Code Indexing components enabled by default");
+                    }
+                };
             }
 
             settingsVersion = CurrentVersion;
@@ -406,7 +431,7 @@ namespace AgentCore.Editor.Config
             workspaceRootOverride = "";
             unityRootRelativePathOverride = "";
             workspaceConfigVersion = 0;
-            enableReasoningOutput = true;
+            enableReasoningOutput = false;
             reasoningEffort = "";
             reasoningMaxTokens = 0;
             extraRequestBody = "";
@@ -417,11 +442,18 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
-        /// 保存设置到磁盘。
+        /// 设置变更事件。
+        /// 当 SaveSettings() 被调用时触发，用于通知 UI 等订阅者刷新状态。
+        /// </summary>
+        public static event Action OnSettingsChanged;
+
+        /// <summary>
+        /// 保存设置到磁盘并通知订阅者。
         /// </summary>
         public void SaveSettings()
         {
             Save(true);
+            OnSettingsChanged?.Invoke();
         }
 
         /// <summary>

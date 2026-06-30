@@ -270,6 +270,9 @@ namespace AgentCore.Editor.UI
             // 3.8 订阅 Hub 模块切换事件
             _hubRail.OnModuleChanged += OnHubModuleChanged;
 
+            // 3.9 订阅设置变更事件（用于动态重建 Hub 面板）
+            SubscribeHubSettingsChanged();
+
             // 4. 绑定按钮事件
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());
             _cancelButton?.RegisterCallback<ClickEvent>(_ => OnCancelClicked());
@@ -362,6 +365,9 @@ namespace AgentCore.Editor.UI
                 _agentLoop.Dispose(); // P1-1 fix: 调用 Dispose() 释放 ConsoleErrorCapture、CompilationWatcher 等资源
                 _agentLoop = null;
             }
+
+            // 取消订阅设置变更事件
+            UnsubscribeHubSettingsChanged();
 
             // 取消订阅 Hub Rail 事件
             if (_hubRail != null)

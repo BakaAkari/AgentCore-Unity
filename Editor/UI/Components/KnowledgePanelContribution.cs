@@ -1,3 +1,4 @@
+using AgentCore.Editor.Config;
 using AgentCore.Editor.Extensions;
 using UnityEngine.UIElements;
 
@@ -5,6 +6,7 @@ namespace AgentCore.Editor.UI.Components
 {
     /// <summary>
     /// Built-in AgentCore Hub contribution for the Knowledge panel.
+    /// Only visible when LightRAG service is enabled in settings.
     /// </summary>
     public sealed class KnowledgePanelContribution : IAgentCorePanelContribution
     {
@@ -30,10 +32,14 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// Creates the Knowledge panel visual tree.
+        /// Returns null when LightRAG is disabled, causing the Hub to skip this panel.
         /// </summary>
-        /// <returns>The Knowledge panel root element.</returns>
+        /// <returns>The Knowledge panel root element, or null if LightRAG is disabled.</returns>
         public VisualElement CreatePanel()
         {
+            if (!AgentCoreSettings.instance.lightragEnabled)
+                return null;
+
             return new KnowledgeBasePanel();
         }
 
