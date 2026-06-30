@@ -16,7 +16,15 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Directly calls Unity Light / Lightmapping API.
     /// </summary>
     [AgentTool("manage_lighting",
-        Description = "Manage lights, lightmapping, and lighting settings in the scene",
+        Description = "Unity Lighting — Light components and lightmap baking. " +
+                      "Actions: create (Directional/Point/Spot/Area light), modify (color/intensity/range/angle/shadows/mode), " +
+                      "get_info (light properties), list (all lights in scene with type/mode), " +
+                      "bake (trigger lightmap baking — long operation), get_lightmap_settings (lightmapper config, bounces, resolution). " +
+                      "USE FOR: adding/configuring lights, setting up scene lighting, baking lightmaps, " +
+                      "adjusting shadow settings per light, switching realtime/mixed/baked mode. " +
+                      "NOT FOR: ambient/fog settings (use manage_graphics), light probes (manual placement via manage_component), " +
+                      "reflection probes (use manage_component), emissive materials (use manage_material). " +
+                      "ACTIVATE WHEN: user mentions 'light', 'lighting', 'shadow', 'bake lightmap', 'directional light', 'point light', 'spot light'.",
         Category = "specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

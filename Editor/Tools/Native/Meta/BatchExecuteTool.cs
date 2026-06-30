@@ -16,7 +16,12 @@ namespace AgentCore.Editor.Tools.Native.Meta
     /// Supports stop-on-error and transaction (undo rollback) modes.
     /// </summary>
     [AgentTool("batch_execute",
-        Description = "Execute multiple tool calls in sequence as a batch operation for efficiency",
+        Description = "Execute multiple tool calls in a single request for efficiency. " +
+            "Pass an array of {tool, args} objects. Each operation executes sequentially. " +
+            "Options: stop_on_error (default true) halts on first failure; transaction (default false) wraps all in Undo group for atomic rollback. " +
+            "Use when: 2+ similar operations on different targets (e.g. set_transform on 5 objects, add component to 3 objects). " +
+            "NOT for: operations that depend on the result of a previous step (use sequential single calls instead). " +
+            "Returns: array of {tool, success, result} for each operation, plus summary counts.",
         Category = "meta",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,

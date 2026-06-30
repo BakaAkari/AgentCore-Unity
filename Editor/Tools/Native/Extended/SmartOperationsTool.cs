@@ -16,7 +16,17 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// randomize transforms, replace objects, and select by criteria.
     /// </summary>
     [AgentTool("smart_operations",
-        Description = "Smart batch operations for GameObjects: align, distribute, snap, randomize transforms, replace objects, and select by criteria",
+        Description = "Spatial batch operations on GameObjects — precision layout and transform manipulation. " +
+                      "Actions: align_objects (align position/rotation to reference axis), distribute_objects (even spacing along axis), " +
+                      "snap_to_grid (snap positions to world grid), align_to_ground (raycast down to place on terrain/collider surface), " +
+                      "randomize_transform (randomize position/rotation/scale within ranges — useful for natural-looking placement), " +
+                      "replace_objects (swap GameObjects with a prefab while preserving transforms), " +
+                      "select_by_criteria (select objects matching component/name/layer/tag criteria). " +
+                      "USE FOR: level design workflows (arranging props, distributing objects evenly, snapping to grid), " +
+                      "randomizing vegetation/decoration placement, replacing placeholder objects with final prefabs. " +
+                      "NOT FOR: individual object positioning (use manage_gameobject set_transform), " +
+                      "batch rename/tag/layer (use workflow tool). " +
+                      "ACTIVATE WHEN: user mentions 'align', 'distribute evenly', 'snap to grid', 'place on ground', 'randomize positions', 'replace objects'.",
         Category = "Extended",
         RequiresMainThread = true,
         Visibility = ToolVisibility.OnDemand)]

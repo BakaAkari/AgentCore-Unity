@@ -59,8 +59,8 @@ namespace AgentCore.Editor.Bootstrap
                 Debug.Log($"[AgentCore] Loaded SOUL.ext.md ({context.SoulExtension.Length} chars)");
             }
 
-            // 2. TOOLS.md — 从模板生成
-            context.Tools = LoadToolsGuide();
+            // 2. TOOLS — 拆分为 Core（永驻 system prompt）和 Deferred（首轮注入）
+            LoadToolsSplit(context);
 
             // 3. PROJECT.md — 自动收集项目信息
             if (settings.autoProjectContext)
@@ -83,11 +83,13 @@ namespace AgentCore.Editor.Bootstrap
                 Debug.Log($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
             }
 
-            var tokenEstimate = context.EstimateTokenCount();
-            Debug.Log($"[AgentCore] Bootstrap loaded: ~{tokenEstimate} tokens " +
+            var coreTokens = context.EstimateTokenCount();
+            var deferredTokens = context.EstimateDeferredTokenCount();
+            Debug.Log($"[AgentCore] Bootstrap loaded: core ~{coreTokens} tokens, deferred ~{deferredTokens} tokens " +
                       $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
                       $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
-                      $"TOOLS={!string.IsNullOrEmpty(context.Tools)}, " +
+                      $"TOOLS.core={!string.IsNullOrEmpty(context.Tools)}, " +
+                      $"TOOLS.deferred={!string.IsNullOrEmpty(context.ToolsDeferred)}, " +
                       $"PROJECT={!string.IsNullOrEmpty(context.Project)}, " +
                       $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)})");
 
@@ -122,29 +124,116 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
-        /// 加载工具使用指南（从模板生成）。
+        /// §3.3 条件化 Section 注入：将 TOOLS.md.template 拆分为 Core 和 Deferred 两部分。
         /// <para>
-        /// 加载 TOOLS.md.template 模板文件，并将 <c>{{ACTIVE_TOOLS_LIST}}</c> 占位符
-        /// 替换为 <see cref="ToolRegistry"/> 中实际注册的工具列表。
-        /// </para>
-        /// <para>
-        /// 工具列表按分类分组，以 Markdown 表格形式呈现。
-        /// 如果 ToolRegistry 中没有注册任何工具，占位符将被替换为"暂无可用工具"的提示。
+        /// Core（永驻 system prompt）：Tool Coordination Patterns + Key Behavioral Triggers
+        /// Deferred（首轮用户消息时注入）：Active Tools List + Tool Selection Decision Tree
         /// </para>
         /// </summary>
-        private string LoadToolsGuide()
+        private void LoadToolsSplit(BootstrapContext context)
         {
             var template = LoadEmbeddedResource("TOOLS.md.template");
             if (string.IsNullOrEmpty(template))
             {
-                return null;
+                return;
             }
 
-            // 从 ToolRegistry 动态生成工具列表
-            var toolsList = GenerateActiveToolsList();
-            template = template.Replace("{{ACTIVE_TOOLS_LIST}}", toolsList);
+            // 用 section 标题将模板拆分为各独立段落
+            var sections = SplitTemplateSections(template);
 
-            return template;
+            // Core sections（永驻 system prompt）
+            var coreSb = new StringBuilder();
+            if (sections.TryGetValue("coordination", out var coordination))
+            {
+                coreSb.AppendLine(coordination.TrimEnd());
+            }
+            if (sections.TryGetValue("triggers", out var triggers))
+            {
+                if (coreSb.Length > 0) coreSb.AppendLine();
+                coreSb.AppendLine(triggers.TrimEnd());
+            }
+            context.Tools = coreSb.Length > 0 ? coreSb.ToString().TrimEnd() : null;
+
+            // Deferred sections（首轮注入）
+            var deferredSb = new StringBuilder();
+
+            // Active Tools List（动态生成）
+            var toolsList = GenerateActiveToolsList();
+            deferredSb.AppendLine("# Available Tools\n");
+            deferredSb.AppendLine(toolsList);
+
+            // Tool Selection Decision Tree
+            if (sections.TryGetValue("decision_tree", out var decisionTree))
+            {
+                deferredSb.AppendLine();
+                deferredSb.AppendLine(decisionTree.TrimEnd());
+            }
+            context.ToolsDeferred = deferredSb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// 将 TOOLS.md.template 按 ## 标题拆分为命名段落。
+        /// 返回字典 key: coordination / decision_tree / triggers / tools_list
+        /// </summary>
+        private static Dictionary<string, string> SplitTemplateSections(string template)
+        {
+            var result = new Dictionary<string, string>();
+            var lines = template.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+            string currentKey = null;
+            var currentContent = new StringBuilder();
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+
+                // 检测 section 标题
+                string newKey = DetectSectionKey(line);
+                if (newKey != null)
+                {
+                    // 保存上一个 section
+                    if (currentKey != null)
+                    {
+                        result[currentKey] = currentContent.ToString();
+                    }
+                    currentKey = newKey;
+                    currentContent.Clear();
+                    currentContent.AppendLine(line);
+                    continue;
+                }
+
+                if (currentKey != null)
+                {
+                    currentContent.AppendLine(line);
+                }
+                // 跳过标题前的内容（# Available Tools + {{ACTIVE_TOOLS_LIST}} + ---）
+            }
+
+            // 保存最后一个 section
+            if (currentKey != null)
+            {
+                result[currentKey] = currentContent.ToString();
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 根据 ## 标题文本识别 section key。
+        /// </summary>
+        private static string DetectSectionKey(string line)
+        {
+            if (!line.StartsWith("## ")) return null;
+
+            var title = line.Substring(3).Trim().ToLowerInvariant();
+            if (title.Contains("coordination"))
+                return "coordination";
+            if (title.Contains("decision tree"))
+                return "decision_tree";
+            if (title.Contains("behavioral triggers"))
+                return "triggers";
+
+            return null;
         }
 
         /// <summary>

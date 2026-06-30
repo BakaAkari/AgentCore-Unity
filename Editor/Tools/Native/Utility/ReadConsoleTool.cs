@@ -20,7 +20,18 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Critical for diagnosing compilation errors, runtime issues, and project configuration.
     /// </summary>
     [AgentTool("read_console",
-        Description = "Read Unity Editor Console logs (errors/warnings/messages), get system/environment info, list loaded assemblies, manage scripting define symbols, and access log files. Essential for diagnosing script issues and project configuration.",
+        Description = "Unity Editor Console and environment diagnostics — the primary debugging information source. " +
+                      "Actions: read_logs (recent console entries filtered by type: Error/Warning/Log, with count limit), " +
+                      "clear_logs (clear console), get_system_info (OS, Unity version, graphics API, scripting backend, .NET version), " +
+                      "list_assemblies (all loaded assemblies with versions — useful for checking if a package API is available), " +
+                      "get_defines (current scripting define symbols for active build target), " +
+                      "set_defines (add/remove scripting defines — TRIGGERS RECOMPILE), " +
+                      "get_log_file (read Editor.log or Player.log for full output including stack traces). " +
+                      "USE FOR: checking compilation errors after script changes, reading runtime exceptions, verifying Unity/package versions, " +
+                      "checking if optional packages are loaded (assembly presence), managing #define symbols. " +
+                      "NOT FOR: runtime Debug.Log interception (only captures Editor-time logs), performance profiling (use manage_profiler). " +
+                      "IMPORTANT: Always read_console after manage_script write/create to check for compilation errors. " +
+                      "Returns: structured log entries with timestamp, message, stacktrace, and type.",
         Category = "Utility",
         RequiresMainThread = true,
         MayModifyScripts = false,

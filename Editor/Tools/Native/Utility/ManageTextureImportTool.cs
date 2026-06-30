@@ -16,7 +16,18 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Inspect and configure TextureImporter settings for texture assets.
     /// </summary>
     [AgentTool("manage_texture_import",
-        Description = "Inspect and configure TextureImporter settings for texture assets",
+        Description = "TextureImporter settings for image assets (PNG, JPG, PSD, TGA, EXR, etc). " +
+                      "Actions: get_settings (full import config), set_settings (modify import parameters), " +
+                      "set_settings_batch (apply to multiple textures), find_assets (discover texture files), " +
+                      "get_info (actual size, format, memory, import warnings), set_type (Default/Sprite/NormalMap/Lightmap/etc), " +
+                      "set_platform_settings (per-platform format/maxSize/compression), get_platform_settings, " +
+                      "set_sprite_settings (sprite mode, pixels per unit, pivot, packing tag), find_by_size (find textures by dimension). " +
+                      "USE FOR: configuring texture compression per platform (Android/iOS/Standalone), setting up sprites for 2D, " +
+                      "converting texture types (Normal Map, Lightmap), adjusting max size for optimization, checking texture memory usage. " +
+                      "NOT FOR: creating textures (import the file instead), material texture assignment (use manage_material), " +
+                      "texture content editing (use external tools). " +
+                      "ACTIVATE WHEN: user mentions 'texture import', 'texture compression', 'sprite settings', 'max texture size', " +
+                      "'normal map', 'platform override', 'texture memory'.",
         Category = "Utility",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

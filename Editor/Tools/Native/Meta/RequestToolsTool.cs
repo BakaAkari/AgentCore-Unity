@@ -19,9 +19,13 @@ namespace AgentCore.Editor.Tools.Native.Meta
     /// </para>
     /// </summary>
     [AgentTool("request_tools",
-        Description = "Discover and activate additional tool categories. Use 'list' to see available categories and their tools, " +
-                      "use 'activate' to enable specific categories for this session. " +
-                      "Once activated, the tools in those categories become available for use in subsequent calls.",
+        Description = "Discover and activate additional tool categories that are not visible by default. " +
+            "action:list — shows all available categories with tool names and descriptions (use when you need a tool not in your current set). " +
+            "action:activate — enables a category for this session (tools become available in your next response). " +
+            "Categories include: Specialized (UI, physics, audio, lighting, camera, terrain, timeline, etc.), " +
+            "Extended (build, packages, tests, profiler, optimization, navigation, input, etc.), " +
+            "Cloud (memory, knowledge base), Scripting (execute_code — restricted). " +
+            "Always check request_tools list before telling the user you cannot do something — the capability may be in an unactivated category.",
         Category = "Meta",
         RequiresMainThread = false,
         RiskLevel = ToolRiskLevel.Low,

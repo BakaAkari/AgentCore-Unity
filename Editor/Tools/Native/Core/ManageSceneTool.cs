@@ -17,7 +17,14 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Manage Unity scenes - list, create, open, save, and get hierarchy.
     /// Directly calls Unity Editor API as part of the native tool system.
     /// </summary>
-    [AgentTool("manage_scene", Description = "Manage Unity scenes - list, create, open, save, and get hierarchy", Category = "Scene", RequiresMainThread = true,
+    [AgentTool("manage_scene",
+        Description = "Manage Unity scenes: list all scenes in project, open/close/create/save scenes, get the full hierarchy tree, manage build settings scenes, and merge scenes. " +
+            "Use get_hierarchy to understand scene structure before operating on objects. Use list to find scene file paths. " +
+            "Applicable: scene-level operations (open, save, create, hierarchy inspection). " +
+            "NOT for: modifying individual GameObjects (use manage_gameobject), searching for objects (use find_gameobjects), scene quality analysis (use scene_analysis). " +
+            "Returns: scene list with paths and load states, or hierarchy tree with depth/components. " +
+            "Note: opening a new scene discards unsaved changes in the current scene unless saved first.",
+        Category = "Scene", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene | ToolCapability.WriteProjectFiles)]
     public class ManageSceneTool : IAgentTool
     {

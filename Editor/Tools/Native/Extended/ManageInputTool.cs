@@ -15,7 +15,13 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// Provides CRUD operations for input axes and input system inspection.
     /// </summary>
     [AgentTool("manage_input",
-        Description = "Manage Unity Input settings and input axes configuration",
+        Description = "Unity Legacy Input Manager axes configuration (Edit > Project Settings > Input Manager). " +
+                      "Actions: list_axes (show all defined input axes), get_axis (detail of one axis), " +
+                      "add_axis (create new input axis with key/joystick bindings), remove_axis, simulate_key. " +
+                      "USE FOR: configuring legacy Input.GetAxis/GetButton bindings, adding custom axes for gameplay, " +
+                      "inspecting what input axes exist in the project. " +
+                      "NOT FOR: new Input System package (com.unity.inputsystem) — that uses InputAction assets, not InputManager. " +
+                      "ACTIVATE WHEN: user mentions 'input axis', 'input settings', 'key bindings', 'InputManager', or wants to add/modify legacy input axes.",
         Category = "extended",
         RequiresMainThread = true,
         Visibility = ToolVisibility.OnDemand)]

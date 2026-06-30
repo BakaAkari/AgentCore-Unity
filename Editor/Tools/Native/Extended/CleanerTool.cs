@@ -19,7 +19,15 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// empty folders, large files, asset usage, and dependency trees.
     /// </summary>
     [AgentTool("cleaner",
-        Description = "Find unused assets, duplicate files, missing references/scripts, empty folders, large assets, asset usage info, and dependency trees. Helps clean up and maintain Unity projects.",
+        Description = "Project hygiene and cleanup analysis. " +
+                      "Actions: find_unused_assets, find_duplicates, find_missing_references, find_missing_scripts, fix_missing_scripts, " +
+                      "find_empty_folders, delete_empty_folders, find_large_assets, get_asset_usage, get_dependency_tree. " +
+                      "USE FOR: identifying dead/orphan assets not referenced by any scene or prefab, finding duplicate textures/meshes/audio by content hash, " +
+                      "detecting broken references (missing scripts on GameObjects, null references in components), discovering bloated assets eating disk space, " +
+                      "understanding asset dependency chains before safe deletion. " +
+                      "NOT FOR: actually deleting assets in bulk (only fix_missing_scripts and delete_empty_folders perform writes), " +
+                      "runtime performance analysis (use manage_profiler or optimization), code quality (use manage_script analyze). " +
+                      "ACTIVATE WHEN: user mentions 'cleanup', 'unused assets', 'missing references', 'project size', 'duplicates', or wants to understand what depends on what.",
         Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,

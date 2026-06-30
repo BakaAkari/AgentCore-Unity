@@ -23,7 +23,12 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// project info detection, and dependency analysis.
     /// </summary>
     [AgentTool("scene_analysis",
-        Description = "Analyze the current Unity scene: summarize, health_check, component_stats, find_hotspots, hierarchy_tree, spatial_query, materials_overview, performance_hints, project_info, dependency_analyze. Read-only analysis — does not modify the scene.",
+        Description = "Read-only analysis of the current scene — does NOT modify anything. " +
+            "Actions: summarize (overview stats), health_check (find issues), component_stats (type distribution), find_hotspots (performance bottlenecks), " +
+            "hierarchy_tree (visual tree structure), spatial_query (find objects in area/radius), materials_overview (shader/material usage), " +
+            "performance_hints (optimization suggestions), project_info (project-level detection), dependency_analyze (asset dependencies). " +
+            "Use BEFORE making changes to understand the current state. Use health_check to diagnose reported issues. " +
+            "NOT for: modifying objects (use manage_gameobject/manage_component), profiler data (use manage_profiler), validation with severity reports (use validate).",
         Category = "Core",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.ReadOnly,

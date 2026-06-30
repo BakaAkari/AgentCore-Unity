@@ -19,7 +19,15 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Directly calls Unity Editor API as part of the native tool system.
     /// Uses SerializedObject/SerializedProperty for robust property modification.
     /// </summary>
-    [AgentTool("manage_component", Description = "Add, remove, modify, and inspect components on GameObjects", Category = "Component", RequiresMainThread = true,
+    [AgentTool("manage_component",
+        Description = "Add, remove, modify, enable/disable, copy, and inspect components on GameObjects. " +
+            "Uses SerializedProperty for robust property modification — handles all serializable fields including nested objects, arrays, and references. " +
+            "Supports batch operations (add_batch, remove_batch, set_property_batch, get_components_batch). " +
+            "Applicable: any component manipulation on scene objects. " +
+            "NOT for: creating the GameObject itself (use manage_gameobject), modifying script source code (use manage_script). " +
+            "Returns: JSON with component type, enabled state, and all serialized properties with current values. " +
+            "Note: componentType uses the class name (e.g. 'Rigidbody', 'BoxCollider', 'AudioSource'), not the full namespace.",
+        Category = "Component", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene)]
     public class ManageComponentTool : IAgentTool
     {

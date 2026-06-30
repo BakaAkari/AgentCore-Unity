@@ -19,7 +19,17 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Uses reflection to access Timeline API (com.unity.timeline package may not be installed).
     /// </summary>
     [AgentTool("manage_timeline",
-        Description = "Manage Unity Timeline: create timeline assets, add/remove tracks, add clips, set bindings, control playback. Requires com.unity.timeline package.",
+        Description = "Unity Timeline — sequenced animation, audio, and cinematic authoring. " +
+                      "Actions: create_timeline (new TimelineAsset), add_track (Animation/Audio/Activation/Signal/Cinemachine/Control), " +
+                      "add_clip (place clip on track with start/duration), remove_track, remove_clip, " +
+                      "set_binding (bind track to scene object), get_info (timeline structure: tracks/clips/duration), " +
+                      "play/pause/stop (preview playback in Editor). " +
+                      "USE FOR: creating cutscene sequences, coordinating animations with audio, " +
+                      "setting up camera switches over time, activation tracks to show/hide objects at specific times. " +
+                      "NOT FOR: Animator Controller state machines (use manage_animation), individual AnimationClip editing, " +
+                      "runtime Playable API programming. " +
+                      "PREREQUISITE: com.unity.timeline package must be installed. " +
+                      "ACTIVATE WHEN: user mentions 'timeline', 'cutscene', 'sequence', 'cinematic', 'playback', 'tracks and clips'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

@@ -19,7 +19,13 @@ namespace AgentCore.Editor.Tools.Native.Meta
     /// and multi-step editor automation sequences.
     /// </summary>
     [AgentTool("workflow",
-        Description = "Workflow automation for Unity Editor: batch rename/tag/layer operations on GameObjects, multi-scene processing, asset batch operations, snapshot/restore scene state, find-and-replace in scene hierarchy, and bulk component operations. Use for repetitive editor tasks that would otherwise require many individual tool calls.",
+        Description = "High-level workflow automation for repetitive Unity Editor tasks that would otherwise require many individual tool calls. " +
+            "Actions: batch_rename (regex/sequential rename), batch_tag/batch_layer (assign tags/layers by criteria), " +
+            "multi_scene_process (apply operation across multiple scenes), asset_batch (bulk asset operations), " +
+            "snapshot/restore (save and restore scene state), find_replace_hierarchy (search and replace in hierarchy names/components), " +
+            "bulk_component (add/remove/modify component across many objects). " +
+            "Use workflow instead of batch_execute when: the operation involves criteria-based selection (e.g. 'all objects with MeshRenderer') rather than explicit target lists. " +
+            "NOT for: single object operations (use manage_gameobject), code editing (use manage_script).",
         Category = "Meta",
         RequiresMainThread = true,
         MayModifyScripts = false,

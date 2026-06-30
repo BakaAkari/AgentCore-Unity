@@ -15,7 +15,17 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Inspect and configure ModelImporter settings for 3D model assets.
     /// </summary>
     [AgentTool("manage_model_import",
-        Description = "Inspect and configure ModelImporter settings for 3D model assets",
+        Description = "ModelImporter settings for 3D model assets (FBX, OBJ, GLTF, etc). " +
+                      "Actions: get_settings (full import config), set_settings (modify import parameters), " +
+                      "set_settings_batch (apply settings to multiple models), find_assets (discover model files in project), " +
+                      "get_mesh_info (vertex/triangle/submesh counts, bounds), get_materials_info (embedded materials and remapping), " +
+                      "get_animations_info (clip list with frame ranges), set_animation_clips (define clip ranges from timeline), " +
+                      "get_rig_info (avatar/rig type/bone mapping), set_rig (configure humanoid/generic/legacy rig). " +
+                      "USE FOR: configuring model import (scale, mesh compression, normals, tangents), setting up animation clips from FBX takes, " +
+                      "configuring humanoid avatars, checking mesh complexity, material extraction setup. " +
+                      "NOT FOR: mesh editing (use manage_probuilder), animation playback (use manage_animation), " +
+                      "placing models in scene (use manage_gameobject + manage_component). " +
+                      "ACTIVATE WHEN: user mentions 'FBX import', 'model import', 'mesh compression', 'humanoid rig', 'animation clips from model', 'model scale'.",
         Category = "Utility",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

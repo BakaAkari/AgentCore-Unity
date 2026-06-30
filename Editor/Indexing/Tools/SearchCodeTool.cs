@@ -31,7 +31,18 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     ///   clear_index        — 清除当前 Workspace 的索引
     /// </summary>
     [AgentTool("search_code",
-        Description = "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、全文搜索（FTS5）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储（SQLite），不提交 VCS。",
+        Description = "Codebase indexing and C# symbol search via local SQLite index (not committed to VCS). " +
+                      "Actions: status (index state), resolve_workspace (workspace root/fingerprint/VCS info), " +
+                      "list_roots (indexed root directories), index_full (full re-index), index_scope (index specific scope), " +
+                      "index_incremental (incremental update), search_symbol (by name/type/namespace/scope), " +
+                      "full_text_search (FTS5 content search), get_dependencies (outgoing refs), find_usages (incoming refs), " +
+                      "get_symbol_context (aggregated symbol info with dependencies), list_namespaces, get_file_symbols, " +
+                      "get_stats, clear_index. " +
+                      "USE FOR: finding class/method definitions, understanding code structure, dependency analysis, " +
+                      "navigating large codebases, finding all usages of a symbol. " +
+                      "NOT FOR: file content reading (use manage_file), runtime behavior analysis, non-C# files. " +
+                      "ACTIVATE WHEN: user asks 'where is X defined', 'who uses Y', 'find all classes that implement Z', " +
+                      "or needs to understand code architecture. PREREQUISITE: Indexing component enabled in Settings.",
         Category = "Indexing",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = false,

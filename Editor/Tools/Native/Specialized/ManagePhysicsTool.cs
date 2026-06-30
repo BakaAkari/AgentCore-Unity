@@ -16,7 +16,17 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Directly calls Unity Physics API.
     /// </summary>
     [AgentTool("manage_physics",
-        Description = "Manage physics settings, colliders, rigidbodies, and joints",
+        Description = "Unity Physics system — Rigidbody, Colliders, Joints, global physics settings, and spatial queries. " +
+                      "Actions: get_settings/set_settings (gravity, default solver iterations, layer collision matrix), " +
+                      "add_rigidbody (with mass/drag/constraints), add_collider (Box/Sphere/Capsule/Mesh with auto-size or custom), " +
+                      "add_joint (Fixed/Hinge/Spring/Configurable with anchor/limits), " +
+                      "raycast (cast ray and return hit info — works in Editor without Play mode), " +
+                      "add_constant_force, configure_collision (layer matrix on/off), add_trigger_zone, overlap_test (sphere/box overlap). " +
+                      "USE FOR: setting up physics on objects, configuring colliders to match geometry, " +
+                      "creating joints between objects, testing raycasts for level design verification, adjusting global gravity. " +
+                      "NOT FOR: Physics2D (needs separate 2D colliders/rigidbodies via manage_component), " +
+                      "runtime physics simulation (Editor raycasts work but simulation requires Play mode). " +
+                      "ACTIVATE WHEN: user mentions 'physics', 'collider', 'rigidbody', 'joint', 'gravity', 'raycast', 'trigger', 'collision'.",
         Category = "specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

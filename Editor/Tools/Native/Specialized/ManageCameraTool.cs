@@ -16,7 +16,14 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Creates, configures, inspects, aligns, and renders Unity Camera components.
     /// </summary>
     [AgentTool("manage_camera",
-        Description = "Create, configure, inspect, align, and render Unity Cameras",
+        Description = "Unity Camera component management — create, configure, inspect, align, and render. " +
+                      "Actions: create (new Camera with configurable properties), get_info (FOV/near/far/clear/culling/depth), " +
+                      "configure (modify any Camera property), look_at (point camera at world position), " +
+                      "align_to_view (match Scene View camera), create_render_texture (create RT asset), " +
+                      "render_to_texture (capture camera output to file), list_cameras (all cameras with priority), set_main_camera (tag as MainCamera). " +
+                      "USE FOR: camera setup, adjusting perspective/orthographic, rendering screenshots, aligning camera to current view. " +
+                      "NOT FOR: Cinemachine virtual cameras (use manage_cinemachine), post-processing effects, camera animation (use Timeline). " +
+                      "ACTIVATE WHEN: user mentions 'camera', 'FOV', 'render texture', 'screenshot', 'camera alignment', 'main camera'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

@@ -19,8 +19,13 @@ namespace AgentCore.Editor.Tools.Native.Scripting
     /// Uses SerializedObject/SerializedProperty for robust property access.
     /// </summary>
     [AgentTool("manage_scriptable_object",
-        Description = "Manage ScriptableObject assets — create, get/set properties, find, duplicate, delete, export/import JSON. " +
-                      "Uses SerializedObject for reliable property access.",
+        Description = "Manage ScriptableObject assets (.asset files). " +
+            "Actions: create (instantiate a SO type as asset), get (read all serialized properties), set (modify properties), " +
+            "find (search project for SO assets by type), duplicate, delete, export_json, import_json. " +
+            "Uses SerializedObject/SerializedProperty for robust access to all serialized fields. " +
+            "Use for: data assets (game config, item databases, AI behavior trees, level data). " +
+            "NOT for: MonoBehaviour components on GameObjects (use manage_component), C# class definition (use manage_script). " +
+            "Note: the SO type must already exist as a compiled C# class inheriting ScriptableObject.",
         Category = "Scripting",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,

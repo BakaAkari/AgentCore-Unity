@@ -19,7 +19,14 @@ namespace AgentCore.Editor.Tools.Native.Meta
     /// Use 'get_info' action to check editor status, connection, and project info (version, platform, scene, etc.).
     /// </summary>
     [AgentTool("manage_editor",
-        Description = "Manage Unity Editor state and project settings. Use 'get_info' to check editor status/connection (returns Unity version, platform, play state, active scene, render pipeline, etc.). Other actions: play_mode, focus_window, get_selection, set_selection, refresh, get_project_settings, set_project_setting",
+        Description = "Control Unity Editor state and access project-level settings. " +
+            "Actions: get_info (editor version, platform, play state, active scene, render pipeline — use to verify environment), " +
+            "play_mode (enter/exit/pause play mode), refresh (force asset reimport/recompile), " +
+            "get_selection/set_selection (current editor selection), focus_window (bring editor windows to front), " +
+            "get_project_settings/set_project_setting (PlayerSettings, Physics, Quality, etc.). " +
+            "Use get_info as a first step to confirm editor connectivity and project state. " +
+            "Use refresh after script changes to trigger recompilation. " +
+            "NOT for: scene object operations (use manage_gameobject), build pipeline (use manage_build).",
         Category = "meta",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,

@@ -20,7 +20,17 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Useful for quality assurance before builds.
     /// </summary>
     [AgentTool("validate",
-        Description = "Validate scene and project quality: check for missing references, duplicate names, missing components, empty GameObjects, layer/tag issues, and performance concerns. Returns structured issue reports with severity levels.",
+        Description = "Scene and project quality validation — automated checks for common issues before builds. " +
+                      "Actions: validate_scene (run all checks on current scene), validate_references (find null/missing references in serialized fields), " +
+                      "validate_names (find duplicate names in hierarchy), validate_components (missing/null components), " +
+                      "validate_empty (GameObjects with no components), validate_layers (objects on default layer that should be categorized), " +
+                      "validate_performance (high poly count, too many components, deep hierarchy). " +
+                      "Returns structured report: [{severity: Error|Warning|Info, category, gameObject, description}]. " +
+                      "USE FOR: pre-build quality checks, finding broken references after refactoring, " +
+                      "ensuring naming consistency, catching performance red flags before testing. " +
+                      "NOT FOR: code validation (use read_console for compile errors), asset validation (use cleaner), " +
+                      "runtime testing (use manage_test). " +
+                      "ACTIVATE WHEN: user mentions 'validate', 'check for issues', 'quality check', 'pre-build check', 'missing references scan', 'scene health'.",
         Category = "Utility",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,

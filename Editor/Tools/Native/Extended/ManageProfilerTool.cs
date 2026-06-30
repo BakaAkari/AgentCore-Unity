@@ -18,7 +18,16 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// Provides frame stats, memory info, rendering stats, and profiler recording control.
     /// </summary>
     [AgentTool("manage_profiler",
-        Description = "Access Unity Profiler data for performance analysis and optimization",
+        Description = "Unity Profiler data access for performance diagnostics. " +
+                      "Actions: get_frame_stats (CPU/GPU time, draw calls, triangles, batches for recent frames), " +
+                      "get_memory (total/used/reserved memory breakdown by category), " +
+                      "get_rendering_stats (shader passes, render targets, shadow casters), " +
+                      "start_recording / stop_recording (control profiler capture). " +
+                      "USE FOR: diagnosing frame rate drops, checking memory usage, understanding rendering costs, " +
+                      "measuring before/after impact of optimizations. " +
+                      "NOT FOR: deep profiler instrumentation (use Unity Profiler window), CPU timeline/flame chart, " +
+                      "custom profiler markers. Requires Play Mode for meaningful frame data. " +
+                      "ACTIVATE WHEN: user mentions 'performance', 'frame rate', 'FPS', 'memory usage', 'profiler', 'draw calls', 'optimization metrics'.",
         Category = "extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Low,

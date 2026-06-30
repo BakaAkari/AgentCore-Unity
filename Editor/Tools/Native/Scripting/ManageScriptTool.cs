@@ -19,7 +19,13 @@ namespace AgentCore.Editor.Tools.Native.Scripting
     /// Directly calls System.IO and AssetDatabase APIs.
     /// </summary>
     [AgentTool("manage_script",
-        Description = "Manage C# scripts — read, write, create, delete, list, get info, analyze API, find references, add methods/fields",
+        Description = "Read, write, create, and delete C# script files (.cs). Also provides code analysis capabilities. " +
+            "Actions: read (get file content), write (overwrite entire file or specific section), create (from template or content), " +
+            "delete, list (find scripts by path/pattern), get_info (class structure), analyze (API usage/dependencies), " +
+            "find_references (where a type/method is used), add_method/add_field (inject code into existing class). " +
+            "TRIGGERS DOMAIN RELOAD: write/create/delete on .cs files causes Unity to recompile. Wait for compilation before continuing. " +
+            "Use for: all C# source file operations. NOT for: non-C# files (use manage_file), runtime code evaluation (use execute_code), " +
+            "symbol search across codebase (use search_code when available).",
         Category = "Scripting",
         RequiresMainThread = true,
         MayModifyScripts = true,

@@ -20,7 +20,16 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// find duplicate materials, and detect overdraw risks.
     /// </summary>
     [AgentTool("optimization",
-        Description = "Analyze scene performance bottlenecks, batch-optimize textures/meshes/audio settings, manage static flags and LOD groups, find duplicate materials, and detect overdraw risks.",
+        Description = "Scene and asset optimization — actionable performance improvements. " +
+                      "Actions: analyze_scene (identify bottlenecks: high-poly meshes, unoptimized textures, excessive draw calls), " +
+                      "optimize_textures (batch set max size/compression/mipmaps), optimize_meshes (set mesh compression/read-write), " +
+                      "optimize_audio (set load type/compression/sample rate), manage_static_flags (set static flags for batching/lightmapping), " +
+                      "manage_lod (create/configure LOD groups), find_duplicate_materials (detect materials sharing same shader+textures), " +
+                      "detect_overdraw (identify overlapping transparent renderers). " +
+                      "USE FOR: reducing build size, improving frame rate, preparing for mobile builds, " +
+                      "batch-applying compression settings across many assets. " +
+                      "NOT FOR: runtime profiling (use manage_profiler), shader optimization, code performance, lighting bake settings. " +
+                      "ACTIVATE WHEN: user mentions 'optimize', 'reduce build size', 'texture compression', 'LOD', 'static batching', 'overdraw', 'performance improvement'.",
         Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,

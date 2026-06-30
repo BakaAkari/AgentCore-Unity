@@ -18,7 +18,14 @@ namespace AgentCore.Editor.Tools.Native.Scripting
     /// For complex code, recommend using manage_script to create and run scripts.
     /// </summary>
     [AgentTool("execute_code",
-        Description = "Execute simple C# expressions via reflection — static method calls, property reads, and Unity API queries",
+        Description = "Execute C# expressions at runtime via reflection. Evaluates a single expression and returns the result. " +
+            "Supports: static method calls (e.g. 'PlayerSettings.productName'), property reads, simple Unity API queries, " +
+            "object inspection, and type discovery. " +
+            "Use for: verifying API behavior, reading runtime values, checking Unity settings not exposed by other tools, " +
+            "confirming version-specific API existence. " +
+            "NOT for: complex multi-statement logic (create a script instead), modifying files, or operations with side effects that other tools handle. " +
+            "Returns: string representation of the expression result, or error message if evaluation fails. " +
+            "Note: RESTRICTED tool — must be activated via request_tools before use. Requires user confirmation.",
         Category = "Scripting",
         Visibility = ToolVisibility.Restricted,
         RequiresMainThread = true,

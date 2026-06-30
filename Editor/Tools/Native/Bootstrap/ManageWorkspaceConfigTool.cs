@@ -15,11 +15,13 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
     /// These files are injected into the System Prompt at the start of each conversation.
     /// </summary>
     [AgentTool("manage_workspace_config",
-        Description = "Read and write workspace configuration files that are injected into the System Prompt. " +
-                      "PROJECT.md stores project conventions and personal preferences. " +
-                      "SOUL.ext.md stores append-only Agent behavior rule extensions. " +
-                      "Use this tool when the user wants to update project conventions, record preferences, or modify Agent behavior rules. " +
-                      "Changes take effect in the NEXT conversation (Bootstrap loads at conversation start).",
+        Description = "Read and write workspace configuration files injected into the System Prompt at conversation start. " +
+                      "Actions: read_file (read config content), write_file (create/overwrite config), get_config_paths (list all config file paths). " +
+                      "Config files: PROJECT.md (project conventions, coding preferences, architecture notes), " +
+                      "SOUL.ext.md (append-only Agent behavior rule extensions — never replaces SOUL.md). " +
+                      "USE FOR: recording user preferences, updating project conventions, adding custom Agent behavior rules. " +
+                      "NOT FOR: reading source code files (use manage_file), modifying SOUL.md directly (immutable). " +
+                      "IMPORTANT: Changes take effect in the NEXT conversation — Bootstrap loads configs only at conversation start.",
         Category = "Bootstrap",
         RequiresMainThread = true,
         MayModifyScripts = false,

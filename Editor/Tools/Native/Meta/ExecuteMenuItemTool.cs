@@ -16,7 +16,12 @@ namespace AgentCore.Editor.Tools.Native.Meta
     /// Execute Unity Editor menu items by path, and list available menu items.
     /// </summary>
     [AgentTool("execute_menu_item",
-        Description = "Execute Unity Editor menu items by path, and list available menu items",
+        Description = "Execute Unity Editor menu items by their menu path, or list available menu items. " +
+            "Use action:execute with menuPath (e.g. 'Window/General/Console', 'Assets/Create/Material'). " +
+            "Use action:list to discover available menu items, optionally filtered by prefix. " +
+            "Applicable: triggering editor functionality that has no dedicated tool (e.g. custom menu items, editor extensions). " +
+            "NOT for: standard operations covered by other tools (use manage_asset for asset creation, manage_editor for play mode, etc.). " +
+            "Note: some menu items require specific context (e.g. selection) to work — set selection first if needed.",
         Category = "meta",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,

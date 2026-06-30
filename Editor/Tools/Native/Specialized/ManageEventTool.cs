@@ -20,8 +20,15 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Uses UnityEditor.Events.UnityEventTools and reflection for persistent listener management.
     /// </summary>
     [AgentTool("manage_event",
-        Description = "Manage UnityEvent persistent listeners — get/add/remove listeners, list events on components, " +
-                      "set listener call state, get listener count, and invoke events via reflection.",
+        Description = "UnityEvent persistent listener wiring — connect UI callbacks and inter-object communication in the Editor. " +
+                      "Actions: get_listeners (inspect all persistent callbacks on an event), add_listener (wire a method on target object), " +
+                      "remove_listener (by index), list_events (find all UnityEvent fields on a component), " +
+                      "set_call_state (EditorAndRuntime/RuntimeOnly/Off), get_count (number of listeners), invoke (fire event for testing). " +
+                      "USE FOR: wiring Button.onClick to methods, connecting custom UnityEvents between components, " +
+                      "inspecting what callbacks are registered on UI elements, testing event firing. " +
+                      "NOT FOR: C# events/delegates (code-only, not serialized), creating new UnityEvent fields (that's script modification), " +
+                      "event system input modules (use manage_ui). " +
+                      "ACTIVATE WHEN: user mentions 'onClick', 'UnityEvent', 'button callback', 'event listener', 'wire up event', 'persistent listener'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

@@ -17,7 +17,14 @@ namespace AgentCore.Editor.Tools.Cloud
     /// 支持添加、搜索、列出、删除记忆操作。
     /// </summary>
     [AgentTool("manage_memory",
-        Description = "管理长期记忆。支持添加(add)、搜索(search)、列出(list)、删除(delete)记忆。记忆会跨会话持久化存储在 mem0 服务中。",
+        Description = "Manage persistent long-term memories stored in external mem0 service (cross-session). " +
+                      "Actions: add (store a new memory with text content), search (semantic search memories by query), " +
+                      "list (enumerate all stored memories), delete (remove a memory by ID). " +
+                      "USE FOR: storing user preferences/conventions discovered during conversation, remembering project decisions, " +
+                      "recalling past context that should persist across sessions. " +
+                      "NOT FOR: workspace config (use manage_workspace_config), session-local context, file content storage. " +
+                      "ACTIVATE WHEN: user says 'remember this', asks to recall past decisions, or mentions cross-session persistence. " +
+                      "REQUIRES: mem0 service configured in Settings. Returns JSON with memory ID and content.",
         Category = "Cloud",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = false,

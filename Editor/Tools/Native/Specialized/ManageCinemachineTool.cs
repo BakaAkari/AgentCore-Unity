@@ -18,7 +18,17 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Supports both Cinemachine 2.x (CinemachineVirtualCamera) and 3.x (CinemachineCamera).
     /// </summary>
     [AgentTool("manage_cinemachine",
-        Description = "Manage Cinemachine virtual cameras: create, configure body/aim/lens/noise, set targets, priorities, and setup CinemachineBrain. Requires com.unity.cinemachine package.",
+        Description = "Cinemachine virtual camera system — create and configure intelligent cameras. " +
+                      "Actions: create_vcam (create virtual camera with body/aim/noise presets), configure_body (Transposer/Framing/Orbital), " +
+                      "configure_aim (Composer/GroupComposer/HardLookAt/POV), configure_lens (FOV/ortho/near/far/dutch), " +
+                      "configure_noise (handheld shake profiles), set_follow/set_look_at (assign targets), " +
+                      "set_priority (control camera priority blending), setup_brain (add CinemachineBrain to main camera), " +
+                      "list_vcams (all virtual cameras), get_info (full vcam state). " +
+                      "Supports both Cinemachine 2.x (CinemachineVirtualCamera) and 3.x (CinemachineCamera) via reflection. " +
+                      "USE FOR: cinematic camera setups, follow cameras, look-at targets, camera shake, camera priority blending. " +
+                      "NOT FOR: basic Camera properties (use manage_camera), Timeline camera cuts (use manage_timeline). " +
+                      "PREREQUISITE: com.unity.cinemachine package must be installed. " +
+                      "ACTIVATE WHEN: user mentions 'cinemachine', 'virtual camera', 'follow camera', 'camera shake', 'camera blend', 'dolly track'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

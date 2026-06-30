@@ -15,7 +15,14 @@ namespace AgentCore.Editor.Tools.Native.Scripting
     /// Directly calls PrefabUtility APIs.
     /// </summary>
     [AgentTool("manage_prefab",
-        Description = "Manage Unity Prefabs — create, instantiate, get info, unpack, apply overrides, and revert",
+        Description = "Manage Unity Prefab assets and instances. " +
+            "Actions: create (save scene GameObject as Prefab asset), instantiate (place Prefab in scene), " +
+            "get_info (overrides, nested prefabs, variant info), unpack (break Prefab connection), " +
+            "apply (push instance overrides back to asset), revert (discard instance overrides). " +
+            "Use for: Prefab workflow — creating reusable assets, managing Prefab instances and their overrides. " +
+            "NOT for: modifying GameObject properties directly (use manage_gameobject/manage_component on the instance), " +
+            "modifying Prefab source scripts (use manage_script). " +
+            "Note: 'create' requires a scene GameObject as source; 'apply' writes to the Prefab asset file (affects all instances).",
         Category = "Scripting",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,

@@ -16,7 +16,15 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Directly calls Unity RenderSettings / QualitySettings / Camera API.
     /// </summary>
     [AgentTool("manage_graphics",
-        Description = "Manage rendering and graphics settings including cameras, render settings, and quality levels",
+        Description = "Global rendering and quality settings — RenderSettings, QualitySettings, and rendering configuration. " +
+                      "Actions: get_render_settings (fog, ambient, skybox, halo, flare), set_render_settings (modify any render setting), " +
+                      "get_quality_settings (all quality levels with detail), set_quality_level (switch active quality), " +
+                      "manage_camera (deprecated — prefer manage_camera tool). " +
+                      "USE FOR: configuring fog (mode/color/density), ambient lighting (color/intensity/mode), skybox material, " +
+                      "quality level switching, shadow distance/resolution, LOD bias, texture resolution, vsync. " +
+                      "NOT FOR: per-object rendering (use manage_component on Renderer), shader editing, post-processing volumes, " +
+                      "render pipeline asset configuration (SRP settings are in pipeline assets). " +
+                      "ACTIVATE WHEN: user mentions 'fog', 'ambient light', 'skybox', 'quality settings', 'render settings', 'shadow distance', 'vsync'.",
         Category = "specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

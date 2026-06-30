@@ -17,7 +17,17 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Creates and edits ProBuilder meshes through reflection so ProBuilder remains an optional package.
     /// </summary>
     [AgentTool("manage_probuilder",
-        Description = "Create and edit ProBuilder meshes using optional ProBuilder package APIs. Supports shape creation, vertex/face/edge editing, UV projection, mesh operations, and ProBuilder-specific tools like extrude, bevel, bridge, and weld.",
+        Description = "ProBuilder in-editor mesh modeling — create and edit meshes without external 3D tools. " +
+                      "Actions: create_shape (cube/cylinder/sphere/plane/stairs/arch/door/pipe/cone/torus with dimensions), " +
+                      "extrude_faces, bevel_edges, bridge_edges, weld_vertices, subdivide, merge_objects, " +
+                      "set_pivot, flip_normals, conform_normals, triangulate, " +
+                      "set_uv_projection (auto/box/planar), get_mesh_info (vertex/face/edge counts, bounds). " +
+                      "USE FOR: rapid prototyping of level geometry, creating architectural elements (stairs, walls, doorways), " +
+                      "in-Editor mesh editing without exporting to Blender/Maya, custom primitive shapes. " +
+                      "NOT FOR: importing external 3D models (use manage_model_import), modifying imported meshes (those are read-only), " +
+                      "skeletal animation or rigging, complex organic modeling. " +
+                      "PREREQUISITE: com.unity.probuilder package must be installed. " +
+                      "ACTIVATE WHEN: user mentions 'probuilder', 'mesh modeling', 'create shape', 'extrude', 'bevel', 'level prototype', 'geometry editing'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

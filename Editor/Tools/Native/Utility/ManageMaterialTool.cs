@@ -16,7 +16,18 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Directly calls Unity Material API as part of the native tool system.
     /// </summary>
     [AgentTool("manage_material",
-        Description = "Create, modify, inspect, and batch-manage materials. Supports shader info retrieval including Shader Graph identification.",
+        Description = "Unity Material management — create, configure, inspect, and batch-modify materials and their shader properties. " +
+                      "Actions: create (new material with shader), get_info (shader/render queue/properties/keywords), " +
+                      "set_property (color/float/vector/int by property name), set_texture (assign texture to slot), " +
+                      "set_shader (change material shader), list_properties (all available properties with types), " +
+                      "assign (apply material to Renderer on a GameObject), copy_properties (clone properties between materials), " +
+                      "set_keyword/get_keywords (shader feature keywords), find_by_shader (all materials using a shader), " +
+                      "batch_set_properties (modify same property across multiple materials), list_materials (all materials in project), " +
+                      "get_shader_info (shader details including Shader Graph identification, pass count, property list). " +
+                      "USE FOR: creating materials, changing colors/textures/floats on materials, assigning materials to objects, " +
+                      "shader keyword toggling, finding all materials using a specific shader for batch updates. " +
+                      "NOT FOR: shader code editing (use manage_file for .shader files), Shader Graph visual editing, render pipeline asset configuration. " +
+                      "ACTIVATE WHEN: user mentions 'material', 'shader property', 'texture slot', 'render queue', 'material color', '_MainTex', '_Color'.",
         Category = "Material",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

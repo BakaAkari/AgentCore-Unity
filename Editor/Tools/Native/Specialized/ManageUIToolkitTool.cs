@@ -20,7 +20,17 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Covers creating/editing UXML/USS files, querying elements, and configuring UIDocument.
     /// </summary>
     [AgentTool("manage_ui_toolkit",
-        Description = "Manage Unity UI Toolkit (UIElements): create/edit UXML documents and USS stylesheets, configure UIDocument components, query elements, manage PanelSettings, and generate UI Toolkit code templates. Use this for the new Unity UI system (not legacy uGUI).",
+        Description = "Unity UI Toolkit (UIElements) — the modern declarative UI system for both Editor and runtime. " +
+                      "Actions: create_uxml (generate UXML document with element hierarchy), edit_uxml (modify existing UXML), " +
+                      "create_uss (generate USS stylesheet with selectors), edit_uss, " +
+                      "create_ui_document (attach UIDocument component to GameObject with UXML/PanelSettings), " +
+                      "query_elements (inspect visual tree structure of a UIDocument), " +
+                      "create_panel_settings (PanelSettings asset for resolution/scaling), " +
+                      "generate_code (C# template for binding UI elements). " +
+                      "USE FOR: creating modern runtime UI (recommended over uGUI for new projects in Unity 2023+), " +
+                      "building Editor tools/inspectors/windows with UI Toolkit, USS styling (flexbox-like layout). " +
+                      "NOT FOR: legacy uGUI Canvas/Button/Image (use manage_ui), IMGUI OnGUI code. " +
+                      "ACTIVATE WHEN: user mentions 'UI Toolkit', 'UXML', 'USS', 'UIDocument', 'VisualElement', 'UIElements', 'modern UI'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,

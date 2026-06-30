@@ -17,7 +17,16 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// Provides access to build configuration, scene management, and player settings.
     /// </summary>
     [AgentTool("manage_build",
-        Description = "Manage build settings, build targets, and trigger builds",
+        Description = "Unity build pipeline control. " +
+                      "Actions: get_settings (current build target, scenes, defines), set_target (switch platform), " +
+                      "build (trigger actual build to output path), add_scene/remove_scene (manage build scene list), " +
+                      "get_defines/set_defines (scripting define symbols). " +
+                      "USE FOR: switching build platform, triggering builds, managing which scenes are in the build, " +
+                      "reading/writing scripting define symbols (e.g. adding feature flags). " +
+                      "NOT FOR: player settings like resolution/icon (use manage_editor get_project_settings), " +
+                      "asset bundle building, addressable builds. " +
+                      "REQUIRES CONFIRMATION: build action triggers actual compilation and may take minutes. " +
+                      "ACTIVATE WHEN: user mentions 'build', 'platform switch', 'build settings', 'scripting defines', 'build scenes'.",
         Category = "extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,

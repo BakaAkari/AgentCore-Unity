@@ -127,6 +127,9 @@ namespace AgentCore.Editor.Core
         /// <summary>工具作用域状态 - 追踪当前会话中 LLM 已激活的 OnDemand 分类（G.3 ActiveToolScope）</summary>
         private ToolScopeState _toolScopeState;
 
+        /// <summary>§3.3 延迟注入内容 — Bootstrap Deferred sections，首轮用户消息时注入</summary>
+        private string _deferredContext;
+
         /// <summary>工具结果压缩器 - 自动压缩过长的工具输出</summary>
         private ToolResultCompressor _toolResultCompressor;
 
@@ -224,6 +227,9 @@ namespace AgentCore.Editor.Core
                 var context = loader.Load();
                 systemPrompt = context.CompileSystemPrompt();
 
+                // §3.3: 保存延迟注入内容，首轮用户消息时注入
+                _deferredContext = context.CompileDeferredContext();
+
                 if (string.IsNullOrWhiteSpace(systemPrompt))
                 {
                     Debug.LogWarning("[AgentCore] Bootstrap returned empty system prompt, using default.");
@@ -231,7 +237,10 @@ namespace AgentCore.Editor.Core
                 }
                 else
                 {
-                    Debug.Log($"[AgentCore] AgentLoop initialized with Bootstrap system prompt (~{context.EstimateTokenCount()} tokens).");
+                    var deferredInfo = _deferredContext != null
+                        ? $", deferred ~{context.EstimateDeferredTokenCount()} tokens"
+                        : "";
+                    Debug.Log($"[AgentCore] AgentLoop initialized with Bootstrap system prompt (~{context.EstimateTokenCount()} tokens{deferredInfo}).");
                 }
             }
             catch (Exception ex)
@@ -239,6 +248,7 @@ namespace AgentCore.Editor.Core
                 Debug.LogError($"[AgentCore] Failed to load Bootstrap context: {ex.Message}");
                 Debug.LogWarning("[AgentCore] Using default system prompt as fallback.");
                 systemPrompt = DefaultSystemPrompt;
+                _deferredContext = null;
             }
 
             _messages.Add(ChatMessage.System(systemPrompt));
@@ -401,6 +411,33 @@ namespace AgentCore.Editor.Core
                     {
                         Debug.LogWarning($"[AgentCore] Memory recall failed (non-blocking): {ex.Message}");
                         // 记忆召回失败不应阻塞对话
+                    }
+                }
+
+                // §3.3 + §3.6: 会话首轮自动注入 Deferred Context + Workspace 运行时快照
+                if (IsFirstUserMessage())
+                {
+                    // §3.3 Deferred Context: Active Tools List + Decision Tree + PROJECT + Workspace
+                    if (!string.IsNullOrEmpty(_deferredContext))
+                    {
+                        _messages.Insert(_messages.Count - 1, ChatMessage.System(_deferredContext));
+                        Debug.Log($"[AgentCore] Deferred context injected for first message (~{_deferredContext.Length / 3} tokens).");
+                        _deferredContext = null; // 注入后释放，避免重复注入
+                    }
+
+                    // §3.6 Cold-Start Elimination: Workspace 运行时快照
+                    try
+                    {
+                        var snapshot = WorkspaceSnapshotBuilder.Build();
+                        if (!string.IsNullOrEmpty(snapshot))
+                        {
+                            _messages.Insert(_messages.Count - 1, ChatMessage.System(snapshot));
+                            Debug.Log("[AgentCore] Cold-start snapshot injected for first message.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[AgentCore] Cold-start snapshot failed (non-blocking): {ex.Message}");
                     }
                 }
 
@@ -649,6 +686,28 @@ namespace AgentCore.Editor.Core
                 IsCompressionActive = _compressionMetrics.TotalCompressionCount > 0,
                 ModelName = modelName
             };
+        }
+
+        #endregion
+
+        #region Cold-Start 辅助
+
+        /// <summary>
+        /// 判断当前是否为会话的首条用户消息。
+        /// 检查 _messages 中是否仅有 1 条 user 角色消息（即当前刚添加的这条）。
+        /// </summary>
+        private bool IsFirstUserMessage()
+        {
+            int userCount = 0;
+            for (int i = 0; i < _messages.Count; i++)
+            {
+                if (_messages[i].Role == "user")
+                {
+                    userCount++;
+                    if (userCount > 1) return false;
+                }
+            }
+            return userCount == 1;
         }
 
         #endregion

@@ -16,7 +16,14 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Directly calls Unity AudioSource / AudioSettings API.
     /// </summary>
     [AgentTool("manage_audio",
-        Description = "Manage audio sources, listeners, and audio settings",
+        Description = "Unity Audio system — AudioSource, AudioListener, and global AudioSettings management. " +
+                      "Actions: add_source (attach AudioSource to GameObject with clip), modify_source (volume/pitch/spatial/loop/etc), " +
+                      "play/stop (preview audio in Editor), get_info (inspect AudioSource parameters), " +
+                      "list (all AudioSources in scene), get_settings (global audio config: speaker mode, sample rate, DSP buffer). " +
+                      "USE FOR: setting up sound effects on objects, configuring spatial audio (3D sound), adjusting audio playback parameters, " +
+                      "checking which objects have audio components. " +
+                      "NOT FOR: audio clip import settings (use manage_asset_import), audio mixing/AudioMixer groups, runtime audio scripting. " +
+                      "ACTIVATE WHEN: user mentions 'audio', 'sound', 'AudioSource', 'volume', 'spatial audio', '3D sound'.",
         Category = "specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

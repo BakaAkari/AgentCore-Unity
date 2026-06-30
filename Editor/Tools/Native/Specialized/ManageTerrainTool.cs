@@ -17,7 +17,16 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Directly calls Unity Terrain / TerrainData API.
     /// </summary>
     [AgentTool("manage_terrain",
-        Description = "Manage Unity Terrain: create, sculpt heightmaps (perlin/smooth/flatten), add texture layers, paint textures, and place trees",
+        Description = "Unity Terrain system — create landscapes and sculpt heightmaps procedurally. " +
+                      "Actions: create (terrain with size/resolution), sculpt_perlin (apply Perlin noise heightmap with scale/amplitude/octaves), " +
+                      "smooth (blur heightmap), flatten (set uniform height), " +
+                      "add_texture_layer (add terrain texture with tiling), paint_texture (apply texture at world position with brush), " +
+                      "place_trees (scatter tree prefabs with density/randomization). " +
+                      "USE FOR: creating terrain landscapes, procedural heightmap generation, terrain texturing, " +
+                      "tree/vegetation placement, terrain size/resolution setup. " +
+                      "NOT FOR: terrain detail/grass painting (too fine-grained for tool), " +
+                      "Terrain Tools package advanced features, SpeedTree configuration, custom terrain shaders. " +
+                      "ACTIVATE WHEN: user mentions 'terrain', 'heightmap', 'landscape', 'terrain texture', 'place trees', 'sculpt terrain'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

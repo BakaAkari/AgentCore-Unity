@@ -23,10 +23,15 @@ namespace AgentCore.Editor.Tools.FileSystem
     /// </para>
     /// </summary>
     [AgentTool("manage_file",
-        Description = "General-purpose file operations — read, write, list, search content, copy, move, delete any file in the project. " +
-                      "Supports all file types (json, xml, yaml, txt, md, shader, etc). " +
-                      "Use this for non-C# files, config files, content search, or files outside Assets/. " +
-                      "For C# scripts use manage_script; for Unity asset operations use manage_asset.",
+        Description = "General-purpose file I/O for ANY file in the project workspace. " +
+                      "Actions: read, write, list_directory, search_content, file_info, delete, copy, move, create_directory. " +
+                      "Supports all text formats (json, xml, yaml, txt, md, shader, uxml, uss, asmdef, etc). " +
+                      "USE FOR: config files, non-C# source, content search across files (regex supported), directory listing, " +
+                      "files outside Assets/ (Packages/, ProjectSettings/, etc), creating/editing .meta or .asset in raw text form. " +
+                      "NOT FOR: C# scripts (use manage_script), Unity asset import settings (use manage_asset_import/manage_texture_import/manage_model_import), " +
+                      "binary files (images, audio — read will fail on non-text). " +
+                      "Returns: file content with line numbers (read), success/failure (write/delete/copy/move), directory tree (list), match results with context lines (search). " +
+                      "IMPORTANT: paths are relative to project root; write creates parent directories automatically; search_content supports regex and glob file_pattern filtering.",
         Category = "FileSystem",
         RequiresMainThread = false,
         MayModifyScripts = true,

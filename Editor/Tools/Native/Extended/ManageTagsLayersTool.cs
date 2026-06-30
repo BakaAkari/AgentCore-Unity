@@ -17,7 +17,14 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// Provides CRUD operations for tags, layers, sorting layers, and object tag/layer assignment.
     /// </summary>
     [AgentTool("manage_tags_layers",
-        Description = "Manage Unity tags, layers, and sorting layers",
+        Description = "Unity Tags, Layers, and Sorting Layers management (Edit > Project Settings > Tags and Layers). " +
+                      "Actions: list_tags, add_tag, remove_tag, list_layers, set_layer (assign layer to slot 8-31), " +
+                      "list_sorting_layers, add_sorting_layer, remove_sorting_layer, assign_tag (set tag on GameObject), assign_layer (set layer on GameObject). " +
+                      "USE FOR: creating custom tags for gameplay logic (CompareTag), setting up physics/rendering layers for LayerMask filtering, " +
+                      "managing 2D sprite render order via sorting layers, bulk-assigning tags/layers to objects. " +
+                      "NOT FOR: querying objects by tag/layer (use find_gameobjects with tag/layer filter), " +
+                      "physics layer collision matrix (use manage_editor get_project_settings). " +
+                      "ACTIVATE WHEN: user mentions 'tags', 'layers', 'sorting layer', 'LayerMask', 'add tag', 'custom layer'.",
         Category = "extended",
         RequiresMainThread = true,
         Visibility = ToolVisibility.OnDemand)]

@@ -19,7 +19,16 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// Uses reflection to access Test Framework API since it is an optional package.
     /// </summary>
     [AgentTool("manage_test",
-        Description = "Run and manage Unity Test Runner tests (EditMode and PlayMode). Supports listing, running, cancelling tests and creating test scripts/fixtures.",
+        Description = "Unity Test Runner — run and manage NUnit/UnityTest tests. " +
+                      "Actions: list (discover all tests with status), run (execute specific tests or all), run_category (by NUnit category), " +
+                      "cancel (abort running tests), get_results (last run results with pass/fail/duration), " +
+                      "create_test (generate test script from template), create_fixture (generate test fixture class). " +
+                      "Supports both EditMode tests (synchronous, no scene) and PlayMode tests (coroutine-based, with scene). " +
+                      "USE FOR: running tests to verify changes, checking test results, creating new test files, " +
+                      "TDD workflow (write test → implement → verify). " +
+                      "NOT FOR: writing test logic (use manage_script), build verification tests, performance benchmarks. " +
+                      "PREREQUISITE: com.unity.test-framework package must be installed. " +
+                      "ACTIVATE WHEN: user mentions 'run tests', 'test runner', 'unit test', 'TDD', 'test results', 'create test'.",
         Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,

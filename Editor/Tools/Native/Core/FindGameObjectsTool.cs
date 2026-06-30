@@ -14,7 +14,13 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Search for GameObjects in the scene by name, tag, component, or layer.
     /// Directly calls Unity Editor API as part of the native tool system.
     /// </summary>
-    [AgentTool("find_gameobjects", Description = "Search for GameObjects in the scene by name, tag, component, or layer", Category = "GameObject", RequiresMainThread = true,
+    [AgentTool("find_gameobjects",
+        Description = "Search for GameObjects in the active scene by name (partial match), tag, layer, or attached component type. " +
+            "Use this BEFORE manage_gameobject when the target name might be ambiguous or you need to discover objects matching criteria. " +
+            "Returns: JSON array of {name, path, instanceId, tag, layer, isActive, components[]}. " +
+            "Supports pagination (page_size, cursor) for large result sets. " +
+            "NOT for: searching asset files (use manage_asset action:search), finding code symbols (use search_code).",
+        Category = "GameObject", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.ReadOnly, Capabilities = ToolCapability.ReadProject)]
     public class FindGameObjectsTool : IAgentTool
     {

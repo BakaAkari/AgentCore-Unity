@@ -17,7 +17,14 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// Provides NavMesh bake/clear, agent/obstacle management, and area configuration.
     /// </summary>
     [AgentTool("manage_navmesh",
-        Description = "Manage NavMesh baking, agents, and navigation settings",
+        Description = "Unity AI Navigation — NavMesh baking and agent/obstacle setup. " +
+                      "Actions: bake (generate NavMesh for current scene), clear (remove baked NavMesh), " +
+                      "get_settings (bake parameters: agent radius/height/slope/step), " +
+                      "add_agent (attach NavMeshAgent to a GameObject), add_obstacle (attach NavMeshObstacle), set_area (configure navigation area costs). " +
+                      "USE FOR: setting up AI pathfinding, baking walkable surfaces, configuring agent navigation parameters, " +
+                      "adding obstacles that carve or block navigation. " +
+                      "NOT FOR: runtime pathfinding queries (NavMesh.CalculatePath is runtime), NavMesh components from AI Navigation package v2. " +
+                      "ACTIVATE WHEN: user mentions 'navmesh', 'navigation', 'pathfinding', 'bake navmesh', 'AI agent movement'.",
         Category = "extended",
         RequiresMainThread = true,
         Visibility = ToolVisibility.OnDemand)]

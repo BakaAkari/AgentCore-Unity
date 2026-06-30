@@ -17,7 +17,17 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Uses reflection to access UnityEngine.UI types to avoid asmdef reference issues.
     /// </summary>
     [AgentTool("manage_ui",
-        Description = "Manage Unity UI elements including Canvas, Text, Image, Button and other UI components",
+        Description = "Unity uGUI (Canvas-based UI) — create and configure UI elements for runtime user interfaces. " +
+                      "Actions: create_canvas (Screen Space/World Space with scaler), create_text (TextMeshPro or legacy Text), " +
+                      "create_image (with sprite/color), create_button (with label and optional onClick target), " +
+                      "create_panel, create_scroll_view, create_dropdown, create_input_field, create_slider, create_toggle, " +
+                      "modify_element (change any RectTransform/UI property), get_info, list_ui_elements. " +
+                      "Uses reflection to access UnityEngine.UI types (avoids asmdef coupling). " +
+                      "USE FOR: building game UI (menus, HUD, dialogs), setting up Canvas hierarchy, " +
+                      "configuring anchors/pivot/size for responsive layout, creating interactive elements. " +
+                      "NOT FOR: Editor UI / custom inspectors (use UI Toolkit/manage_ui_toolkit), " +
+                      "world-space text that's not UI (use TextMesh component via manage_component). " +
+                      "ACTIVATE WHEN: user mentions 'UI', 'Canvas', 'Button', 'Text UI', 'HUD', 'menu', 'uGUI', 'ScrollView', 'panel'.",
         Category = "specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

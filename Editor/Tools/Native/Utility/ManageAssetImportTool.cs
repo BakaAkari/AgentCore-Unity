@@ -15,7 +15,16 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Manage generic AssetImporter settings, labels, bundles, dependencies, and reimport operations.
     /// </summary>
     [AgentTool("manage_asset_import",
-        Description = "Manage generic AssetImporter settings, labels, bundles, dependencies, and reimport operations",
+        Description = "Generic AssetImporter operations — importer inspection, labels, asset bundles, dependencies, and reimport. " +
+                      "Actions: get_importer (read importer type and settings for any asset), reimport (force reimport single asset), " +
+                      "reimport_batch (reimport multiple assets), set_labels/get_labels (asset labels for organization), " +
+                      "set_bundle (assign asset bundle name), get_dependencies (what this asset depends on), " +
+                      "get_import_log (import warnings/errors), find_by_importer (find all assets using a specific importer type). " +
+                      "USE FOR: diagnosing import issues, forcing reimport after external changes, organizing assets with labels, " +
+                      "asset bundle assignment, understanding dependency chains. " +
+                      "NOT FOR: texture-specific settings (use manage_texture_import), model-specific settings (use manage_model_import), " +
+                      "asset creation/deletion (use manage_asset). " +
+                      "ACTIVATE WHEN: user mentions 'reimport', 'asset labels', 'asset bundle', 'import settings', 'dependencies', 'importer'.",
         Category = "Utility",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

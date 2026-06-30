@@ -13,7 +13,16 @@ using UnityEditor;
 namespace AgentCore.Editor.Components.VCS.Tools
 {
     [AgentTool("version_control",
-        Description = "Manage version control system (SVN/Perforce/Git). Supports read-only queries (status, log, diff, blame) and guarded write operations (stage, commit, revert, cleanup, resolve, ignore, remove, branch). Write operations require user confirmation.",
+        Description = "Manage version control operations for SVN, Perforce (P4), and Git repositories. " +
+                      "Read actions: detect_vcs, get_status, get_branch, get_log, get_diff, get_remote, get_tags, get_blame, " +
+                      "get_sync_status, get_commit_info, get_client_info, get_changelist, get_info, get_file_log. " +
+                      "Write actions (REQUIRE CONFIRMATION): stage_files, unstage_files, commit, commit_files, " +
+                      "create_branch, switch_branch, stash, stash_pop, checkout_files, revert_files, resolve_files, " +
+                      "ignore_file, ignore_folder, ignore_extension, remove_files, cleanup. " +
+                      "USE FOR: checking file status before/after changes, reviewing diffs, committing work, managing branches. " +
+                      "NOT FOR: file content reading (use manage_file), project-wide search (use search_code). " +
+                      "ACTIVATE WHEN: user mentions git/svn/p4/commit/diff/branch/status/revert/blame. " +
+                      "PREREQUISITE: VCS optional component enabled in Settings. Auto-detects VCS type from workspace.",
         Category = "VersionControl",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,

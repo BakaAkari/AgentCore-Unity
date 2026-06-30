@@ -20,7 +20,16 @@ namespace AgentCore.Editor.Tools.Native.Extended
     /// and inspect dependencies via the Unity Package Manager API.
     /// </summary>
     [AgentTool("manage_package",
-        Description = "Manage Unity packages: list installed, search registry, install/remove packages, get info, check versions, and inspect dependencies via Unity Package Manager.",
+        Description = "Unity Package Manager (UPM) operations. " +
+                      "Actions: list (all installed packages with versions), search (query Unity registry), " +
+                      "install (add package by name@version or git URL), remove (uninstall package), " +
+                      "get_info (detailed metadata for installed package), check_updates (find available upgrades), " +
+                      "get_dependencies (dependency tree of a package). " +
+                      "USE FOR: installing packages from Unity registry or git, removing unused packages, " +
+                      "checking what version is installed, finding if a package exists in the registry, understanding dependency chains. " +
+                      "NOT FOR: Asset Store packages (those are .unitypackage imports), NuGet packages, custom package development. " +
+                      "REQUIRES CONFIRMATION: install/remove actions modify the project manifest and trigger reimport. " +
+                      "ACTIVATE WHEN: user mentions 'install package', 'UPM', 'package manager', 'add package', 'remove package', 'package version'.",
         Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,

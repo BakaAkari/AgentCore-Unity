@@ -17,7 +17,17 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Directly calls Unity AssetDatabase API as part of the native tool system.
     /// </summary>
     [AgentTool("manage_asset",
-        Description = "Manage Unity assets - search, create, delete, move, copy, and get info",
+        Description = "Unity AssetDatabase operations — search, create, delete, move, copy, and inspect assets. " +
+                      "Actions: search (find assets by name/type/label using AssetDatabase.FindAssets with filter syntax: 't:Type', 'l:Label', name), " +
+                      "get_info (type, path, GUID, labels, bundle, main asset type, sub-assets), " +
+                      "create (create asset from type — Material, RenderTexture, AnimatorController, etc), " +
+                      "delete (permanently remove asset file), move (change asset path), copy (duplicate asset), " +
+                      "rename (change asset filename). " +
+                      "USE FOR: finding assets by type/name, creating new Material/RenderTexture/Shader assets, " +
+                      "organizing assets (move/copy/rename), getting asset metadata (GUID, type, sub-assets). " +
+                      "NOT FOR: file content read/write (use manage_file), import settings (use manage_asset_import/manage_texture_import/manage_model_import), " +
+                      "C# script creation (use manage_script), prefab operations (use manage_prefab). " +
+                      "Returns: asset paths, GUIDs, type info. Search filter syntax: 't:Texture2D' (by type), 'l:MyLabel' (by label), 'Player' (by name).",
         Category = "Asset",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,

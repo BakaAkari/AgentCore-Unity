@@ -16,7 +16,14 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// Create, modify, delete, and inspect GameObjects in the scene.
     /// Directly calls Unity Editor API as part of the native tool system.
     /// </summary>
-    [AgentTool("manage_gameobject", Description = "Create, modify, delete, and inspect GameObjects in the scene", Category = "GameObject", RequiresMainThread = true,
+    [AgentTool("manage_gameobject",
+        Description = "Create, modify, delete, duplicate, reparent, and inspect GameObjects in the currently open scene. " +
+            "Supports single and batch operations (create_batch, modify_batch, delete_batch, set_active_batch, arrange_grid). " +
+            "Applicable: operating on objects in the active scene hierarchy. " +
+            "NOT for: Prefab asset editing (use manage_prefab), adding/removing components (use manage_component), reading scene structure (use manage_scene get_hierarchy). " +
+            "Returns: JSON with name, hierarchy path, instanceId, transform, and active state. " +
+            "Note: 'target' accepts a name or hierarchy path (e.g. '/Canvas/Panel/Button'). Duplicate names return the first match — use find_gameobjects to disambiguate.",
+        Category = "GameObject", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene)]
     public class ManageGameObjectTool : IAgentTool
     {

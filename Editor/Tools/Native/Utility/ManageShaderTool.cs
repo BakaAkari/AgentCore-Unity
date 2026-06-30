@@ -16,7 +16,17 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Directly calls Unity ShaderUtil API as part of the native tool system.
     /// </summary>
     [AgentTool("manage_shader",
-        Description = "Inspect and manage shaders - list available shaders, get shader info, find shader properties",
+        Description = "Unity Shader inspection and discovery — find, list, and inspect shader properties/keywords/passes. " +
+                      "Actions: list (all shaders in project with categories), get_info (pass count, property list, render queue, is Shader Graph), " +
+                      "find (search shaders by name pattern), list_keywords (all global/local shader keywords), " +
+                      "get_properties (detailed property list: type, display name, default value), " +
+                      "get_keywords (keywords on a specific shader), find_shaders (by property name or keyword), " +
+                      "get_shader_info (comprehensive shader metadata). " +
+                      "USE FOR: discovering available shaders before assigning to materials, understanding shader property names/types " +
+                      "before calling manage_material set_property, checking Shader Graph vs code shader, finding shaders with specific features. " +
+                      "NOT FOR: writing shader code (use manage_file for .shader/.hlsl), Shader Graph editing, " +
+                      "modifying material properties (use manage_material). " +
+                      "ACTIVATE WHEN: user mentions 'shader info', 'shader properties', 'find shader', 'shader keywords', 'list shaders', 'what shaders are available'.",
         Category = "Shader",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]

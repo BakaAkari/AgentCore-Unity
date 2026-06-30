@@ -16,7 +16,17 @@ namespace AgentCore.Editor.Tools.Native.Utility
     /// Directly calls Unity Animation API as part of the native tool system.
     /// </summary>
     [AgentTool("manage_animation",
-        Description = "Manage animation clips and Animator controllers",
+        Description = "Unity Animation system — AnimatorController states/transitions and AnimationClip management. " +
+                      "Actions: list_clips (all animation clips on an Animator), get_clip_info (events/curves/length/sample rate), " +
+                      "list_parameters (Animator parameters with types/values), set_parameter (set bool/int/float/trigger), " +
+                      "get_controller_info (layers/states/transitions overview), list_animator_states (all states per layer), " +
+                      "get_layers (layer names/weights/blending), set_layer_weight, " +
+                      "create_animation_clip (new clip with keyframes for position/rotation/scale). " +
+                      "USE FOR: inspecting Animator setup, creating simple animation clips, checking state machine structure, " +
+                      "verifying parameters are wired correctly, adjusting layer weights. " +
+                      "NOT FOR: editing Animator Controller graph (add states/transitions — use manage_script for code or manual editing), " +
+                      "Timeline animation (use manage_timeline), blend tree configuration. " +
+                      "ACTIVATE WHEN: user mentions 'animation', 'animator', 'animation clip', 'state machine', 'animation parameter'.",
         Category = "Animation",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
