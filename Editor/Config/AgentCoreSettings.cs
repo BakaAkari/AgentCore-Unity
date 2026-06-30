@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 11;
+        private const int CurrentVersion = 12;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -73,10 +73,10 @@ namespace AgentCore.Editor.Config
         public bool mem0Enabled = false;
 
         [Tooltip("mem0 服务端点")]
-        public string mem0Endpoint = "http://localhost:8765";
+        public string mem0Endpoint = "";
 
         [Tooltip("启用自动记忆策略（会话结束时自动提取关键信息存入 mem0）")]
-        public bool autoMemoryEnabled = true;
+        public bool autoMemoryEnabled = false;
 
         [Tooltip("触发自动记忆的最小用户对话轮次")]
         public int autoMemoryMinTurns = 3;
@@ -87,7 +87,7 @@ namespace AgentCore.Editor.Config
         public bool lightragEnabled = false;
 
         [Tooltip("LightRAG 服务端点")]
-        public string lightragEndpoint = "http://localhost:9621";
+        public string lightragEndpoint = "";
 
         // --- 用户标识 ---
         [Header("User")]
@@ -357,6 +357,13 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v10→v11: request enrichment fields initialized (reasoning output enabled by default)");
             }
 
+            // v11 → v12: 可选服务默认值对齐（新安装用户 endpoint 为空，autoMemoryEnabled 为 false）
+            // 不迁移现有用户的已配置值 — 仅影响新安装
+            if (settingsVersion < 12)
+            {
+                Debug.Log("[AgentCore] Settings migrated v11→v12: optional service defaults aligned (no data migration for existing users)");
+            }
+
             settingsVersion = CurrentVersion;
             Save(true);
         }
@@ -380,11 +387,11 @@ namespace AgentCore.Editor.Config
             bootstrapEnabled = true;
             autoProjectContext = true;
             mem0Enabled = false;
-            mem0Endpoint = "http://localhost:8765";
-            autoMemoryEnabled = true;
+            mem0Endpoint = "";
+            autoMemoryEnabled = false;
             autoMemoryMinTurns = 3;
             lightragEnabled = false;
-            lightragEndpoint = "http://localhost:9621";
+            lightragEndpoint = "";
             disabledToolCategories = new List<string>();
             disabledTools = new List<string> { "execute_code" };
             toolScopingEnabled = true;

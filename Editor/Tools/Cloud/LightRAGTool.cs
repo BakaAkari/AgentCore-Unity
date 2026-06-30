@@ -121,12 +121,21 @@ namespace AgentCore.Editor.Tools.Cloud
 
             try
             {
-                // 检查 LightRAG 是否已配置
+                // 检查 LightRAG 是否已启用
                 var settings = AgentCoreSettings.instance;
+                if (!settings.lightragEnabled)
+                {
+                    response = ToolResponse.Fail(
+                        "LightRAG 知识库已禁用，请在 AgentCore Settings 中启用");
+                    sw.Stop();
+                    return response.ToToolResult(sw.Elapsed.TotalMilliseconds);
+                }
+
+                // 检查 LightRAG Endpoint 是否已配置
                 if (string.IsNullOrEmpty(settings.lightragEndpoint))
                 {
                     response = ToolResponse.Fail(
-                        "LightRAG 服务未配置，请在 AgentCore Settings 中设置 LightRAG Endpoint URL");
+                        "LightRAG 服务未配置 Endpoint URL，请在 AgentCore Settings 中设置");
                     sw.Stop();
                     return response.ToToolResult(sw.Elapsed.TotalMilliseconds);
                 }

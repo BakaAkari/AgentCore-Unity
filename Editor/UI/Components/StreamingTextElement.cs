@@ -63,8 +63,9 @@ namespace AgentCore.Editor.UI.Components
 
             // 压缩过滤后产生的连续空行（3个以上换行 → 2个换行）
             filtered = ExcessiveNewlinesRegex.Replace(filtered, "\n\n");
-            // 流式阶段跳过 emoji 替换和 Markdown 格式化，以减少 CPU 开销
-            // filtered = SanitizeUnsupportedEmoji(filtered);
+            // 移除 SDF 字体不支持的 emoji（流式阶段也需要，否则渲染时仍会触发字体警告）
+            filtered = SanitizeUnsupportedEmoji(filtered);
+            // 流式阶段跳过 Markdown 格式化，以减少 CPU 开销
             // filtered = FormatMarkdown(filtered);
             // 去除开头的空行，保留末尾的自然截断
             filtered = filtered.TrimStart('\n', '\r');
@@ -73,11 +74,17 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
-        /// 移除 SDF 字体不支持的 emoji 相关字符。
+        /// 移除 SDF 字体不支持的 emoji 及相关字符。
         /// <para>
-        /// Unity 默认 UI 字体通常不支持 Supplementary Multilingual Plane 中的图形字符，
-        /// 渲染时容易显示为缺字方块。此方法直接移除 surrogate pairs、变体选择符和零宽连接符，
-        /// 保证输出仅保留常规文本字符。
+        /// Unity 默认 UI Toolkit 字体（Inter SDF）不支持以下字符：
+        /// <list type="bullet">
+        ///   <item>Supplementary Multilingual Plane 中的图形字符（通过 surrogate pairs 编码）</item>
+        ///   <item>BMP 中的 Miscellaneous Symbols（U+2600-U+26FF: ☀⚡⚠♻ 等）</item>
+        ///   <item>BMP 中的 Dingbats（U+2700-U+27BF: ✅❌✂✈ 等）</item>
+        ///   <item>变体选择符（U+FE0E/FE0F）和零宽连接符（U+200D）</item>
+        /// </list>
+        /// 渲染时触发 "Font ... does not contain ... Unicode (Hex)" 警告。
+        /// 此方法将这些字符移除，保证输出文本不会触发字体回退警告。
         /// </para>
         /// </summary>
         /// <param name="text">可能包含不受支持图形字符的文本</param>
@@ -90,7 +97,7 @@ namespace AgentCore.Editor.UI.Components
             for (int i = 0; i < text.Length; i++)
             {
                 char c = text[i];
-                if (char.IsSurrogate(c) || c == (char)0xFE0E || c == (char)0xFE0F || c == (char)0x200D)
+                if (char.IsSurrogate(c) || IsUnsupportedBmpEmoji(c))
                 {
                     needsSanitize = true;
                     break;
@@ -104,6 +111,7 @@ namespace AgentCore.Editor.UI.Components
             {
                 char c = text[i];
 
+                // 跳过 surrogate pairs（BMP 外 emoji）
                 if (char.IsHighSurrogate(c))
                 {
                     if (i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
@@ -113,7 +121,13 @@ namespace AgentCore.Editor.UI.Components
                     continue;
                 }
 
-                if (char.IsLowSurrogate(c) || c == (char)0xFE0E || c == (char)0xFE0F || c == (char)0x200D)
+                if (char.IsLowSurrogate(c))
+                {
+                    continue;
+                }
+
+                // 跳过 BMP 内 SDF 字体不支持的 emoji / 符号
+                if (IsUnsupportedBmpEmoji(c))
                 {
                     continue;
                 }
@@ -122,6 +136,26 @@ namespace AgentCore.Editor.UI.Components
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 判断 BMP 字符是否属于 SDF 字体不支持的 emoji/符号范围。
+        /// </summary>
+        private static bool IsUnsupportedBmpEmoji(char c)
+        {
+            // 变体选择符 (Variation Selectors) 和零宽连接符 (ZWJ)
+            if (c == (char)0xFE0E || c == (char)0xFE0F || c == (char)0x200D)
+                return true;
+
+            // Miscellaneous Symbols: U+2600-U+26FF (☀⚡⚠♻☎☑ 等)
+            if (c >= (char)0x2600 && c <= (char)0x26FF)
+                return true;
+
+            // Dingbats: U+2700-U+27BF (✅❌✂✈✉✓✔✖ 等)
+            if (c >= (char)0x2700 && c <= (char)0x27BF)
+                return true;
+
+            return false;
         }
 
         #region Markdown 格式化

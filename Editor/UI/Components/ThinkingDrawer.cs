@@ -150,7 +150,7 @@ namespace AgentCore.Editor.UI.Components
             UpdateSourceLabel();
             if (_isExpanded)
             {
-                _reasoningLabel.text = _reasoningText;
+                _reasoningLabel.text = ContentFilter.SanitizeUnsupportedEmoji(_reasoningText);
             }
             UpdateTitle();
         }
@@ -173,7 +173,7 @@ namespace AgentCore.Editor.UI.Components
             UpdateTitle();
             if (_isExpanded)
             {
-                _reasoningLabel.text = _reasoningText;
+                _reasoningLabel.text = ContentFilter.SanitizeUnsupportedEmoji(_reasoningText);
             }
         }
 
@@ -199,7 +199,7 @@ namespace AgentCore.Editor.UI.Components
             _isExpanded = expanded;
             _arrowLabel.text = expanded ? ArrowExpanded : ArrowCollapsed;
             _content.style.display = expanded ? DisplayStyle.Flex : DisplayStyle.None;
-            _reasoningLabel.text = expanded ? _reasoningText : string.Empty;
+            _reasoningLabel.text = expanded ? ContentFilter.SanitizeUnsupportedEmoji(_reasoningText) : string.Empty;
         }
 
         private void StartTimer()

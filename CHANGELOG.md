@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-06-30
+
+### Fixed
+- **LightRAGTool 门控缺失**：[`LightRAGTool`](Editor/Tools/Cloud/LightRAGTool.cs:124) 现在正确检查 `lightragEnabled` 开关，与 `Mem0Tool` 行为对齐。之前仅检查 endpoint 是否为空，导致 `lightragEnabled = false` 但 endpoint 非空时仍尝试连接。
+- **Emoji 字体警告污染 Console**：扩展 [`ContentFilter.SanitizeUnsupportedEmoji()`](Editor/UI/Components/StreamingTextElement.cs:92) 覆盖 BMP 内的 Miscellaneous Symbols（U+2600-U+26FF）和 Dingbats（U+2700-U+27BF）范围，解决 ✅❌⚠ 等字符触发 "Font does not contain Unicode" 警告的问题。同时在 `FilterStreaming()` 和 [`ThinkingDrawer`](Editor/UI/Components/ThinkingDrawer.cs) 中启用 emoji 过滤，确保流式输出和 reasoning 内容也不会触发警告。
+
+### Changed
+- **可选服务默认值对齐（仅影响新安装用户）**：
+  - `mem0Endpoint` 默认值从 `http://localhost:8765` 改为空字符串 — 消除"看似需要部署本地服务"的误导。
+  - `lightragEndpoint` 默认值从 `http://localhost:9621` 改为空字符串 — 同上。
+  - `autoMemoryEnabled` 默认值从 `true` 改为 `false` — 与 `mem0Enabled = false` 语义对齐，用户启用 mem0 后再按需开启自动记忆。
+- **Settings 版本**: `CurrentVersion` 11 → 12。现有用户不触发数据迁移，保留其已配置的 endpoint 值。
+- **版本号**: `1.2.1` → `1.2.2`
+
 ## [1.2.1] - 2026-06-26
 
 ### Added
