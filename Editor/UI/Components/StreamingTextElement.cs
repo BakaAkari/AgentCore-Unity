@@ -67,12 +67,15 @@ namespace AgentCore.Editor.UI.Components
     }
     
     /// <summary>
-    /// 表格块。
+    /// 表格块（存储结构化数据，由 Flex 网格渲染）。
     /// </summary>
     internal class TableBlock : ContentBlock
     {
         public override ContentBlockType Type => ContentBlockType.Table;
-        public List<string> FormattedLines { get; set; } = new List<string>();
+        /// <summary>表头单元格</summary>
+        public string[] Headers { get; set; }
+        /// <summary>数据行（每行为单元格数组）</summary>
+        public List<string[]> Rows { get; set; } = new List<string[]>();
     }
     
     /// <summary>
@@ -142,7 +145,13 @@ namespace AgentCore.Editor.UI.Components
             // 替换 SDF 字体不支持的 emoji 字符
             filtered = SanitizeUnsupportedEmoji(filtered);
             // 解析为 block 列表
-            return ParseMarkdownToBlocks(filtered.Trim());
+            var blocks = ParseMarkdownToBlocks(filtered.Trim());
+            // 过滤首行无意义的水平分隔线（LLM 有时在响应开头输出 ---）
+            if (blocks.Count > 0 && blocks[0].Type == ContentBlockType.HorizontalRule)
+            {
+                blocks.RemoveAt(0);
+            }
+            return blocks;
         }
 
         /// <summary>
@@ -644,10 +653,27 @@ namespace AgentCore.Editor.UI.Components
             {
                 if (tableBuffer.Count > 0)
                 {
-                    var formattedLines = FormatTable(tableBuffer);
-                    if (formattedLines.Count > 0)
+                    // 解析为结构化数据（Headers + Rows），供 Flex 网格渲染
+                    var tableBlock = new TableBlock();
+                    var dataRows = new List<string[]>();
+                    
+                    foreach (var rawLine in tableBuffer)
                     {
-                        blocks.Add(new TableBlock { FormattedLines = formattedLines });
+                        // 跳过分隔行（|---|---|---| 模式）
+                        var stripped = rawLine.Replace(" ", "").Replace("-", "").Replace("|", "").Replace(":", "");
+                        if (string.IsNullOrEmpty(stripped))
+                            continue;
+                        dataRows.Add(ParseTableRow(rawLine));
+                    }
+                    
+                    if (dataRows.Count > 0)
+                    {
+                        tableBlock.Headers = dataRows[0];
+                        for (int r = 1; r < dataRows.Count; r++)
+                        {
+                            tableBlock.Rows.Add(dataRows[r]);
+                        }
+                        blocks.Add(tableBlock);
                     }
                     tableBuffer.Clear();
                 }
@@ -857,7 +883,8 @@ namespace AgentCore.Editor.UI.Components
         {
             // 主容器样式
             style.flexDirection = FlexDirection.Column;
-            style.flexGrow = 1;
+            style.flexGrow = 0;
+            style.flexShrink = 0;
 
             // 流式阶段容器
             _streamingContainer = new VisualElement();
@@ -934,7 +961,8 @@ namespace AgentCore.Editor.UI.Components
                 _blockContainer = new VisualElement();
                 _blockContainer.name = "block-container";
                 _blockContainer.style.flexDirection = FlexDirection.Column;
-                _blockContainer.style.flexGrow = 1;
+                _blockContainer.style.flexGrow = 0;
+                _blockContainer.style.flexShrink = 0;
                 Add(_blockContainer);
 
                 _isBlockMode = true;
@@ -1136,10 +1164,11 @@ namespace AgentCore.Editor.UI.Components
                 container.Add(langLabel);
             }
 
-            // 代码内容 — 每行单独渲染保留格式
+            // 代码内容 — 每行单独渲染，前导空格替换为非断裂空格保留缩进
             foreach (var line in block.Lines)
             {
-                var lineLabel = new Label(string.IsNullOrEmpty(line) ? " " : line);
+                var displayLine = string.IsNullOrEmpty(line) ? " " : PreserveLeadingSpaces(line);
+                var lineLabel = new Label(displayLine);
                 lineLabel.style.whiteSpace = WhiteSpace.Normal;
                 lineLabel.style.fontSize = 12;
                 lineLabel.style.color = new StyleColor(new UnityEngine.Color(0.85f, 0.85f, 0.85f));
@@ -1156,19 +1185,77 @@ namespace AgentCore.Editor.UI.Components
             container.AddToClassList("content-table");
             container.style.marginTop = 6;
             container.style.marginBottom = 6;
+            container.style.borderTopLeftRadius = 4;
+            container.style.borderTopRightRadius = 4;
+            container.style.borderBottomLeftRadius = 4;
+            container.style.borderBottomRightRadius = 4;
+            container.style.backgroundColor = new StyleColor(new UnityEngine.Color(0.15f, 0.15f, 0.15f, 0.3f));
+            container.style.paddingTop = 2;
+            container.style.paddingBottom = 2;
 
-            // 表格每行单独渲染保留格式
-            foreach (var line in block.FormattedLines)
+            int colCount = block.Headers?.Length ?? 0;
+            if (colCount == 0) return container;
+
+            // 表头行
+            var headerRow = CreateTableRow(block.Headers, colCount, isHeader: true);
+            container.Add(headerRow);
+
+            // 分隔线
+            var separator = new VisualElement();
+            separator.style.height = 1;
+            separator.style.backgroundColor = new StyleColor(new UnityEngine.Color(0.4f, 0.4f, 0.4f, 0.6f));
+            separator.style.marginLeft = 6;
+            separator.style.marginRight = 6;
+            container.Add(separator);
+
+            // 数据行
+            foreach (var row in block.Rows)
             {
-                var lineLabel = new Label(line);
-                lineLabel.style.whiteSpace = WhiteSpace.Normal;
-                lineLabel.style.fontSize = 12;
-                lineLabel.style.color = new StyleColor(new UnityEngine.Color(0.83f, 0.83f, 0.83f));
-                lineLabel.selection.isSelectable = true;
-                container.Add(lineLabel);
+                var rowElement = CreateTableRow(row, colCount, isHeader: false);
+                container.Add(rowElement);
             }
 
             return container;
+        }
+
+        /// <summary>
+        /// 创建表格行（Flex Row 布局，每个单元格等宽）。
+        /// </summary>
+        private VisualElement CreateTableRow(string[] cells, int colCount, bool isHeader)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.paddingTop = 3;
+            row.style.paddingBottom = 3;
+            row.style.paddingLeft = 6;
+            row.style.paddingRight = 6;
+
+            for (int c = 0; c < colCount; c++)
+            {
+                var cellText = c < cells.Length ? cells[c] : "";
+                var cellLabel = new Label(cellText);
+                cellLabel.style.flexGrow = 1;
+                cellLabel.style.flexBasis = 0;
+                cellLabel.style.whiteSpace = WhiteSpace.Normal;
+                cellLabel.style.fontSize = 12;
+                cellLabel.style.paddingLeft = 4;
+                cellLabel.style.paddingRight = 4;
+                cellLabel.selection.isSelectable = true;
+
+                if (isHeader)
+                {
+                    cellLabel.style.color = new StyleColor(new UnityEngine.Color(0.9f, 0.85f, 0.7f));
+                    cellLabel.style.unityFontStyleAndWeight = UnityEngine.FontStyle.Bold;
+                }
+                else
+                {
+                    cellLabel.style.color = new StyleColor(new UnityEngine.Color(0.83f, 0.83f, 0.83f));
+                }
+
+                row.Add(cellLabel);
+            }
+
+            return row;
         }
 
         private VisualElement CreateList(ListBlock block)
@@ -1187,6 +1274,21 @@ namespace AgentCore.Editor.UI.Components
             container.Add(label);
 
             return container;
+        }
+
+        /// <summary>
+        /// 将代码行的前导空格替换为非断裂空格 (U+00A0)，防止 WhiteSpace.Normal 折叠缩进。
+        /// </summary>
+        private static string PreserveLeadingSpaces(string line)
+        {
+            int leadingSpaces = 0;
+            while (leadingSpaces < line.Length && line[leadingSpaces] == ' ')
+                leadingSpaces++;
+
+            if (leadingSpaces == 0) return line;
+
+            // 前导空格 → \u00A0（非断裂空格），其余内容不变
+            return new string('\u00A0', leadingSpaces) + line.Substring(leadingSpaces);
         }
 
         #endregion

@@ -328,6 +328,8 @@
 
 #message-scroll-view > #unity-content-container {
     padding: 8px 0;
+    flex-grow: 0;
+    flex-shrink: 0;
 }
 
 #message-container {
