@@ -97,6 +97,9 @@ namespace AgentCore.Editor.UI
                             errorMessage: "恢复未执行，可能是中断阶段不支持自动恢复");
                     }
                 }
+                
+                // 恢复上下文使用情况显示
+                UpdateContextUsagePanel();
             }
             catch (Exception ex)
             {

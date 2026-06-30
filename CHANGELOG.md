@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-06-30
+
+### Fixed
+- **聊天窗口分隔符换行问题**：重写 [`StreamingTextElement`](Editor/UI/Components/StreamingTextElement.cs:817) 使用混合 block 渲染 — 流式阶段保持单 Label（性能优化），finalize 时切换为 VisualElement 块布局。水平分隔线使用 `height: 1px` + `flex-grow: 1` 的 VisualElement 替代字符（═══/───），在窄窗口下不再换行。新增 ContentBlock 数据模型（Paragraph/Heading/HorizontalRule/CodeBlock/Table/List）和 `ParseMarkdownToBlocks()` 解析器。
+
+### Changed
+- **版本号**: `1.2.3` → `1.2.4`
+
+## [1.2.3] - 2026-06-30
+
+### Added
+- **VCS / Code Indexing 默认启用**：升级到此版本时，自动通过 Settings 迁移（v12→v13）启用 VCS 和 Code Indexing 可选组件。已手动禁用的用户不受影响（迁移仅在 `settingsVersion < 13` 时执行一次）。
+- **Hub 面板动态重建**：新增 `AgentCoreSettings.OnSettingsChanged` 事件，ChatWindow Hub 订阅该事件并在 mem0/LightRAG 启用状态变化时自动重建面板，无需关闭重开窗口。
+
+### Fixed
+- **Memory/Knowledge 面板不随服务禁用消失**：[`MemoryPanelContribution.CreatePanel()`](Editor/UI/Components/MemoryPanelContribution.cs:38) 和 [`KnowledgePanelContribution.CreatePanel()`](Editor/UI/Components/KnowledgePanelContribution.cs:38) 在对应服务未启用时返回 null，Hub 跳过该面板。配合动态重建机制，禁用服务后面板立即从 Rail 中消失。
+- **Reasoning 参数默认值修正**：`enableReasoningOutput` 默认值从 `true` 改为 `false`，避免 Bedrock 等不支持 reasoning 扩展的 provider 返回 HTTP 400。
+- **NormalizeAssetPath 路径重复**：[`ToolHelpers.NormalizeAssetPath()`](Editor/Tools/Infrastructure/ToolHelpers.cs:378) 对 `"Assets"` 根目录不再错误拼接为 `"Assets/Assets"`，修复 `ManageAssetTool` 搜索时的 "Folder not found" 错误。
+
+### Changed
+- **Settings 版本**: `CurrentVersion` 12 → 13
+- **版本号**: `1.2.2` → `1.2.3`
+
 ## [1.2.2] - 2026-06-30
 
 ### Fixed

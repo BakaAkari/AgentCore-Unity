@@ -6,6 +6,86 @@ using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
 {
+    #region Block Data Models
+    
+    /// <summary>
+    /// Markdown 内容块类型枚举。
+    /// </summary>
+    internal enum ContentBlockType
+    {
+        Paragraph,
+        Heading,
+        HorizontalRule,
+        CodeBlock,
+        Table,
+        List
+    }
+    
+    /// <summary>
+    /// Markdown 内容块基类。
+    /// </summary>
+    internal abstract class ContentBlock
+    {
+        public abstract ContentBlockType Type { get; }
+    }
+    
+    /// <summary>
+    /// 段落块（普通文本）。
+    /// </summary>
+    internal class ParagraphBlock : ContentBlock
+    {
+        public override ContentBlockType Type => ContentBlockType.Paragraph;
+        public string Text { get; set; }
+    }
+    
+    /// <summary>
+    /// 标题块。
+    /// </summary>
+    internal class HeadingBlock : ContentBlock
+    {
+        public override ContentBlockType Type => ContentBlockType.Heading;
+        public int Level { get; set; } // 1-6
+        public string Text { get; set; }
+    }
+    
+    /// <summary>
+    /// 水平分隔线块。
+    /// </summary>
+    internal class HorizontalRuleBlock : ContentBlock
+    {
+        public override ContentBlockType Type => ContentBlockType.HorizontalRule;
+    }
+    
+    /// <summary>
+    /// 代码块。
+    /// </summary>
+    internal class CodeBlock : ContentBlock
+    {
+        public override ContentBlockType Type => ContentBlockType.CodeBlock;
+        public string Language { get; set; }
+        public List<string> Lines { get; set; } = new List<string>();
+    }
+    
+    /// <summary>
+    /// 表格块。
+    /// </summary>
+    internal class TableBlock : ContentBlock
+    {
+        public override ContentBlockType Type => ContentBlockType.Table;
+        public List<string> FormattedLines { get; set; } = new List<string>();
+    }
+    
+    /// <summary>
+    /// 列表块（无序/有序/引用）。
+    /// </summary>
+    internal class ListBlock : ContentBlock
+    {
+        public override ContentBlockType Type => ContentBlockType.List;
+        public List<string> Items { get; set; } = new List<string>();
+    }
+    
+    #endregion
+
     /// <summary>
     /// 内容过滤工具，用于移除 LLM 返回内容中的技术标签。
     /// </summary>
@@ -28,7 +108,8 @@ namespace AgentCore.Editor.UI.Components
         /// 用于最终化消息时的完整过滤。
         /// </summary>
         /// <param name="content">原始内容</param>
-        /// <returns>过滤后的内容</returns>
+        /// <returns>过滤后的内容（已废弃 — 使用 FilterCompletedToBlocks）</returns>
+        [Obsolete("Use FilterCompletedToBlocks for block-based rendering")]
         public static string FilterCompleted(string content)
         {
             if (string.IsNullOrEmpty(content)) return content;
@@ -42,6 +123,26 @@ namespace AgentCore.Editor.UI.Components
             // 轻量级 Markdown 格式化（标题、表格、粗体、列表等）
             filtered = FormatMarkdown(filtered);
             return filtered.Trim();
+        }
+
+        /// <summary>
+        /// 过滤完整的 tool_call 和 tool_result 标签及其内容，并解析为 block 列表。
+        /// 用于最终化消息时的完整过滤和 block 渲染。
+        /// </summary>
+        /// <param name="content">原始内容</param>
+        /// <returns>过滤并解析后的 content block 列表</returns>
+        public static List<ContentBlock> FilterCompletedToBlocks(string content)
+        {
+            if (string.IsNullOrEmpty(content)) return new List<ContentBlock>();
+
+            var filtered = ToolCallRegex.Replace(content, "");
+            filtered = ToolResultRegex.Replace(filtered, "");
+            // 压缩过滤后产生的连续空行（3个以上换行 → 2个换行）
+            filtered = ExcessiveNewlinesRegex.Replace(filtered, "\n\n");
+            // 替换 SDF 字体不支持的 emoji 字符
+            filtered = SanitizeUnsupportedEmoji(filtered);
+            // 解析为 block 列表
+            return ParseMarkdownToBlocks(filtered.Trim());
         }
 
         /// <summary>
@@ -158,10 +259,10 @@ namespace AgentCore.Editor.UI.Components
             return false;
         }
 
-        #region Markdown 格式化
+        #region Markdown 格式化 (旧版 — 字符串输出)
 
         /// <summary>
-        /// 轻量级 Markdown → 可读纯文本格式化。
+        /// 轻量级 Markdown → 可读纯文本格式化（已废弃 — 使用 ParseMarkdownToBlocks）。
         /// <para>
         /// 不使用任何 Rich Text 标签（无 &lt;b&gt;、&lt;i&gt;、&lt;size&gt;），
         /// 仅通过纯文本符号和排版优化可读性：
@@ -182,6 +283,7 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         /// <param name="content">过滤后的内容</param>
         /// <returns>格式化后的可读文本</returns>
+        [Obsolete("Use ParseMarkdownToBlocks for block-based rendering")]
         internal static string FormatMarkdown(string content)
         {
             if (string.IsNullOrEmpty(content)) return content;
@@ -497,6 +599,208 @@ namespace AgentCore.Editor.UI.Components
         }
 
         #endregion
+
+        #region Markdown 解析为 Block（新版）
+
+        /// <summary>
+        /// 解析 Markdown 为 ContentBlock 列表。
+        /// 复用 FormatMarkdown 的逻辑，但输出为结构化 block 而非纯文本。
+        /// </summary>
+        internal static List<ContentBlock> ParseMarkdownToBlocks(string content)
+        {
+            var blocks = new List<ContentBlock>();
+            if (string.IsNullOrEmpty(content)) return blocks;
+
+            var lines = content.Split('\n');
+            var inCodeBlock = false;
+            CodeBlock currentCodeBlock = null;
+            var tableBuffer = new List<string>();
+            var paragraphBuffer = new List<string>();
+            var listBuffer = new List<string>();
+
+            void FlushParagraph()
+            {
+                if (paragraphBuffer.Count > 0)
+                {
+                    var text = string.Join("\n", paragraphBuffer).Trim();
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        blocks.Add(new ParagraphBlock { Text = FormatInlineStyles(text) });
+                    }
+                    paragraphBuffer.Clear();
+                }
+            }
+
+            void FlushList()
+            {
+                if (listBuffer.Count > 0)
+                {
+                    blocks.Add(new ListBlock { Items = new List<string>(listBuffer) });
+                    listBuffer.Clear();
+                }
+            }
+
+            void FlushTable()
+            {
+                if (tableBuffer.Count > 0)
+                {
+                    var formattedLines = FormatTable(tableBuffer);
+                    if (formattedLines.Count > 0)
+                    {
+                        blocks.Add(new TableBlock { FormattedLines = formattedLines });
+                    }
+                    tableBuffer.Clear();
+                }
+            }
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                var trimmed = line.TrimStart();
+
+                // 代码块：```
+                if (trimmed.StartsWith("```"))
+                {
+                    FlushParagraph();
+                    FlushList();
+                    FlushTable();
+
+                    inCodeBlock = !inCodeBlock;
+                    if (inCodeBlock)
+                    {
+                        // 代码块开始
+                        var lang = trimmed.Length > 3 ? trimmed.Substring(3).Trim() : "";
+                        currentCodeBlock = new CodeBlock { Language = lang };
+                    }
+                    else
+                    {
+                        // 代码块结束
+                        if (currentCodeBlock != null)
+                        {
+                            blocks.Add(currentCodeBlock);
+                            currentCodeBlock = null;
+                        }
+                    }
+                    continue;
+                }
+
+                if (inCodeBlock)
+                {
+                    // 代码块内容
+                    currentCodeBlock?.Lines.Add(line);
+                    continue;
+                }
+
+                // 表格行：| ... |
+                if (trimmed.StartsWith("|") && trimmed.EndsWith("|"))
+                {
+                    FlushParagraph();
+                    FlushList();
+                    tableBuffer.Add(trimmed);
+                    continue;
+                }
+
+                // 如果之前有表格缓冲，先刷新
+                if (tableBuffer.Count > 0)
+                {
+                    FlushTable();
+                }
+
+                // 标题：# ...
+                if (trimmed.StartsWith("#"))
+                {
+                    FlushParagraph();
+                    FlushList();
+                    int level = 0;
+                    while (level < trimmed.Length && trimmed[level] == '#') level++;
+                    var title = trimmed.Substring(level).Trim();
+                    blocks.Add(new HeadingBlock
+                    {
+                        Level = level,
+                        Text = FormatInlineStyles(title)
+                    });
+                    continue;
+                }
+
+                // 水平线：--- / *** / ___
+                if (IsHorizontalRule(trimmed))
+                {
+                    FlushParagraph();
+                    FlushList();
+                    blocks.Add(new HorizontalRuleBlock());
+                    continue;
+                }
+
+                // 列表项：- item 或 * item 或 1. item 或 > quote
+                bool isListItem = false;
+                string listItemText = null;
+
+                if ((trimmed.StartsWith("- ") || trimmed.StartsWith("* ")) && trimmed.Length > 2)
+                {
+                    var indent = line.Length - line.TrimStart().Length;
+                    var prefix = new string(' ', indent);
+                    var itemText = FormatInlineStyles(trimmed.Substring(2));
+                    listItemText = $"{prefix}  · {itemText}";
+                    isListItem = true;
+                }
+                else
+                {
+                    var orderedMatch = Regex.Match(trimmed, @"^(\d+)\.\s+(.+)$");
+                    if (orderedMatch.Success)
+                    {
+                        var indent = line.Length - line.TrimStart().Length;
+                        var prefix = new string(' ', indent);
+                        var num = orderedMatch.Groups[1].Value;
+                        var itemText = FormatInlineStyles(orderedMatch.Groups[2].Value);
+                        listItemText = $"{prefix}  {num}) {itemText}";
+                        isListItem = true;
+                    }
+                    else if (trimmed.StartsWith("> "))
+                    {
+                        var quoteText = FormatInlineStyles(trimmed.Substring(2));
+                        listItemText = $"  │ {quoteText}";
+                        isListItem = true;
+                    }
+                    else if (trimmed == ">")
+                    {
+                        listItemText = "  │";
+                        isListItem = true;
+                    }
+                }
+
+                if (isListItem)
+                {
+                    FlushParagraph();
+                    listBuffer.Add(listItemText);
+                    continue;
+                }
+
+                // 非列表项且之前有列表缓冲，先刷新
+                if (listBuffer.Count > 0)
+                {
+                    FlushList();
+                }
+
+                // 空行 — 段落分隔
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    FlushParagraph();
+                    continue;
+                }
+
+                // 普通行 — 累积到段落
+                paragraphBuffer.Add(line);
+            }
+
+            // 刷新末尾的缓冲区
+            FlushParagraph();
+            FlushList();
+            FlushTable();
+
+            return blocks;
+        }
+
+        #endregion
     }
 
     /// <summary>
@@ -505,16 +809,26 @@ namespace AgentCore.Editor.UI.Components
     /// 用于在助手消息气泡中逐 token 显示 LLM 流式输出的文本。
     /// 支持追加文本、设置最终文本和清空操作，并提供可选的闪烁光标效果。
     /// </para>
+    /// <para>
+    /// 流式阶段使用单个 Label 显示原始文本（性能优化）。
+    /// Finalize 阶段切换到 block 布局，支持分隔线、代码块背景等响应式元素。
+    /// </para>
     /// </summary>
     public class StreamingTextElement : VisualElement
     {
         #region 私有字段
 
-        /// <summary>显示文本内容的 Label</summary>
+        /// <summary>流式阶段的文本容器</summary>
+        private readonly VisualElement _streamingContainer;
+
+        /// <summary>显示文本内容的 Label（流式阶段）</summary>
         private readonly Label _textLabel;
 
         /// <summary>闪烁光标元素</summary>
         private readonly VisualElement _cursor;
+
+        /// <summary>Finalize 阶段的 block 容器</summary>
+        private VisualElement _blockContainer;
 
         /// <summary>当前累积的文本内容</summary>
         private string _currentText = "";
@@ -528,22 +842,30 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>光标当前是否可见</summary>
         private bool _cursorVisible;
 
+        /// <summary>是否已切换到 block 渲染模式</summary>
+        private bool _isBlockMode;
+
         #endregion
 
         #region 构造函数
 
         /// <summary>
         /// 创建流式文本显示元素。
-        /// 包含一个文本 Label 和一个可选的闪烁光标。
+        /// 包含一个流式容器（Label + 光标）和一个 block 容器（finalize 后显示）。
         /// </summary>
         public StreamingTextElement()
         {
-            // 容器样式
-            style.flexDirection = FlexDirection.Row;
-            style.flexWrap = Wrap.Wrap;
-            style.alignItems = Align.FlexEnd;
+            // 主容器样式
+            style.flexDirection = FlexDirection.Column;
+            style.flexGrow = 1;
 
-            // 文本标签
+            // 流式阶段容器
+            _streamingContainer = new VisualElement();
+            _streamingContainer.style.flexDirection = FlexDirection.Row;
+            _streamingContainer.style.flexWrap = Wrap.Wrap;
+            _streamingContainer.style.alignItems = Align.FlexEnd;
+
+            // 文本标签（流式阶段）
             _textLabel = new Label
             {
                 name = "streaming-text-label",
@@ -556,13 +878,15 @@ namespace AgentCore.Editor.UI.Components
             _textLabel.style.flexGrow = 1;
             // 启用文本选择，允许用户选中和复制文本（Unity 2022.2+）
             _textLabel.selection.isSelectable = true;
-            Add(_textLabel);
+            _streamingContainer.Add(_textLabel);
 
             // 闪烁光标
             _cursor = new VisualElement();
             _cursor.AddToClassList("streaming-cursor");
             _cursor.style.display = DisplayStyle.None;
-            Add(_cursor);
+            _streamingContainer.Add(_cursor);
+
+            Add(_streamingContainer);
         }
 
         #endregion
@@ -589,15 +913,47 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 设置最终完整文本。
-        /// 流式输出完成后调用，替换当前累积的文本并隐藏光标。
+        /// 流式输出完成后调用，切换到 block 渲染模式并隐藏光标。
         /// </summary>
         /// <param name="text">完整的最终文本</param>
         public void SetFinalText(string text)
         {
             _currentText = text ?? "";
-            // 最终化时做完整过滤
-            _textLabel.text = ContentFilter.FilterCompleted(_currentText);
             HideCursor();
+
+            // 解析为 block 列表
+            var blocks = ContentFilter.FilterCompletedToBlocks(_currentText);
+
+            // 切换到 block 渲染模式
+            if (!_isBlockMode)
+            {
+                // 隐藏流式容器
+                _streamingContainer.style.display = DisplayStyle.None;
+
+                // 创建 block 容器
+                _blockContainer = new VisualElement();
+                _blockContainer.name = "block-container";
+                _blockContainer.style.flexDirection = FlexDirection.Column;
+                _blockContainer.style.flexGrow = 1;
+                Add(_blockContainer);
+
+                _isBlockMode = true;
+            }
+            else
+            {
+                // 已在 block 模式，清空容器
+                _blockContainer.Clear();
+            }
+
+            // 渲染 blocks
+            foreach (var block in blocks)
+            {
+                var element = CreateBlockElement(block);
+                if (element != null)
+                {
+                    _blockContainer.Add(element);
+                }
+            }
         }
 
         /// <summary>
@@ -612,7 +968,20 @@ namespace AgentCore.Editor.UI.Components
         {
             _currentText = "";
             _textLabel.text = "";
+            _blockContainer?.Clear();
             HideCursor();
+
+            // 恢复流式模式
+            if (_isBlockMode)
+            {
+                _streamingContainer.style.display = DisplayStyle.Flex;
+                if (_blockContainer != null)
+                {
+                    _blockContainer.RemoveFromHierarchy();
+                    _blockContainer = null;
+                }
+                _isBlockMode = false;
+            }
         }
 
         /// <summary>
@@ -656,6 +1025,168 @@ namespace AgentCore.Editor.UI.Components
                 _cursorBlink.Pause();
                 _cursorBlink = null;
             }
+        }
+
+        #endregion
+
+        #region Block 渲染
+
+        /// <summary>
+        /// 根据 ContentBlock 创建对应的 VisualElement。
+        /// </summary>
+        private VisualElement CreateBlockElement(ContentBlock block)
+        {
+            switch (block.Type)
+            {
+                case ContentBlockType.Paragraph:
+                    return CreateParagraph((ParagraphBlock)block);
+
+                case ContentBlockType.Heading:
+                    return CreateHeading((HeadingBlock)block);
+
+                case ContentBlockType.HorizontalRule:
+                    return CreateHorizontalRule();
+
+                case ContentBlockType.CodeBlock:
+                    return CreateCodeBlock((CodeBlock)block);
+
+                case ContentBlockType.Table:
+                    return CreateTable((TableBlock)block);
+
+                case ContentBlockType.List:
+                    return CreateList((ListBlock)block);
+
+                default:
+                    return null;
+            }
+        }
+
+        private VisualElement CreateParagraph(ParagraphBlock block)
+        {
+            var label = new Label(block.Text);
+            label.AddToClassList("content-paragraph");
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.style.fontSize = 13;
+            label.style.color = new StyleColor(new UnityEngine.Color(0.83f, 0.83f, 0.83f));
+            label.style.marginTop = 6;
+            label.style.marginBottom = 12;
+            label.selection.isSelectable = true;
+            return label;
+        }
+
+        private VisualElement CreateHeading(HeadingBlock block)
+        {
+            var label = new Label(block.Text);
+            label.AddToClassList($"content-heading-{block.Level}");
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.style.color = new StyleColor(new UnityEngine.Color(0.9f, 0.85f, 0.7f));
+            label.style.marginTop = block.Level == 1 ? 12 : 8;
+            label.style.marginBottom = 6;
+            label.selection.isSelectable = true;
+
+            // 根据级别设置字体大小
+            label.style.fontSize = block.Level switch
+            {
+                1 => 16,
+                2 => 15,
+                3 => 14,
+                _ => 13
+            };
+
+            return label;
+        }
+
+        private VisualElement CreateHorizontalRule()
+        {
+            // 使用短横线文本 + 增大上下边距，避免换行问题且提升可读性
+            var label = new Label("───");
+            label.AddToClassList("content-horizontal-rule");
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.style.fontSize = 12;
+            label.style.color = new StyleColor(new UnityEngine.Color(0.5f, 0.5f, 0.5f));
+            label.style.marginTop = 12;
+            label.style.marginBottom = 12;
+            label.style.unityTextAlign = UnityEngine.TextAnchor.MiddleCenter;
+            return label;
+        }
+
+        private VisualElement CreateCodeBlock(CodeBlock block)
+        {
+            var container = new VisualElement();
+            container.AddToClassList("content-code-block");
+            container.style.backgroundColor = new StyleColor(new UnityEngine.Color(0.15f, 0.15f, 0.15f));
+            container.style.borderTopLeftRadius = 4;
+            container.style.borderTopRightRadius = 4;
+            container.style.borderBottomLeftRadius = 4;
+            container.style.borderBottomRightRadius = 4;
+            container.style.paddingTop = 8;
+            container.style.paddingBottom = 8;
+            container.style.paddingLeft = 10;
+            container.style.paddingRight = 10;
+            container.style.marginTop = 6;
+            container.style.marginBottom = 6;
+
+            // 语言标签（如果有）
+            if (!string.IsNullOrEmpty(block.Language))
+            {
+                var langLabel = new Label(block.Language);
+                langLabel.style.fontSize = 11;
+                langLabel.style.color = new StyleColor(new UnityEngine.Color(0.6f, 0.6f, 0.6f));
+                langLabel.style.marginBottom = 4;
+                container.Add(langLabel);
+            }
+
+            // 代码内容 — 每行单独渲染保留格式
+            foreach (var line in block.Lines)
+            {
+                var lineLabel = new Label(string.IsNullOrEmpty(line) ? " " : line);
+                lineLabel.style.whiteSpace = WhiteSpace.Normal;
+                lineLabel.style.fontSize = 12;
+                lineLabel.style.color = new StyleColor(new UnityEngine.Color(0.85f, 0.85f, 0.85f));
+                lineLabel.selection.isSelectable = true;
+                container.Add(lineLabel);
+            }
+
+            return container;
+        }
+
+        private VisualElement CreateTable(TableBlock block)
+        {
+            var container = new VisualElement();
+            container.AddToClassList("content-table");
+            container.style.marginTop = 6;
+            container.style.marginBottom = 6;
+
+            // 表格每行单独渲染保留格式
+            foreach (var line in block.FormattedLines)
+            {
+                var lineLabel = new Label(line);
+                lineLabel.style.whiteSpace = WhiteSpace.Normal;
+                lineLabel.style.fontSize = 12;
+                lineLabel.style.color = new StyleColor(new UnityEngine.Color(0.83f, 0.83f, 0.83f));
+                lineLabel.selection.isSelectable = true;
+                container.Add(lineLabel);
+            }
+
+            return container;
+        }
+
+        private VisualElement CreateList(ListBlock block)
+        {
+            var container = new VisualElement();
+            container.AddToClassList("content-list");
+            container.style.marginTop = 4;
+            container.style.marginBottom = 4;
+
+            var listText = string.Join("\n", block.Items);
+            var label = new Label(listText);
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.style.fontSize = 13;
+            label.style.color = new StyleColor(new UnityEngine.Color(0.83f, 0.83f, 0.83f));
+            label.selection.isSelectable = true;
+            container.Add(label);
+
+            return container;
         }
 
         #endregion

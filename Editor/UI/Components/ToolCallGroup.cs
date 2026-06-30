@@ -278,6 +278,9 @@ namespace AgentCore.Editor.UI.Components
         /// <param name="expanded">是否展开</param>
         private void SetExpanded(bool expanded)
         {
+            // 避免重复设置相同状态导致的视觉抖动
+            if (_isExpanded == expanded) return;
+            
             _isExpanded = expanded;
             _content.style.display = _isExpanded ? DisplayStyle.Flex : DisplayStyle.None;
             _arrowLabel.text = _isExpanded ? ArrowExpanded : ArrowCollapsed;
