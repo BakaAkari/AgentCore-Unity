@@ -62,6 +62,7 @@ namespace AgentCore.Editor.UI.Components
         private int _runningCalls;
         private int _currentRound;
         private int _maxRounds;
+        private int _tokensUsed;
 
         // 内部卡片列表（用于统计）
         private readonly List<ToolCallCard> _cards = new List<ToolCallCard>();
@@ -216,10 +217,12 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         /// <param name="currentRound">当前轮次</param>
         /// <param name="maxRounds">最大轮次</param>
-        public void UpdateRoundInfo(int currentRound, int maxRounds)
+        /// <param name="tokensUsed">累计 token 消耗量</param>
+        public void UpdateRoundInfo(int currentRound, int maxRounds, int tokensUsed = 0)
         {
             _currentRound = currentRound;
             _maxRounds = maxRounds;
+            _tokensUsed = tokensUsed;
             UpdateSummaryText();
         }
 
@@ -334,7 +337,7 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 更新摘要文本。
-        /// 格式：[第 2/25 轮 | 3 个调用: 2 成功, 1 执行中]
+        /// 格式：[第 2/200 轮 | 45.2K tokens | 3 个调用: 2 成功, 1 执行中]
         /// </summary>
         private void UpdateSummaryText()
         {
@@ -344,6 +347,12 @@ namespace AgentCore.Editor.UI.Components
             if (_maxRounds > 1 || _currentRound > 1)
             {
                 parts.Add($"第 {_currentRound}/{_maxRounds} 轮");
+            }
+
+            // Token 消耗
+            if (_tokensUsed > 0)
+            {
+                parts.Add(FormatTokenCount(_tokensUsed));
             }
 
             // 调用统计
@@ -370,6 +379,18 @@ namespace AgentCore.Editor.UI.Components
             _summaryLabel.text = parts.Count > 0
                 ? $"[{string.Join(" | ", parts)}]"
                 : "";
+        }
+
+        /// <summary>
+        /// 格式化 token 数量为人类可读形式。
+        /// </summary>
+        private static string FormatTokenCount(int tokens)
+        {
+            if (tokens >= 1_000_000)
+                return $"{tokens / 1_000_000.0:F1}M tokens";
+            if (tokens >= 1_000)
+                return $"{tokens / 1_000.0:F1}K tokens";
+            return $"{tokens} tokens";
         }
 
         /// <summary>

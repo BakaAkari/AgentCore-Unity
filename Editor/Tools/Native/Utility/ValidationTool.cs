@@ -524,8 +524,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 var prefabStatus = PrefabUtility.GetPrefabInstanceStatus(go);
                 var prefabType = PrefabUtility.GetPrefabAssetType(go);
 
-                // Check for disconnected prefabs
-                if (prefabStatus == PrefabInstanceStatus.Disconnected)
+                // Check for disconnected/missing prefabs
+#pragma warning disable CS0618 // PrefabInstanceStatus.Disconnected is obsolete in newer Unity but needed for backward compat
+                if (prefabStatus == PrefabInstanceStatus.Disconnected ||
+                    prefabStatus == PrefabInstanceStatus.MissingAsset)
+#pragma warning restore CS0618
                 {
                     issues.Add(new ValidationIssue
                     {
@@ -533,7 +536,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                         category = "prefab_integrity",
                         game_object = go.name,
                         path = GetPath(go),
-                        message = $"Prefab instance '{go.name}' is disconnected from its source prefab",
+                        message = $"Prefab instance '{go.name}' has a broken prefab link (status: {prefabStatus})",
                         fix_hint = "Reconnect via right-click > Prefab > Reconnect to Prefab Asset, or unpack the prefab"
                     });
                 }

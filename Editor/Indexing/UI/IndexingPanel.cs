@@ -39,7 +39,9 @@ namespace AgentCore.Editor.Components.Indexing.UI
         private string _lastIndexResult;
         private IndexingStats _cachedStats;
         private bool _statsDirty = true;
+#pragma warning disable CS0414 // _isPanelActive tracks lifecycle state; read access reserved for future conditional refresh
         private bool _isPanelActive;
+#pragma warning restore CS0414
 
         // ── UI references ────────────────────────────────────────────────────────
         private Label _statusLabel;

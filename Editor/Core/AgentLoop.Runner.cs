@@ -6,6 +6,7 @@ using AgentCore.Editor.Config;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
 using AgentCore.Editor.Tools;
+using AgentCore.Editor.Tools.Safety;
 using UnityEngine;
 
 namespace AgentCore.Editor.Core
@@ -32,19 +33,32 @@ namespace AgentCore.Editor.Core
         {
             var settings = AgentCoreSettings.instance;
             int maxRounds = settings.maxToolCallRounds;
+            int tokenBudget = settings.maxTokenBudget; // 0 = 不限制
             int currentRound = 0;
+            int accumulatedTokens = 0; // 本次任务累计消耗的 token 数
 
-            // 连续失败检测
+            // 连续失败检测 — 两级响应（warning / block）
             int consecutiveAllFailRounds = 0;
-            const int maxConsecutiveFailures = 3;
+            int allToolsFailBlockThreshold = Math.Max(2, settings.allToolsFailBlockThreshold);
 
-            // 单工具连续失败追踪
+            // 单工具连续失败追踪 — 阈值从 Settings 读取
             var perToolFailCount = new Dictionary<string, int>();
-            const int maxPerToolFailures = 3;
+            int toolFailWarningThreshold = Math.Max(1, settings.toolFailWarningThreshold);
+            int toolFailBlockThreshold = Math.Max(2, settings.toolFailBlockThreshold);
+
+            // 已发出警告的工具集合（同一工具在同一循环内只警告一次）
+            var warnedTools = new HashSet<string>();
 
             while (currentRound < maxRounds)
             {
                 currentRound++;
+
+                // Token Budget 检查（在轮次开始前，第 1 轮不检查）
+                if (tokenBudget > 0 && currentRound > 1 && accumulatedTokens >= tokenBudget)
+                {
+                    Debug.LogWarning($"[AgentCore]{logPrefix} Token budget exceeded ({accumulatedTokens}/{tokenBudget}) at round {currentRound}. Triggering summary.");
+                    break;
+                }
 
                 if (ct.IsCancellationRequested)
                 {
@@ -55,7 +69,7 @@ namespace AgentCore.Editor.Core
                 // 调用 LLM（流式）。先进入 Thinking 以确保 ChatWindow 已创建 AssistantTurnView，
                 // 再发 LoopRoundStarted，避免 ToolCallGroup 降级挂到根消息列表。
                 SetState(AgentState.Thinking);
-                EmitEvent(AgentEvent.LoopRoundStarted(currentRound, maxRounds));
+                EmitEvent(AgentEvent.LoopRoundStarted(currentRound, maxRounds, accumulatedTokens));
                 var assistantMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
 
                 if (ct.IsCancellationRequested)
@@ -77,10 +91,21 @@ namespace AgentCore.Editor.Core
                 // 有 tool_calls — 执行工具。写入 LLM 历史前必须清洗可见规划 trace，避免 thinking 泄漏到上下文。
                 Debug.Log($"[AgentCore]{logPrefix} Round {currentRound}: LLM returned {assistantMessage.ToolCalls.Count} tool call(s).");
                 PrepareAssistantMessageForHistory(assistantMessage, assistantTurn);
+
+                // Token Budget: 记录本轮 LLM 输出 token（assistant message）
+                int roundTokensBefore = _messages.Count;
                 _messages.Add(assistantMessage);
 
                 SetState(AgentState.ExecutingTool);
                 await ExecuteToolCallsAsync(assistantMessage.ToolCalls, assistantTurn, ct);
+
+                // Token Budget: 累计本轮消耗（assistant 输出 + 工具结果）
+                int roundTokens = 0;
+                for (int mi = roundTokensBefore; mi < _messages.Count; mi++)
+                {
+                    roundTokens += TokenCounter.EstimateMessageTokens(_messages[mi]);
+                }
+                accumulatedTokens += roundTokens;
 
                 if (ct.IsCancellationRequested)
                 {
@@ -94,7 +119,7 @@ namespace AgentCore.Editor.Core
                 {
                     consecutiveAllFailRounds++;
                     Debug.LogWarning($"[AgentCore]{logPrefix} All tool calls failed in round {currentRound}. " +
-                                     $"Consecutive failure rounds: {consecutiveAllFailRounds}/{maxConsecutiveFailures}");
+                                     $"Consecutive failure rounds: {consecutiveAllFailRounds}/{allToolsFailBlockThreshold}");
                 }
                 else
                 {
@@ -103,30 +128,56 @@ namespace AgentCore.Editor.Core
 
                 // 单工具连续失败追踪
                 UpdatePerToolFailCounts(assistantTurn, assistantMessage.ToolCalls, perToolFailCount);
-                string repeatedFailTool = null;
+
+                // 两级响应：检查是否需要警告或阻断
+                string blockTool = null;
+                string warnTool = null;
                 foreach (var kvp in perToolFailCount)
                 {
-                    if (kvp.Value >= maxPerToolFailures)
+                    int effectiveBlock = GetEffectiveThreshold(kvp.Key, toolFailBlockThreshold);
+                    int effectiveWarn = GetEffectiveThreshold(kvp.Key, toolFailWarningThreshold);
+
+                    if (kvp.Value >= effectiveBlock)
                     {
-                        repeatedFailTool = kvp.Key;
+                        blockTool = kvp.Key;
                         break;
+                    }
+                    else if (kvp.Value >= effectiveWarn && !warnedTools.Contains(kvp.Key))
+                    {
+                        warnTool = kvp.Key;
                     }
                 }
 
-                // 判断是否需要强制退出
-                bool shouldForceExit = consecutiveAllFailRounds >= maxConsecutiveFailures || repeatedFailTool != null;
+                // Level 1: 警告 — 注入降级提示但不中断循环
+                if (warnTool != null && blockTool == null)
+                {
+                    warnedTools.Add(warnTool);
+                    int failCount = perToolFailCount[warnTool];
+                    int effectiveBlock = GetEffectiveThreshold(warnTool, toolFailBlockThreshold);
+
+                    Debug.LogWarning($"[AgentCore]{logPrefix} Tool '{warnTool}' has failed {failCount} times (block at {effectiveBlock}). Sending degradation warning.");
+
+                    _messages.Add(ChatMessage.System(
+                        $"[SYSTEM WARNING] Tool '{warnTool}' 已连续失败 {failCount} 次。" +
+                        $"如果继续失败到 {effectiveBlock} 次将被强制中断。" +
+                        "请尝试不同的参数、方法或工具来解决问题。如果确认该工具无法完成任务，请直接告知用户。"));
+                }
+
+                // Level 2: 阻断 — 强制退出工具循环
+                bool shouldForceExit = consecutiveAllFailRounds >= allToolsFailBlockThreshold || blockTool != null;
                 if (shouldForceExit)
                 {
-                    string reason = repeatedFailTool != null
-                        ? $"Tool '{repeatedFailTool}' has failed {maxPerToolFailures} consecutive times"
-                        : $"All tool calls have failed consecutively {maxConsecutiveFailures} rounds";
+                    string reason = blockTool != null
+                        ? $"Tool '{blockTool}' has failed {perToolFailCount[blockTool]} consecutive times (threshold: {GetEffectiveThreshold(blockTool, toolFailBlockThreshold)})"
+                        : $"All tool calls have failed consecutively {consecutiveAllFailRounds} rounds (threshold: {allToolsFailBlockThreshold})";
 
                     Debug.LogWarning($"[AgentCore]{logPrefix} {reason}. Forcing final response.");
 
                     _messages.Add(ChatMessage.System(
                         "[SYSTEM] " + reason + "。" +
                         "你现在必须立即停止调用任何工具，直接用纯文本向用户解释问题。" +
-                        "总结你之前尝试做什么以及哪里出了问题。不要再发起任何 tool_call。"));
+                        "总结你之前尝试做什么以及哪里出了问题。不要再发起任何 tool_call。" +
+                        "用户可以发送新消息继续对话，届时失败计数将重置。"));
 
                     assistantTurn.IsStreaming = true;
                     SetState(AgentState.Thinking);
@@ -146,13 +197,20 @@ namespace AgentCore.Editor.Core
                 assistantTurn.IsStreaming = true;
             }
 
-            // 检查是否因达到最大轮次而退出
-            if (currentRound >= maxRounds && CurrentState != AgentState.Idle)
+            // 检查是否因达到限制（轮次上限或 Token Budget）而退出，触发总结
+            bool reachedRoundLimit = currentRound >= maxRounds;
+            bool reachedTokenBudget = tokenBudget > 0 && accumulatedTokens >= tokenBudget;
+
+            if ((reachedRoundLimit || reachedTokenBudget) && CurrentState != AgentState.Idle)
             {
-                Debug.LogWarning($"[AgentCore]{logPrefix} Reached max tool call rounds ({maxRounds}). Requesting LLM to summarize.");
+                string limitReason = reachedTokenBudget
+                    ? $"Token 预算已耗尽（已消耗 {accumulatedTokens:N0}，预算 {tokenBudget:N0}）"
+                    : $"已达到工具调用轮次上限（{maxRounds} 轮）";
+
+                Debug.LogWarning($"[AgentCore]{logPrefix} {limitReason}. Requesting LLM to summarize.");
 
                 _messages.Add(ChatMessage.System(
-                    "[SYSTEM] 你已达到工具调用上限（" + maxRounds + "轮）。" +
+                    "[SYSTEM] " + limitReason + "。" +
                     "你现在必须立即停止调用任何工具，直接用纯文本总结当前已完成的工作进度和结果。" +
                     "不要再发起任何 tool_call。"));
 
@@ -415,6 +473,35 @@ namespace AgentCore.Editor.Core
                         perToolFailCount[toolName] = 0;
                 }
             }
+        }
+
+        /// <summary>
+        /// 根据工具的风险等级计算有效阈值。
+        /// <para>
+        /// 低风险工具（ReadOnly / Low）获得 2 倍阈值宽容度，
+        /// 因为这些工具的失败通常是参数或环境问题，不会造成破坏性后果。
+        /// </para>
+        /// </summary>
+        /// <param name="toolName">工具名称</param>
+        /// <param name="baseThreshold">基础阈值</param>
+        /// <returns>考虑风险等级后的有效阈值</returns>
+        private static int GetEffectiveThreshold(string toolName, int baseThreshold)
+        {
+            if (string.IsNullOrEmpty(toolName))
+                return baseThreshold;
+
+            var tool = ToolRegistry.Instance.GetTool(toolName);
+            if (tool == null)
+                return baseThreshold;
+
+            var riskLevel = tool.Metadata.RiskLevel;
+            // 低风险工具（ReadOnly / Low）获得 2 倍宽容度
+            if (riskLevel <= ToolRiskLevel.Low)
+            {
+                return baseThreshold * 2;
+            }
+
+            return baseThreshold;
         }
     }
 }

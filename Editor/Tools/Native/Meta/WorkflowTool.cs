@@ -1171,6 +1171,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
         /// <summary>
         /// Resolves a static flags string to StaticEditorFlags.
         /// </summary>
+#pragma warning disable CS0618 // NavigationStatic and OffMeshLinkGeneration are obsolete but still functional for legacy NavMesh workflows
         private static StaticEditorFlags ResolveStaticFlags(string flagsStr)
         {
             switch (flagsStr)
@@ -1202,6 +1203,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
                          | StaticEditorFlags.OffMeshLinkGeneration;
             }
         }
+#pragma warning restore CS0618
 
         #endregion
     }

@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-07-01
+
+### Changed
+- **工具连续失败安全机制全面改进**：将原有硬编码 `maxConsecutiveFailures=3` 的一刀切阻断改为两级响应模型：
+  - **Warning 级别**（默认 3 次）：注入降级提示引导 LLM 换方法，但不中断循环
+  - **Block 级别**（默认 6 次）：强制中断工具循环，要求 LLM 输出纯文本总结
+  - **风险等级乘数**：低风险工具（ReadOnly/Low）获得 2 倍阈值宽容度
+  - **用户消息自动重置**：用户发送新消息时失败计数自然归零，无需新建会话
+  - **可配置阈值**：新增 `toolFailWarningThreshold`、`toolFailBlockThreshold`、`allToolsFailBlockThreshold` 三个设置项
+- **Settings 版本**: v14 → v15
+
+## [1.3.1] - 2026-07-01
+
+### Fixed
+- **窗口 resize/会话切换后渲染格式丢失**：修复拉宽聊天窗口或切换会话后，助手消息的标题、代码块、表格等 block rendering 退化为纯文本的问题。根因是 `CreateGUI()` 在 resize 时重新触发，`RebuildMessageBubbles` 以 `isStreaming: false` 重建 assistant 气泡，走入 `SetupStaticMode` 的纯文本 `FilterCompleted` 路径。修复方式：[`MessageBubble.SetupStaticMode()`](Editor/UI/Components/MessageBubble.cs:341) 对 assistant 角色改用 `StreamingTextElement.SetFinalText()` 路径，与流式完成后的渲染一致。
+- **消除 8 个编译警告**：CS0219（未使用变量）、CS0618（obsolete API）、CS0414（未使用字段）— 通过删除死代码、添加 pragma suppress、让字段实际生效等方式修复。
+
+### Changed
+- **版本号**: `1.3.0` → `1.3.1`
+
+## [1.3.0] - 2026-07-01
+
+### Added
+- **Token Budget 模式**：新增 `maxTokenBudget` 设置项，以 token 消耗量而非固定轮次作为工具循环的主要终止条件。设为 0 表示不限制（默认值），正整数表示累计消耗达到该值后触发软着陆总结。配合已有的对话压缩系统，可实现近似无限轮次的工具调用能力。
+- **Token 消耗实时显示**：ToolCallGroup 头部摘要和轮次分隔线现在会显示累计 token 消耗（如 "45.2K tokens"），帮助用户直观了解 Agent 运行成本。
+- **AgentEvent.TokensUsed 属性**：`LoopRoundStarted` 事件新增 `TokensUsed` 字段，传递当前累计 token 消耗到 UI 层。
+
+### Changed
+- **maxToolCallRounds 默认值提升**：从 50 提升至 200，作为硬安全网保留；Token Budget 成为主要循环控制手段。
+- **Settings 迁移 v13→v14**：已有用户的 `maxToolCallRounds` 如果 ≤50 会自动升级至 200。
+- **Settings UI**：Agent Runtime 区域新增 Token Budget 输入框；Max Tool Rounds 滑动条上限调整为 200。
+- **版本号**: `1.2.5` → `1.3.0`
+
+## [1.2.5] - 2026-06-30
+
+### Fixed
+- **ScrollView 多轮对话布局异常**：修复聊天窗口在多轮对话后消息气泡被压缩或出现大面积空白的问题。根因是 ScrollView 内部 `#unity-content-container` 默认 `flex-grow: 1` 导致子元素在 Flex 布局中被拉伸/挤压。修复方式：[`ChatWindow.uss`](Editor/UI/ChatWindow.uss:329) 中 `#message-scroll-view > #unity-content-container` 设为 `flex-grow: 0; flex-shrink: 0`；[`StreamingTextElement`](Editor/UI/Components/StreamingTextElement.cs:886) 自身同步设为 `flexGrow=0, flexShrink=0`，确保消息气泡按内容高度自然排列。
+
+### Changed
+- **ChatWindow partial 拆分**：提取 [`ChatWindow.UIHelpers.cs`](Editor/UI/ChatWindow.UIHelpers.cs:1) — 包含 `UpdateStatusLabel`、`SetSendEnabled`、`SetCancelVisible` 三个 UI 辅助方法，降低主文件行数。
+- **版本号**: `1.2.4` → `1.2.5`
+
 ## [1.2.4] - 2026-06-30
 
 ### Fixed

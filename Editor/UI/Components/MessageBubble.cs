@@ -188,8 +188,10 @@ namespace AgentCore.Editor.UI.Components
             }
             else if (_contentLabel != null)
             {
-                // 静态 Label 需要手动过滤
+                // 静态 Label 需要手动过滤（FilterCompleted 是 fallback string 路径）
+#pragma warning disable CS0618 // FilterCompleted is intentional for plain-text Label
                 _contentLabel.text = ContentFilter.FilterCompleted(content);
+#pragma warning restore CS0618
             }
 
             _isStreaming = false;
@@ -332,15 +334,45 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 设置静态内容模式。
-        /// 直接在 Label 中显示完整文本。
+        /// 助手消息使用 StreamingTextElement.SetFinalText 进行 block rendering（标题、代码块、表格等）。
+        /// 其他角色直接在 Label 中显示纯文本。
         /// </summary>
         /// <param name="content">消息内容</param>
         private void SetupStaticMode(string content)
         {
+            var text = content ?? "";
+
+            // 助手消息：使用 block rendering 保留富文本格式（标题、代码块、表格等）
+            if (Role == "assistant" && !string.IsNullOrEmpty(text))
+            {
+                // 隐藏静态 Label，使用 StreamingTextElement 的 block 模式渲染
+                if (_contentLabel != null)
+                {
+                    _contentLabel.style.display = DisplayStyle.None;
+                }
+
+                _streamingText = new StreamingTextElement();
+
+                if (_bubbleContent != null)
+                {
+                    _bubbleContent.Add(_streamingText);
+                }
+                else
+                {
+                    Add(_streamingText);
+                }
+
+                // 直接调用 SetFinalText 触发 block rendering
+                _streamingText.SetFinalText(text);
+                return;
+            }
+
+            // 非助手消息或空内容：保持纯文本 Label
             if (_contentLabel != null)
             {
-                // 静态模式也过滤 tool_call/tool_result 标签
-                _contentLabel.text = ContentFilter.FilterCompleted(content ?? "");
+#pragma warning disable CS0618 // FilterCompleted is intentional for plain-text Label
+                _contentLabel.text = ContentFilter.FilterCompleted(text);
+#pragma warning restore CS0618
             }
         }
 

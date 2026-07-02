@@ -171,8 +171,8 @@ namespace AgentCore.Editor.UI
         {
             var group = EnsureToolCallGroup();
 
-            // 更新分组容器的轮次信息
-            group.UpdateRoundInfo(evt.CurrentRound, evt.MaxRounds);
+            // 更新分组容器的轮次信息（含 token 消耗）
+            group.UpdateRoundInfo(evt.CurrentRound, evt.MaxRounds, evt.TokensUsed);
 
             // 第 1 轮不显示分隔线（避免冗余）
             if (evt.CurrentRound <= 1) return;
@@ -193,7 +193,8 @@ namespace AgentCore.Editor.UI
             separator.Add(leftLine);
 
             // 轮次文本
-            var roundLabel = new Label($" 第 {evt.CurrentRound}/{evt.MaxRounds} 轮 ");
+            var tokenSuffix = evt.TokensUsed > 0 ? $" | {FormatTokenCount(evt.TokensUsed)}" : "";
+            var roundLabel = new Label($" 第 {evt.CurrentRound}/{evt.MaxRounds} 轮{tokenSuffix} ");
             roundLabel.style.fontSize = 10;
             roundLabel.style.color = new Color(0.533f, 0.533f, 0.533f);
             roundLabel.style.flexShrink = 0;
@@ -209,6 +210,18 @@ namespace AgentCore.Editor.UI
             // 分隔线添加到分组容器内部
             group.AddSeparator(separator);
             ScrollToBottom(force: true); // 新轮次分隔线添加，强制滚动到底部
+        }
+
+        /// <summary>
+        /// 格式化 token 数量为人类可读形式。
+        /// </summary>
+        private static string FormatTokenCount(int tokens)
+        {
+            if (tokens >= 1_000_000)
+                return $"{tokens / 1_000_000.0:F1}M tokens";
+            if (tokens >= 1_000)
+                return $"{tokens / 1_000.0:F1}K tokens";
+            return $"{tokens} tokens";
         }
 
         #endregion

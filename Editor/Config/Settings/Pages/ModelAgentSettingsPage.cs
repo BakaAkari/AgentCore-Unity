@@ -118,8 +118,13 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 EditorGUI.BeginChangeCheck();
 
                 settings.maxToolCallRounds = EditorGUILayout.IntSlider(
-                    new GUIContent("Max Tool Rounds", "Maximum tool-call rounds to prevent infinite loops"),
-                    settings.maxToolCallRounds, 1, 50);
+                    new GUIContent("Max Tool Rounds", "Hard safety limit on tool-call rounds (token budget is the primary limiter)"),
+                    settings.maxToolCallRounds, 1, 200);
+
+                settings.maxTokenBudget = EditorGUILayout.IntField(
+                    new GUIContent("Token Budget", "Maximum token consumption per tool loop (0 = unlimited). When exceeded, Agent summarizes and stops."),
+                    settings.maxTokenBudget);
+                settings.maxTokenBudget = Mathf.Max(0, settings.maxTokenBudget);
 
                 settings.fallbackRoutingEnabled = EditorGUILayout.Toggle(
                     new GUIContent("Fallback Routing", "Enable failure-recovery strategy routing"),

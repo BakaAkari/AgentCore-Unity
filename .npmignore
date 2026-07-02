@@ -43,3 +43,6 @@ desktop.ini
 __pycache__/
 __pycache__.meta
 *.pyc
+
+# --- PowerShell 重定向残留 ---
+$null

@@ -381,8 +381,6 @@ namespace AgentCore.Editor.Core
             {
                 // 5. 获取配置
                 var settings = AgentCoreSettings.instance;
-                int maxRounds = settings.maxToolCallRounds;
-                int currentRound = 0;
 
                 // 5.5 自动记忆召回：搜索与用户消息相关的记忆并注入上下文
                 if (settings.mem0Enabled && !string.IsNullOrEmpty(settings.mem0Endpoint))

@@ -213,7 +213,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     { "version", pkg.version },
                     { "displayName", pkg.displayName },
                     { "source", pkg.source.ToString() },
+#pragma warning disable CS0618 // PackageInfo.status is deprecated but no direct replacement provides equivalent info
                     { "status", pkg.status.ToString() }
+#pragma warning restore CS0618
                 });
             }
 
@@ -328,7 +330,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
                 { "version", foundPkg.version },
                 { "description", foundPkg.description },
                 { "source", foundPkg.source.ToString() },
+#pragma warning disable CS0618
                 { "status", foundPkg.status.ToString() },
+#pragma warning restore CS0618
                 { "category", foundPkg.category ?? "unknown" },
                 { "documentationUrl", foundPkg.documentationUrl ?? "" },
                 { "changelogUrl", foundPkg.changelogUrl ?? "" }
@@ -518,7 +522,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     { "version", foundPkg.version },
                     { "displayName", foundPkg.displayName ?? foundPkg.name },
                     { "source", foundPkg.source.ToString() },
+#pragma warning disable CS0618
                     { "status", foundPkg.status.ToString() }
+#pragma warning restore CS0618
                 };
                 return ToolResponse.OkWithData(result, $"Package '{packageName}' is installed (v{foundPkg.version}).");
             }

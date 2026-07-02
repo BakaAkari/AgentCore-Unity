@@ -152,6 +152,9 @@ namespace AgentCore.Editor.Core
         /// <summary>最大轮次（<see cref="AgentEventType.LoopRoundStarted"/> 时有值）</summary>
         public int MaxRounds { get; }
 
+        /// <summary>累计消耗的 Token 数（<see cref="AgentEventType.LoopRoundStarted"/> 时有值，用于 Token Budget 显示）</summary>
+        public int TokensUsed { get; }
+
         /// <summary>执行时间（毫秒，工具调用完成/失败事件时有值）</summary>
         public double ExecutionTimeMs { get; }
 
@@ -198,6 +201,7 @@ namespace AgentCore.Editor.Core
             string toolResult = null,
             int currentRound = 0,
             int maxRounds = 0,
+            int tokensUsed = 0,
             double executionTimeMs = 0,
             ErrorDetail detail = null,
             List<FileChangeSummary> fileChanges = null,
@@ -215,6 +219,7 @@ namespace AgentCore.Editor.Core
             ToolResult = toolResult;
             CurrentRound = currentRound;
             MaxRounds = maxRounds;
+            TokensUsed = tokensUsed;
             ExecutionTimeMs = executionTimeMs;
             Detail = detail;
             FileChanges = fileChanges;
@@ -380,13 +385,15 @@ namespace AgentCore.Editor.Core
         /// </summary>
         /// <param name="currentRound">当前轮次（从 1 开始）</param>
         /// <param name="maxRounds">最大轮次</param>
+        /// <param name="tokensUsed">本次任务已累计消耗的 token 数</param>
         /// <returns>循环轮次开始事件</returns>
-        public static AgentEvent LoopRoundStarted(int currentRound, int maxRounds)
+        public static AgentEvent LoopRoundStarted(int currentRound, int maxRounds, int tokensUsed = 0)
         {
             return new AgentEvent(
                 AgentEventType.LoopRoundStarted,
                 currentRound: currentRound,
-                maxRounds: maxRounds
+                maxRounds: maxRounds,
+                tokensUsed: tokensUsed
             );
         }
 

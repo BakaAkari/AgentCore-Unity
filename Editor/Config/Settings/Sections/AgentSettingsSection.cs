@@ -68,8 +68,13 @@ namespace AgentCore.Editor.Config.Settings.Sections
                 EditorGUI.BeginChangeCheck();
 
                 settings.maxToolCallRounds = EditorGUILayout.IntSlider(
-                    new GUIContent("Max Tool Rounds", "最大工具调用轮次（防止无限循环）"),
-                    settings.maxToolCallRounds, 1, 50);
+                    new GUIContent("Max Tool Rounds", "硬安全上限（Token 预算是主要限制器）"),
+                    settings.maxToolCallRounds, 1, 200);
+
+                settings.maxTokenBudget = EditorGUILayout.IntField(
+                    new GUIContent("Token Budget", "每轮工具循环的最大 token 消耗量（0 = 不限制）"),
+                    settings.maxTokenBudget);
+                settings.maxTokenBudget = Mathf.Max(0, settings.maxTokenBudget);
 
                 settings.maxConsecutiveErrors = EditorGUILayout.IntSlider(
                     new GUIContent("Max Consecutive Errors", "连续错误上限"),

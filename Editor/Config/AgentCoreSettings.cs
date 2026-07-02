@@ -18,7 +18,7 @@ namespace AgentCore.Editor.Config
     {
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 13;
+        private const int CurrentVersion = 15;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -37,8 +37,11 @@ namespace AgentCore.Editor.Config
 
         // --- Agent 行为 ---
         [Header("Agent Behavior")]
-        [Tooltip("最大工具调用轮次（防止无限循环）")]
-        public int maxToolCallRounds = 50;
+        [Tooltip("最大工具调用轮次（硬上限安全网，防止无限循环）")]
+        public int maxToolCallRounds = 200;
+
+        [Tooltip("单次任务 Token 预算（0 = 不限制，正数 = 累计消耗达到此值后触发软着陆总结）")]
+        public int maxTokenBudget = 0;
 
         [Tooltip("上下文窗口 token 上限（0 = 自动根据模型名称推断）")]
         public int maxContextTokens = 0;
@@ -59,6 +62,15 @@ namespace AgentCore.Editor.Config
 
         [Tooltip("连续错误上限，超过后请求用户介入")]
         public int maxConsecutiveErrors = 5;
+
+        [Tooltip("单工具连续失败警告阈值（达到后 LLM 收到降级提示但不中断）")]
+        public int toolFailWarningThreshold = 3;
+
+        [Tooltip("单工具连续失败阻断阈值（达到后强制中断工具循环）")]
+        public int toolFailBlockThreshold = 6;
+
+        [Tooltip("全工具连续失败轮次阻断阈值（所有工具同时失败的连续轮次）")]
+        public int allToolsFailBlockThreshold = 4;
 
         // --- Bootstrap Files 配置 ---
         [Header("Bootstrap Files")]
@@ -389,6 +401,27 @@ namespace AgentCore.Editor.Config
                 };
             }
 
+            // v13 → v14: Token Budget 模式 — maxToolCallRounds 升级为 200 安全网，新增 maxTokenBudget
+            if (settingsVersion < 14)
+            {
+                // 旧默认值 50 → 提升为 200（token budget 是真正的限制器）
+                if (maxToolCallRounds <= 50)
+                {
+                    maxToolCallRounds = 200;
+                    Debug.Log("[AgentCore] Settings migrated v13→v14: maxToolCallRounds raised to 200 (token budget is now the primary limiter)");
+                }
+                // maxTokenBudget 字段默认 0（不限制），无需迁移
+                Debug.Log("[AgentCore] Settings migrated v13→v14: token budget system initialized (maxTokenBudget=0 means unlimited)");
+            }
+
+            // v14 → v15: 工具连续失败安全机制改进 — 两级响应 + 可配置阈值
+            if (settingsVersion < 15)
+            {
+                // 新字段有合理默认值，无需迁移旧值
+                // toolFailWarningThreshold = 3, toolFailBlockThreshold = 6, allToolsFailBlockThreshold = 4
+                Debug.Log("[AgentCore] Settings migrated v14→v15: tool failure safety mechanism upgraded (warning/block two-level response)");
+            }
+
             settingsVersion = CurrentVersion;
             Save(true);
         }
@@ -402,13 +435,17 @@ namespace AgentCore.Editor.Config
             llmModel = "claude-sonnet-4-5";
             temperature = 0.7f;
             maxTokens = 16000;
-            maxToolCallRounds = 50;
+            maxToolCallRounds = 200;
+            maxTokenBudget = 0;
             maxContextTokens = 0;
             reserveResponseTokens = 16000;
             autoCompileCheck = true;
             autoConsoleCapture = true;
             fallbackRoutingEnabled = true;
             maxConsecutiveErrors = 5;
+            toolFailWarningThreshold = 3;
+            toolFailBlockThreshold = 6;
+            allToolsFailBlockThreshold = 4;
             bootstrapEnabled = true;
             autoProjectContext = true;
             mem0Enabled = false;

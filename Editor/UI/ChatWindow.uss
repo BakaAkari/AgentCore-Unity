@@ -566,7 +566,7 @@
     flex-shrink: 1;
     flex-direction: column;
     display: none;
-    overflow: auto;
+    overflow: scroll;
 }
 
 /* KnowledgeBasePanel 根容器 */
@@ -575,7 +575,7 @@
     flex-shrink: 1;
     flex-direction: column;
     padding: 16px;
-    overflow: auto;
+    overflow: scroll;
     min-height: 0;
 }
 
@@ -793,7 +793,7 @@
     flex-shrink: 1;
     flex-direction: column;
     display: none;
-    overflow: auto;
+    overflow: scroll;
 }
 
 .memory-panel-content {
@@ -801,7 +801,7 @@
     flex-shrink: 1;
     flex-direction: column;
     padding: 16px;
-    overflow: auto;
+    overflow: scroll;
     min-height: 0;
 }
 

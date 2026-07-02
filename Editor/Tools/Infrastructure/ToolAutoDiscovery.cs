@@ -31,6 +31,12 @@ namespace AgentCore.Editor.Tools.Infrastructure
         {
             lock (_lock)
             {
+                if (_initialized)
+                {
+                    Debug.Log("[AgentCore] ToolAutoDiscovery: Already initialized, skipping redundant discovery.");
+                    return;
+                }
+
                 Debug.Log("[AgentCore] ToolAutoDiscovery: Rebuilding tool registry...");
 
                 ToolRegistry.Instance.Clear();

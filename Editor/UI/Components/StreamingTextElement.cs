@@ -542,6 +542,7 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 解析表格行，提取单元格内容。
+        /// 支持反引号内的 | 不作为分隔符（避免内联代码中的管道符号错误拆分列）。
         /// </summary>
         private static string[] ParseTableRow(string line)
         {
@@ -550,12 +551,32 @@ namespace AgentCore.Editor.UI.Components
             if (trimmed.StartsWith("|")) trimmed = trimmed.Substring(1);
             if (trimmed.EndsWith("|")) trimmed = trimmed.Substring(0, trimmed.Length - 1);
 
-            var cells = trimmed.Split('|');
-            for (int i = 0; i < cells.Length; i++)
+            // 状态机分割：反引号内的 | 不作为列分隔符
+            var cells = new List<string>();
+            var current = new StringBuilder();
+            bool inBacktick = false;
+
+            for (int i = 0; i < trimmed.Length; i++)
             {
-                cells[i] = cells[i].Trim();
+                char c = trimmed[i];
+                if (c == '`')
+                {
+                    inBacktick = !inBacktick;
+                    current.Append(c);
+                }
+                else if (c == '|' && !inBacktick)
+                {
+                    cells.Add(current.ToString().Trim());
+                    current.Clear();
+                }
+                else
+                {
+                    current.Append(c);
+                }
             }
-            return cells;
+            cells.Add(current.ToString().Trim());
+
+            return cells.ToArray();
         }
 
         /// <summary>
@@ -663,7 +684,10 @@ namespace AgentCore.Editor.UI.Components
                         var stripped = rawLine.Replace(" ", "").Replace("-", "").Replace("|", "").Replace(":", "");
                         if (string.IsNullOrEmpty(stripped))
                             continue;
-                        dataRows.Add(ParseTableRow(rawLine));
+                        var parsed = ParseTableRow(rawLine);
+                        for (int ci = 0; ci < parsed.Length; ci++)
+                            parsed[ci] = FormatInlineStyles(parsed[ci]);
+                        dataRows.Add(parsed);
                     }
                     
                     if (dataRows.Count > 0)

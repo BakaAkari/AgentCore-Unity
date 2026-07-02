@@ -91,7 +91,9 @@ namespace AgentCore.Editor.UI.Components
         // ─────────────────────────────────────────────
 
         private ConnectionStatus _connectionStatus = ConnectionStatus.Unknown;
+#pragma warning disable CS0414 // _indexStatus is assigned for state tracking; read access reserved for future UI binding
         private IndexStatus _indexStatus = IndexStatus.Idle;
+#pragma warning restore CS0414
         private string _lastIndexedFile = null;
         private string _lastIndexSummary = null;
 
