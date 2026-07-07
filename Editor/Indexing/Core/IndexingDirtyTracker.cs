@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using AgentCore.Editor.Components.Indexing.Config;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -224,6 +225,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             EnsureLoaded();
             var normalizedPaths = NormalizePaths(paths);
             var changed = false;
+            var addedInThisBatch = 0;
 
             lock (_gate)
             {
@@ -231,17 +233,32 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 {
                     if (deleted)
                     {
-                        changed |= _deletedPaths.Add(path);
-                        changed |= _changedPaths.Remove(path);
+                        if (_deletedPaths.Add(path))
+                        {
+                            changed = true;
+                            addedInThisBatch++;
+                        }
+
+                        if (_changedPaths.Remove(path))
+                        {
+                            changed = true;
+                        }
                     }
                     else
                     {
                         if (File.Exists(path))
                         {
-                            changed |= _changedPaths.Add(path);
+                            if (_changedPaths.Add(path))
+                            {
+                                changed = true;
+                                addedInThisBatch++;
+                            }
                         }
 
-                        changed |= _deletedPaths.Remove(path);
+                        if (_deletedPaths.Remove(path))
+                        {
+                            changed = true;
+                        }
                     }
                 }
             }
@@ -250,6 +267,41 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 Save();
                 NotifyChanged();
+
+                // v1.4.0 — Burst detection: notify BackgroundIndexService to pause when a single
+                // batch marks a large number of files dirty (branch switch, formatting sweep, etc.).
+                TryNotifyBurst(addedInThisBatch);
+            }
+        }
+
+        /// <summary>
+        /// v1.4.0 — When a single Add() call adds more than the configured threshold, tell
+        /// <see cref="BackgroundIndexService"/> to enter burst backoff so the Editor can settle.
+        /// Silent no-op when settings are unavailable or threshold is 0.
+        /// </summary>
+        private static void TryNotifyBurst(int addedInThisBatch)
+        {
+            if (addedInThisBatch <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var settings = IndexingSettings.instance?.EffectiveAutoSettings;
+                if (settings == null || settings.BurstThreshold <= 0)
+                {
+                    return;
+                }
+
+                if (addedInThisBatch >= settings.BurstThreshold)
+                {
+                    BackgroundIndexService.NotifyBurstDetected(addedInThisBatch, settings.BurstBackoffSeconds);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] IndexingDirtyTracker burst notify failed: {ex.Message}");
             }
         }
 

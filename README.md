@@ -1,4 +1,4 @@
-﻿# AgentCore Unity
+# AgentCore Unity
 
 > Unity Editor 内置 AI Agent 插件 — 让 LLM 在真实 Unity Editor 工作流中规划、执行、观察与修正。
 
@@ -7,11 +7,11 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ## 当前状态
 
 - **Package**: `com.agentcore.unity`
-- **Version**: `1.2.1`
+- **Version**: `1.3.8`
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
-- **Status**: Phase 6 已验收；治理层 G.1~G.3、后台增量索引、ThinkingDrawer / reasoning 可观测性、Request Enrichment 已完成；后续重点为 MCP Server 对外互操作与产品化分发
+- **Status**: Phase 6 已验收；治理层 G.1~G.3 已完成；后台增量索引、ThinkingDrawer / reasoning 可观测性、Request Enrichment、Token Budget 已完成；Code Indexing 标记为实验性，默认不再自动启用；后续重点为 MCP Server 对外互操作与产品化分发
 
 ## 核心能力
 

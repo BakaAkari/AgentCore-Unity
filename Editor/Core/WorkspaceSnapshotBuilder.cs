@@ -71,6 +71,27 @@ namespace AgentCore.Editor.Core
 
                 // 6. 工具可用性摘要
                 sb.AppendLine($"可用工具: {GetToolSummary()}");
+
+                // 7. v1.4.0 — Optional component contributions (Indexing 组件在启用时通过
+                //   WorkspaceSnapshotHooks.IndexStatusBlockProvider 注入 "Index Status" 块；
+                //   组件未编译时 provider 为 null，snapshot 中不出现该块)
+                try
+                {
+                    var indexProvider = WorkspaceSnapshotHooks.IndexStatusBlockProvider;
+                    if (indexProvider != null)
+                    {
+                        var indexBlock = indexProvider();
+                        if (!string.IsNullOrEmpty(indexBlock))
+                        {
+                            sb.AppendLine();
+                            sb.AppendLine(indexBlock);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] IndexStatusBlockProvider failed: {ex.Message}");
+                }
             }
             catch (Exception ex)
             {

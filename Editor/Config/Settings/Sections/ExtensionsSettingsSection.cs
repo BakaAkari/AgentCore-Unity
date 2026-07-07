@@ -39,9 +39,16 @@ namespace AgentCore.Editor.Config.Settings.Sections
         {
             context.Ui.DrawCard(
                 "Optional Components",
-                "Enable or disable bundled AgentCore components. Changes update scripting define symbols and request Unity script recompilation immediately.",
+                "Enable or disable bundled AgentCore components. Changes update scripting define symbols for all build target groups and request Unity script recompilation immediately.",
                 () =>
                 {
+                    // 实验性警告始终显示，不依赖 Component Cards 折叠状态
+                    EditorGUILayout.HelpBox(
+                        "Code Indexing is experimental. Background indexing can significantly impact Editor responsiveness on large projects. " +
+                        "Enable it only if you need the search_code tool, and pause auto-index during intensive work.",
+                        MessageType.Warning);
+                    EditorGUILayout.Space(4);
+
                     var expanded = context.State.GetFoldout(OptionalComponentsFoldoutKey, true);
                     expanded = EditorGUILayout.Foldout(expanded, "Component Cards", true);
                     context.State.SetFoldout(OptionalComponentsFoldoutKey, expanded);
@@ -51,7 +58,7 @@ namespace AgentCore.Editor.Config.Settings.Sections
                     EditorGUI.indentLevel++;
                     var buildTargetGroup = EditorUserBuildSettings.selectedBuildTargetGroup;
                     EditorGUILayout.LabelField($"Active Build Target Group: {buildTargetGroup}", EditorStyles.miniLabel);
-                    context.Ui.DrawHelpText("This first-stage toggle only updates the active BuildTargetGroup. If you build multiple platforms, enable the component again after switching target groups.");
+                    context.Ui.DrawHelpText("Component state is synchronized across all build target groups. Switching build targets will no longer disable a component.");
                     EditorGUILayout.Space(4);
 
                     foreach (var component in OptionalComponentManager.GetComponents())

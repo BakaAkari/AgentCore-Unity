@@ -60,6 +60,18 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public int ConsecutiveFailures;
 
         /// <summary>
+        /// v1.4.0 — Scheduled next-run time when background service is paused (e.g. burst backoff).
+        /// Null when no pause is active.
+        /// </summary>
+        public DateTime? NextRunAt;
+
+        /// <summary>
+        /// v1.4.0 — Human-readable reason for the current pause (e.g. "burst detected: 800 files")
+        /// or null when the service is not paused.
+        /// </summary>
+        public string ReasonPaused;
+
+        /// <summary>
         /// Creates a copy so subscribers cannot mutate shared status state.
         /// </summary>
         public IndexingStatusSnapshot Clone()
@@ -73,7 +85,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 CurrentFile = CurrentFile,
                 LastError = LastError,
                 LastSuccessAt = LastSuccessAt,
-                ConsecutiveFailures = ConsecutiveFailures
+                ConsecutiveFailures = ConsecutiveFailures,
+                NextRunAt = NextRunAt,
+                ReasonPaused = ReasonPaused
             };
         }
     }

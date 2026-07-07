@@ -126,6 +126,15 @@ namespace AgentCore.Editor.Components.Indexing.UI
             _statusLabel.style.display = DisplayStyle.None;
             mainScroll.Add(_statusLabel);
 
+            // ── Experimental warning ──
+            var experimentalWarning = new Label(
+                "Experimental: background indexing can significantly impact Editor responsiveness on large projects. " +
+                "Pause auto-index during intensive work.");
+            experimentalWarning.AddToClassList(HelpTextClass);
+            experimentalWarning.AddToClassList(StatusErrorClass);
+            experimentalWarning.style.whiteSpace = WhiteSpace.Normal;
+            mainScroll.Add(experimentalWarning);
+
             // ── Background Auto Index ──
             mainScroll.Add(BuildBackgroundIndexSection());
 
@@ -137,6 +146,9 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
             // ── Index Statistics ──
             mainScroll.Add(BuildIndexStatsSection());
+
+            // ── v1.4.0 Indexing Roots Overview ──
+            mainScroll.Add(BuildRootsOverviewSection());
 
             // ── Index Actions ──
             mainScroll.Add(BuildIndexActionsSection());
@@ -253,6 +265,91 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
             // Populate will be called by RefreshStats
             RenderStats();
+
+            return section;
+        }
+
+        /// <summary>
+        /// v1.4.0 — Indexing Roots overview.
+        /// Read-only listing of all resolved roots with their scheduling priority.
+        /// Live per-root state (Ready / Stale / Failed) is intentionally omitted from
+        /// the synchronous UI to avoid store I/O; use <c>search_code::list_root_states</c>
+        /// from the Chat for detailed inspection.
+        /// </summary>
+        private VisualElement BuildRootsOverviewSection()
+        {
+            var section = CreateSection("INDEXING ROOTS");
+            var content = section.Q<VisualElement>(className: SectionContentClass);
+
+            try
+            {
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var resolver = new IndexRootResolver();
+                var roots = resolver.Resolve(workspace);
+
+                if (roots == null || roots.Count == 0)
+                {
+                    var empty = new Label("No indexing roots resolved. Configure workspace scope roots in Project Settings > AgentCore > Workspace.");
+                    empty.AddToClassList(HelpTextClass);
+                    empty.AddToClassList(StatusErrorClass);
+                    content.Add(empty);
+                }
+                else
+                {
+                    int foreground = 0, background = 0, onDemand = 0;
+                    foreach (var root in roots)
+                    {
+                        if (root == null || !root.IsEnabled) continue;
+                        switch (root.Priority)
+                        {
+                            case IndexRootPriority.Foreground: foreground++; break;
+                            case IndexRootPriority.Background: background++; break;
+                            case IndexRootPriority.OnDemand:   onDemand++; break;
+                        }
+                    }
+
+                    content.Add(CreateLabelRow("Total", $"{roots.Count} resolved (Foreground: {foreground} / Background: {background} / OnDemand: {onDemand})"));
+
+                    // Show up to 20 roots inline; more roots collapsed with a summary line.
+                    const int maxInline = 20;
+                    int shown = 0;
+                    foreach (var root in roots)
+                    {
+                        if (root == null) continue;
+                        if (shown >= maxInline) break;
+
+                        var rowLabel = $"{root.DisplayName ?? root.RootPath ?? "(unnamed)"}";
+                        var rowValue = $"{root.ScopeType}/{root.Role} · Priority={root.Priority}"
+                                     + (root.IsEnabled ? "" : " · Disabled");
+
+                        content.Add(CreateLabelRow(rowLabel, rowValue));
+                        shown++;
+                    }
+
+                    if (roots.Count > maxInline)
+                    {
+                        var moreLabel = new Label($"... and {roots.Count - maxInline} more roots not shown");
+                        moreLabel.AddToClassList(HelpTextClass);
+                        content.Add(moreLabel);
+                    }
+
+                    var help = new Label(
+                        "Foreground / Background roots participate in the auto-index loop. " +
+                        "OnDemand roots (CommercialPlugin / Engine / Generated) are indexed only when explicitly requested via " +
+                        "search_code::index_scope. For live per-root state (Ready/Stale/Failed with counts), " +
+                        "call search_code::list_root_states or search_code::diagnose from the AgentCore Chat.");
+                    help.AddToClassList(HelpTextClass);
+                    help.style.whiteSpace = WhiteSpace.Normal;
+                    content.Add(help);
+                }
+            }
+            catch (Exception ex)
+            {
+                var err = new Label($"Failed to enumerate indexing roots: {ex.Message}");
+                err.AddToClassList(HelpTextClass);
+                err.AddToClassList(StatusErrorClass);
+                content.Add(err);
+            }
 
             return section;
         }

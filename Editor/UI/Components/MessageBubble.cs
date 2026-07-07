@@ -195,6 +195,84 @@ namespace AgentCore.Editor.UI.Components
             }
 
             _isStreaming = false;
+
+            // v1.4.0 fix: SetFinalText 动态添加 block 元素（表格、列表等）后，Unity UI Toolkit
+            // 的 layout 计算有时会出现"父容器 background 只覆盖到初始 height"的问题，导致后添加
+            // 的 block 溢出 bubble 灰色背景。强制标记 layout 重算 + 下一帧再刷一次以确保 resolvedStyle
+            // 更新。
+            ForceLayoutRefresh();
+        }
+
+        /// <summary>
+        /// v1.4.0 — Force parent bubble height to match child block container height.
+        /// <para>
+        /// Root cause (confirmed via UI Debugger on Unity 2022.3.50f1):
+        /// After <see cref="StreamingTextElement.SetFinalText"/> dynamically adds block
+        /// elements (table/list/code), the <c>#bubble-content</c> resolved height gets
+        /// stuck at its initial flex layout value (~377px) while its child block
+        /// container's real height is 450+px. USS <c>align-items:stretch + flex-shrink:0
+        /// + height:auto</c> only partially mitigates this — Unity 2022.3's UI Toolkit
+        /// layout engine has a known issue where GeometryChangedEvent does not properly
+        /// bubble up multi-level dynamic additions.
+        /// </para>
+        /// <para>
+        /// Fix: explicitly forward the child block container's resolvedStyle.height to
+        /// bubble-content via inline style. This bypasses the layout cache entirely.
+        /// Runs once after SetFinalText and re-runs on subsequent GeometryChangedEvent
+        /// (covers late layout passes and window resize).
+        /// </para>
+        /// </summary>
+        private void ForceLayoutRefresh()
+        {
+            if (_streamingText == null || _bubbleContent == null)
+            {
+                _bubbleRoot?.MarkDirtyRepaint();
+                return;
+            }
+
+            // Register a persistent listener on the streaming element:
+            // whenever its geometry changes (block layout completed, or window resized),
+            // sync the parent bubble-content's height to fit the streaming content.
+            _streamingText.UnregisterCallback<GeometryChangedEvent>(OnStreamingGeometryChanged);
+            _streamingText.RegisterCallback<GeometryChangedEvent>(OnStreamingGeometryChanged);
+
+            // Fire the sync immediately (in case geometry is already resolved) and
+            // again after a short delay to cover the multi-frame layout settle window.
+            SyncBubbleContentHeight();
+            schedule.Execute(SyncBubbleContentHeight).StartingIn(16);
+            schedule.Execute(SyncBubbleContentHeight).StartingIn(64);
+        }
+
+        /// <summary>
+        /// v1.4.0 — GeometryChangedEvent handler on _streamingText. Fired whenever the
+        /// streaming element's layout changes (e.g. block added, text wrapped).
+        /// </summary>
+        private void OnStreamingGeometryChanged(GeometryChangedEvent evt)
+        {
+            SyncBubbleContentHeight();
+        }
+
+        /// <summary>
+        /// v1.4.0 — Read the streaming element's resolved height and, if larger than the
+        /// current bubble-content height, forcibly apply it as an inline style. This is
+        /// the workaround for Unity 2022.3's layout cache issue.
+        /// </summary>
+        private void SyncBubbleContentHeight()
+        {
+            if (_streamingText == null || _bubbleContent == null) return;
+
+            float streamHeight = _streamingText.resolvedStyle.height;
+            if (float.IsNaN(streamHeight) || streamHeight <= 0f) return;
+
+            float currentBubbleContentHeight = _bubbleContent.resolvedStyle.height;
+
+            // Only apply if there's a discrepancy — otherwise it's a no-op.
+            if (streamHeight > currentBubbleContentHeight + 1f)
+            {
+                _bubbleContent.style.minHeight = streamHeight;
+                _bubbleContent.MarkDirtyRepaint();
+                _bubbleRoot?.MarkDirtyRepaint();
+            }
         }
 
         /// <summary>
@@ -364,6 +442,9 @@ namespace AgentCore.Editor.UI.Components
 
                 // 直接调用 SetFinalText 触发 block rendering
                 _streamingText.SetFinalText(text);
+
+                // v1.4.0 fix: 同 FinalizeContent，强制刷 layout 保证 bubble background 覆盖所有 block
+                ForceLayoutRefresh();
                 return;
             }
 

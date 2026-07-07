@@ -32,17 +32,18 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     /// </summary>
     [AgentTool("search_code",
         Description = "Codebase indexing and C# symbol search via local SQLite index (not committed to VCS). " +
-                      "Actions: status (index state), resolve_workspace (workspace root/fingerprint/VCS info), " +
-                      "list_roots (indexed root directories), index_full (full re-index), index_scope (index specific scope), " +
-                      "index_incremental (incremental update), search_symbol (by name/type/namespace/scope), " +
-                      "full_text_search (FTS5 content search), get_dependencies (outgoing refs), find_usages (incoming refs), " +
-                      "get_symbol_context (aggregated symbol info with dependencies), list_namespaces, get_file_symbols, " +
-                      "get_stats, clear_index. " +
+                      "Actions: status (index state), diagnose (full diagnostic: background service + per-root state + advice), " +
+                      "list_root_states (per-root Ready/Indexing/Stale/NotIndexed/Failed with counts), " +
+                      "mark_stale (force re-index of a root/scope on next background pass), " +
+                      "resolve_workspace, list_roots, index_full, index_scope, index_incremental, " +
+                      "search_symbol, search_text, list_namespaces, get_file_symbols, get_stats, clear_index, " +
+                      "get_dependencies, find_usages, get_symbol_context, get_backend_info. " +
                       "USE FOR: finding class/method definitions, understanding code structure, dependency analysis, " +
-                      "navigating large codebases, finding all usages of a symbol. " +
+                      "navigating large codebases, finding all usages of a symbol, diagnosing why searches return no results. " +
                       "NOT FOR: file content reading (use manage_file), runtime behavior analysis, non-C# files. " +
                       "ACTIVATE WHEN: user asks 'where is X defined', 'who uses Y', 'find all classes that implement Z', " +
-                      "or needs to understand code architecture. PREREQUISITE: Indexing component enabled in Settings.",
+                      "or when a previous symbol search returned no results (call diagnose to check root state first). " +
+                      "PREREQUISITE: Indexing component enabled in Settings.",
         Category = "Indexing",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = false,
@@ -56,8 +57,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
   ""properties"": {
     ""action"": {
       ""type"": ""string"",
-      ""enum"": [""status"", ""resolve_workspace"", ""list_roots"", ""index_full"", ""index_scope"", ""index_incremental"", ""search_symbol"", ""search_text"", ""list_namespaces"", ""get_file_symbols"", ""get_stats"", ""clear_index"", ""get_dependencies"", ""find_usages"", ""get_symbol_context"", ""get_backend_info""],
-      ""description"": ""要执行的操作""
+      ""enum"": [""status"", ""diagnose"", ""list_root_states"", ""mark_stale"", ""resolve_workspace"", ""list_roots"", ""index_full"", ""index_scope"", ""index_incremental"", ""search_symbol"", ""search_text"", ""list_namespaces"", ""get_file_symbols"", ""get_stats"", ""clear_index"", ""get_dependencies"", ""find_usages"", ""get_symbol_context"", ""get_backend_info""],
+      ""description"": ""要执行的操作。诊断优先级：搜索无结果时先 diagnose，索引未就绪时先 list_root_states 或 index_scope。""
     },
     ""query"": {
       ""type"": ""string"",
@@ -174,7 +175,19 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 switch (action)
                 {
                     case "status":
-                        response = HandleStatus();
+                        response = await HandleStatusAsync(cancellationToken);
+                        break;
+
+                    case "diagnose":
+                        response = await HandleDiagnoseAsync(cancellationToken);
+                        break;
+
+                    case "list_root_states":
+                        response = await HandleListRootStatesAsync(cancellationToken);
+                        break;
+
+                    case "mark_stale":
+                        response = await HandleMarkStaleAsync(parameters, cancellationToken);
                         break;
 
                     case "resolve_workspace":
@@ -239,7 +252,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: status, resolve_workspace, list_roots, index_full, index_scope, index_incremental, search_symbol, search_text, list_namespaces, get_file_symbols, get_stats, clear_index, get_dependencies, find_usages, get_symbol_context, get_backend_info");
+                            $"Unknown action: '{action}'. Valid actions: status, diagnose, list_root_states, mark_stale, resolve_workspace, list_roots, index_full, index_scope, index_incremental, search_symbol, search_text, list_namespaces, get_file_symbols, get_stats, clear_index, get_dependencies, find_usages, get_symbol_context, get_backend_info");
                         break;
                 }
             }
@@ -255,11 +268,23 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         // ── Action Handlers ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// status — 获取当前后台索引状态。
+        /// status — 获取当前后台索引状态，v1.4.0 附带 per-root 状态数组。
         /// </summary>
-        private static ToolResponse HandleStatus()
+        private static async Task<ToolResponse> HandleStatusAsync(CancellationToken ct)
         {
             var snapshot = IndexingStatusBus.Current;
+
+            List<object> perRoot = null;
+            try
+            {
+                perRoot = await BuildPerRootStateSummaryAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                // per-root state is best-effort — don't fail the whole status call
+                UnityEngine.Debug.LogWarning($"[AgentCore] search_code::status per-root fetch failed: {ex.Message}");
+            }
+
             return ToolResponse.OkWithData(new
             {
                 state = snapshot.State.ToString(),
@@ -270,8 +295,151 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 last_error = snapshot.LastError,
                 last_success_at = snapshot.LastSuccessAt?.ToString("O"),
                 consecutive_failures = snapshot.ConsecutiveFailures,
+                next_run_at = snapshot.NextRunAt?.ToString("O"),
+                reason_paused = snapshot.ReasonPaused,
                 session_paused = BackgroundIndexService.SessionPaused,
+                per_root_state = perRoot,
             }, $"后台索引状态：{snapshot.State}");
+        }
+
+        /// <summary>
+        /// diagnose — v1.4.0 全量索引诊断：后台服务状态 + workspace 摘要 + 每个 root 的状态 + advice。
+        /// LLM 在搜索落空时应优先调用此 action 判断原因。
+        /// </summary>
+        private static async Task<ToolResponse> HandleDiagnoseAsync(CancellationToken ct)
+        {
+            var snapshot = IndexingStatusBus.Current;
+
+            // Workspace summary
+            IndexWorkspace workspace = null;
+            IReadOnlyList<IndexRoot> resolvedRoots = Array.Empty<IndexRoot>();
+            try
+            {
+                workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var resolver = new IndexRootResolver();
+                resolvedRoots = resolver.Resolve(workspace);
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogWarning($"[AgentCore] diagnose workspace resolve failed: {ex.Message}");
+            }
+
+            var perRootEntries = await BuildPerRootStateEntriesAsync(ct);
+            var perRootDtos = perRootEntries.Select(e => e.Dto).ToList();
+            var advice = BuildDiagnoseAdvice(snapshot, perRootEntries);
+
+            return ToolResponse.OkWithData(new
+            {
+                background_service = new
+                {
+                    state = snapshot.State.ToString(),
+                    dirty_file_count = snapshot.DirtyFileCount,
+                    processed_files = snapshot.ProcessedFiles,
+                    total_files = snapshot.TotalFiles,
+                    current_file = snapshot.CurrentFile,
+                    last_error = snapshot.LastError,
+                    last_success_at = snapshot.LastSuccessAt?.ToString("O"),
+                    consecutive_failures = snapshot.ConsecutiveFailures,
+                    next_run_at = snapshot.NextRunAt?.ToString("O"),
+                    reason_paused = snapshot.ReasonPaused,
+                    session_paused = BackgroundIndexService.SessionPaused,
+                },
+                workspace = workspace == null ? null : new
+                {
+                    fingerprint = workspace.Fingerprint,
+                    root_path = workspace.WorkspaceRoot,
+                    display_name = workspace.DisplayName,
+                    resolved_roots = resolvedRoots?.Count ?? 0,
+                    enabled_roots = resolvedRoots?.Count(r => r.IsEnabled) ?? 0,
+                },
+                roots = perRootDtos,
+                advice = advice,
+            }, $"索引诊断：{snapshot.State}，{perRootDtos.Count} 个 root 已解析");
+        }
+
+        /// <summary>
+        /// list_root_states — v1.4.0 列出所有 root 的动态状态（比 diagnose 更聚焦，无 advice）。
+        /// </summary>
+        private static async Task<ToolResponse> HandleListRootStatesAsync(CancellationToken ct)
+        {
+            var perRoot = await BuildPerRootStateSummaryAsync(ct);
+            return ToolResponse.OkWithData(new
+            {
+                total = perRoot?.Count ?? 0,
+                roots = perRoot,
+            }, $"共 {perRoot?.Count ?? 0} 个 root 状态记录");
+        }
+
+        /// <summary>
+        /// mark_stale — v1.4.0 强制把匹配的 root 标记为 Stale，把其下所有已索引文件塞回脏队列，
+        /// 下次 background 触发时会重新索引该 root。
+        /// </summary>
+        private static async Task<ToolResponse> HandleMarkStaleAsync(JObject parameters, CancellationToken ct)
+        {
+            var scopeTypeStr = ToolHelpers.GetOptionalString(parameters, "scope_type");
+            var scopeName = ToolHelpers.GetOptionalString(parameters, "scope_name");
+            var rootId = ToolHelpers.GetOptionalInt(parameters, "root_id", 0);
+
+            if (string.IsNullOrEmpty(scopeTypeStr) && string.IsNullOrEmpty(scopeName) && rootId == 0)
+                return ToolResponse.Fail("mark_stale 需要至少提供 scope_type、scope_name 或 root_id 之一。");
+
+            using var store = CreateStore();
+            if (store == null)
+                return ToolResponse.Fail("索引存储初始化失败，请检查 WorkspaceRoot 配置。");
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
+                return ToolResponse.Fail("尚未建立索引，mark_stale 无对象可标记。");
+
+            IndexScopeType? scopeType = null;
+            if (!string.IsNullOrEmpty(scopeTypeStr) &&
+                Enum.TryParse<IndexScopeType>(scopeTypeStr, true, out var parsedScope))
+            {
+                scopeType = parsedScope;
+            }
+
+            var indexedRoots = await store.GetRootsAsync(stored.Id, ct);
+            var targets = indexedRoots.Where(r =>
+            {
+                if (rootId > 0 && r.Id != rootId) return false;
+                if (scopeType.HasValue && r.ScopeType != scopeType.Value) return false;
+                if (!string.IsNullOrEmpty(scopeName) &&
+                    !string.Equals(r.ScopeName, scopeName, StringComparison.OrdinalIgnoreCase)) return false;
+                return true;
+            }).ToList();
+
+            if (targets.Count == 0)
+                return ToolResponse.Fail($"未找到匹配的 Root（scope_type={scopeTypeStr}, scope_name={scopeName}, root_id={rootId}）");
+
+            var stateStore = new IndexRootStateStore(store, stored.Id);
+            int totalRequeued = 0;
+            var affectedNames = new List<string>();
+
+            foreach (var root in targets)
+            {
+                await stateStore.SetStateAsync(root.Id, IndexRootState.Stale, ct);
+
+                var files = await store.GetFilesForRootAsync(root.Id, ct);
+                if (files != null && files.Count > 0)
+                {
+                    var paths = files
+                        .Where(f => f != null && !string.IsNullOrEmpty(f.FilePath))
+                        .Select(f => f.FilePath)
+                        .ToList();
+                    IndexingDirtyTracker.AddChanged(paths);
+                    totalRequeued += paths.Count;
+                }
+
+                affectedNames.Add(root.DisplayName ?? root.RootPath ?? $"root#{root.Id}");
+            }
+
+            return ToolResponse.OkWithData(new
+            {
+                affected_roots = targets.Count,
+                affected_names = affectedNames,
+                requeued_files = totalRequeued,
+            }, $"已标记 {targets.Count} 个 root 为 Stale，重新入队 {totalRequeued} 个文件。下次后台任务触发时将重新索引。");
         }
 
         /// <summary>
@@ -1044,6 +1212,197 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 read_only = s.ReadOnly,
                 branch_id = workspace.BranchId,
             };
+        }
+
+        // ── v1.4.0 Per-root state helpers ─────────────────────────────────────
+
+        /// <summary>
+        /// v1.4.0 — Internal struct paired with each per-root DTO so downstream code (advice
+        /// generator) can filter by state without reflecting on anonymous types.
+        /// </summary>
+        private readonly struct PerRootEntry
+        {
+            public readonly object Dto;
+            public readonly IndexRootState State;
+
+            public PerRootEntry(object dto, IndexRootState state)
+            {
+                Dto = dto;
+                State = state;
+            }
+        }
+
+        /// <summary>
+        /// v1.4.0 — Compose per-root state summary. Returns DTOs suitable for LLM consumption.
+        /// Internal callers wanting to filter by state should call
+        /// <see cref="BuildPerRootStateEntriesAsync"/> instead.
+        /// </summary>
+        private static async Task<List<object>> BuildPerRootStateSummaryAsync(CancellationToken ct)
+        {
+            var entries = await BuildPerRootStateEntriesAsync(ct);
+            var result = new List<object>(entries.Count);
+            foreach (var entry in entries)
+            {
+                result.Add(entry.Dto);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// v1.4.0 — Enumerate per-root entries with typed state (for internal filtering).
+        /// Resilient to store failures — returns empty list on error.
+        /// </summary>
+        private static async Task<List<PerRootEntry>> BuildPerRootStateEntriesAsync(CancellationToken ct)
+        {
+            var result = new List<PerRootEntry>();
+
+            try
+            {
+                using var store = CreateStore();
+                if (store == null)
+                {
+                    return result;
+                }
+
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+
+                // Resolve current roots from providers (may include roots not yet persisted)
+                var rootResolver = new IndexRootResolver();
+                var resolvedRoots = rootResolver.Resolve(workspace);
+
+                // Cross-reference with stored roots so we can populate IDs
+                IReadOnlyList<IndexRoot> storedRoots = Array.Empty<IndexRoot>();
+                IndexRootStateStore stateStore = null;
+                if (stored != null)
+                {
+                    storedRoots = await store.GetRootsAsync(stored.Id, ct);
+                    stateStore = new IndexRootStateStore(store, stored.Id);
+                }
+
+                var storedByPath = storedRoots.ToDictionary(
+                    r => (r.RootPath ?? string.Empty).Replace('\\', '/').TrimEnd('/'),
+                    r => r,
+                    StringComparer.OrdinalIgnoreCase);
+
+                foreach (var root in resolvedRoots)
+                {
+                    if (root == null || string.IsNullOrEmpty(root.RootPath)) continue;
+
+                    var normalizedPath = root.RootPath.Replace('\\', '/').TrimEnd('/');
+                    var status = new IndexRootStatus { RootId = 0, State = IndexRootState.NotIndexed };
+
+                    if (storedByPath.TryGetValue(normalizedPath, out var storedRoot))
+                    {
+                        status.RootId = storedRoot.Id;
+                        if (stateStore != null)
+                        {
+                            status = await stateStore.LoadAsync(storedRoot.Id, ct);
+                        }
+                    }
+
+                    var dto = new
+                    {
+                        root_id = status.RootId,
+                        display_name = root.DisplayName,
+                        root_path = root.RootPath,
+                        scope_type = root.ScopeType.ToString(),
+                        scope_name = root.ScopeName,
+                        role = root.Role.ToString(),
+                        priority = root.Priority.ToString(),
+                        is_enabled = root.IsEnabled,
+                        index_state = status.State.ToString(),
+                        last_indexed_at = status.LastIndexedAt?.ToString("O"),
+                        last_error = status.LastError,
+                        indexed_file_count = status.FileCount,
+                        indexed_symbol_count = status.SymbolCount,
+                    };
+                    result.Add(new PerRootEntry(dto, status.State));
+                }
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogWarning($"[AgentCore] BuildPerRootStateEntriesAsync failed: {ex.Message}");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// v1.4.0 — Build human-readable advice for the diagnose action.
+        /// Rules are evaluated in a fixed order (top-down); triggered rules accumulate.
+        /// </summary>
+        private static List<string> BuildDiagnoseAdvice(IndexingStatusSnapshot snapshot, List<PerRootEntry> perRoot)
+        {
+            var advice = new List<string>();
+
+            if (snapshot.State == IndexingBackgroundState.Disabled)
+            {
+                advice.Add("后台索引已禁用（可能是 session 手动暂停或连续失败超限）。请在 Settings → Indexing 检查配置或点击 'Force Run' 恢复。");
+                return advice;
+            }
+
+            if (!string.IsNullOrEmpty(snapshot.ReasonPaused))
+            {
+                advice.Add($"后台索引当前暂停中：{snapshot.ReasonPaused}");
+            }
+
+            if (snapshot.State == IndexingBackgroundState.Failed && snapshot.ConsecutiveFailures > 0)
+            {
+                advice.Add($"最近 {snapshot.ConsecutiveFailures} 次索引失败，错误：{snapshot.LastError ?? "未知"}。检查 Console 中的详细堆栈。");
+            }
+
+            if (snapshot.DirtyFileCount > 500)
+            {
+                advice.Add($"当前有 {snapshot.DirtyFileCount} 个脏文件待处理，可能存在批量变更（分支切换/生成器）。建议等待后台索引完成后再触发密集搜索。");
+            }
+            else if (snapshot.State == IndexingBackgroundState.Running)
+            {
+                advice.Add("后台索引正在运行，短期内新增文件搜索命中率可能偏低。");
+            }
+
+            if (perRoot != null && perRoot.Count > 0)
+            {
+                int failed = 0, indexing = 0, notIndexed = 0, ready = 0, stale = 0;
+                foreach (var entry in perRoot)
+                {
+                    switch (entry.State)
+                    {
+                        case IndexRootState.Failed:     failed++; break;
+                        case IndexRootState.Indexing:   indexing++; break;
+                        case IndexRootState.NotIndexed: notIndexed++; break;
+                        case IndexRootState.Ready:      ready++; break;
+                        case IndexRootState.Stale:      stale++; break;
+                    }
+                }
+
+                if (failed > 0)
+                {
+                    advice.Add($"{failed} 个 root 上次索引失败。建议调用 search_code::list_root_states 查看错误详情，必要时 mark_stale 后重试。");
+                }
+                if (notIndexed > 0)
+                {
+                    advice.Add($"{notIndexed} 个 root 从未索引（多为 OnDemand 类型，如 CommercialPlugin / Engine / Generated）。若要搜索其中符号，调用 search_code::index_scope 显式触发。");
+                }
+                if (stale > 0)
+                {
+                    advice.Add($"{stale} 个 root 处于 Stale（有脏文件待处理）。下次后台任务触发时将自动重新索引。");
+                }
+                if (indexing > 0)
+                {
+                    advice.Add($"{indexing} 个 root 正在索引中，搜索结果可能不完整。");
+                }
+                if (ready == perRoot.Count && failed == 0 && stale == 0 && indexing == 0)
+                {
+                    advice.Add("所有 root 均为 Ready 状态，索引健康。");
+                }
+            }
+            else
+            {
+                advice.Add("尚未解析出任何 root。请检查 Workspace 配置是否有效（可调用 search_code::resolve_workspace）。");
+            }
+
+            return advice;
         }
 
         // ── 内部辅助类 ───────────────────────────────────────────────────────────

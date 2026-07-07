@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.Compilation;
+using UnityEngine;
 
 namespace AgentCore.Editor.Extensions
 {
@@ -37,7 +39,7 @@ namespace AgentCore.Editor.Extensions
                 new OptionalComponentInfo(
                     "indexing",
                     "Code Indexing",
-                    "Roslyn-based C# symbol index for the search_code tool. Enables fast symbol lookup, namespace browsing, and incremental re-indexing across all workspace roots.",
+                    "[Experimental] Roslyn-based C# symbol index for the search_code tool. Background indexing may impact Editor responsiveness on large projects; enable with caution.",
                     IndexingDefine,
                     IsIndexingEnabled())
             };
@@ -53,7 +55,7 @@ namespace AgentCore.Editor.Extensions
         }
 
         /// <summary>
-        /// Enables or disables the Version Control optional component for the active build target group.
+        /// Enables or disables the Version Control optional component across all build target groups.
         /// </summary>
         /// <param name="enabled">Whether VCS should be enabled.</param>
         public static void SetVcsEnabled(bool enabled)
@@ -71,7 +73,7 @@ namespace AgentCore.Editor.Extensions
         }
 
         /// <summary>
-        /// Enables or disables the Code Indexing optional component for the active build target group.
+        /// Enables or disables the Code Indexing optional component across all build target groups.
         /// </summary>
         /// <param name="enabled">Whether Code Indexing should be enabled.</param>
         public static void SetIndexingEnabled(bool enabled)
@@ -81,40 +83,66 @@ namespace AgentCore.Editor.Extensions
 
         private static bool HasDefine(string define)
         {
-            var defines = GetDefines();
+            var defines = GetDefines(EditorUserBuildSettings.selectedBuildTargetGroup);
             return defines.Contains(define);
         }
 
         private static void SetDefine(string define, bool enabled)
         {
-            var defines = GetDefines();
-            bool changed;
+            bool anyChanged = false;
 
-            if (enabled)
+            foreach (BuildTargetGroup group in Enum.GetValues(typeof(BuildTargetGroup)))
             {
-                changed = defines.Add(define);
-            }
-            else
-            {
-                changed = defines.Remove(define);
+                if (!IsValidBuildTargetGroup(group))
+                    continue;
+
+                var defines = GetDefines(group);
+                bool changed = enabled ? defines.Add(define) : defines.Remove(define);
+                if (!changed)
+                    continue;
+
+                try
+                {
+                    PlayerSettings.SetScriptingDefineSymbolsForGroup(group, string.Join(";", defines));
+                    anyChanged = true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] Failed to set scripting define '{define}' for build target group {group}: {ex.Message}");
+                }
             }
 
-            if (!changed)
+            if (!anyChanged)
                 return;
 
-            PlayerSettings.SetScriptingDefineSymbolsForGroup(EditorUserBuildSettings.selectedBuildTargetGroup, string.Join(";", defines));
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             CompilationPipeline.RequestScriptCompilation();
             AgentCoreExtensionRegistry.Refresh();
         }
 
-        private static HashSet<string> GetDefines()
+        private static HashSet<string> GetDefines(BuildTargetGroup group)
         {
-            var raw = PlayerSettings.GetScriptingDefineSymbolsForGroup(EditorUserBuildSettings.selectedBuildTargetGroup);
-            return new HashSet<string>(
-                raw.Split(';')
-                    .Select(value => value.Trim())
-                    .Where(value => !string.IsNullOrEmpty(value)));
+            try
+            {
+                var raw = PlayerSettings.GetScriptingDefineSymbolsForGroup(group);
+                return new HashSet<string>(
+                    raw.Split(';')
+                        .Select(value => value.Trim())
+                        .Where(value => !string.IsNullOrEmpty(value)));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to read scripting defines for build target group {group}: {ex.Message}");
+                return new HashSet<string>();
+            }
+        }
+
+        private static bool IsValidBuildTargetGroup(BuildTargetGroup group)
+        {
+            // Unknown is not a real build target group.
+            // Editor-only tools rely on the active platform group; writing defines to all
+            // valid platform groups ensures component state survives build target switches.
+            return group != BuildTargetGroup.Unknown;
         }
     }
 

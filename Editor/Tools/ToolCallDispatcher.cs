@@ -457,8 +457,9 @@ namespace AgentCore.Editor.Tools
         /// <summary>
         /// 在 Unity 主线程上执行工具。
         /// <para>
-        /// 使用 <see cref="TaskCompletionSource{T}"/> + <see cref="EditorApplication.delayCall"/>
-        /// 模式，将异步工具执行调度到主线程。
+        /// 使用 <see cref="TaskCompletionSource{T}"/> + <see cref="EditorApplication.update"/>
+        /// 模式，将异步工具执行调度到主线程。相比 delayCall，update 回调在每一帧都会检查，
+        /// 并带有超时保护，避免在长 import / Domain Reload / 模态对话框期间无限挂起。
         /// </para>
         /// </summary>
         /// <param name="tool">要执行的工具</param>
@@ -471,6 +472,7 @@ namespace AgentCore.Editor.Tools
             CancellationToken ct)
         {
             var tcs = new TaskCompletionSource<ToolResult>();
+            var executed = false;
 
             // 注册取消回调
             using var registration = ct.Register(() =>
@@ -478,25 +480,58 @@ namespace AgentCore.Editor.Tools
                 tcs.TrySetCanceled(ct);
             });
 
-            // 调度到主线程执行
-            EditorApplication.delayCall += async () =>
+            // 超时保护：主线程若 30 秒内仍未执行，则返回失败而不是无限挂起
+            const int mainThreadTimeoutSeconds = 30;
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(mainThreadTimeoutSeconds));
+            using var timeoutRegistration = timeoutCts.Token.Register(() =>
             {
-                try
+                if (!executed)
                 {
-                    var result = await tool.ExecuteAsync(parameters, ct);
-                    tcs.TrySetResult(result);
+                    tcs.TrySetException(new TimeoutException(
+                        $"Tool '{tool.Metadata.Name}' timed out after {mainThreadTimeoutSeconds}s waiting for the main thread. " +
+                        "This often happens during long asset imports, Domain Reload, or modal dialogs. Please retry after the operation completes."));
                 }
-                catch (OperationCanceledException oce)
-                {
-                    tcs.TrySetCanceled(oce.CancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetException(ex);
-                }
+            });
+
+            // 调度到主线程执行
+            EditorApplication.CallbackFunction callback = null;
+            callback = () =>
+            {
+                EditorApplication.update -= callback;
+
+                if (tcs.Task.IsCompleted)
+                    return;
+
+                executed = true;
+                _ = ExecuteToolOnMainThreadAsync(tool, parameters, ct, tcs);
             };
+            EditorApplication.update += callback;
 
             return await tcs.Task;
+        }
+
+        /// <summary>
+        /// 实际在主线程上执行工具的异步包装。
+        /// </summary>
+        private static async Task ExecuteToolOnMainThreadAsync(
+            IAgentTool tool,
+            JObject parameters,
+            CancellationToken ct,
+            TaskCompletionSource<ToolResult> tcs)
+        {
+            try
+            {
+                var result = await tool.ExecuteAsync(parameters, ct);
+                tcs.TrySetResult(result);
+            }
+            catch (OperationCanceledException oce)
+            {
+                tcs.TrySetCanceled(oce.CancellationToken);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
         }
 
         /// <summary>

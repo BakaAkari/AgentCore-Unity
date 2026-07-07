@@ -87,6 +87,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     if (seenPaths.Contains(normalizedPath)) continue;
 
                     seenPaths.Add(normalizedPath);
+
+                    // v1.4.0 — assign scheduling priority based on role/scope.
+                    // Runtime state (IndexState/LastIndexedAt/counts) will be populated
+                    // by IndexRootStateStore when the store is accessible.
+                    root.Priority = IndexingSchedulePolicy.ResolvePriority(root);
+
                     result.Add(root);
                 }
             }

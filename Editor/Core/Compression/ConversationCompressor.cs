@@ -173,11 +173,19 @@ namespace AgentCore.Editor.Core.Compression
                 startIndex = 1;
             }
 
-            // 跳过已有的摘要消息
+            // v1.4.0 fix: 跳过所有紧跟主 system prompt 之后的
+            //   (a) 已有摘要消息（避免重复压缩）
+            //   (b) Workspace snapshot 首轮注入的 system 消息（首轮上下文，跨轮次保留）
+            // 这两类都是首轮时插入的"运行时静态上下文"，被压缩会破坏 LLM 对 workspace/index 状态的感知。
             while (startIndex < messages.Count &&
                    messages[startIndex].Role == "system" &&
                    messages[startIndex].Content != null &&
-                   messages[startIndex].Content.StartsWith(SummaryMessageMarker))
+                   (messages[startIndex].Content.StartsWith(SummaryMessageMarker)
+                    || messages[startIndex].Content.StartsWith(WorkspaceSnapshotBuilder.SnapshotMarker)
+                    // Deferred context（Active Tools List + PROJECT + Workspace PROJECT.md）
+                    // 由 BootstrapContext.CompileDeferredContext 生成，首轮注入后应跨轮次保留。
+                    // 未来若需要精确标记可加专用前缀；此处以启发式识别 "# Available Tools" 开头。
+                    || messages[startIndex].Content.StartsWith("# Available Tools")))
             {
                 startIndex++;
             }

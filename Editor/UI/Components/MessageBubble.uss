@@ -9,7 +9,11 @@
     padding: 10px;
     margin: 4px 12px;
     max-width: 82%;
+    /* v1.4.0 fix: 强制父容器高度随子元素扩展，防止表格/列表等动态 block 溢出 bubble 灰色背景 */
     flex-shrink: 0;
+    flex-grow: 0;
+    flex-direction: column;
+    height: auto;
 }
 
 /* --- 用户消息 --- */
@@ -142,13 +146,25 @@
 /* --- 气泡内容 --- */
 #bubble-content {
     flex-direction: column;
+    /* v1.4.0 fix (Part 3, confirmed via UI Debugger):
+       #bubble-content.Layout.height = 360.67px 但 BoundingBox.height = 463.33px
+       —— 父容器高度停留在初始 flex 布局值，未跟随 StreamingTextElement 动态添加的
+       block 扩展。用 align-items:stretch + flex-shrink:0 + height:auto 强制
+       父容器高度 = 子元素总高度。 */
+    align-items: stretch;
+    flex-shrink: 0;
+    flex-grow: 0;
+    height: auto;
 }
 
 #content-label {
     font-size: 13px;
     white-space: normal;
     -unity-text-align: upper-left;
-    overflow: hidden;
+    /* v1.4.0 fix: 移除 overflow: hidden — 它会阻止 Label 请求高度增长，
+       导致长文本被裁剪，用户后续消息气泡叠在 LLM 溢出文本之上。
+       flex-shrink: 0 已在 .message-bubble 上生效，父容器不会挤压高度。 */
+    flex-shrink: 0;
 }
 
 /* --- 流式光标 --- */

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config;
@@ -7,6 +8,8 @@ using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Safety;
+using AgentCore.Editor.Utils;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace AgentCore.Editor.Core
@@ -48,6 +51,12 @@ namespace AgentCore.Editor.Core
 
             // 已发出警告的工具集合（同一工具在同一循环内只警告一次）
             var warnedTools = new HashSet<string>();
+
+            // 同一工具对同一目标重复调用检测 —— 防止 LLM 在单文件/单目标上无限循环
+            var perToolTargetCallCount = new Dictionary<string, int>();
+            const int toolTargetRepeatWarningThreshold = 4;
+            const int toolTargetRepeatBlockThreshold = 7;
+            var warnedToolTargets = new HashSet<string>();
 
             while (currentRound < maxRounds)
             {
@@ -178,6 +187,62 @@ namespace AgentCore.Editor.Core
                         "你现在必须立即停止调用任何工具，直接用纯文本向用户解释问题。" +
                         "总结你之前尝试做什么以及哪里出了问题。不要再发起任何 tool_call。" +
                         "用户可以发送新消息继续对话，届时失败计数将重置。"));
+
+                    assistantTurn.IsStreaming = true;
+                    SetState(AgentState.Thinking);
+                    var finalMessage = await CallLLMStreamAsync(assistantTurn, toolDefinitions, ct);
+
+                    if (finalMessage != null && finalMessage.ToolCalls != null && finalMessage.ToolCalls.Count > 0)
+                    {
+                        Debug.LogWarning($"[AgentCore]{logPrefix} LLM returned {finalMessage.ToolCalls.Count} tool call(s) in final round despite stop instruction. Ignoring.");
+                        finalMessage.ToolCalls.Clear();
+                    }
+
+                    HandleFinalResponse(finalMessage, assistantTurn);
+                    break;
+                }
+
+                // 重复调用检测：同一工具对同一目标反复调用（即使工具返回成功）
+                UpdatePerToolTargetCallCounts(assistantMessage.ToolCalls, perToolTargetCallCount);
+
+                string repeatBlockTarget = null;
+                string repeatWarnTarget = null;
+                foreach (var kvp in perToolTargetCallCount)
+                {
+                    if (kvp.Value >= toolTargetRepeatBlockThreshold)
+                    {
+                        repeatBlockTarget = kvp.Key;
+                        break;
+                    }
+                    else if (kvp.Value >= toolTargetRepeatWarningThreshold && !warnedToolTargets.Contains(kvp.Key))
+                    {
+                        repeatWarnTarget = kvp.Key;
+                    }
+                }
+
+                if (repeatWarnTarget != null && repeatBlockTarget == null)
+                {
+                    warnedToolTargets.Add(repeatWarnTarget);
+                    var (warnToolName, warnTarget) = SplitToolTargetKey(repeatWarnTarget);
+                    Debug.LogWarning($"[AgentCore]{logPrefix} Tool '{warnToolName}' has been called {perToolTargetCallCount[repeatWarnTarget]} times on target '{warnTarget}'. Sending repetition warning.");
+
+                    _messages.Add(ChatMessage.System(
+                        $"[SYSTEM WARNING] Tool '{warnToolName}' 已连续调用 {perToolTargetCallCount[repeatWarnTarget]} 次针对同一目标 '{warnTarget}'。" +
+                        $"如果继续重复调用到 {toolTargetRepeatBlockThreshold} 次将被强制中断。" +
+                        "请确认任务是否已完成：如果已完成，请直接回复用户结果；如果陷入僵局，请向用户说明当前状态和卡点，不要继续盲目重试。"));
+                }
+
+                if (repeatBlockTarget != null)
+                {
+                    var (blockToolName, blockTarget) = SplitToolTargetKey(repeatBlockTarget);
+                    string reason = $"Tool '{blockToolName}' has been called {perToolTargetCallCount[repeatBlockTarget]} times on the same target '{blockTarget}' (threshold: {toolTargetRepeatBlockThreshold})";
+
+                    Debug.LogWarning($"[AgentCore]{logPrefix} {reason}. Forcing final response.");
+
+                    _messages.Add(ChatMessage.System(
+                        "[SYSTEM] " + reason + "。" +
+                        "你现在必须立即停止调用任何工具，直接用纯文本向用户解释：你刚才反复尝试做什么、当前进展如何、遇到了什么卡点。" +
+                        "不要再发起任何 tool_call。用户可以发送新消息继续对话。"));
 
                     assistantTurn.IsStreaming = true;
                     SetState(AgentState.Thinking);
@@ -473,6 +538,104 @@ namespace AgentCore.Editor.Core
                         perToolFailCount[toolName] = 0;
                 }
             }
+        }
+
+        /// <summary>
+        /// 更新每个（工具 + 目标）组合的累计调用次数。
+        /// <para>
+        /// 目标从工具参数中按常见路径字段（path/script_path/file_path/asset_path/directory/name/query）提取。
+        /// 该计数用于检测 LLM 是否在同一个文件/对象上反复调用同一工具而陷入循环。
+        /// </para>
+        /// </summary>
+        /// <param name="toolCalls">本轮 LLM 返回的工具调用列表</param>
+        /// <param name="perToolTargetCallCount">（工具 + 目标）累计计数</param>
+        private static void UpdatePerToolTargetCallCounts(
+            List<ToolCall> toolCalls,
+            Dictionary<string, int> perToolTargetCallCount)
+        {
+            if (toolCalls == null || toolCalls.Count == 0)
+                return;
+
+            foreach (var toolCall in toolCalls)
+            {
+                var toolName = toolCall.Function?.Name;
+                if (string.IsNullOrEmpty(toolName))
+                    continue;
+
+                var targetKey = ExtractToolTargetKey(toolName, toolCall.Function?.Arguments);
+                var dictKey = BuildToolTargetKey(toolName, targetKey);
+
+                if (perToolTargetCallCount.ContainsKey(dictKey))
+                    perToolTargetCallCount[dictKey]++;
+                else
+                    perToolTargetCallCount[dictKey] = 1;
+            }
+        }
+
+        /// <summary>
+        /// 从工具参数 JSON 中提取最能代表“操作目标”的键值。
+        /// </summary>
+        /// <param name="toolName">工具名称</param>
+        /// <param name="argumentsJson">工具参数 JSON 字符串</param>
+        /// <returns>目标键值；无法提取时返回空字符串</returns>
+        private static string ExtractToolTargetKey(string toolName, string argumentsJson)
+        {
+            if (string.IsNullOrEmpty(argumentsJson))
+                return string.Empty;
+
+            var args = JsonHelper.ParseObject(argumentsJson);
+            if (args == null)
+                return string.Empty;
+
+            // 优先匹配常见的路径/目标字段
+            var candidateKeys = new[]
+            {
+                "script_path",
+                "asset_path",
+                "file_path",
+                "path",
+                "directory",
+                "name",
+                "query",
+                "class_name",
+                "method_name",
+                "field_name"
+            };
+
+            foreach (var key in candidateKeys)
+            {
+                if (args.TryGetValue(key, out var token) && token != null)
+                {
+                    var value = token.ToString().Trim();
+                    if (!string.IsNullOrEmpty(value))
+                        return value;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// 构建（工具 + 目标）字典键。
+        /// </summary>
+        private static string BuildToolTargetKey(string toolName, string targetKey)
+        {
+            return $"{toolName}::{targetKey ?? string.Empty}";
+        }
+
+        /// <summary>
+        /// 将 <see cref="BuildToolTargetKey"/> 生成的键拆分为工具名和目标。
+        /// </summary>
+        private static (string ToolName, string Target) SplitToolTargetKey(string combinedKey)
+        {
+            if (string.IsNullOrEmpty(combinedKey))
+                return (string.Empty, string.Empty);
+
+            var parts = combinedKey.Split(new[] { "::" }, StringSplitOptions.None);
+            if (parts.Length >= 2)
+                return (parts[0], parts[1]);
+
+            return (combinedKey, string.Empty);
         }
 
         /// <summary>

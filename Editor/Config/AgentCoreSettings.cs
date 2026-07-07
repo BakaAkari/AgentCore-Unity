@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 using AgentCore.Editor.Extensions;
+using AgentCore.Editor.Utils;
+using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -13,20 +17,34 @@ namespace AgentCore.Editor.Config
     /// 使用 ScriptableSingleton 存储在 Library/ 目录下，不进版本控制。
     /// 通过 Project Settings > AgentCore 面板访问。
     /// </summary>
+    [InitializeOnLoad]
     [FilePath("AgentCore/Settings.asset", FilePathAttribute.Location.PreferencesFolder)]
     public class AgentCoreSettings : ScriptableSingleton<AgentCoreSettings>
     {
+        static AgentCoreSettings()
+        {
+            // 强制在 Editor 启动后期加载一次 Settings，确保版本迁移（包括默认启用 VCS）被执行。
+            // ScriptableSingleton OnEnable 可能在 Editor 启动早期触发，部分 Editor 服务尚未就绪。
+            EditorApplication.delayCall += () =>
+            {
+                var settings = instance;
+                if (settings != null)
+                    settings.MigrateSettings();
+            };
+        }
+
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 15;
+        [SerializeField] private bool vcsDefaultEnabled = false;
+        private const int CurrentVersion = 16;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
         [Tooltip("LLM API 端点地址（OpenAI 兼容）")]
-        public string llmEndpoint = "http://localhost:4000/v1";
+        public string llmEndpoint = "http://172.16.248.60:8000/v1";
 
         [Tooltip("LLM 模型名称")]
-        public string llmModel = "claude-sonnet-4-5";
+        public string llmModel = "auto";
 
         [Tooltip("生成温度 (0.0-2.0)")]
         [Range(0f, 2f)]
@@ -246,7 +264,32 @@ namespace AgentCore.Editor.Config
             {
                 Debug.Log($"[AgentCore] OnEnable: clearing stale userId '{userId}', EffectiveUserId will use system-generated ID");
                 userId = "";
-                Save(true);
+                // v1.4.0 fix: defer Save(true) out of OnEnable (Unity forbids saving a
+                // ScriptableSingleton while it is still being loaded).
+                EditorApplication.delayCall += () =>
+                {
+                    try { Save(true); }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[AgentCore] Deferred userId clear save failed: {ex.Message}");
+                    }
+                };
+            }
+
+            // 如果模型设置为自动获取，则在延迟调用中异步获取模型列表
+            if (llmModel == "auto")
+            {
+                EditorApplication.delayCall += async () =>
+                {
+                    try
+                    {
+                        await FetchModelsAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"[AgentCore] Failed to fetch models: {ex.Message}");
+                    }
+                };
             }
         }
 
@@ -377,28 +420,12 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v11→v12: optional service defaults aligned (no data migration for existing users)");
             }
 
-            // v12 → v13: 默认启用 VCS 和 Code Indexing 可选组件
+            // v12 → v13: 默认启用 VCS 可选组件；Code Indexing 保持禁用（实验性，需用户手动启用）
             if (settingsVersion < 13)
             {
-                // 使用 delayCall 避免在 ScriptableSingleton OnEnable 期间触发重编译
-                EditorApplication.delayCall += () =>
-                {
-                    bool changed = false;
-                    if (!OptionalComponentManager.IsVcsEnabled())
-                    {
-                        OptionalComponentManager.SetVcsEnabled(true);
-                        changed = true;
-                    }
-                    if (!OptionalComponentManager.IsIndexingEnabled())
-                    {
-                        OptionalComponentManager.SetIndexingEnabled(true);
-                        changed = true;
-                    }
-                    if (changed)
-                    {
-                        Debug.Log("[AgentCore] Settings migrated v12→v13: VCS and Code Indexing components enabled by default");
-                    }
-                };
+                // 使用 delayCall 避免在 ScriptableSingleton OnEnable 期间触发重编译。
+                // 同时安排一次延迟重试，防止首次调用时 Editor 尚未完全就绪。
+                EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(this, retry: true);
             }
 
             // v13 → v14: Token Budget 模式 — maxToolCallRounds 升级为 200 安全网，新增 maxTokenBudget
@@ -422,8 +449,115 @@ namespace AgentCore.Editor.Config
                 Debug.Log("[AgentCore] Settings migrated v14→v15: tool failure safety mechanism upgraded (warning/block two-level response)");
             }
 
+            // v15 → v16: 确保 VCS 默认启用已应用（修复部分环境下 v12→v13 迁移未触发的问题）
+            if (settingsVersion < 16)
+            {
+                if (!vcsDefaultEnabled)
+                {
+                    EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(this, retry: true);
+                }
+                else
+                {
+                    Debug.Log("[AgentCore] Settings migrated v15→v16: VCS default enablement already applied");
+                }
+            }
+
             settingsVersion = CurrentVersion;
-            Save(true);
+
+            // v1.4.0 fix: Save(true) cannot run inside ScriptableSingleton.OnEnable — Unity emits
+            // "You may not pass in objects that are already persistent" because the asset file
+            // is already being loaded when OnEnable fires. Defer to the next editor update.
+            EditorApplication.delayCall += () =>
+            {
+                try { Save(true); }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] Deferred settings save failed: {ex.Message}");
+                }
+            };
+        }
+
+        /// <summary>
+        /// 应用 VCS 默认启用（v12→v13 / v15→v16 迁移）。
+        /// 包装在 try/catch 中，并在首次调用后安排一次重试，以应对 Editor 启动早期
+        /// PlayerSettings 尚未完全就绪的情况。成功后持久化 vcsDefaultEnabled 标记。
+        /// </summary>
+        /// <param name="settings">当前 Settings 实例。</param>
+        /// <param name="retry">是否安排延迟重试。</param>
+        private static void ApplyVcsDefaultEnablement(AgentCoreSettings settings, bool retry)
+        {
+            if (settings == null)
+                return;
+
+            try
+            {
+                if (!OptionalComponentManager.IsVcsEnabled())
+                {
+                    OptionalComponentManager.SetVcsEnabled(true);
+                    Debug.Log("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental, enable manually in Extensions settings if needed)");
+                }
+                else
+                {
+                    Debug.Log("[AgentCore] VCS already enabled; Code Indexing remains disabled (experimental, enable manually in Extensions settings if needed)");
+                }
+
+                settings.vcsDefaultEnabled = true;
+                settings.Save(true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Failed to apply VCS default enablement: {ex.Message}");
+
+                if (retry)
+                {
+                    EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(settings, retry: false);
+                }
+                else
+                {
+                    Debug.LogError("[AgentCore] VCS default enablement could not be applied. You can enable it manually in Project Settings > AgentCore > Extensions.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 异步获取 LLM 模型列表并设置第一个为默认模型。
+        /// </summary>
+        private async Task FetchModelsAsync()
+        {
+            if (string.IsNullOrEmpty(llmEndpoint))
+            {
+                Debug.LogWarning("[AgentCore] LLM endpoint is empty, cannot fetch models.");
+                return;
+            }
+
+            var client = HttpClientFactory.GetClient();
+            var request = HttpClientFactory.CreateRequest(HttpMethod.Get, llmEndpoint + "/models");
+            var response = await client.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                // 解析 JSON 响应，假设返回格式为 { "data": [{ "id": "model1" }, { "id": "model2" }] }
+                var jobj = JsonHelper.ParseObject(content);
+                if (jobj != null && jobj.TryGetValue("data", out var jarr) && jarr is JArray models && models.Count > 0)
+                {
+                    var firstModel = models[0]["id"]?.ToString();
+                    if (!string.IsNullOrEmpty(firstModel))
+                    {
+                        llmModel = firstModel;
+                        Save(true);
+                        Debug.Log($"[AgentCore] Fetched models, set default to: {firstModel}");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning($"[AgentCore] No models found in response: {content}");
+                }
+            }
+            else
+            {
+                Debug.LogError($"[AgentCore] Failed to fetch models: {response.StatusCode} {response.ReasonPhrase}");
+            }
         }
 
         /// <summary>

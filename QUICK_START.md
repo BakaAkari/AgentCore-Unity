@@ -6,7 +6,7 @@
 
 1. Unity Editor → Window → Package Manager
 2. 左上角 `+` → **Add package from tarball...**
-3. 选择 `com.agentcore.unity-1.2.2.tgz`
+3. 选择 `com.agentcore.unity-1.3.8.tgz`
 4. 等待导入完成
 
 **要求**: Unity 2021.3+

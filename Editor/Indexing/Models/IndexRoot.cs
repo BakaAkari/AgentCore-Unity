@@ -1,9 +1,16 @@
+using System;
 using System.Collections.Generic;
 
 namespace AgentCore.Editor.Components.Indexing.Models
 {
     /// <summary>
     /// 索引根目录，代表一个可独立索引的代码范围单元。
+    /// <para>
+    /// v1.4.0 — Runtime state fields (<see cref="IndexState"/>, <see cref="LastIndexedAt"/>,
+    /// <see cref="IndexedFileCount"/>, <see cref="IndexedSymbolCount"/>, <see cref="Priority"/>)
+    /// are populated by <c>IndexRootStateStore</c> from <c>IIndexStore</c> metadata KV.
+    /// They are NOT part of the index store schema — no migration needed.
+    /// </para>
     /// </summary>
     public sealed class IndexRoot
     {
@@ -76,6 +83,31 @@ namespace AgentCore.Editor.Components.Indexing.Models
             get => IsDefaultSearchScope;
             set => IsDefaultSearchScope = value;
         }
+
+        // ── v1.4.0 Runtime state ──────────────────────────────────────────────
+        // The fields below are populated from IIndexStore metadata KV (see IndexRootStateStore).
+        // They are NOT persisted as columns/schema; existing JSONL/SQLite indexes remain compatible.
+
+        /// <summary>v1.4.0 — Current lifecycle state of this root's index.</summary>
+        public IndexRootState IndexState { get; set; } = IndexRootState.NotIndexed;
+
+        /// <summary>v1.4.0 — Timestamp of the last successful index run for this root (UTC).</summary>
+        public DateTime? LastIndexedAt { get; set; }
+
+        /// <summary>v1.4.0 — Last error message from a failed index run; null when healthy.</summary>
+        public string LastIndexError { get; set; }
+
+        /// <summary>v1.4.0 — Number of files indexed under this root at last successful run.</summary>
+        public int IndexedFileCount { get; set; }
+
+        /// <summary>v1.4.0 — Number of symbols extracted under this root at last successful run.</summary>
+        public int IndexedSymbolCount { get; set; }
+
+        /// <summary>
+        /// v1.4.0 — Scheduling priority assigned by <c>IndexingSchedulePolicy</c>.
+        /// Determines whether this root participates in the automatic background loop.
+        /// </summary>
+        public IndexRootPriority Priority { get; set; } = IndexRootPriority.Background;
 
         /// <summary>
         /// 根据 ScopeType 和 Role 推断默认只读状态。

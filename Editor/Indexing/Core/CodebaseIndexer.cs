@@ -152,16 +152,33 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 progress.Phase = IndexingPhase.FullIndexing;
                 ReportProgress(onProgress, progress);
 
-                foreach (var (root, filePath) in allFiles)
+                const int yieldEveryNFiles = 10;
+                for (var i = 0; i < allFiles.Count; i++)
                 {
+                    var (root, filePath) = allFiles[i];
                     ct.ThrowIfCancellationRequested();
                     progress.CurrentRoot = root.RootPath;
                     progress.CurrentFile = filePath;
 
-                    await IndexFileAsync(workspaceId, root, filePath, workspace, progress, ct);
+                    try
+                    {
+                        await IndexFileAsync(workspaceId, root, filePath, workspace, progress, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Unhandled exception indexing '{filePath}': {ex.Message}");
+                        progress.ErrorFiles++;
+                    }
 
                     progress.ProcessedFiles++;
                     ReportProgress(onProgress, progress);
+
+                    if (i % yieldEveryNFiles == 0)
+                        await Task.Yield();
                 }
 
                 // 8. 持久化元数据
@@ -804,11 +821,20 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 return;
             }
 
-            // 提取符号（Roslyn 解析）
+            // 提取符号（Roslyn 解析），对单个文件设置超时保护，避免极端文件卡死主线程
             ExtractionResult extraction;
             try
             {
-                extraction = RoslynSymbolExtractor.ExtractFromFile(filePath, 0, root, workspace);
+                const int perFileTimeoutMs = 5000;
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(perFileTimeoutMs);
+                extraction = await Task.Run(() => RoslynSymbolExtractor.ExtractFromFile(filePath, 0, root, workspace), cts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Extraction timed out for '{filePath}' (>5s), skipping.");
+                progress.ErrorFiles++;
+                return;
             }
             catch (Exception ex)
             {
