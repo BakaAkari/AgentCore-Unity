@@ -3,6 +3,29 @@ using System.Collections.Generic;
 namespace AgentCore.Editor.Config.Settings
 {
     /// <summary>
+    /// Foldout default policy for AgentCore settings pages. Keeps default expand/collapse
+    /// decisions consistent across all pages so users see the same behavior everywhere.
+    /// </summary>
+    public static class FoldoutDefaults
+    {
+        /// <summary>Primary configuration fields for an already-enabled service (endpoint / API key).
+        /// Default: expanded — user just enabled the service and needs to fill it in.</summary>
+        public const bool ServiceConfig = true;
+
+        /// <summary>Advanced / secondary options (auto-memory, burst tuning, dedicated compression LLM).
+        /// Default: collapsed — reduces initial visual density.</summary>
+        public const bool Advanced = false;
+
+        /// <summary>Read-only reference tables (scope roots overview, path-safety policy).
+        /// Default: collapsed — only relevant during troubleshooting.</summary>
+        public const bool ReadOnlyInfo = false;
+
+        /// <summary>Tool category listings inside Tools &amp; Extensions.
+        /// Default: collapsed — categories are numerous.</summary>
+        public const bool ToolCategory = false;
+    }
+
+    /// <summary>
     /// Stores transient IMGUI state for the AgentCore settings hub.
     /// </summary>
     public sealed class AgentCoreSettingsState

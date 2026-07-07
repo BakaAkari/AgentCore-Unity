@@ -7,6 +7,10 @@
 *.tgz
 *.tgz.meta
 
+# --- npm pack 解压后的 package/ 目录（如果被误留在仓库中） ---
+package/
+package.meta
+
 # --- 归档文件（旧版本遗留，用户不需要） ---
 _archive/
 _archive.meta

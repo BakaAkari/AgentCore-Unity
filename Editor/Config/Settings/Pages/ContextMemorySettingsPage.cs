@@ -9,11 +9,21 @@ namespace AgentCore.Editor.Config.Settings.Pages
     /// <summary>
     /// Context &amp; Memory settings page — context sources, budget, compression, memory, and knowledge base.
     /// </summary>
+    /// <remarks>
+    /// v1.4.2: Memory Service, Knowledge Base and Separate Compression LLM all render as
+    /// unified "service cards" (see <see cref="AgentCoreSettingsUi.DrawServiceCard"/>).
+    /// When the service is disabled, only the title + status badge + Enable toggle are shown;
+    /// configuration fields (endpoint, API key, auto-memory, model name) render only after
+    /// the user opts in. This significantly reduces default visual density for optional cloud
+    /// services and matches the AGENTS.md §10.1 "connection-type settings" pattern.
+    /// </remarks>
     public sealed class ContextMemorySettingsPage : IAgentCoreSettingsPage
     {
         private const string Mem0ApiKeyDisplayKey = "context-memory.mem0.apiKeyDisplay";
         private const string LightRagApiKeyDisplayKey = "context-memory.lightrag.apiKeyDisplay";
-        private const string CompressionAdvancedFoldoutKey = "context-memory.compression-llm";
+
+        // Foldout keys for advanced / optional configuration groups nested inside service cards.
+        private const string AutoMemoryFoldoutKey = "context-memory.auto-memory";
 
         /// <inheritdoc />
         public string Id => "context-memory";
@@ -40,9 +50,33 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public void Draw(AgentCoreSettingsContext context)
         {
             EnsureApiKeyDisplays(context);
+
+            DrawContextSourcesCard(context);
+            EditorGUILayout.Space(8);
+
+            DrawContextBudgetCard(context);
+            EditorGUILayout.Space(8);
+
+            DrawCompressionCard(context);
+            EditorGUILayout.Space(8);
+
+            DrawCompressionLlmCard(context);
+            EditorGUILayout.Space(8);
+
+            DrawMemoryServiceCard(context);
+            EditorGUILayout.Space(8);
+
+            DrawKnowledgeBaseCard(context);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Cards
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static void DrawContextSourcesCard(AgentCoreSettingsContext context)
+        {
             var settings = context.Settings;
 
-            // ── Context Sources ──
             context.Ui.DrawCard("Context Sources", "Bootstrap pipeline and project-local context files.", () =>
             {
                 EditorGUI.BeginChangeCheck();
@@ -64,10 +98,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 DrawUserFileRow("PROJECT.md", "Project conventions and personal preferences — team-shared, recommended for VCS commit.");
                 DrawUserFileRow("SOUL.ext.md", "Agent behavior rule extensions — appended to built-in SOUL, recommended for VCS commit.");
             });
+        }
 
-            EditorGUILayout.Space(8);
+        private static void DrawContextBudgetCard(AgentCoreSettingsContext context)
+        {
+            var settings = context.Settings;
 
-            // ── Context Budget ──
             context.Ui.DrawCard("Context Budget", null, () =>
             {
                 EditorGUI.BeginChangeCheck();
@@ -87,10 +123,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     settings.SaveSettings();
                 }
             });
+        }
 
-            EditorGUILayout.Space(8);
+        private static void DrawCompressionCard(AgentCoreSettingsContext context)
+        {
+            var settings = context.Settings;
 
-            // ── Compression ──
             context.Ui.DrawCard("Compression", null, () =>
             {
                 EditorGUI.BeginChangeCheck();
@@ -122,25 +160,28 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     settings.SaveSettings();
                 }
             });
+        }
 
-            EditorGUILayout.Space(8);
+        private static void DrawCompressionLlmCard(AgentCoreSettingsContext context)
+        {
+            var settings = context.Settings;
 
-            // ── Compression LLM (foldout) ──
-            var compressionExpanded = context.State.GetFoldout(CompressionAdvancedFoldoutKey);
-            compressionExpanded = EditorGUILayout.Foldout(compressionExpanded, "Separate Compression LLM", true);
-            context.State.SetFoldout(CompressionAdvancedFoldoutKey, compressionExpanded);
-
-            if (compressionExpanded)
-            {
-                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUI.BeginChangeCheck();
-
-                settings.useSeparateCompressionLLM = EditorGUILayout.Toggle(
-                    new GUIContent("Use Separate LLM", "Use a dedicated LLM for compression tasks"),
-                    settings.useSeparateCompressionLLM);
-
-                if (settings.useSeparateCompressionLLM)
+            context.Ui.DrawServiceCard(
+                title: "Separate Compression LLM",
+                description: "Use a dedicated LLM for summarizing tool results and conversation history. Falls back to the main LLM when disabled.",
+                enabled: settings.useSeparateCompressionLLM,
+                onEnabledChanged: value =>
                 {
+                    settings.useSeparateCompressionLLM = value;
+                    settings.SaveSettings();
+                },
+                statusHint: settings.useSeparateCompressionLLM && !string.IsNullOrEmpty(settings.compressionLLMEndpoint)
+                    ? $"→ {settings.compressionLLMEndpoint}"
+                    : null,
+                drawEnabledBody: () =>
+                {
+                    EditorGUI.BeginChangeCheck();
+
                     settings.compressionLLMEndpoint = EditorGUILayout.TextField(
                         new GUIContent("Endpoint", "Compression LLM API endpoint"),
                         settings.compressionLLMEndpoint);
@@ -152,115 +193,151 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     context.Ui.DrawApiKeyRow(
                         "API Key",
                         "Compression LLM API key",
-                        SecureKeyStorage.HasCompressionLLMApiKey() ? "••••••••" : "(not set)",
+                        SecureKeyStorage.HasCompressionLLMApiKey() ? "••••••••••••" : "(not set)",
                         "Set Compression LLM API Key",
                         "Enter your compression LLM API key:",
                         SecureKeyStorage.SetCompressionLLMApiKey,
                         () => SecureKeyStorage.SetCompressionLLMApiKey(string.Empty));
-                }
 
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-                EditorGUILayout.EndVertical();
-            }
-
-            EditorGUILayout.Space(8);
-
-            // ── Memory Service ──
-            context.Ui.DrawCard("Memory Service", "mem0 persistent memory service for cross-session knowledge.", () =>
-            {
-                EditorGUI.BeginChangeCheck();
-
-                settings.mem0Enabled = EditorGUILayout.Toggle(
-                    new GUIContent("Enabled", "Enable mem0 memory service"),
-                    settings.mem0Enabled);
-
-                settings.mem0Endpoint = EditorGUILayout.TextField(
-                    new GUIContent("Endpoint", "mem0 service URL"),
-                    settings.mem0Endpoint);
-
-                context.Ui.DrawApiKeyRow(
-                    "API Key",
-                    "mem0 service API key",
-                    context.State.StringValues[Mem0ApiKeyDisplayKey],
-                    "Set mem0 API Key",
-                    "Enter your mem0 API Key:",
-                    newKey =>
+                    if (EditorGUI.EndChangeCheck())
                     {
-                        SecureKeyStorage.SetMem0ApiKey(newKey);
-                        context.State.StringValues[Mem0ApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
-                    },
-                    () =>
-                    {
-                        SecureKeyStorage.SetMem0ApiKey(string.Empty);
-                        context.State.StringValues[Mem0ApiKeyDisplayKey] = "(not set)";
-                    });
-
-                GUI.enabled = false;
-                EditorGUILayout.TextField(
-                    new GUIContent("User ID", "Auto-generated unique user identifier for memory isolation"),
-                    settings.EffectiveUserId);
-                GUI.enabled = true;
-
-                EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField("Auto Memory", EditorStyles.miniLabel);
-
-                settings.autoMemoryEnabled = EditorGUILayout.Toggle(
-                    new GUIContent("Enabled", "Automatically extract key information to mem0 at session end"),
-                    settings.autoMemoryEnabled);
-
-                settings.autoMemoryMinTurns = EditorGUILayout.IntSlider(
-                    new GUIContent("Min Turns", "Minimum user turns before triggering auto-memory"),
-                    settings.autoMemoryMinTurns, 1, 20);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-            });
-
-            EditorGUILayout.Space(8);
-
-            // ── Knowledge Base ──
-            context.Ui.DrawCard("Knowledge Base", "LightRAG knowledge base for project-specific retrieval.", () =>
-            {
-                EditorGUI.BeginChangeCheck();
-
-                settings.lightragEnabled = EditorGUILayout.Toggle(
-                    new GUIContent("Enabled", "Enable LightRAG knowledge base"),
-                    settings.lightragEnabled);
-
-                settings.lightragEndpoint = EditorGUILayout.TextField(
-                    new GUIContent("Endpoint", "LightRAG service URL"),
-                    settings.lightragEndpoint);
-
-                context.Ui.DrawApiKeyRow(
-                    "API Key",
-                    "LightRAG service API key",
-                    context.State.StringValues[LightRagApiKeyDisplayKey],
-                    "Set LightRAG API Key",
-                    "Enter your LightRAG API Key:",
-                    newKey =>
-                    {
-                        SecureKeyStorage.SetLightRAGApiKey(newKey);
-                        context.State.StringValues[LightRagApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
-                    },
-                    () =>
-                    {
-                        SecureKeyStorage.SetLightRAGApiKey(string.Empty);
-                        context.State.StringValues[LightRagApiKeyDisplayKey] = "(not set)";
-                    });
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-            });
+                        settings.SaveSettings();
+                    }
+                });
         }
 
-        // ── User Files ──
+        private static void DrawMemoryServiceCard(AgentCoreSettingsContext context)
+        {
+            var settings = context.Settings;
+
+            context.Ui.DrawServiceCard(
+                title: "Memory Service (mem0)",
+                description: "Persistent cross-session memory service. Extracts and recalls key information from conversations.",
+                enabled: settings.mem0Enabled,
+                onEnabledChanged: value =>
+                {
+                    settings.mem0Enabled = value;
+                    settings.SaveSettings();
+                },
+                statusHint: settings.mem0Enabled && !string.IsNullOrEmpty(settings.mem0Endpoint)
+                    ? $"→ {settings.mem0Endpoint}"
+                    : null,
+                drawEnabledBody: () =>
+                {
+                    EditorGUI.BeginChangeCheck();
+
+                    settings.mem0Endpoint = EditorGUILayout.TextField(
+                        new GUIContent("Endpoint", "mem0 service URL"),
+                        settings.mem0Endpoint);
+
+                    context.Ui.DrawApiKeyRow(
+                        "API Key",
+                        "mem0 service API key",
+                        context.State.StringValues[Mem0ApiKeyDisplayKey],
+                        "Set mem0 API Key",
+                        "Enter your mem0 API Key:",
+                        newKey =>
+                        {
+                            SecureKeyStorage.SetMem0ApiKey(newKey);
+                            context.State.StringValues[Mem0ApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
+                        },
+                        () =>
+                        {
+                            SecureKeyStorage.SetMem0ApiKey(string.Empty);
+                            context.State.StringValues[Mem0ApiKeyDisplayKey] = "(not set)";
+                        });
+
+                    GUI.enabled = false;
+                    EditorGUILayout.TextField(
+                        new GUIContent("User ID", "Auto-generated unique user identifier for memory isolation"),
+                        settings.EffectiveUserId);
+                    GUI.enabled = true;
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        settings.SaveSettings();
+                    }
+
+                    // Auto Memory — advanced, collapsed by default.
+                    EditorGUILayout.Space(4);
+                    var autoExpanded = context.State.GetFoldout(AutoMemoryFoldoutKey, FoldoutDefaults.Advanced);
+                    autoExpanded = EditorGUILayout.Foldout(autoExpanded, "Auto Memory (advanced)", true);
+                    context.State.SetFoldout(AutoMemoryFoldoutKey, autoExpanded);
+
+                    if (autoExpanded)
+                    {
+                        EditorGUI.indentLevel++;
+                        EditorGUI.BeginChangeCheck();
+
+                        settings.autoMemoryEnabled = EditorGUILayout.Toggle(
+                            new GUIContent("Auto-Extract at Session End",
+                                "Automatically extract key information to mem0 at session end"),
+                            settings.autoMemoryEnabled);
+
+                        settings.autoMemoryMinTurns = EditorGUILayout.IntSlider(
+                            new GUIContent("Min Turns", "Minimum user turns before triggering auto-memory"),
+                            settings.autoMemoryMinTurns, 1, 20);
+
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            settings.SaveSettings();
+                        }
+                        EditorGUI.indentLevel--;
+                    }
+                });
+        }
+
+        private static void DrawKnowledgeBaseCard(AgentCoreSettingsContext context)
+        {
+            var settings = context.Settings;
+
+            context.Ui.DrawServiceCard(
+                title: "Knowledge Base (LightRAG)",
+                description: "Project-specific retrieval augmented generation. Indexes docs and returns relevant snippets on demand.",
+                enabled: settings.lightragEnabled,
+                onEnabledChanged: value =>
+                {
+                    settings.lightragEnabled = value;
+                    settings.SaveSettings();
+                },
+                statusHint: settings.lightragEnabled && !string.IsNullOrEmpty(settings.lightragEndpoint)
+                    ? $"→ {settings.lightragEndpoint}"
+                    : null,
+                drawEnabledBody: () =>
+                {
+                    EditorGUI.BeginChangeCheck();
+
+                    settings.lightragEndpoint = EditorGUILayout.TextField(
+                        new GUIContent("Endpoint", "LightRAG service URL"),
+                        settings.lightragEndpoint);
+
+                    context.Ui.DrawApiKeyRow(
+                        "API Key",
+                        "LightRAG service API key",
+                        context.State.StringValues[LightRagApiKeyDisplayKey],
+                        "Set LightRAG API Key",
+                        "Enter your LightRAG API Key:",
+                        newKey =>
+                        {
+                            SecureKeyStorage.SetLightRAGApiKey(newKey);
+                            context.State.StringValues[LightRagApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
+                        },
+                        () =>
+                        {
+                            SecureKeyStorage.SetLightRAGApiKey(string.Empty);
+                            context.State.StringValues[LightRagApiKeyDisplayKey] = "(not set)";
+                        });
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        settings.SaveSettings();
+                    }
+                });
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // User Files (PROJECT.md / SOUL.ext.md rows)
+        // ─────────────────────────────────────────────────────────────────────
 
         private static void DrawUserFileRow(string fileName, string description)
         {
@@ -326,7 +403,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
         }
 
-        // ── Helpers ──
+        // ─────────────────────────────────────────────────────────────────────
+        // Helpers
+        // ─────────────────────────────────────────────────────────────────────
 
         private static void EnsureApiKeyDisplays(AgentCoreSettingsContext context)
         {

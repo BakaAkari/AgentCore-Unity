@@ -82,6 +82,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             context.Ui.DrawCard("Diagnostics", "Connection checks and troubleshooting utilities.", () =>
             {
+                // v1.4.2: Test buttons rendered with a shared minimum width so longer labels
+                // ("Test LightRAG") no longer truncate against a fixed 120px allotment.
                 DrawTestButton(context, "Test LLM", TestLlmRunningKey, TestLlmStatusKey, TestLlmConnection);
                 DrawTestButton(context, "Test mem0", TestMem0RunningKey, TestMem0StatusKey, TestMem0Connection);
                 DrawTestButton(context, "Test LightRAG", TestLightRAGRunningKey, TestLightRAGStatusKey, TestLightRAGConnection);
@@ -89,15 +91,13 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 EditorGUILayout.Space(4);
 
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Refresh Tool Registry", GUILayout.Width(150)))
+                if (GUILayout.Button("Refresh Tool Registry", GUILayout.MinWidth(150), GUILayout.MaxWidth(220)))
                 {
                     AgentCore.Editor.Tools.Infrastructure.ToolAutoDiscovery.DiscoverAndRegisterAll();
                     Debug.Log("[AgentCore] Tool registry refreshed.");
                 }
-                EditorGUILayout.EndHorizontal();
 
-                EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Open Logs", GUILayout.Width(150)))
+                if (GUILayout.Button("Open Logs", GUILayout.MinWidth(150), GUILayout.MaxWidth(220)))
                 {
                     var logPath = GetEditorLogPath();
                     if (!string.IsNullOrEmpty(logPath) && File.Exists(logPath))
@@ -109,6 +109,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         EditorUtility.DisplayDialog("Open Logs", "Could not locate the Unity Editor log file.", "OK");
                     }
                 }
+                GUILayout.FlexibleSpace();
                 EditorGUILayout.EndHorizontal();
             });
         }
@@ -117,7 +118,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = !IsRunning(context, runningKey);
-            if (GUILayout.Button(IsRunning(context, runningKey) ? "Testing..." : label, GUILayout.Width(120)))
+            // MinWidth ensures "Test LightRAG" fits without truncation; MaxWidth keeps
+            // buttons compact when the settings window is wider than needed.
+            if (GUILayout.Button(IsRunning(context, runningKey) ? "Testing..." : label, GUILayout.MinWidth(140), GUILayout.MaxWidth(180)))
             {
                 testAction(context);
             }

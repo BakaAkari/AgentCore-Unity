@@ -628,22 +628,30 @@ public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken
 1. 在 `AgentCoreSettings` 中添加字段（带合理默认值）
 2. 递增 `CurrentVersion`（基于实际代码中的当前值）
 3. 在 `MigrateSettings()` 中添加迁移逻辑
-4. 在对应 `IAgentCoreSettingsSection` 中添加 UI，不得直接修改 `AgentCoreSettingsProvider` 绘制业务设置
+4. 在对应 `IAgentCoreSettingsPage` 中添加 UI，不得直接修改 `AgentCoreSettingsProvider` 绘制业务设置
 
 ### 10.1 Settings 页面开发规则
 
-AgentCore Project Settings 采用 shell + section registry 架构。修改设置页时必须遵守：
+AgentCore Project Settings 采用 **shell + top-tab pages + cards** 架构（自 v1.0.0 起）。修改设置页时必须遵守：
 
-- **Provider 只做外壳** — `AgentCoreSettingsProvider` 只能负责初始化 `AgentCoreSettingsContext`、刷新 `AgentCoreSettingsRegistry`、绘制左侧导航、分发当前 section；禁止新增业务设置 UI、业务 async action 或 section 私有状态字段。
-- **设置项必须有归属** — 新增设置项必须归属到一个 `IAgentCoreSettingsSection`，或先新增明确的 section；不得新增无归属的顶层 foldout / card。
-- **Section 元数据稳定** — 新增 section 必须定义稳定 `Id`、`Title`、`Description`、`Category`、`Order`，并通过 `AgentCoreSettingsRegistry` 注册。
-- **UI 状态集中管理** — foldout、异步运行标记、异步结果等临时状态必须存放在 `AgentCoreSettingsState`，不得回到 Provider 字段。
-- **共享 UI Helper** — API key 行、状态文本、卡片、说明文本等通用 IMGUI 片段优先复用 `AgentCoreSettingsUi`，避免各 section 重复实现。
-- **连接型设置统一模式** — LLM、mem0、LightRAG、Compression LLM 以及后续云服务应使用 Enabled / Endpoint / API Key / Test Connection / Result / Advanced Options 的一致交互结构。
-- **Optional Components 职责边界** — 组件启用/禁用归 `ExtensionsSettingsSection` 管理；descriptor 必须位于主程序集可编译代码中，不能强引用被 define gate 的组件程序集类型。
-- **Extension Settings 兼容约束** — 当前扩展设置通过 `IAgentCoreSettingsContribution` 挂载在 Extensions section；新增扩展设置不得绕过 section shell 直接修改 Provider。未来引入 TargetSectionId / TargetComponentId V2 接口时，必须迁移到明确挂载点，禁止恢复“Extension Settings 垃圾桶”。
-- **Tools 只控制暴露** — `ToolsSettingsSection` 只控制 LLM 可见工具、category disable 和 individual tool disable，不负责 optional component 编译/启用。
-- **Provider 行数约束** — Provider 应保持 200-300 行左右；如果新增功能导致 Provider 增长，应拆分到 section/service/helper。
+**核心架构**：
+- `AgentCoreSettingsProvider` 是外壳（约 230 行），维护有序 `IAgentCoreSettingsPage[]`，绘制顶部 Tab 导航并分发到当前 page。
+- 每个 `IAgentCoreSettingsPage`（当前 6 个：Dashboard / Model & Agent / Context & Memory / Tools & Extensions / Workspace / UI & Diagnostics）负责一屏的业务设置。
+- Page 内部使用 `AgentCoreSettingsUi.DrawCard(...)` 或 `AgentCoreSettingsUi.DrawServiceCard(...)` 组织内容，垂直堆叠，每张 card 一个业务子领域。
+
+**约束**：
+- **Provider 只做外壳** — `AgentCoreSettingsProvider` 只能负责初始化 `AgentCoreSettingsContext`、构建 page 列表、绘制顶部 Tab、分发到当前 page；禁止新增业务设置 UI、业务 async action 或 page 私有状态字段。
+- **设置项必须有归属** — 新增设置项必须归属到一个现有 `IAgentCoreSettingsPage` 的具体 card，或先新增明确的 page；不得新增无归属的顶层 foldout / card。
+- **Page 元数据稳定** — 新增 page 必须定义稳定 `Id`、`Title`、`Description`、`Order`。built-in pages 使用 order 100~600；optional component pages 使用 600+。
+- **UI 状态集中管理** — foldout、异步运行标记、异步结果等临时状态必须存放在 `AgentCoreSettingsState`，不得回到 Provider / Page 字段。foldout 默认状态优先使用 `FoldoutDefaults` 常量（`ServiceConfig` / `Advanced` / `ReadOnlyInfo` / `ToolCategory`）以保证跨 page 一致性。
+- **共享 UI Helper** — API key 行、状态文本、普通 card、服务卡、状态徽标等通用 IMGUI 片段优先复用 `AgentCoreSettingsUi`，避免各 page 重复实现。
+- **连接型设置统一模式** — LLM、mem0、LightRAG、Compression LLM 以及后续可选云服务应通过 `AgentCoreSettingsUi.DrawServiceCard(...)` 使用统一的 "Enabled 开关 + 启用后展开明细字段（Endpoint / API Key / Test / Advanced Options）" 结构；禁止让默认关闭的可选服务在 disabled 状态下也把所有字段全展开。
+- **Optional Components 职责边界** — 组件启用/禁用归 `ToolsExtensionsSettingsPage` 内的 Optional Components 卡片管理；descriptor 必须位于主程序集可编译代码中，不能强引用被 define gate 的组件程序集类型。
+- **Extension Settings 兼容约束** — 当前扩展设置通过 `IAgentCoreSettingsContribution` 挂载在 Tools & Extensions page 内的对应组件卡；新增扩展设置不得绕过 page shell 直接修改 Provider。未来引入 TargetPageId / TargetComponentId V2 接口时，必须迁移到明确挂载点，禁止恢复"Extension Settings 垃圾桶"。
+- **Tools 只控制暴露** — Tools & Extensions page 的 Tool Visibility card 只控制 LLM 可见工具、category disable 和 individual tool disable，不负责 optional component 编译/启用。
+- **Provider 行数约束** — Provider 应保持 200-300 行左右；如果新增功能导致 Provider 增长，应拆分到 page/service/helper。
+
+> **历史说明**：v1.0.0 之前曾使用左侧导航 + `IAgentCoreSettingsSection` + `AgentCoreSettingsRegistry` 的架构；自迁移到顶部 Tab + Page 后，Section/Registry 已于 v1.4.2 被删除。若在代码中看到相关命名的历史文档，请以本节的 Page/Card 描述为准。
 
 ---
 

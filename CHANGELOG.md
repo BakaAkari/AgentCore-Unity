@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-07-07
+
+### Changed
+- **Settings UI — Context & Memory 页面重构服务卡片**：mem0（Memory Service）和 LightRAG（Knowledge Base）改为「Enabled 开关 + 启用后展开明细字段」的渐进披露模式，与 Separate Compression LLM 保持完全一致。默认关闭时只显示服务名称 + `○ Disabled` 状态徽标 + Enable 复选框，Endpoint / API Key / User ID / Auto Memory 等字段全部隐藏；启用后自动展开配置字段，Auto Memory 二级选项以 Foldout 收起（`FoldoutDefaults.Advanced`）。视觉密度对未配置服务下降约 40%。
+- **`FoldoutDefaults` 常量统一 Foldout 默认策略**：新增 [`FoldoutDefaults`](Editor/Config/Settings/AgentCoreSettingsState.cs:8)（`ServiceConfig=true` / `Advanced=false` / `ReadOnlyInfo=false` / `ToolCategory=false`），所有 page 的 foldout 默认状态应通过此常量决策，避免各 page 各自决定。
+- **`AgentCoreSettingsUi.DrawServiceCard()`**：新增标准化服务卡 helper，封装 "Header(Title + Status Badge) → Description → Enable Toggle → Enabled Body"。当 `enabled = false` 时 body 完全不渲染，减少空 field 视觉噪音；`enabled = true` 时状态徽标转绿并可显示 endpoint 提示。
+- **`AgentCoreSettingsUi.DrawServiceStatusBadge()`**：新增紧凑 `● Enabled` / `○ Disabled` 徽标，Dashboard 与服务卡共用一套视觉语言。
+- **Dashboard 合并 Package Info 到 Setup Status**：`Package` 卡片删除，包名 + 版本以灰色 miniLabel 出现在 Setup Status 卡片底部，节省一整张卡片。同时 Disabled 服务在 Setup Status 中改用 `○ Service: Disabled` 灰色前缀而非默认色，一眼可与 Enabled（绿色 `●`）区分。
+- **UI & Diagnostics — Test 按钮改等宽**：三个 Test 按钮从固定 120px 改为 `MinWidth=140 / MaxWidth=180`，"Test LightRAG" 不再被截断。`Refresh Tool Registry` 与 `Open Logs` 合并到同一横行，减少一条空 layout。
+- **AGENTS.md §10.1 表述与实际架构对齐**：Settings 章节从「shell + section registry」改写为「shell + top-tab pages + cards」，添加 `FoldoutDefaults` 约束、`DrawServiceCard` 强制要求，说明历史 Section/Registry 已于 v1.4.2 移除。
+
+### Removed
+- **死代码清理**：删除 `Editor/Config/Settings/AgentCoreSettingsRegistry.cs`、`IAgentCoreSettingsSection.cs`、`SettingsSectionBase.cs` 和 `Sections/` 整目录（11 个 Section 类：General/Model/Agent/Context/ContextManagement/Memory/Knowledge/Extensions/Tools/Interface/Diagnostics）。共 **14 个 .cs 文件 + 14 个 .meta**。这些类自 Provider 从 Section-based 迁移到 Page-based（v1.0.0 之前）后已不被任何代码引用（`grep AgentCoreSettingsRegistry.` 与所有 `SettingsSection` 类名的项目级搜索均只命中待删除文件内部）。
+- **迁移路径明确**：若第三方 extension 之前实现了 `IAgentCoreSettingsSection`（实际上无此案例），应改为 `IAgentCoreSettingsContribution` 挂载到 Tools & Extensions page。
+
 ## [1.4.1] - 2026-07-07
 
 ### Changed

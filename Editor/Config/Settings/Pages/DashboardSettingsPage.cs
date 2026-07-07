@@ -36,11 +36,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
         /// <inheritdoc />
         public void Draw(AgentCoreSettingsContext context)
         {
+            // v1.4.2: package info merged into the bottom of Setup Status to save a full card.
             DrawSetupStatusCard(context);
             EditorGUILayout.Space(8);
             DrawQuickActionsCard(context);
-            EditorGUILayout.Space(8);
-            DrawPackageInfoCard(context);
         }
 
         private static void DrawSetupStatusCard(AgentCoreSettingsContext context)
@@ -49,43 +48,35 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             context.Ui.DrawCard("Setup Status", "Current configuration state for core services.", () =>
             {
-                // LLM
-                var llmConfigured = !string.IsNullOrWhiteSpace(settings.llmEndpoint);
-                var llmText = llmConfigured
-                    ? $"LLM: Configured ({settings.llmModel})"
-                    : "LLM: Missing Endpoint";
-                context.Ui.DrawStatusLabel(
-                    llmText,
-                    llmConfigured ? SettingsStatusLevel.Success : SettingsStatusLevel.Error,
-                    miniLabel: true);
+                // LLM — required, so missing endpoint is an Error.
+                DrawServiceStatusRow(context,
+                    "LLM",
+                    isEnabled: !string.IsNullOrWhiteSpace(settings.llmEndpoint),
+                    enabledDetail: settings.llmModel,
+                    disabledIsError: true);
 
-                // Memory
-                var mem0Text = settings.mem0Enabled
-                    ? $"Memory: Enabled ({settings.mem0Endpoint})"
-                    : "Memory: Disabled";
-                context.Ui.DrawStatusLabel(
-                    mem0Text,
-                    settings.mem0Enabled ? SettingsStatusLevel.Success : SettingsStatusLevel.None,
-                    miniLabel: true);
+                // Memory (mem0) — optional.
+                DrawServiceStatusRow(context,
+                    "Memory",
+                    isEnabled: settings.mem0Enabled,
+                    enabledDetail: settings.mem0Endpoint,
+                    disabledIsError: false);
 
-                // Knowledge
-                var ragText = settings.lightragEnabled
-                    ? $"Knowledge: Enabled ({settings.lightragEndpoint})"
-                    : "Knowledge: Disabled";
-                context.Ui.DrawStatusLabel(
-                    ragText,
-                    settings.lightragEnabled ? SettingsStatusLevel.Success : SettingsStatusLevel.None,
-                    miniLabel: true);
+                // Knowledge (LightRAG) — optional.
+                DrawServiceStatusRow(context,
+                    "Knowledge",
+                    isEnabled: settings.lightragEnabled,
+                    enabledDetail: settings.lightragEndpoint,
+                    disabledIsError: false);
 
-                // VCS
-                var vcsEnabled = OptionalComponentManager.IsVcsEnabled();
-                var vcsText = vcsEnabled ? "VCS: Enabled" : "VCS: Disabled";
-                context.Ui.DrawStatusLabel(
-                    vcsText,
-                    vcsEnabled ? SettingsStatusLevel.Success : SettingsStatusLevel.None,
-                    miniLabel: true);
+                // VCS — optional component.
+                DrawServiceStatusRow(context,
+                    "VCS",
+                    isEnabled: OptionalComponentManager.IsVcsEnabled(),
+                    enabledDetail: null,
+                    disabledIsError: false);
 
-                // Tools
+                // Tools — informational count.
                 var allTools = ToolRegistry.Instance.GetAllTools();
                 if (allTools != null && allTools.Count > 0)
                 {
@@ -103,7 +94,51 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         SettingsStatusLevel.Warning,
                         miniLabel: true);
                 }
+
+                // Package footer — merged in from the removed Package card.
+                EditorGUILayout.Space(6);
+                var footerStyle = new GUIStyle(EditorStyles.miniLabel)
+                {
+                    alignment = TextAnchor.MiddleLeft,
+                };
+                footerStyle.normal.textColor = new Color(0.5f, 0.5f, 0.5f);
+                EditorGUILayout.LabelField($"com.agentcore.unity  v{GetPackageVersion()}", footerStyle);
             });
+        }
+
+        /// <summary>
+        /// Draws a single status row with a leading badge + service name + optional detail.
+        /// Disabled services are dimmed (gray) and clearly labeled instead of using the default label color.
+        /// </summary>
+        private static void DrawServiceStatusRow(
+            AgentCoreSettingsContext context,
+            string serviceName,
+            bool isEnabled,
+            string enabledDetail,
+            bool disabledIsError)
+        {
+            string text;
+            SettingsStatusLevel level;
+
+            if (isEnabled)
+            {
+                text = string.IsNullOrEmpty(enabledDetail)
+                    ? $"● {serviceName}: Enabled"
+                    : $"● {serviceName}: Enabled ({enabledDetail})";
+                level = SettingsStatusLevel.Success;
+            }
+            else if (disabledIsError)
+            {
+                text = $"✗ {serviceName}: Missing configuration";
+                level = SettingsStatusLevel.Error;
+            }
+            else
+            {
+                text = $"○ {serviceName}: Disabled";
+                level = SettingsStatusLevel.None;
+            }
+
+            context.Ui.DrawStatusLabel(text, level, miniLabel: true);
         }
 
         private static void DrawQuickActionsCard(AgentCoreSettingsContext context)
@@ -125,16 +160,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                 GUILayout.FlexibleSpace();
                 EditorGUILayout.EndHorizontal();
-            });
-        }
-
-        private static void DrawPackageInfoCard(AgentCoreSettingsContext context)
-        {
-            context.Ui.DrawCard("Package", "Installed package identity and version.", () =>
-            {
-                EditorGUILayout.LabelField("Package", "com.agentcore.unity");
-                EditorGUILayout.LabelField("Version", GetPackageVersion());
-                EditorGUILayout.LabelField("Description", "Unity Editor embedded AI Agent plugin");
             });
         }
 

@@ -5,7 +5,7 @@ using UnityEngine;
 namespace AgentCore.Editor.Config.Settings
 {
     /// <summary>
-    /// Provides shared IMGUI drawing helpers for AgentCore settings sections.
+    /// Provides shared IMGUI drawing helpers for AgentCore settings pages.
     /// </summary>
     public sealed class AgentCoreSettingsUi
     {
@@ -77,7 +77,6 @@ namespace AgentCore.Editor.Config.Settings
                 catch (Exception ex)
                 {
                     // 防御性处理：内容回调异常不能破坏外层 layout 平衡。
-                    // 记录异常但保证 EndVertical 仍然在 finally 中执行。
                     UnityEngine.Debug.LogException(ex);
                     EditorGUILayout.HelpBox(
                         $"绘制此卡片内容时发生异常：{ex.Message}\n详细信息见 Console。",
@@ -88,6 +87,104 @@ namespace AgentCore.Editor.Config.Settings
             {
                 EditorGUILayout.EndVertical();
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Service Card — unified pattern for optional cloud services
+        // (mem0 / LightRAG / Compression LLM).
+        //
+        // Layout invariants:
+        //   1. Header row always visible: [Bold Title] [Status Badge]
+        //   2. Description always visible below title
+        //   3. Enable toggle always visible
+        //   4. Configuration body only renders when enabled — reduces default
+        //      density for un-configured optional services
+        //   5. When disabled, drawEnabledBody is NOT invoked at all, so callers
+        //      don't need to guard field visibility themselves
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Draws a standardized service card whose body only renders when the service is enabled.
+        /// </summary>
+        /// <param name="title">Service display name (e.g. "Memory Service").</param>
+        /// <param name="description">Short description shown under the title.</param>
+        /// <param name="enabled">Current enabled state.</param>
+        /// <param name="onEnabledChanged">Callback invoked when the enabled toggle changes; caller persists the value.</param>
+        /// <param name="statusHint">Optional status hint shown to the right of the title when enabled (e.g. endpoint URL).</param>
+        /// <param name="drawEnabledBody">Body callback invoked only when <paramref name="enabled"/> is true.</param>
+        public void DrawServiceCard(
+            string title,
+            string description,
+            bool enabled,
+            Action<bool> onEnabledChanged,
+            string statusHint,
+            Action drawEnabledBody)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            try
+            {
+                // Header: title + status badge
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+                GUILayout.FlexibleSpace();
+                DrawServiceStatusBadge(enabled);
+                EditorGUILayout.EndHorizontal();
+
+                DrawHelpText(description);
+
+                if (enabled && !string.IsNullOrEmpty(statusHint))
+                {
+                    var hintStyle = new GUIStyle(EditorStyles.miniLabel) { wordWrap = true };
+                    hintStyle.normal.textColor = GetStatusColor(SettingsStatusLevel.Success);
+                    EditorGUILayout.LabelField(statusHint, hintStyle);
+                }
+
+                EditorGUILayout.Space(4);
+
+                // Enable toggle — always visible
+                EditorGUI.BeginChangeCheck();
+                var newEnabled = EditorGUILayout.ToggleLeft(
+                    new GUIContent(enabled ? "Enabled" : "Enable this service"),
+                    enabled);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    onEnabledChanged?.Invoke(newEnabled);
+                }
+
+                // Body only when enabled
+                if (enabled)
+                {
+                    EditorGUILayout.Space(4);
+                    try
+                    {
+                        drawEnabledBody?.Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        UnityEngine.Debug.LogException(ex);
+                        EditorGUILayout.HelpBox(
+                            $"绘制此服务卡内容时发生异常：{ex.Message}\n详细信息见 Console。",
+                            UnityEditor.MessageType.Error);
+                    }
+                }
+            }
+            finally
+            {
+                EditorGUILayout.EndVertical();
+            }
+        }
+
+        /// <summary>
+        /// Draws a compact [Enabled] / [Disabled] badge suitable for card headers and status lines.
+        /// </summary>
+        /// <param name="enabled">Whether the target is enabled.</param>
+        /// <param name="width">Badge width in pixels.</param>
+        public void DrawServiceStatusBadge(bool enabled, float width = 74f)
+        {
+            var text = enabled ? "● Enabled" : "○ Disabled";
+            var style = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
+            style.normal.textColor = enabled ? GetStatusColor(SettingsStatusLevel.Success) : new Color(0.55f, 0.55f, 0.55f);
+            EditorGUILayout.LabelField(text, style, GUILayout.Width(width));
         }
 
         /// <summary>
@@ -128,6 +225,31 @@ namespace AgentCore.Editor.Config.Settings
             }
 
             EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>
+        /// Draws a horizontal button row with equal widths, avoiding truncation when labels vary in length.
+        /// </summary>
+        /// <param name="labels">Button labels; each also acts as the returned selection sentinel.</param>
+        /// <returns>The clicked label, or null when nothing was clicked this frame.</returns>
+        public string DrawEqualWidthButtonRow(params string[] labels)
+        {
+            if (labels == null || labels.Length == 0)
+                return null;
+
+            string clicked = null;
+
+            EditorGUILayout.BeginHorizontal();
+            foreach (var label in labels)
+            {
+                if (GUILayout.Button(label, GUILayout.MinWidth(120), GUILayout.ExpandWidth(true)))
+                {
+                    clicked = label;
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            return clicked;
         }
 
         private static Color GetStatusColor(SettingsStatusLevel level)

@@ -1,6 +1,6 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.4.1 | **更新日期**: 2026-07-07 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.3–v1.3.7 一系列稳定性修复；v1.3.8 新增工具调用重复循环刹车；v1.4.0 完成 Phase 7 §3.1.1 索引 Scope 层次化与可观测性；**v1.4.1 补齐 `package.json` 仓库元数据**（documentationUrl / changelogUrl / licensesUrl / repository / bugs 指向 [BakaAkari/agentcore-unity](https://github.com/BakaAkari/agentcore-unity)，Package Manager 内可直达仓库主页 / CHANGELOG / LICENSE / Issues）；Plugin 系统已归档（见 ADR-15）；后续仅保留 MCP Server（Phase 8）与产品化分发两个待开发方向
+> **版本**: v1.4.2 | **更新日期**: 2026-07-07 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.3–v1.3.7 一系列稳定性修复；v1.3.8 新增工具调用重复循环刹车；v1.4.0 完成 Phase 7 §3.1.1 索引 Scope 层次化与可观测性；v1.4.1 补齐 `package.json` 仓库元数据；**v1.4.2 Settings UI 密度优化 + Section registry 死代码清理**（mem0 / LightRAG / Compression LLM 三个服务卡统一渐进披露、FoldoutDefaults 常量、Dashboard 合并 Package、Diagnostics 按钮等宽；删除 `AgentCoreSettingsRegistry` + `Sections/` 整目录共 14 个 `.cs` 文件；AGENTS.md §10.1 更新为 Page/Card 架构）；Plugin 系统已归档（见 ADR-15）；后续仅保留 MCP Server（Phase 8）与产品化分发两个待开发方向
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
