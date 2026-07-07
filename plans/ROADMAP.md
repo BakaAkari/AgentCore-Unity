@@ -1,6 +1,6 @@
-﻿# AgentCore Unity 开发路线图 (Roadmap)
+# AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.2.1 | **更新日期**: 2026-06-29 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；Plugin 系统已归档（见 ADR-15）；后续仅保留 MCP Server（Phase 8）与产品化分发两个待开发方向
+> **版本**: v1.4.1 | **更新日期**: 2026-07-07 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.3–v1.3.7 一系列稳定性修复；v1.3.8 新增工具调用重复循环刹车；v1.4.0 完成 Phase 7 §3.1.1 索引 Scope 层次化与可观测性；**v1.4.1 补齐 `package.json` 仓库元数据**（documentationUrl / changelogUrl / licensesUrl / repository / bugs 指向 [BakaAkari/agentcore-unity](https://github.com/BakaAkari/agentcore-unity)，Package Manager 内可直达仓库主页 / CHANGELOG / LICENSE / Issues）；Plugin 系统已归档（见 ADR-15）；后续仅保留 MCP Server（Phase 8）与产品化分发两个待开发方向
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -36,18 +36,18 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.2.1)
+### 0.4 当前项目快照 (v1.3.6)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.2.1 (2026-06-26) — Request Enrichment 修复 reasoning 触发；ThinkingDrawer 端到端可用 |
+| **版本** | 1.3.6 (2026-07-06) — Round 1 稳定性补丁：跨平台 define、迁移健壮性、Indexing 保守默认值、工具主线程超时 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
 | **UI 框架** | UI Toolkit 动态 Hub 架构；Chat 使用 AssistantTurnView 固定 assistant 轮次布局（ThinkingDrawer → ToolCallGroup → MessageBubble）；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用（OnDemand 可见性） |
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪 |
-| **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；Full Index 已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪；**当前为同步阻塞触发，Phase 7 将改造为后台静默 + 增量索引** |
+| **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；Full Index 已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪；**v1.3.5 起不再默认启用，标记为实验性，需手动在 Extensions 设置中开启** |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
 | **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 128K（适配现代大 context LLM） |
 | **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
@@ -191,6 +191,26 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | 7.1.5 | **CodebaseIndexer.RunTargetedIncrementalAsync** | 跳过 ScanAllFiles，按 dirty/deleted 集合定向更新 SQLite | [x] |
 | 7.1.6 | **IndexingStatusBus + Hub Badge** | 状态枚举 Idle/Pending/Running/Failed/Disabled；Hub 会话头部右侧 ChipBadge 静默呈现 | [x] |
 | 7.1.7 | **SOUL.md §14 / TOOLS.md.template 增补** | LLM 感知"索引可能正在后台更新"的规则，避免在 Pending 状态强行依赖陈旧结果 | [x] |
+
+#### 3.1.1 索引 Scope 层次化与可观测性（v1.4.0）
+
+> **触发原因**: v1.3.x 用户实战反馈"动态 index 索引代码库会让整个系统变得特别卡"；实际根因是所有 root 一视同仁进入自动增量循环，且 LLM 无法感知 per-root 索引状态。
+> **设计文档**: [`indexing-scope-layered-and-status-awareness-design.md`](indexing-scope-layered-and-status-awareness-design.md)
+> **范围**: 沿用 §3.1 的 SQLite 单层架构（不新增存储 / 不新增顶层工具 / 不引入骨架文档）；per-root 状态走 `IIndexStore` metadata KV，无 schema 迁移。
+> **治理约束**: 严格遵守 ADR-7（无骨架文档）、ADR-8（Agent 行为规则内嵌于 SOUL.md）与 `llm-agent-architecture-remediation-plan.md`（不扩大默认工具暴露）。
+
+| # | 任务 | 说明 | 状态 |
+|---|------|------|------|
+| 7.1.1.1 | **IndexRoot 运行时字段** | `IndexState / LastIndexedAt / LastIndexError / IndexedFileCount / IndexedSymbolCount / Priority` 6 个字段；`IndexRootState` / `IndexRootPriority` 枚举 | [x] v1.4.0 |
+| 7.1.1.2 | **IndexingSchedulePolicy** | 按 `IndexRootRole` 三档划分 Foreground / Background / OnDemand；OnDemand 跳过自动增量循环 | [x] v1.4.0 |
+| 7.1.1.3 | **IndexRootStateStore** | per-root 状态持久化（`IIndexStore.SetMetadataAsync` KV, key = `root:{rootId}:*`），零 schema 变更 | [x] v1.4.0 |
+| 7.1.1.4 | **BackgroundIndexService Priority 过滤 + 状态更新** | RunOnceAsync 按 Priority 分流脏文件；索引前后 mark `Indexing → Ready / Failed`；OnDemand 路径直接 mark processed | [x] v1.4.0 |
+| 7.1.1.5 | **IndexingDirtyTracker Burst Detection** | 单批 500+ 文件（可配置）触发 60s backoff，snapshot 携带 `NextRunAt / ReasonPaused` | [x] v1.4.0 |
+| 7.1.1.6 | **search_code::diagnose / list_root_states / mark_stale** | 三个新 action：诊断根因 / 列出 per-root 状态 / 强制标脏重建；status action 附带 per_root_state | [x] v1.4.0 |
+| 7.1.1.7 | **WorkspaceSnapshotBuilder + IndexingStatusBlockBuilder** | 会话首轮 snapshot 追加 "Index Status" 块（同步、零 I/O，仅 IndexingStatusBus 全局状态 + roots 静态元数据） | [x] v1.4.0 |
+| 7.1.1.8 | **SOUL.md §4 Context Awareness 追加** | LLM 看到 "Index Status" 块时的行为规则；搜索落空先 diagnose 再下结论 | [x] v1.4.0 |
+| 7.1.1.9 | **IndexingPanel Roots Overview 折叠区** | Editor UI 只读展示 root 列表 + Priority 分类摘要；交互仍走 `search_code` action | [x] v1.4.0 |
+| 7.1.1.10 | **ProjectContextCollector Fast/Heavy 拆分** | `CollectFast` / `CollectHeavyAsync` 基础设施；Unity API 主线程预取 + 后台磁盘扫描；预留给未来 UI/Panel 消费 | [x] v1.4.0 |
 
 ### 3.2 P0 — Chat UI / ThinkingDrawer 可观测性（v1.2.0）
 
@@ -458,6 +478,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md) | 企业级 Unity 项目适配需求基准，后续任务上游依据 | `plans/` 顶层 |
 | [`llm-agent-architecture-remediation-plan.md`](llm-agent-architecture-remediation-plan.md) | **治理层** LLM/Agent 架构安全收口最终准则；Phase 7/8 工具扩展与 MCP 前置约束 | `plans/` 顶层 |
 | [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) | **Phase 7 §3.1** 后台静默 + 增量索引详细设计（v1.1.0 上游依据） | `plans/` 顶层 |
+| [`indexing-scope-layered-and-status-awareness-design.md`](indexing-scope-layered-and-status-awareness-design.md) | **Phase 7 §3.1.1** Scope 层次化索引 + LLM 状态感知详细设计（v1.4.0 上游依据） | `plans/` 顶层 |
 | [`mcp-server-feasibility.md`](mcp-server-feasibility.md) | **Phase 8 §3.x** MCP 对外互操作可行性分析与初步设计；实现受治理层 G.1/G.2/G.3 约束 | `plans/` 顶层 |
 | [`vcs-treeview-refactor-plan.md`](_archive/features/vcs-treeview-refactor-plan.md) | ~~已废弃~~ — TreeView 方案废弃，改为扁平列表（v0.9.3 完成），已归档 | `_archive/features/` |
 | [`codebase-indexing-phase2-plan.md`](_archive/features/codebase-indexing-phase2-plan.md) | 已完成（v0.9.3）— SQLite 迁移 + 依赖图 + FTS5，已归档 | `_archive/features/` |

@@ -1,9 +1,85 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.4.1] - 2026-07-07
+
+### Changed
+- **`package.json` 补齐仓库元数据**：填充 `documentationUrl` / `changelogUrl` / `licensesUrl` 指向 GitHub 仓库（[BakaAkari/agentcore-unity](https://github.com/BakaAkari/agentcore-unity)），新增 `repository` 与 `bugs` 字段。Unity Package Manager 中现在可以直接跳转到仓库主页、CHANGELOG、LICENSE 与 Issues。无代码变更。
+
+## [1.4.0] - 2026-07-07
+
+### Added
+- **`search_code::diagnose`**：一键索引诊断 action，返回后台服务状态 + workspace 摘要 + 每个 root 的动态状态 + 中文可读 advice。LLM 在搜索落空时应先调用此 action 判断根因，不再"闷头再搜"。
+- **`search_code::list_root_states`**：列出所有 root 的当前 IndexState (`NotIndexed / Indexing / Ready / Stale / Failed`)、Priority、file/symbol count 与 last_indexed_at。
+- **`search_code::mark_stale`**：按 `root_id` / `scope_type` / `scope_name` 强制把匹配 root 标为 Stale，并把其下所有已索引文件塞回脏队列，下轮后台任务触发时会自动重新索引。
+- **`search_code::status` 附带 per_root_state 数组**：现有 status action 保持向后兼容，同时携带 v1.4.0 的 per-root 状态摘要。
+- **`IndexRoot` 增加 6 个运行时字段**：`IndexState / LastIndexedAt / LastIndexError / IndexedFileCount / IndexedSymbolCount / Priority`。字段落盘到 `IIndexStore` metadata KV（`root:{rootId}:*`），不修改 store schema，JSONL 与 SQLite 后端均无迁移成本。
+- **`IndexingSchedulePolicy`**：按 `IndexRootRole` 三档划分调度优先级 —— `Foreground`（EditableProjectCode / SharedCode，前台优先）/ `Background`（WorkspacePackage / ToolingCode / CustomPlugin，后台闲时）/ `OnDemand`（CommercialPlugin / EngineCode / GeneratedCode / ReadOnlyReference，跳过自动增量）。
+- **`IndexRootStateStore`**：per-root 状态持久化与在内存缓存的抽象，走 `IIndexStore.SetMetadataAsync / GetMetadataAsync`；提供 `LoadAsync / SaveAsync / MarkReadyAsync / MarkFailedAsync / RefreshAndMarkReadyAsync / ApplyStatesToRootsAsync` 等便捷方法。
+- **`IndexingStatusBlockBuilder`**：在会话首轮 workspace snapshot 中注入 "Index Status" 块，展示后台服务全局状态 + roots 分类清单（Participating vs OnDemand）。设计上不做任何 store I/O，per-root live state 交由 LLM 主动 pull（`search_code::status/diagnose`）。
+- **`IndexingPanel` 增加 "Indexing Roots" 折叠区**：Editor UI 只读展示所有 root 的 DisplayName / ScopeType / Role / Priority；Reindex/MarkStale 交互仍走 Chat 内 `search_code` action。
+- **SOUL.md §4 新增一条 Context Awareness 规则**：明确当 workspace snapshot 出现 "Index Status" 块时，LLM 如何区分 Participating vs OnDemand roots，以及搜索落空时先 `diagnose` 再下结论的行为闭环。
+
+### Changed
+- **`IndexingStatusSnapshot` 新增 `NextRunAt` / `ReasonPaused` 字段**（非破坏）：Publish 时携带下次运行时间点与暂停原因，UI 与工具可一致展示 burst backoff / failure backoff / quiet delay 三种暂停语义。
+- **`IndexingDirtyTracker` 引入 Burst Detection**：单次 `AddChanged/AddDeleted` 调用超过 `BurstThreshold`（默认 500）时，触发 `BackgroundIndexService.NotifyBurstDetected` 进入 `BurstBackoffSeconds`（默认 60s）暂停窗口，避免分支切换 / 代码格式化 / 生成器批量运行时 Editor Update 卡顿。
+- **`IndexingAutoSettings` 新增 `BurstThreshold` / `BurstBackoffSeconds` 配置项**，可在 IndexingSettings 中调整或置 0 禁用。
+- **`BackgroundIndexService.RunOnceAsync` 接入 Priority 过滤 + per-root 状态更新**：脏文件按归属 root 的 `IndexRootPriority` 分流，`OnDemand` root 的路径直接 mark processed 不参与增量；索引开始时把受影响 root 标 `Indexing`，成功时通过 `RefreshAndMarkReadyAsync` 反查 file/symbol count 并标 `Ready`，失败时标 `Failed`。
+- **`IndexRootResolver.Resolve` 现在会为每个 root 填充 `Priority`**：调用 `IndexingSchedulePolicy.ResolvePriority(root)`，供 BackgroundIndexService 消费。
+- **`ProjectContextCollector` 拆为 Fast/Heavy 两条路径**（预留基础设施）：新增 `CollectFast` / `CollectHeavyAsync(ct)`，后者在后台线程执行磁盘扫描 + Roslyn 命名空间聚合，Unity API 数据由主线程预取快照。缓存按 workspace fingerprint + 5min TTL 生效，多次并发调用共享同一 in-flight task。当前 BootstrapLoader 仍使用轻量的 `Collect()`；`CollectExtended` 在缓存未命中时返回 Fast 版本并触发后台预热，缓存命中时返回完整版。
+- **`WorkspaceSnapshotBuilder.Build` 追加 Index Status 块**：会话首轮 system message 中携带索引状态摘要（同步、零 I/O 版本）。
+
+### Fixed
+- **修复 AgentCoreSettings.OnEnable 内 `Save(true)` 触发 Unity 警告**：`ScriptableSingleton<T>.OnEnable` 上下文中调用 `Save(true)` 会触发 `"You may not pass in objects that are already persistent"`。改为通过 `EditorApplication.delayCall` 延迟到 OnEnable 完成后执行，警告消失且不影响迁移语义。
+- **修复长文本消息气泡高度不自适应（Part 1: 静态 Label 路径）**：[`MessageBubble.uss`](Editor/UI/Components/MessageBubble.uss:151) 中 `#content-label { overflow: hidden }` 会阻止 Label 请求高度增长，导致 error/user 消息（走静态 Label 路径）的长文本溢出气泡底部。移除该属性 + `flex-shrink: 0` 确保父容器不会挤压气泡尺寸。
+- **改进消息气泡对动态 block 元素的 layout 支持（Part 2: assistant streaming/block 路径）**：assistant 消息（走 [`StreamingTextElement.SetFinalText`](Editor/UI/Components/StreamingTextElement.cs:970)）在 SetFinalText 后动态添加 table/list/codeblock 等 block 元素时，Unity UI Toolkit 某些版本的父容器 background 高度未能同步扩展，导致部分内容溢出 bubble 灰色矩形。修复方案：`.message-bubble` 显式声明 `flex-shrink: 0 / flex-grow: 0 / height: auto`；[`MessageBubble.FinalizeContent`](Editor/UI/Components/MessageBubble.cs:180) 与 [`SetupStaticMode`](Editor/UI/Components/MessageBubble.cs:341) 在 SetFinalText 后调用 `ForceLayoutRefresh`——立即 + GeometryChangedEvent 触发 + 延迟 50ms 三重 `MarkDirtyRepaint` 兜底，覆盖 layout pass 延迟的 UI Toolkit 版本。
+- **修复 ConversationCompressor 会摘要掉首轮 Workspace Snapshot / Deferred Context**：[`ConversationCompressor.DetermineCompressRange`](Editor/Core/Compression/ConversationCompressor.cs:165) 之前只保护第 1 条主 system prompt 与已有摘要消息，未保护首轮注入的 workspace snapshot（含 v1.4.0 的 Index Status 块）与 deferred context（Active Tools List + PROJECT.md）。当对话上下文使用率超过压缩阈值（默认 70%）后，这两类"跨轮次静态上下文" system 消息会被摘要掉，导致 LLM 在后续轮次问答中无法看到 Index Status 与项目上下文。现在通过 `[WORKSPACE_SNAPSHOT]` 和 `# Available Tools` 前缀识别并跳过它们，与摘要消息一样受压缩保护。
+
+## [1.3.8] - 2026-07-06
+
+### Added
+- **工具调用重复循环刹车**：`AgentLoop.Runner` 新增同一工具对同一目标的重复调用检测。若 LLM 在同一文件/对象上反复调用同一工具（如 `manage_script` 连续修改同一个 `.cs` 文件），第 4 次发出警告，第 7 次强制中断工具循环并要求 LLM 向用户说明当前状态与卡点，避免跑满 200 轮上限。
+- **SOUL.md 增加 Repetition brake 规则**：明确指示 LLM 在同一工具对同一目标调用超过 3 次仍无进展时，必须停止并向用户报告，而不是盲目重试。
+
+## [1.3.7] - 2026-07-06
+
+### Fixed
+- **修复 VCS 默认启用未触发**：`AgentCoreSettings` 增加 `[InitializeOnLoad]`，在 Editor 启动后期强制加载 Settings 并执行迁移；新增 `vcsDefaultEnabled` 标记和 v15→v16 迁移作为兜底，确保新安装/升级用户都能自动启用 VCS。
+- **修复 Extensions 设置页 Code Indexing 警告不显示**：将实验性警告移到 Optional Components 卡片顶部、折叠区之外，确保用户打开 Extensions 页面即可看到，不受 Component Cards foldout 折叠状态影响。
+- **Indexing Hub 面板增加实验性警告**：在 Index 面板顶部增加红色警告文本，提示后台索引对大型项目性能的影响。
+
+## [1.3.6] - 2026-07-06
+
+### Changed
+- **可选组件 define 写入全部 BuildTargetGroup**：`OptionalComponentManager.SetDefine` 现在会把 `AGENTCORE_VCS` / `AGENTCORE_INDEXING` 写入所有有效的 BuildTargetGroup，而不是仅当前 `selectedBuildTargetGroup`。切换 Build Target 后组件状态不再丢失。
+- **VCS 默认启用迁移更健壮**：v12→v13 迁移提取为 `ApplyVcsDefaultEnablement()`，增加 try/catch 和一次延迟重试，避免 Editor 启动早期 `PlayerSettings` 未就绪时启用失败。
+- **后台索引默认参数改保守**：`QuietDelayMs` 2000 → **15000**，`MaxBatchFiles` 200 → **50**，`YieldEveryNFiles` 5 → **1**，降低大型项目保存/导入后的瞬间卡顿。
+
+### Fixed
+- **修复长 import 期间工具调用无限挂起**：`ToolCallDispatcher.ExecuteOnMainThreadAsync()` 从 `EditorApplication.delayCall` 改为 `EditorApplication.update` + 30 秒超时保护。主线程被长 import / Domain Reload / 模态对话框阻塞时，工具调用会返回 `TimeoutException` 而不是永久等待。
+
+## [1.3.5] - 2026-07-06
+
+### Changed
+- **默认启用策略调整**：v12→v13 设置迁移现在只默认启用 VCS 可选组件，不再默认启用 Code Indexing。Code Indexing 目前为实验性功能，需要用户在 Project Settings > AgentCore > Extensions 中手动开启。
+- **Code Indexing 实验性警告**：在 Extensions 设置页 Code Indexing 组件卡片和组件描述中增加警告说明，提示后台索引在大型项目中可能显著影响 Editor 响应。
+
+### Fixed
+- **清理 `CodebaseIndexer.cs` 重复 using 语句**：移除 `System.Threading` / `System.Threading.Tasks` 的重复引用，消除 CS0105 编译警告。
+
+## [1.3.4] - 2026-07-06
+
+### Fixed
+- **修复全量代码索引可能长时间卡死主线程**：为单文件 Roslyn 解析增加 5 秒超时保护（超时时跳过并记为 ErrorFiles）；索引循环每处理 10 个文件 `await Task.Yield()` 让出主线程，避免 UI 假死。
+
+## [1.3.3] - 2026-07-03
+
+### Fixed
+- **修复打包产物 `CS0246` 编译错误**：已分发的 `com.agentcore.unity-1.3.2.tgz` 中 `AgentCoreSettings.cs` 缺少 `using System.Net.Http;` 和 `using System.Threading.Tasks;`，导致用户通过 Unity Package Manager 安装时编译失败。重新从当前源码打包，恢复正确的 using 语句。
 
 ## [1.3.2] - 2026-07-01
 
