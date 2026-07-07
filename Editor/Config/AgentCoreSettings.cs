@@ -30,6 +30,13 @@ namespace AgentCore.Editor.Config
                 var settings = instance;
                 if (settings != null)
                     settings.MigrateSettings();
+
+                // v1.4.3: 每个项目独立检查 VCS 默认启用状态。
+                // 修复"跨项目共享 Settings.asset 导致新项目 VCS 未自动启用"问题（见
+                // OptionalComponentManager.EnsureVcsDefaultForCurrentProject 的详细说明）。
+                // 这里独立于 MigrateSettings 触发，因为版本号迁移只在 settingsVersion 落后时生效，
+                // 而项目级检查需要每个新项目都跑一次，即使 settingsVersion 已经是最新。
+                Extensions.OptionalComponentManager.EnsureVcsDefaultForCurrentProject();
             };
         }
 

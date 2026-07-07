@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
@@ -21,6 +23,26 @@ namespace AgentCore.Editor.Extensions
         /// Scripting define symbol used to enable the Code Indexing optional component.
         /// </summary>
         public const string IndexingDefine = "AGENTCORE_INDEXING";
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Project-level enablement tracking (v1.4.3)
+        //
+        // Background: AgentCoreSettings is a ScriptableSingleton stored in Unity's
+        // global PreferencesFolder, which means it is SHARED across all Unity projects
+        // on the same machine. Consequently, the settingsVersion-based migration
+        // strategy for "auto-enable VCS on first install" only runs ONCE per machine,
+        // not once per project. Users who install AgentCore into a second project see
+        // Settings.asset already at CurrentVersion — the migration is skipped — and
+        // the AGENTCORE_VCS define (which lives in the per-project PlayerSettings) is
+        // never written for that new project.
+        //
+        // Fix: track "has this specific project been checked for default enablement"
+        // and "has the user explicitly disabled VCS in this project" via EditorPrefs,
+        // keyed by a stable hash of the project root path.
+        // ─────────────────────────────────────────────────────────────────────
+
+        private const string VcsDefaultCheckedKeyPrefix = "AgentCore.VcsDefaultChecked.";
+        private const string VcsUserDisabledKeyPrefix = "AgentCore.VcsUserDisabled.";
 
         /// <summary>
         /// Gets all optional components known to AgentCore.
@@ -79,6 +101,106 @@ namespace AgentCore.Editor.Extensions
         public static void SetIndexingEnabled(bool enabled)
         {
             SetDefine(IndexingDefine, enabled);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Project-level VCS default enablement (v1.4.3)
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Ensures VCS is enabled by default for the current Unity project, unless the user has
+        /// explicitly disabled it in this project. Idempotent: safe to call every Editor startup.
+        /// </summary>
+        /// <remarks>
+        /// This exists because <see cref="AgentCoreSettings"/> is stored in Unity's global
+        /// PreferencesFolder and therefore its settingsVersion-based migration only runs once per
+        /// machine, not once per project. This helper checks the current project independently.
+        /// </remarks>
+        public static void EnsureVcsDefaultForCurrentProject()
+        {
+            try
+            {
+                var projectKey = ComputeCurrentProjectKey();
+                var checkedKey = VcsDefaultCheckedKeyPrefix + projectKey;
+                var userDisabledKey = VcsUserDisabledKeyPrefix + projectKey;
+
+                // User has explicitly disabled VCS in this project — respect that decision.
+                if (EditorPrefs.GetBool(userDisabledKey, false))
+                    return;
+
+                // Already checked and applied for this project — do nothing (preserves user's
+                // current state whether they left it enabled or later toggled it off/on).
+                if (EditorPrefs.GetBool(checkedKey, false))
+                    return;
+
+                if (!IsVcsEnabled())
+                {
+                    SetVcsEnabled(true);
+                    Debug.Log($"[AgentCore] VCS auto-enabled for this project (project key: {projectKey})");
+                }
+
+                EditorPrefs.SetBool(checkedKey, true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] EnsureVcsDefaultForCurrentProject failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Records the user's intent when they manually toggle VCS via the Settings UI, so the
+        /// project-level auto-enable machinery does not later override their choice.
+        /// </summary>
+        /// <param name="enabled">The value the user just set VCS to.</param>
+        public static void RecordVcsUserIntent(bool enabled)
+        {
+            try
+            {
+                var projectKey = ComputeCurrentProjectKey();
+                var userDisabledKey = VcsUserDisabledKeyPrefix + projectKey;
+                var checkedKey = VcsDefaultCheckedKeyPrefix + projectKey;
+
+                if (enabled)
+                {
+                    // User re-enabled VCS — clear any "user disabled" marker.
+                    EditorPrefs.DeleteKey(userDisabledKey);
+                }
+                else
+                {
+                    // User explicitly disabled — mark so we never re-enable automatically.
+                    EditorPrefs.SetBool(userDisabledKey, true);
+                }
+
+                // Either way, treat this project as checked so auto-enable never runs again.
+                EditorPrefs.SetBool(checkedKey, true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] RecordVcsUserIntent failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Computes a stable, short key derived from the current Unity project root path.
+        /// Uses SHA256 truncated to 16 hex chars — collision risk between typical developer
+        /// project counts is negligible and the EditorPrefs key length stays manageable.
+        /// </summary>
+        private static string ComputeCurrentProjectKey()
+        {
+            // Application.dataPath ends with "/Assets"; strip it to get the project root.
+            var dataPath = Application.dataPath ?? string.Empty;
+            var projectRoot = string.IsNullOrEmpty(dataPath)
+                ? "(unknown-project)"
+                : System.IO.Path.GetDirectoryName(dataPath) ?? dataPath;
+
+            using (var sha = SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(projectRoot));
+                var sb = new StringBuilder(16);
+                for (int i = 0; i < 8; i++)
+                    sb.Append(bytes[i].ToString("x2"));
+                return sb.ToString();
+            }
         }
 
         private static bool HasDefine(string define)

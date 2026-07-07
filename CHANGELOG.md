@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-07-07
+
+### Fixed
+- **VCS 组件未自动启用（新项目场景）**：修复了在已安装过 AgentCore 的机器上，为新项目安装 AgentCore 时 VCS 可选组件未被自动启用的问题。根因是 [`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs:22) 使用 `ScriptableSingleton<T>` + `FilePathAttribute.Location.PreferencesFolder`，`Settings.asset` 存储在 Unity **全局** PreferencesFolder（跨项目共享），因此基于 `settingsVersion` 的版本迁移策略（v12→v13 / v15→v16 中的默认启用 VCS 逻辑）在每台机器上只会执行一次；用户在第二个项目安装 AgentCore 时 `Settings.asset` 已经是 CurrentVersion，迁移被跳过，`AGENTCORE_VCS` define（存于**项目级** `PlayerSettings`）从未被写入新项目。
+
+### Added
+- **`OptionalComponentManager.EnsureVcsDefaultForCurrentProject()`**：项目级 VCS 默认启用检查。每个 Unity 项目独立记录"是否已应用过默认启用"到 `EditorPrefs`（key 前缀 `AgentCore.VcsDefaultChecked.{projectPathHash}`），确保新项目安装时即使全局 `Settings.asset` 已经迁移完毕，仍会为当前项目独立触发一次 VCS 启用。项目路径通过 `SHA256(Application.dataPath)` 的前 16 hex 字符标识。
+- **`OptionalComponentManager.RecordVcsUserIntent(bool enabled)`**：记录用户在 Tools & Extensions Settings 中手动切换 VCS 的意图。用户主动禁用后写入 `AgentCore.VcsUserDisabled.{projectPathHash}` 标记，之后的 `EnsureVcsDefaultForCurrentProject` 将尊重用户选择，不再自动启用。
+- **[`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs:24) 静态构造器新增项目级检查触发点**：`static AgentCoreSettings()` 中的 `EditorApplication.delayCall` 除了触发 `MigrateSettings()` 外，还会调用 `OptionalComponentManager.EnsureVcsDefaultForCurrentProject()`。两者独立触发，`MigrateSettings` 负责机器级一次性迁移，`EnsureVcsDefaultForCurrentProject` 负责项目级幂等检查。
+- **[`ToolsExtensionsSettingsPage.SetComponentEnabled`](Editor/Config/Settings/Pages/ToolsExtensionsSettingsPage.cs:408) 的 vcs 分支**：用户手动切换 VCS 时同步调用 `RecordVcsUserIntent(enabled)`，把用户意图持久化到 `EditorPrefs`，避免下次启动被自动重新启用。
+
+### Changed
+- 保留 [`vcsDefaultEnabled`](Editor/Config/AgentCoreSettings.cs:38) 字段和 v12→v13 / v15→v16 迁移逻辑作为历史兼容路径（不删除，避免破坏已工作场景）；新的项目级机制独立运行且幂等。
+
 ## [1.4.2] - 2026-07-07
 
 ### Changed

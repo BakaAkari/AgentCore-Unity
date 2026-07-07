@@ -411,6 +411,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
             {
                 case "vcs":
                     OptionalComponentManager.SetVcsEnabled(enabled);
+                    // v1.4.3: 记录用户手动意图，避免下次 Editor 启动时项目级 auto-enable
+                    // 逻辑覆盖用户选择（尤其重要：用户主动禁用后不希望被自动重新启用）。
+                    OptionalComponentManager.RecordVcsUserIntent(enabled);
                     break;
                 case "indexing":
                     OptionalComponentManager.SetIndexingEnabled(enabled);
