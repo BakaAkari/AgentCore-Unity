@@ -128,18 +128,35 @@ namespace AgentCore.Editor.Extensions
                 if (EditorPrefs.GetBool(userDisabledKey, false))
                     return;
 
-                // Already checked and applied for this project — do nothing (preserves user's
-                // current state whether they left it enabled or later toggled it off/on).
-                if (EditorPrefs.GetBool(checkedKey, false))
-                    return;
-
-                if (!IsVcsEnabled())
+                // Fast path: already enabled AND already flagged as checked — nothing to do.
+                // NOTE (v1.4.4): The previous implementation set the "checked" flag unconditionally
+                // even when SetVcsEnabled() failed silently (e.g. PlayerSettings not ready during
+                // early Editor bootstrap). That created a deadlock: the flag prevented all future
+                // retries, so VCS stayed disabled forever. Fix: only set the flag AFTER
+                // IsVcsEnabled() returns true, which confirms the define was actually written.
+                if (IsVcsEnabled())
                 {
-                    SetVcsEnabled(true);
-                    Debug.Log($"[AgentCore] VCS auto-enabled for this project (project key: {projectKey})");
+                    if (!EditorPrefs.GetBool(checkedKey, false))
+                        EditorPrefs.SetBool(checkedKey, true);
+                    return;
                 }
 
-                EditorPrefs.SetBool(checkedKey, true);
+                // VCS is not enabled yet AND user has not disabled it → apply default.
+                SetVcsEnabled(true);
+
+                // Verify the write succeeded before marking the project as "checked".
+                // If PlayerSettings.SetScriptingDefineSymbolsForGroup silently failed (rare but
+                // possible during Editor startup races), we intentionally leave the flag unset
+                // so the next Editor startup retries automatically.
+                if (IsVcsEnabled())
+                {
+                    EditorPrefs.SetBool(checkedKey, true);
+                    Debug.Log($"[AgentCore] VCS auto-enabled for this project (project key: {projectKey})");
+                }
+                else
+                {
+                    Debug.LogWarning($"[AgentCore] VCS auto-enable attempted but define not present after write; will retry on next Editor startup (project key: {projectKey})");
+                }
             }
             catch (Exception ex)
             {

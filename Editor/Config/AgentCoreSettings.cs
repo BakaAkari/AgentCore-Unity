@@ -23,20 +23,17 @@ namespace AgentCore.Editor.Config
     {
         static AgentCoreSettings()
         {
-            // 强制在 Editor 启动后期加载一次 Settings，确保版本迁移（包括默认启用 VCS）被执行。
+            // 强制在 Editor 启动后期加载一次 Settings，确保版本迁移被执行。
             // ScriptableSingleton OnEnable 可能在 Editor 启动早期触发，部分 Editor 服务尚未就绪。
+            //
+            // v1.4.4 note: 项目级 VCS 默认启用检查已迁移到独立的
+            // OptionalComponentDefaultsBootstrap（使用 [InitializeOnLoadMethod]），不再依赖
+            // Settings 静态构造被触发。这样即使 Settings 加载路径出现问题，默认启用仍能独立工作。
             EditorApplication.delayCall += () =>
             {
                 var settings = instance;
                 if (settings != null)
                     settings.MigrateSettings();
-
-                // v1.4.3: 每个项目独立检查 VCS 默认启用状态。
-                // 修复"跨项目共享 Settings.asset 导致新项目 VCS 未自动启用"问题（见
-                // OptionalComponentManager.EnsureVcsDefaultForCurrentProject 的详细说明）。
-                // 这里独立于 MigrateSettings 触发，因为版本号迁移只在 settingsVersion 落后时生效，
-                // 而项目级检查需要每个新项目都跑一次，即使 settingsVersion 已经是最新。
-                Extensions.OptionalComponentManager.EnsureVcsDefaultForCurrentProject();
             };
         }
 
