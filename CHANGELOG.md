@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] - 2026-07-08
+
+### Fixed
+- **写入/创建/删除类工具现在会真正请求用户确认**：用户反馈 Agent 未经批准即自动完成脚本创建和编辑。根因是 [`ToolRiskPolicy.Evaluate`](Editor/Tools/Safety/ToolRiskPolicy.cs:43) 存在两处设计问题：
+  1. **`metadata.RequiresConfirmation` 声明形同虚设**：策略层把这个字段透传给 `ToolExecutionRisk`，但从未真正读它做决策。`ExecuteCodeTool` / `ManageBuildTool` / `ManagePackageTool` 明明显式声明了 `RequiresConfirmation = true`，也不会触发确认。
+  2. **破坏性 action 检测过窄**：只识别 `delete` / `remove` / `destroy` 三个 token，且用子串匹配（`IndexOf`）。`write` / `create` / `copy` / `move` / `add_method` / `add_field` / `write_file` / `create_directory` 等实际写盘/改文件的 action 全部走 Allow 分支直通。
+- **修复策略**（[`ToolRiskPolicy.cs`](Editor/Tools/Safety/ToolRiskPolicy.cs:1)）：
+  1. 新增一条独立分支：`metadata.RequiresConfirmation == true` 直接返回 RequireConfirmation，让工具级声明真正生效。
+  2. 破坏性 action 检测从 3 个 marker 扩展为完整的 `DestructiveActionTokens` 集合（write/create/overwrite/modify/update/replace/add_method/add_field/add/copy/move/rename/instantiate/duplicate/clone/install/uninstall/commit/push/revert/reset/checkout/merge/rebase 以及历史保留的 delete/remove/destroy）。
+  3. 匹配算法从子串 `IndexOf` 改为 token-level 匹配（按 `_` 拆分 action 后逐 token 命中集合）。这样 `write_file` / `create_directory` / `add_method` 会被识别为破坏性；`read_file` / `list_directory` / `find_references` / `get_info` / `analyze` 保持只读直通。
+  4. RequireConfirmation 分支的 `AllowedTrustScopes` 已包含 `SessionExactTarget`；ChatWindow 端 [`_trustedToolConfirmations`](Editor/UI/ChatWindow.Confirmation.cs:21) 缓存会让用户勾选"信任本会话相同目标"后，同一 tool+action+targets 的后续调用自动直通，避免烦扰。
+
+### Impact
+- **首次触发确认**：Agent 想改代码 / 写文件 / 复制 / 移动 / 创建目录时会在 Chat 面板底部弹出确认卡片，展示 tool 名 / action / risk / capabilities / 参数摘要 / 影响目标；用户点击 Approve 后才执行。
+- **会话级免打扰**：确认卡上"信任本会话相同目标"选项复用 v1.4.0 已实现的 SessionTrust 机制，一次批准后本 ChatWindow 会话内该 tool+action+目标组合直通到会话被 Reset 或窗口关闭。
+- **只读工具不受影响**：`read_file` / `list_directory` / `search_content` / `find_references` / `get_info` / `analyze` / `file_info` 等所有只读 action 保持零打扰。
+- **测试兼容**：搜索确认 `Editor/Tests/` 下无代码引用 `DeleteActionMarkers` 或 `RequiresDeleteConfirmation`；`ToolCallDispatcherSchemaValidationTests` 只覆盖 schema 层，与策略层无耦合。
+
+### Notes
+- 如果新增工具希望**整个工具**都需要确认（如 `ExecuteCodeTool` / `ManageBuildTool`），继续在 `[AgentTool(..., RequiresConfirmation = true)]` 上声明。
+- 如果只希望**特定 action** 需要确认，让 action 名包含 `DestructiveActionTokens` 里的任一 token，或走 delete/write/create 语义命名。
+- 未来若需要按用户偏好切换"严格 / 精准"模式（例如所有 High risk 工具默认弹确认），可在 `AgentCoreSettings` 加开关，`ToolRiskPolicy.Evaluate` 已经把决策合并逻辑集中到一处，便于扩展。
+
+## [1.4.4] - 2026-07-08
+
+### Fixed
+- **VCS 组件在新安装场景仍未自动启用（v1.4.3 后续修复）**：用户反馈全新安装插件后 VCS 依然是关闭状态。根因是 v1.4.3 的 [`OptionalComponentManager.EnsureVcsDefaultForCurrentProject`](Editor/Extensions/OptionalComponentManager.cs:119) 存在**"标记落下但 define 未写入"死锁**：`SetVcsEnabled(true)` → `PlayerSettings.SetScriptingDefineSymbolsForGroup` 在 Editor 启动早期可能静默失败（compilation pipeline 尚未就绪），但代码无论成功与否都会执行 `EditorPrefs.SetBool(checkedKey, true)`，导致下次启动因为标记已置位而永远跳过重试，VCS 被永久锁在禁用状态。
+- **修复策略**：
+  1. `EnsureVcsDefaultForCurrentProject` 现在**只在 `IsVcsEnabled()` 返回 true 确认 define 实际写入后**才设置 `VcsDefaultChecked.{projectPathHash}` 标记；写入失败时不设标记，下次 Editor 启动自动重试。
+  2. 快速路径分离：如果 VCS 已启用，直接补齐标记后返回，避免重复 `SetScriptingDefineSymbolsForGroup` 调用（该 API 会触发 `RequestScriptCompilation`）。
+
+### Added
+- **[`OptionalComponentDefaultsBootstrap`](Editor/Extensions/OptionalComponentDefaultsBootstrap.cs:1)**：新增独立的 `[InitializeOnLoadMethod]` 引导器，独立于 `AgentCoreSettings` 静态构造运行。修复了另一条失败路径：`ScriptableSingleton<AgentCoreSettings>.instance` 的访问时机依赖于哪段 Editor 代码先加载，某些环境下静态构造未被触发时旧逻辑完全不会运行。新 Bootstrap 使用 `EditorApplication.delayCall` 推迟到下一 tick 执行，确保 `PlayerSettings` 已就绪；异常被捕获并以 `LogError` 上报，不会污染 Editor 启动流程。
+
+### Changed
+- **[`AgentCoreSettings` 静态构造](Editor/Config/AgentCoreSettings.cs:24)**：移除对 `OptionalComponentManager.EnsureVcsDefaultForCurrentProject()` 的直接调用（现由 `OptionalComponentDefaultsBootstrap` 负责）。静态构造现在只负责 `MigrateSettings()`，职责单一化。历史迁移路径（v12→v13 / v15→v16 的 `ApplyVcsDefaultEnablement`）保留不动，作为兼容层。
+
+### Notes
+- 已升级过 v1.4.3 且当前 VCS 被"死锁在禁用状态"的项目：升级到 v1.4.4 后，下次 Editor 重启会自动检测到 `checkedKey` 未设置（因为 v1.4.3 那次尝试实际失败）并重新触发启用。若手动删除 `EditorPrefs` 中的 `AgentCore.VcsDefaultChecked.*` 项，也可强制立即重试。
+- 用户显式禁用 VCS 的意图仍受 `AgentCore.VcsUserDisabled.{projectPathHash}` 保护，不会被自动重启用。
+
 ## [1.4.3] - 2026-07-07
 
 ### Fixed
