@@ -116,11 +116,10 @@ namespace AgentCore.Editor.UI
 
                 if (!string.IsNullOrEmpty(evt.ToolResult))
                 {
-                    // 截断过长的结果
-                    var result = evt.ToolResult.Length > 200
-                        ? evt.ToolResult.Substring(0, 200) + "..."
-                        : evt.ToolResult;
-                    card.SetDetails(result);
+                    // v1.4.8：完整保留原始结果，不再做 200 字符截断。
+                    // ToolCallCard 内部已改用 ScrollView + 只读 TextField，
+                    // 长内容可滚动查看且可 Ctrl+C 复制，用户诊断时能拿到完整信息。
+                    card.SetDetails(evt.ToolResult);
                 }
 
                 _activeToolCards.Remove(key);

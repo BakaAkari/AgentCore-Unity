@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using UnityEditor;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
@@ -36,6 +37,13 @@ namespace AgentCore.Editor.UI.Components
     /// - 用户可以点击切换折叠/展开状态
     /// </para>
     /// <para>
+    /// v1.4.8 UX 增强：
+    /// - 详情区域改用只读 <see cref="TextField"/>（multiline + isReadOnly），支持文本选择和 Ctrl+C 复制
+    /// - 详情容器包裹在 <see cref="ScrollView"/> 中，避免 maxHeight 裁剪导致内容不可见
+    /// - 头部新增"复制"按钮，一键复制完整原始内容到系统剪贴板
+    /// - 移除 200 字符截断——保留完整参数 / 结果 / 错误信息，方便用户诊断
+    /// </para>
+    /// <para>
     /// 纯代码构建 UI，不依赖外部 UXML/USS 文件。
     /// </para>
     /// </summary>
@@ -52,6 +60,9 @@ namespace AgentCore.Editor.UI.Components
         private static readonly Color TextSecondary = new Color(0.533f, 0.533f, 0.533f);   // #888888
         private static readonly Color DetailsBg = new Color(0.153f, 0.153f, 0.153f);       // #272727
         private static readonly Color ToggleArrowColor = new Color(0.45f, 0.45f, 0.45f);   // #737373
+        private static readonly Color CopyButtonBg = new Color(0.24f, 0.24f, 0.24f);       // #3D3D3D
+        private static readonly Color CopyButtonBgHover = new Color(0.30f, 0.30f, 0.30f);  // #4D4D4D
+        private static readonly Color CopyButtonBgFlash = new Color(0.298f, 0.686f, 0.314f); // green flash (与 BorderGreen 一致)
 
         // 状态图标（纯文本字符，不使用 emoji）
         private const string IconPending = "[.]";
@@ -63,6 +74,11 @@ namespace AgentCore.Editor.UI.Components
         private const string ArrowCollapsed = ">";
         private const string ArrowExpanded = "v";
 
+        // 详情区域最大高度（超过时出滚动条而不是裁剪）
+        // v1.4.8：从"maxHeight+Hidden 裁剪"改为"maxHeight+ScrollView"。
+        // 值保守选择 240px：一般 6~8 行可见，足以直观查看常见结果；超出则滚动。
+        private const float DetailsMaxHeight = 240f;
+
         #endregion
 
         #region UI 元素
@@ -70,13 +86,21 @@ namespace AgentCore.Editor.UI.Components
         private readonly Label _statusIcon;
         private readonly Label _toolNameLabel;
         private readonly Label _statusLabel;
+        private readonly Button _copyButton;
         private readonly Label _toggleArrow;
         private readonly VisualElement _detailsContainer;
-        private readonly Label _detailsLabel;
+        private readonly ScrollView _detailsScroll;
+        private readonly TextField _detailsField;
         private bool _isExpanded;
 
         /// <summary>是否由用户手动切换过折叠状态（手动切换后不再自动改变）</summary>
         private bool _userToggled;
+
+        /// <summary>
+        /// 完整的详情原始文本（未做任何截断），供"复制"按钮读取。
+        /// 与 <c>_detailsField.value</c> 保持一致，但显式独立字段更清晰。
+        /// </summary>
+        private string _detailsRaw = string.Empty;
 
         #endregion
 
@@ -87,6 +111,11 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>当前状态</summary>
         public ToolCallStatus Status { get; private set; }
+
+        /// <summary>
+        /// 完整的详情原始文本（未截断）。方便外部（例如批量导出）读取。
+        /// </summary>
+        public string DetailsRaw => _detailsRaw;
 
         #endregion
 
@@ -125,7 +154,7 @@ namespace AgentCore.Editor.UI.Components
             style.borderTopRightRadius = 3;
             style.borderBottomRightRadius = 3;
 
-            // === 头部行（图标 + 工具名 + 状态文本 + 折叠箭头）===
+            // === 头部行（图标 + 工具名 + 状态文本 + [复制] + 折叠箭头）===
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
             headerRow.style.alignItems = Align.Center;
@@ -158,6 +187,33 @@ namespace AgentCore.Editor.UI.Components
             _statusLabel.style.flexShrink = 0;
             headerRow.Add(_statusLabel);
 
+            // 复制按钮（默认隐藏，有详情时才显示，避免 UI 噪音）
+            _copyButton = new Button(OnCopyClicked) { text = "复制" };
+            _copyButton.style.fontSize = 10;
+            _copyButton.style.color = TextPrimary;
+            _copyButton.style.backgroundColor = CopyButtonBg;
+            _copyButton.style.marginLeft = 6;
+            _copyButton.style.marginTop = 0;
+            _copyButton.style.marginBottom = 0;
+            _copyButton.style.paddingLeft = 6;
+            _copyButton.style.paddingRight = 6;
+            _copyButton.style.paddingTop = 1;
+            _copyButton.style.paddingBottom = 1;
+            _copyButton.style.borderTopWidth = 0;
+            _copyButton.style.borderBottomWidth = 0;
+            _copyButton.style.borderLeftWidth = 0;
+            _copyButton.style.borderRightWidth = 0;
+            _copyButton.style.borderTopLeftRadius = 2;
+            _copyButton.style.borderBottomLeftRadius = 2;
+            _copyButton.style.borderTopRightRadius = 2;
+            _copyButton.style.borderBottomRightRadius = 2;
+            _copyButton.style.flexShrink = 0;
+            _copyButton.style.display = DisplayStyle.None; // 默认隐藏
+            _copyButton.tooltip = "复制完整原始详情到剪贴板";
+            // 阻止点击复制按钮时冒泡到卡片本身触发折叠切换
+            _copyButton.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
+            headerRow.Add(_copyButton);
+
             // 折叠/展开箭头指示器
             _toggleArrow = new Label(ArrowCollapsed);
             _toggleArrow.style.fontSize = 9;
@@ -171,6 +227,8 @@ namespace AgentCore.Editor.UI.Components
             Add(headerRow);
 
             // === 详情区域（默认隐藏）===
+            // v1.4.8：详情容器包裹一层 ScrollView，超过 DetailsMaxHeight 时可滚动查看
+            // 而不是被 overflow:hidden 裁剪。TextField 支持文本选择 + Ctrl+C 复制。
             _detailsContainer = new VisualElement();
             _detailsContainer.style.display = DisplayStyle.None;
             _detailsContainer.style.marginTop = 4;
@@ -184,23 +242,43 @@ namespace AgentCore.Editor.UI.Components
             _detailsContainer.style.borderTopRightRadius = 2;
             _detailsContainer.style.borderBottomRightRadius = 2;
 
-            _detailsLabel = new Label("");
-            _detailsLabel.style.fontSize = 11;
-            _detailsLabel.style.color = TextSecondary;
-            _detailsLabel.style.whiteSpace = WhiteSpace.Normal;
-            _detailsLabel.style.overflow = Overflow.Hidden;
-            _detailsLabel.style.maxHeight = 120;
-            _detailsContainer.Add(_detailsLabel);
+            // ScrollView：详情高度超过 DetailsMaxHeight 时可垂直滚动
+            _detailsScroll = new ScrollView(ScrollViewMode.Vertical);
+            _detailsScroll.style.maxHeight = DetailsMaxHeight;
+            _detailsScroll.style.flexGrow = 1;
+            // 阻止 ScrollView 的滚轮 / 点击事件冒泡到卡片触发折叠切换
+            _detailsScroll.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
 
+            // 只读 TextField，multiline，支持选择和 Ctrl+C 复制
+            _detailsField = new TextField
+            {
+                multiline = true,
+                isReadOnly = true,
+                value = string.Empty
+            };
+            _detailsField.style.fontSize = 11;
+            _detailsField.style.whiteSpace = WhiteSpace.Normal;
+            _detailsField.style.flexGrow = 1;
+            // TextField 默认背景色是白色，覆盖为深色主题背景
+            _detailsField.style.backgroundColor = DetailsBg;
+            // 让 TextField 内部的实际输入子元素 (.unity-text-element) 显示 secondary 灰色文字
+            _detailsField.style.color = TextPrimary;
+            // 去除默认 border（在 dark theme 下会显示为一圈亮线）
+            _detailsField.style.borderTopWidth = 0;
+            _detailsField.style.borderBottomWidth = 0;
+            _detailsField.style.borderLeftWidth = 0;
+            _detailsField.style.borderRightWidth = 0;
+            // 阻止 TextField 的点击事件冒泡到卡片触发折叠切换
+            _detailsField.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
+
+            _detailsScroll.Add(_detailsField);
+            _detailsContainer.Add(_detailsScroll);
             Add(_detailsContainer);
 
-            // 如果有参数，预设详情内容
+            // 如果有参数，预设详情内容（v1.4.8 起不再截断）
             if (!string.IsNullOrEmpty(arguments))
             {
-                var truncatedArgs = arguments.Length > 200
-                    ? arguments.Substring(0, 200) + "..."
-                    : arguments;
-                _detailsLabel.text = "参数: " + truncatedArgs;
+                SetDetailsInternal("参数: " + arguments);
             }
 
             // === 点击事件：展开/折叠详情 ===
@@ -237,13 +315,14 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 设置详情内容（参数/结果/错误信息）。
+        /// v1.4.8 起完整保留原始文本，不做长度截断。
         /// </summary>
         /// <param name="details">详情文本</param>
         public void SetDetails(string details)
         {
             if (string.IsNullOrEmpty(details)) return;
 
-            _detailsLabel.text = details;
+            SetDetailsInternal(details);
 
             // 失败状态自动展开详情（仅在用户未手动切换时）
             if (Status == ToolCallStatus.Failed && !_isExpanded && !_userToggled)
@@ -255,6 +334,55 @@ namespace AgentCore.Editor.UI.Components
         #endregion
 
         #region 私有方法
+
+        /// <summary>
+        /// 内部详情设置——同步更新 _detailsRaw、_detailsField.value，
+        /// 并根据是否有内容切换复制按钮的可见性。
+        /// </summary>
+        private void SetDetailsInternal(string details)
+        {
+            _detailsRaw = details ?? string.Empty;
+            _detailsField.SetValueWithoutNotify(_detailsRaw);
+            _copyButton.style.display = string.IsNullOrEmpty(_detailsRaw)
+                ? DisplayStyle.None
+                : DisplayStyle.Flex;
+        }
+
+        /// <summary>
+        /// 复制按钮回调：把 <see cref="_detailsRaw"/> 完整内容写入系统剪贴板，
+        /// 并做一个短暂的绿色闪烁反馈让用户知道确实复制了。
+        /// </summary>
+        private void OnCopyClicked()
+        {
+            if (string.IsNullOrEmpty(_detailsRaw))
+                return;
+
+            try
+            {
+                // EditorGUIUtility.systemCopyBuffer 是 Unity Editor 的标准剪贴板 API，
+                // 跨平台可用（Windows / macOS / Linux）。
+                EditorGUIUtility.systemCopyBuffer = _detailsRaw;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore.UI] ToolCallCard 复制到剪贴板失败: {ex.Message}");
+                return;
+            }
+
+            // 视觉反馈：按钮短暂变绿 + 文字变"已复制"，1 秒后恢复
+            var originalText = _copyButton.text;
+            var originalBg = _copyButton.style.backgroundColor;
+            _copyButton.text = "已复制";
+            _copyButton.style.backgroundColor = CopyButtonBgFlash;
+
+            // 使用 schedule 而不是 Coroutine——UI Toolkit VisualElement 自带 schedule 系统，
+            // 无需依赖 EditorApplication.update 或 MonoBehaviour。
+            _copyButton.schedule.Execute(() =>
+            {
+                _copyButton.text = originalText;
+                _copyButton.style.backgroundColor = originalBg;
+            }).StartingIn(900);
+        }
 
         /// <summary>
         /// 根据状态自动决定展开/折叠。
@@ -283,7 +411,7 @@ namespace AgentCore.Editor.UI.Components
 
                 case ToolCallStatus.Failed:
                     // 失败时自动展开，显示错误信息
-                    if (!string.IsNullOrEmpty(_detailsLabel.text))
+                    if (!string.IsNullOrEmpty(_detailsRaw))
                     {
                         SetExpanded(true);
                     }
@@ -361,11 +489,13 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 卡片点击事件处理：展开/折叠详情。
+        /// v1.4.8：复制按钮、ScrollView、TextField 的点击事件都已 StopPropagation，
+        /// 所以此处收到的都是 header 空白区域或折叠状态下的点击，不会被误触。
         /// </summary>
         private void OnCardClicked(ClickEvent evt)
         {
             // 仅在有详情内容时才允许展开
-            if (!string.IsNullOrEmpty(_detailsLabel.text))
+            if (!string.IsNullOrEmpty(_detailsRaw))
             {
                 _userToggled = true; // 标记用户已手动切换
                 ToggleDetails();

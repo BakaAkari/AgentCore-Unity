@@ -27,6 +27,13 @@ AGENTS.md.meta
 .agents/
 .roo/
 
+# --- 仓库工具脚本（打包脚本、CI helper 等，用户不需要） ---
+# NOTE: 必须使用前导 '/' 明确表示仓库根目录，否则 minimatch 会同时匹配
+# 任意深度的 'tools/'（包括 Editor/Tools/、Editor/VCS/Tools/ 等核心代码目录），
+# 导致 npm pack 意外排除半个项目。历史事故见 CHANGELOG v1.4.6。
+/tools/
+/tools.meta
+
 # --- IDE ---
 .vs/
 .vscode/

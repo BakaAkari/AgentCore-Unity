@@ -254,6 +254,49 @@ namespace AgentCore.Editor.Extensions
             if (!anyChanged)
                 return;
 
+            // ─── v1.4.7 fix: 强制 flush PlayerSettings 后再触发编译 ───────────────
+            // 问题历史：v1.4.6 及之前的实现直接调用 CompilationPipeline.RequestScriptCompilation()，
+            // 但 Unity 2021.3~2022.3 上 PlayerSettings.SetScriptingDefineSymbolsForGroup 的写入是
+            // **延迟持久化的**——只打 dirty flag，实际序列化到 ProjectSettings.asset 要等
+            // Editor 的下一个 idle tick / focus lost 事件才发生。所以 RequestScriptCompilation
+            // 立即触发时，CompilationPipeline 读到的仍是旧 defines，编译请求被内部去重丢弃。
+            // 用户反馈：勾选/取消 VCS 或 Indexing 后必须切窗口再切回来才会触发脚本编译，正是
+            // 因为 focus lost 事件强制 flush 了 PlayerSettings，Unity 自己检测到 defines 变了才编译。
+            //
+            // 修复：显式调用 PlayerSettings.SaveSettings 立即持久化 defines（Unity 2020.1+）。
+            // 该 API 会强制把当前 PlayerSettings 内存状态序列化到 ProjectSettings/ProjectSettings.asset，
+            // 保证 CompilationPipeline 后续读取到最新 defines。
+            // 备用/兼容：也调用 AssetDatabase.SaveAssets() 作为通用 flush 兜底，覆盖任意 Unity 版本。
+            //
+            // 顺序至关重要：
+            //   1. SaveAssets / SaveSettings — flush PlayerSettings 到磁盘（关键）
+            //   2. Refresh — 让 AssetDatabase 重新扫描（部分场景下需要）
+            //   3. RequestScriptCompilation — 现在管线能读到最新 defines，会真正触发编译
+            //   4. Registry.Refresh — 让扩展注册表基于新状态刷新（不影响编译）
+            try
+            {
+                // PlayerSettings.SaveSettings() 存在于 Unity 2020.1+；用反射调用以兼容更旧版本。
+                // 若不存在，AssetDatabase.SaveAssets() 一样能覆盖大多数情形。
+                var saveSettingsMethod = typeof(PlayerSettings).GetMethod(
+                    "SaveSettings",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                saveSettingsMethod?.Invoke(null, null);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] PlayerSettings.SaveSettings() invocation failed: {ex.Message} (continuing with AssetDatabase.SaveAssets fallback)");
+            }
+
+            try
+            {
+                // 通用兜底：SaveAssets 会 flush 所有 dirty 的 ScriptableObject / ProjectSettings 到磁盘。
+                AssetDatabase.SaveAssets();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] AssetDatabase.SaveAssets() failed after define change: {ex.Message}");
+            }
+
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             CompilationPipeline.RequestScriptCompilation();
             AgentCoreExtensionRegistry.Refresh();

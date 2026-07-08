@@ -1,6 +1,6 @@
 {
   "name": "com.agentcore.unity",
-  "version": "1.4.5",
+  "version": "1.4.8",
   "displayName": "AgentCore Unity",
   "description": "Unity Editor 内置 AI Agent 插件 — 通过自然语言对话驱动 Unity 开发工作流",
   "unity": "2021.3",
@@ -28,5 +28,11 @@
   "author": {
     "name": "AgentCore Team"
   },
-  "type": "tool"
+  "type": "tool",
+  "scripts": {
+    "verify-meta": "powershell -File tools/verify-meta.ps1",
+    "verify-tarball": "powershell -File tools/verify-tarball.ps1",
+    "prepack": "powershell -File tools/verify-meta.ps1",
+    "postpack": "powershell -File tools/verify-tarball.ps1"
+  }
 }

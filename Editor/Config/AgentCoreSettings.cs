@@ -26,14 +26,31 @@ namespace AgentCore.Editor.Config
             // 强制在 Editor 启动后期加载一次 Settings，确保版本迁移被执行。
             // ScriptableSingleton OnEnable 可能在 Editor 启动早期触发，部分 Editor 服务尚未就绪。
             //
-            // v1.4.4 note: 项目级 VCS 默认启用检查已迁移到独立的
-            // OptionalComponentDefaultsBootstrap（使用 [InitializeOnLoadMethod]），不再依赖
-            // Settings 静态构造被触发。这样即使 Settings 加载路径出现问题，默认启用仍能独立工作。
+            // v1.4.4 note: 项目级 VCS 默认启用检查主路径已迁移到独立的
+            // OptionalComponentDefaultsBootstrap（使用 [InitializeOnLoadMethod]）。
+            //
+            // v1.4.6 note: 恢复静态构造里对 EnsureVcsDefaultForCurrentProject() 的调用作为
+            // **fallback 双写路径**。原因见 CHANGELOG v1.4.6：1.4.5 打包产物中
+            // OptionalComponentDefaultsBootstrap.cs 的 .meta 文件缺失，Unity 在只读 UPM 包中
+            // 遇到无 meta 的 .cs 会跳过编译，导致 [InitializeOnLoadMethod] 永远不触发。
+            // AgentCoreSettings 作为主 asmdef 的核心类型一定被编译，静态构造几乎必然触发，
+            // 加一条 idempotent 的调用作为兜底，成本可忽略。EnsureVcsDefaultForCurrentProject
+            // 内部使用 EditorPrefs 做幂等标记，两条路径同时跑不会造成任何副作用。
             EditorApplication.delayCall += () =>
             {
                 var settings = instance;
                 if (settings != null)
                     settings.MigrateSettings();
+
+                // Fallback path — 见上方 v1.4.6 note。
+                try
+                {
+                    OptionalComponentManager.EnsureVcsDefaultForCurrentProject();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AgentCore] Fallback EnsureVcsDefaultForCurrentProject failed: {ex.Message}");
+                }
             };
         }
 

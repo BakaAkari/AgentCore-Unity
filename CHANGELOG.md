@@ -5,6 +5,91 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.8] - 2026-07-08
+
+### Fixed
+- **工具执行过程的详情内容不可选中/复制，且被静默截断，导致用户无法诊断问题**：用户反馈聊天窗口"工具执行过程"分组下的每一个工具调用卡片（[`ToolCallCard`](Editor/UI/Components/ToolCallCard.cs:1)）展开后的详情内容存在三个共生的 UX 缺陷：
+  1. **详情框是 `Label`，Unity UI Toolkit 的 `Label` 默认不支持文本选择**——用户无法框选、右键或 Ctrl+C 复制任何内容
+  2. **详情文本被硬编码截断到 200 字符**，之后拼一个 `"..."`，超过部分**永久丢失且不可恢复**——即使用户展开也看不到完整结果 / 错误信息 / 参数
+  3. **详情容器 `maxHeight = 120` + `overflow = Hidden`**——即使内容没超过 200 字符，只要行数多也会被裁剪且没有滚动条，超出部分不可见
+- **修复策略**（[`ToolCallCard.cs`](Editor/UI/Components/ToolCallCard.cs:1) + [`ChatWindow.Tools.cs`](Editor/UI/ChatWindow.Tools.cs:117) + [`ChatWindow.Messages.cs`](Editor/UI/ChatWindow.Messages.cs:310)）：
+  1. **`Label` → 只读 `TextField`**：详情内容改用 `TextField { multiline = true, isReadOnly = true }`，原生支持文本选择、Ctrl+C 复制、Ctrl+A 全选。深色主题背景与边框做了显式覆盖，视觉与原 Label 一致。
+  2. **详情容器包 `ScrollView`**：`ScrollView { mode = Vertical, maxHeight = 240px }` 替代原来的 `overflow = Hidden`——超过 240px 出现垂直滚动条，全部内容始终可访问，不再被裁剪。
+  3. **完全移除 200 字符截断**：删除 [`ChatWindow.Tools.cs:119-122`](Editor/UI/ChatWindow.Tools.cs:117) 和 [`ChatWindow.Messages.cs:312-314`](Editor/UI/ChatWindow.Messages.cs:310) 的 `Substring(0, 200) + "..."` 逻辑，`SetDetails` 完整传入原始内容。同时移除 [`ToolCallCard`](Editor/UI/Components/ToolCallCard.cs:1) 构造函数里对 `arguments` 的 200 字符截断。
+  4. **新增"复制"按钮**：卡片头部（工具名右侧、折叠箭头左侧）新增一个"复制"按钮，点击写入 `EditorGUIUtility.systemCopyBuffer`。按钮做了短暂绿色闪烁 + "已复制" 文字反馈（900ms），让用户明确知道复制成功。按钮点击事件已 `StopPropagation`，不会误触发卡片折叠切换。仅在有详情内容时显示（`DisplayStyle.None` when empty），避免 UI 噪音。
+  5. **事件冒泡隔离**：`ScrollView`、`TextField`、`Button` 内的 `ClickEvent` 全部注册 `StopPropagation` 回调，确保用户在详情区选中文本、滚动、点复制按钮时不会误触卡片折叠动作。
+
+### Impact
+- **完整信息可访问**：`batch_execute` 等一次返回大量数据的工具，用户现在能看到完整的原始 JSON / 错误堆栈 / 参数 payload，不再丢失后 N 个字符。
+- **可复制到剪贴板**：任何详情内容都可以通过（1）框选 + Ctrl+C 或（2）头部"复制"按钮一键复制。方便粘贴到 Issue、log 分析、外部诊断工具。
+- **长内容不裁剪**：超过 240px 高的详情区会出现滚动条而不是被 overflow:hidden 吞掉。
+- **无破坏性变化**：`SetDetails` 公开 API 签名不变；`ToolCallStatus` 枚举不变；折叠 / 展开的自动化行为规则保持一致。新增 `DetailsRaw` 只读属性供外部（未来的导出功能）访问原始文本。
+
+### Added
+- **[`ToolCallCard.DetailsRaw`](Editor/UI/Components/ToolCallCard.cs:1) 只读属性**：暴露当前卡片的完整原始详情文本，方便未来实现"整个 turn 一键导出"之类功能时读取。
+- **卡片头部"复制"按钮**：使用 `EditorGUIUtility.systemCopyBuffer` 跨平台剪贴板 API，闪烁反馈使用 `VisualElement.schedule.Execute().StartingIn(900)` 避免依赖 Coroutine / `EditorApplication.update`。
+
+### Notes
+- **详情区最大高度选择**：`DetailsMaxHeight = 240f`（原为 120）——6~8 行常见结果可见，超过部分出滚动条。选 240 而非 unbounded 是因为多个工具卡片堆叠时太高会挤压聊天视野；用户觉得不够可以进一步展开使用完整 UI。
+- **性能考虑**：`TextField` 的渲染开销略高于 `Label`，但 `ToolCallCard` 数量一般在几十以内（一个 turn 内几条），实测无感知。若未来出现超大规模工具调用序列（>500 张卡），可以考虑详情区做虚拟化，但目前不需要。
+- **文本颜色配置**：`TextField` 的实际文本子元素样式由 `_detailsField.style.color` 控制，Unity 2021.3+ 会自动继承到内部的 `.unity-text-element`。若特定 Unity 版本仍显示为白色，可以额外用 USS class + `.unity-base-text-field__input > .unity-text-element` 选择器精调。
+- **测试建议**：让 Agent 执行 `batch_execute` 或返回大量 JSON 的工具，展开卡片，验证：（1）能看到全部内容；（2）能框选文本；（3）Ctrl+C 复制的内容与"复制"按钮一致；（4）内容超过 240px 时出现滚动条。
+
+## [1.4.7] - 2026-07-08
+
+### Fixed
+- **勾选/取消 Optional Component 后不会立即触发脚本编译，必须切换 Unity 窗口再切回来才编译**：用户反馈在 Project Settings → AgentCore → Tools & Extensions 中勾选或取消 VCS / Code Indexing 后，Editor 状态栏不显示编译进度，工具也不会立刻生效，必须把 Unity 窗口切走再切回（触发 focus lost → focus gained）才会开始编译。
+- **根因**：[`OptionalComponentManager.SetDefine`](Editor/Extensions/OptionalComponentManager.cs:229) 在调用 `PlayerSettings.SetScriptingDefineSymbolsForGroup()` 之后立即调用 `CompilationPipeline.RequestScriptCompilation()`，但 Unity 2021.3~2022.3 上前者的写入是**延迟持久化的**——只打 dirty flag，实际序列化到 `ProjectSettings/ProjectSettings.asset` 要等 Editor 下一个 idle tick / focus lost 事件才发生。因此 `RequestScriptCompilation` 立即触发时，`CompilationPipeline` 读到的还是**旧 defines**，编译请求被内部去重丢弃。用户切窗口时 focus lost 事件强制 flush 了 PlayerSettings，Unity 自己检测到 defines 变了、这才启动编译。
+- **修复策略**（[`OptionalComponentManager.cs`](Editor/Extensions/OptionalComponentManager.cs:229)）：在 `SetDefine` 检测到有变化后，按以下顺序执行：
+  1. **反射调用 `PlayerSettings.SaveSettings()`**（Unity 2020.1+ API）强制立即持久化 PlayerSettings 到磁盘。用反射调用是为了兼容旧版本 Unity（若 API 不存在则跳过，走 fallback）。
+  2. **调用 `AssetDatabase.SaveAssets()`** 作为通用兜底，flush 所有 dirty 的 ScriptableObject / ProjectSettings。
+  3. **再调用 `AssetDatabase.Refresh(ForceUpdate)` → `CompilationPipeline.RequestScriptCompilation()`**：此时 CompilationPipeline 能读到最新 defines，会真正触发编译。
+  4. **最后 `AgentCoreExtensionRegistry.Refresh()`** 让扩展注册表基于新状态刷新。
+- **两个 flush 步骤都独立 try-catch**：即使反射调用或 SaveAssets 抛异常，也只 `LogWarning`，不影响后续 Refresh + RequestScriptCompilation 流程。属于渐进降级策略——最坏情况下退回到 v1.4.6 的行为（用户需要切窗口），不会更糟。
+
+### Impact
+- **VCS / Code Indexing 切换立即生效**：勾选后 Editor 状态栏立即显示编译进度，编译完成后工具在下一次会话立即可用；取消后同理，相关工具立即从 `ToolRegistry` 中移除。
+- **无需额外用户操作**：不再需要"切窗口重新聚焦"这个 workaround。
+- **对现有安装无副作用**：只影响 optional component 切换路径，其他所有代码路径不受影响。
+
+### Notes
+- **兼容性**：`PlayerSettings.SaveSettings()` 反射调用兼容 Unity 2019.4 到 2023.x（更旧版本 API 不存在时静默跳过，`AssetDatabase.SaveAssets()` 单独也足够 flush 大多数情形）。
+- **未处理的边界情况**：如果用户在勾选后**立即关闭 Project Settings 窗口**（在 flush 完成之前），Unity 可能仍需 focus 事件才 tick。这是 Unity 内部行为，无法从插件层完全消除，但发生概率极低（<50ms 窗口）。
+- **测试建议**：新装环境或删除 `Library/` 后打开工程，进入 Project Settings → AgentCore → Tools & Extensions，勾选/取消 VCS 或 Indexing，观察 Editor 状态栏应立即出现编译进度。
+
+## [1.4.6] - 2026-07-08
+
+### Fixed
+- **VCS 组件在 1.4.5 全新安装场景依然未自动启用**（v1.4.4 修复的回归）：用户反馈全新安装 1.4.5 后 VCS 仍处于禁用状态。根因是**打包产物缺失关键 meta 文件**：`com.agentcore.unity-1.4.5.tgz` 里包含 [`OptionalComponentDefaultsBootstrap.cs`](Editor/Extensions/OptionalComponentDefaultsBootstrap.cs:1) 但**不包含** `OptionalComponentDefaultsBootstrap.cs.meta`。工作区里 `.meta` 的 `LastWriteTime` 是 `2026-07-08 11:33:50`（打包后才由 Unity 生成），而 `.tgz` 打包时该 meta 尚未存在。
+- **Unity UPM 只读包行为**：Unity 在只读 UPM 包目录中遇到无 `.meta` 的 `.cs` 会**跳过编译**（无法就地生成 meta 到只读位置），因此 `OptionalComponentDefaultsBootstrap` 从未被编译进 `AgentCore.Editor` 程序集，`[InitializeOnLoadMethod]` **永远不会触发**。又因为 v1.4.4 出于职责单一化把 [`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs:24) 静态构造里对 `EnsureVcsDefaultForCurrentProject()` 的调用移除了，也没有 fallback，导致 VCS 在 1.4.5 全新安装场景下**永远不启用**。
+- **修复策略**（双重保险 + 打包前后校验）：
+  1. **恢复 [`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs:24) 静态构造中的 `OptionalComponentManager.EnsureVcsDefaultForCurrentProject()` 调用**作为 fallback 双写路径。`AgentCoreSettings` 是主 asmdef 核心类型，一定被编译，静态构造几乎必然被触发（用户打开 Project Settings 就会实例化），可以覆盖 `OptionalComponentDefaultsBootstrap` 因任何原因（打包错误、编译顺序、程序集裁剪等）不生效的场景。`EnsureVcsDefaultForCurrentProject` 内部通过 `EditorPrefs` 做项目级幂等标记（`AgentCore.VcsDefaultChecked.{projectHash}` / `AgentCore.VcsUserDisabled.{projectHash}`），两条路径同时触发不会造成任何副作用。
+  2. **静态构造 fallback 独立 try-catch**：即使 fallback 内部抛异常也只 `LogWarning`，不影响 `MigrateSettings()` 正常执行。
+- **【二次事故 & 修复】v1.4.6 首个打包版本引入了严重回归——`.npmignore` 里 `tools/` 规则缺失前导 `/`**：初始 1.4.6 tarball 内所有 `Editor/Tools/**` 都被误排除（`Native/` 99 条、`Cloud/` 8 条、`FileSystem/` 3 条、`Infrastructure/` 12 条、`Safety/` 22 条，共 ~145 个 `.cs` 文件），导致用户装机后目标项目**大规模编译失败**（`AgentCore.Editor.Tools` 命名空间整体缺失，`IAgentTool` / `ToolCallDispatcher` / `Mem0Memory` / `LightRAGDocument` 等全部找不到；`AgentCore.Indexing.Editor` 程序集也无法解析）。根因：minimatch/gitignore 语义下 `foo/`（无前导 `/`）匹配**任意深度**的 `foo/` 目录，而 Windows 文件系统大小写不敏感，`tools/` 意外匹配到了 `Editor/Tools/`。
+- **修复策略（.npmignore + 打包后校验）**：
+  1. `.npmignore` 中 `tools/` → `/tools/`（加前导 `/` 锚定到仓库根），同样处理 `tools.meta`。规则上方添加显式注释说明历史事故与规则语义，防止未来再犯。
+  2. 新增 [`tools/verify-tarball.ps1`](tools/verify-tarball.ps1:1)：**打包后**对 `.tgz` 实际内容做结构校验，声明 26 个必须存在的路径（含最低文件数）+ 7 个必须不存在的路径。任何关键代码目录缺失或 dev-only 文件泄漏都会以 exit code 1 失败。
+  3. `package.json` 新增 `postpack` 钩子：`npm pack` 后**自动**执行 `tools/verify-tarball.ps1`，把源码校验（prepack）+ 打包产物校验（postpack）串成一条完整的防线。`verify-meta.ps1` 只能查源，不能查打包出的 tarball——它是必要但不充分条件；`verify-tarball.ps1` 才能捕获 `.npmignore` glob 错配这类问题。
+
+### Added
+- **[`tools/verify-meta.ps1`](tools/verify-meta.ps1:1)**：打包前 meta 完整性校验脚本。扫描 `Editor/` 下所有 `.cs` / `.uxml` / `.uss` / `.asmdef` / `.md` / `.template` 文件及所有子目录，要求每一个都有对应 `.meta` 文件；缺失则以非 0 退出码失败并打印缺失清单。**当前工作区 263 files + 50 dirs 全部 meta 齐备**。
+- **[`tools/verify-tarball.ps1`](tools/verify-tarball.ps1:1)**：打包后 tarball 结构完整性校验脚本。检查 26 个 required paths（每个含最低文件数）+ 7 个 forbidden paths（dev-only 不应泄漏的路径）。**当前 1.4.6 tarball 603 entries，全部检查通过**。
+- **`package.json` `prepack` + `postpack` 钩子**：`npm pack` 会**自动**串行执行 pre-pack meta 校验 + post-pack tarball 结构校验，任一失败都会中断发布流程。同步暴露 `npm run verify-meta` / `npm run verify-tarball` 手动校验命令。
+- **`.npmignore` 添加 `/tools/` 排除**（正确前导锚定形式）：仓库工具脚本不打包进用户 tarball。
+
+### Changed
+- **[`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs:24) 静态构造注释更新**：说明 v1.4.6 恢复 fallback 的理由和历史 context，以及 `EnsureVcsDefaultForCurrentProject` 的幂等性保证。
+- **`.npmignore` 注释增强**：`/tools/` 规则上方添加显式警告，说明 gitignore/npmignore glob 语义与前导 `/` 的作用，防止未来再引入类似回归。
+
+### Notes
+- 已装 1.4.5 且 VCS 被永久锁在禁用状态的项目：升级到 1.4.6 后，只要用户没有主动通过 Settings 禁用过 VCS（即 `AgentCore.VcsUserDisabled.{projectHash}` 不存在），下次打开 Unity 时 fallback 路径会自动触发启用。
+- 用户显式禁用的意图仍受 `AgentCore.VcsUserDisabled.{projectHash}` 保护，不会被自动重启用。
+- **两条防线各自的作用范围**：
+  - `verify-meta.ps1` (prepack)：捕获源码里 `.cs` 缺 `.meta` 的问题（v1.4.5 的 `OptionalComponentDefaultsBootstrap.cs.meta` 缺失就是这类）
+  - `verify-tarball.ps1` (postpack)：捕获 `.npmignore` glob 错配、误排除关键目录、误泄漏 dev-only 文件（v1.4.6 首次打包 `Editor/Tools/` 整体丢失就是这类）
+- **架构权衡说明**：本次修复恢复"双写幂等"违反了 v1.4.4 的"职责单一化"初衷，但换来了抗打包错误的鲁棒性。属于合理的工程权衡（单点故障 vs 双写幂等）。fallback 路径的额外成本可以忽略（一次 `EditorPrefs` 读取 + 一次 `HasDefine` 检查）。
+- **教训**：任何形如 `foo/` 的 `.npmignore` 规则，**如果 `foo` 是常见目录名**（tools、src、tests、docs 等），必须加前导 `/` 锚定到仓库根。反之，如果确实想排除任意深度出现的 `node_modules/` / `__pycache__/`，才可以不加前导 `/`。
+
 ## [1.4.5] - 2026-07-08
 
 ### Fixed

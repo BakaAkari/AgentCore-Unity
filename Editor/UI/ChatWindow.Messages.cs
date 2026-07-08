@@ -309,10 +309,9 @@ namespace AgentCore.Editor.UI
 
                             if (!string.IsNullOrEmpty(tc.Result))
                             {
-                                var result = tc.Result.Length > 200
-                                    ? tc.Result.Substring(0, 200) + "..."
-                                    : tc.Result;
-                                card.SetDetails(result);
+                                // v1.4.8：完整保留原始结果，不再做 200 字符截断。
+                                // 会话恢复时同样让用户能查看完整详情并复制。
+                                card.SetDetails(tc.Result);
                             }
 
                             restoreGroup.AddToolCard(card);
