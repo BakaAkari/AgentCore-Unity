@@ -1,0 +1,179 @@
+# RagMem - Docker Compose
+# mem0 (Memory) + LightRAG (RAG) + pgvector (Vector DB)
+#
+# Architecture:
+#   mem0-server (FastAPI) → pgvector (PostgreSQL + vector extension)
+#   LightRAG (FastAPI) → local file storage (JsonKV + NanoVectorDB + NetworkX)
+#   LLM: routed through LiteLLM (OpenAI-compatible gateway)
+#   Embedding: cloud endpoint (OpenAI-compatible /v1/embeddings)
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose ps              # Check status
+#   docker compose logs -f mem0    # View mem0 logs
+#   docker compose down            # Stop all services
+#
+# pgvector binds to 127.0.0.1 (internal only, accessed by mem0 via Docker network)
+# mem0 and LightRAG bind to 0.0.0.0 (accessible from Windows host via localhost)
+
+services:
+  # ===========================================
+  # pgvector - PostgreSQL with vector extension
+  # Required by mem0 server (hardcoded dependency)
+  # ===========================================
+  pgvector:
+    image: ankane/pgvector:v0.5.1
+    container_name: ragmem-pgvector
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-18930}:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mem0}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mem0pass}
+      POSTGRES_DB: ${POSTGRES_DB:-mem0}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mem0} -d ${POSTGRES_DB:-mem0}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ragmem-net
+
+  # ===========================================
+  # mem0 - AI Memory Layer (built from source)
+  # FastAPI server using mem0ai pip package
+  # Source: https://github.com/mem0ai/mem0/tree/main/server
+  # ===========================================
+  mem0:
+    image: mem0-server:latest
+    container_name: ragmem-mem0
+    restart: unless-stopped
+    # Override entrypoint to apply runtime patches (store/top_p removal)
+    # and use main_override.py which reads LLM_MODEL, EMBEDDING_HOST etc.
+    # from environment variables instead of hardcoding model names.
+    # This ensures correct behavior even if prepare-images.sh Patch 4 regex
+    # fails to match a new upstream mem0 model name format.
+    entrypoint: ["bash", "/app/entrypoint.sh"]
+    ports:
+      - "0.0.0.0:${MEM0_PORT:-18910}:8000"
+    volumes:
+      - mem0-data:/app/data
+      - ./mem0/main_override.py:/app/main.py:ro
+      - ./mem0/entrypoint.sh:/app/entrypoint.sh:ro
+    environment:
+      # LLM Configuration (via LiteLLM, OpenAI-compatible)
+      OPENAI_API_KEY: ${LITELLM_API_KEY:-sk-placeholder}
+      OPENAI_BASE_URL: ${LITELLM_BASE_URL:-http://host.docker.internal:4000}/v1
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      # Embedding Configuration (cloud endpoint, OpenAI-compatible)
+      EMBEDDING_HOST: ${EMBEDDING_HOST:-http://host.docker.internal:8001}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-sk-any}
+      EMBEDDER_MODEL: ${EMBEDDING_MODEL:-qwen3-embedding}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      # PostgreSQL / pgvector
+      POSTGRES_HOST: pgvector
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-mem0}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mem0pass}
+      POSTGRES_DB: ${POSTGRES_DB:-mem0}
+      # mem0 server config
+      MEM0_TELEMETRY: "false"
+      HISTORY_DB_PATH: /app/data/history.db
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ragmem-net
+
+  # ===========================================
+  # LightRAG - Knowledge Base / RAG
+  # Official image: ghcr.io/hkuds/lightrag
+  # ===========================================
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    container_name: ragmem-lightrag
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:${LIGHTRAG_PORT:-18920}:9621"
+    volumes:
+      - ./lightrag/data:/app/data
+      - ./lightrag/documents:/app/documents
+    environment:
+      # Server
+      LIGHTRAG_HOST: "0.0.0.0"
+      LIGHTRAG_PORT: "9621"
+      LIGHTRAG_WORKING_DIR: /app/data
+      # LLM (via LiteLLM, OpenAI-compatible)
+      # NOTE: LightRAG's openai binding passes base_url directly to OpenAI SDK,
+      # which does NOT auto-add /v1. LiteLLM serves at both / and /v1, so no
+      # suffix needed for LLM. But vLLM embedding only serves at /v1/embeddings,
+      # so EMBEDDING_BINDING_HOST must include /v1.
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_BINDING: openai
+      LLM_BINDING_HOST: ${LITELLM_BASE_URL:-http://host.docker.internal:4000}
+      LLM_BINDING_API_KEY: ${LITELLM_API_KEY:-sk-placeholder}
+      # Embedding (cloud endpoint, OpenAI-compatible)
+      # IMPORTANT: /v1 suffix required — vLLM only serves at /v1/embeddings
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-qwen3-embedding}
+      EMBEDDING_BINDING: openai
+      EMBEDDING_BINDING_HOST: ${EMBEDDING_HOST:-http://host.docker.internal:8001}/v1
+      EMBEDDING_BINDING_API_KEY: ${EMBEDDING_API_KEY:-sk-any}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      # Storage (local file system - no external DB needed)
+      LIGHTRAG_KV_STORAGE: JsonKVStorage
+      LIGHTRAG_VECTOR_STORAGE: NanoVectorDBStorage
+      LIGHTRAG_GRAPH_STORAGE: NetworkXStorage
+      LIGHTRAG_DOC_STATUS_STORAGE: JsonDocStatusStorage
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9621/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ragmem-net
+
+  # ===========================================
+  # Neo4j - Graph Database (OPTIONAL)
+  # Uncomment to enable mem0 graph memory
+  # ===========================================
+  # neo4j:
+  #   image: neo4j:5.26.4
+  #   container_name: ragmem-neo4j
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:7474:7474"    # HTTP
+  #     - "127.0.0.1:7687:7687"    # Bolt
+  #   volumes:
+  #     - neo4j-data:/data
+  #   environment:
+  #     NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-neo4jpass}
+  #     NEO4J_PLUGINS: '["apoc"]'
+  #   healthcheck:
+  #     test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-neo4jpass}", "RETURN 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - ragmem-net
+
+networks:
+  ragmem-net:
+    name: ragmem-network
+    driver: bridge
+
+volumes:
+  pgvector-data:
+    name: ragmem-pgvector-data
+  mem0-data:
+    name: ragmem-mem0-data
+  # neo4j-data:
+  #   name: ragmem-neo4j-data

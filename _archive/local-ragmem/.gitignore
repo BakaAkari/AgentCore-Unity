@@ -1,0 +1,79 @@
+# ============================================
+# RagMem - Git Ignore
+# ============================================
+
+# ------------------------------------------
+# Docker Images (Build Artifacts)
+# These are built/downloaded by prepare-images.sh
+# ------------------------------------------
+images/*.tar
+
+# ------------------------------------------
+# Environment Configuration (Sensitive)
+# Copy from .env.example instead
+# ------------------------------------------
+stack/.env
+
+# ------------------------------------------
+# LightRAG Runtime Data (Auto-generated)
+# ------------------------------------------
+# User uploaded documents
+stack/lightrag/documents/*
+!stack/lightrag/documents/.gitkeep
+
+# Input files for processing
+stack/lightrag/data/inputs/*
+!stack/lightrag/data/inputs/.gitkeep
+
+# RAG index storage (generated embeddings/graphs)
+stack/lightrag/data/rag_storage/*
+!stack/lightrag/data/rag_storage/.gitkeep
+
+# tiktoken cache (downloaded models)
+stack/lightrag/data/tiktoken/
+
+# SQLite databases
+stack/lightrag/data/*.db
+stack/lightrag/data/*.db-journal
+
+# ------------------------------------------
+# mem0 Runtime Data
+# ------------------------------------------
+stack/mem0/data/
+
+# ------------------------------------------
+# Docker Volumes (if stored locally)
+# ------------------------------------------
+volumes/
+pgvector-data/
+mem0-data/
+neo4j-data/
+
+# ------------------------------------------
+# Logs
+# ------------------------------------------
+*.log
+logs/
+
+# ------------------------------------------
+# OS Generated Files
+# ------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ------------------------------------------
+# Editor/IDE
+# ------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ------------------------------------------
+# Temporary Files
+# ------------------------------------------
+tmp/
+temp/
+*.tmp
