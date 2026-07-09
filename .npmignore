@@ -34,6 +34,23 @@ AGENTS.md.meta
 /tools/
 /tools.meta
 
+# --- 主项目污染（外层 Unity 项目把插件目录当子项目扫描生成）---
+# NOTE: 必须使用前导 '/'，同 tools/ 规则的理由。这些目录不属于 UPM package。
+# 引入用户项目后会覆盖用户自己的 Assets/Library/Logs/Packages/ProjectSettings/UserSettings，
+# 属于严重污染。历史事故：alpha2 首次打包时未过滤，导致 tgz 含 ProjectSettings/*.asset。
+/Assets/
+/Assets.meta
+/Library/
+/Library.meta
+/Logs/
+/Logs.meta
+/Packages/
+/Packages.meta
+/ProjectSettings/
+/ProjectSettings.meta
+/UserSettings/
+/UserSettings.meta
+
 # --- IDE ---
 .vs/
 .vscode/
@@ -48,6 +65,7 @@ desktop.ini
 
 # --- Git ---
 .gitignore
+.gitattributes
 .git/
 
 # --- Python 缓存 ---
