@@ -65,6 +65,12 @@ _archive/**/*.tgz
 _archive/**/*.zip
 _archive/**/__pycache__/
 _archive/**/*.pyc
+# Large binary media (GitHub warns >50MB); use LFS if truly needed
+_archive/**/*.gif
+_archive/**/*.mp4
+_archive/**/*.mov
+_archive/**/*.psd
+_archive/**/*.blend
 
 # --- Package build output (npm pack / UPM tarball extraction) ---
 # .tgz release archives are intentionally tracked (see repo history);
