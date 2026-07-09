@@ -16,12 +16,12 @@ namespace AgentCore.Editor.Components.VCS.Config
         /// <summary>
         /// Gets the settings section title.
         /// </summary>
-        public string Title => "Version Control";
+        public string Title => "版本控制";
 
         /// <summary>
         /// Gets the settings section description.
         /// </summary>
-        public string Description => "Configuration for the optional Git / SVN / Perforce component.";
+        public string Description => "Git / SVN / Perforce 组件的高级配置。";
 
         /// <summary>
         /// Gets the sorting order for this contribution.
@@ -39,27 +39,27 @@ namespace AgentCore.Editor.Components.VCS.Config
         public void DrawGUI()
         {
             EditorGUI.BeginChangeCheck();
-            var autoRefreshOnOpen = EditorGUILayout.ToggleLeft("Refresh repository state when opening VCS panel", VcsSettings.AutoRefreshOnOpen);
-            var maxCommitEntries = EditorGUILayout.IntSlider("Default commit entries", VcsSettings.MaxCommitEntries, 1, 100);
+            var autoRefreshOnOpen = EditorGUILayout.ToggleLeft("打开 VCS 面板时自动刷新仓库状态", VcsSettings.AutoRefreshOnOpen);
+            var maxCommitEntries = EditorGUILayout.IntSlider("默认显示的提交条数", VcsSettings.MaxCommitEntries, 1, 100);
 
             EditorGUILayout.Space(6f);
-            EditorGUILayout.LabelField("Auto Refresh", EditorStyles.boldLabel);
-            var autoRefreshCommitList = EditorGUILayout.ToggleLeft("Silently refresh commit list in the background", VcsSettings.AutoRefreshCommitListEnabled);
+            EditorGUILayout.LabelField("自动刷新", EditorStyles.boldLabel);
+            var autoRefreshCommitList = EditorGUILayout.ToggleLeft("后台静默刷新提交记录", VcsSettings.AutoRefreshCommitListEnabled);
             int commitRefreshInterval;
             using (new EditorGUI.DisabledScope(!autoRefreshCommitList))
             {
-                commitRefreshInterval = EditorGUILayout.IntSlider("Commit list refresh interval (seconds)", VcsSettings.CommitListRefreshIntervalSeconds, 10, 300);
+                commitRefreshInterval = EditorGUILayout.IntSlider("提交记录刷新间隔 (秒)", VcsSettings.CommitListRefreshIntervalSeconds, 10, 300);
             }
 
             EditorGUILayout.Space(6f);
-            EditorGUILayout.LabelField("Remote Update Detection", EditorStyles.boldLabel);
-            var checkRemoteOnRefresh = EditorGUILayout.ToggleLeft("Check remote status when refreshing VCS panel", VcsSettings.CheckRemoteStatusOnRefresh);
-            var sceneViewBannerEnabled = EditorGUILayout.ToggleLeft("Show SceneView top banner when remote updates are available", VcsSettings.SceneViewUpdateBannerEnabled);
-            var periodicCheckEnabled = EditorGUILayout.ToggleLeft("Check remote status periodically in the editor", VcsSettings.PeriodicRemoteStatusCheckEnabled);
+            EditorGUILayout.LabelField("远程状态检测", EditorStyles.boldLabel);
+            var checkRemoteOnRefresh = EditorGUILayout.ToggleLeft("刷新 VCS 面板时检查远程状态", VcsSettings.CheckRemoteStatusOnRefresh);
+            var sceneViewBannerEnabled = EditorGUILayout.ToggleLeft("有远程更新时在 SceneView 顶部显示提示条", VcsSettings.SceneViewUpdateBannerEnabled);
+            var periodicCheckEnabled = EditorGUILayout.ToggleLeft("在编辑器中定期检查远程状态", VcsSettings.PeriodicRemoteStatusCheckEnabled);
             int intervalMinutes;
             using (new EditorGUI.DisabledScope(!periodicCheckEnabled))
             {
-                intervalMinutes = EditorGUILayout.IntSlider("Remote check interval (minutes)", VcsSettings.RemoteStatusCheckIntervalMinutes, 1, 120);
+                intervalMinutes = EditorGUILayout.IntSlider("远程检查间隔 (分钟)", VcsSettings.RemoteStatusCheckIntervalMinutes, 1, 120);
             }
 
             if (EditorGUI.EndChangeCheck())
