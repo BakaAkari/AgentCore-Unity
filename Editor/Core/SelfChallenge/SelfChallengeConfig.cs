@@ -100,5 +100,19 @@ namespace AgentCore.Editor.Core.SelfChallenge
 
         /// <summary>首周引导：Self-Challenge Card 强制展开的前 N 次数量（v0.9 §5.5）。</summary>
         public const int DefaultForcedExpansionCount = 5;
+
+        // ─── ADR-17 极简化: 原用户可控字段转为内部常量 ─────────
+
+        /// <summary>Node A / Node B 结构校验失败后的独立小会话 correction retry 上限(v0.9 §11.5)。</summary>
+        public const int NodeARetryMax = 2;
+
+        /// <summary>Node B 结构校验失败后的独立小会话 correction retry 上限。</summary>
+        public const int NodeBRetryMax = 2;
+
+        /// <summary>允许 Agent 在 Node A Step 4 判定需求模糊时主动向用户提问澄清(进入 WaitingForClarification 状态)。</summary>
+        public const bool AllowClarificationQuestions = true;
+
+        /// <summary>Self-Challenge Card 首周引导强制展开次数(v0.9 §5.5)。</summary>
+        public const int CardForcedExpansionCount = 5;
     }
 }

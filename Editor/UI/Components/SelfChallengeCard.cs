@@ -85,7 +85,7 @@ namespace AgentCore.Editor.UI.Components
             _verdictIcon.style.unityFontStyleAndWeight = FontStyle.Bold;
             header.Add(_verdictIcon);
 
-            _verdictText = new Label("Self-Challenge");
+            _verdictText = new Label("自挑战");
             _verdictText.style.color = TextPrimary;
             _verdictText.style.unityFontStyleAndWeight = FontStyle.Bold;
             _verdictText.style.marginRight = 8;
@@ -170,9 +170,9 @@ namespace AgentCore.Editor.UI.Components
             {
                 switch (data.NodeBVerdict)
                 {
-                    case NodeBVerdict.PASS: return (IconPass, VerdictPassColor, "PASS");
-                    case NodeBVerdict.REVISE: return (IconRevise, VerdictReviseColor, "REVISED");
-                    case NodeBVerdict.BLOCK: return (IconBlock, VerdictBlockColor, "BLOCKED");
+                    case NodeBVerdict.PASS: return (IconPass, VerdictPassColor, "通过");
+                    case NodeBVerdict.REVISE: return (IconRevise, VerdictReviseColor, "已修正");
+                    case NodeBVerdict.BLOCK: return (IconBlock, VerdictBlockColor, "已阻止");
                 }
             }
 
@@ -180,17 +180,17 @@ namespace AgentCore.Editor.UI.Components
             if (data.NodeATriggered)
             {
                 if (data.TriggeredClarification)
-                    return (IconWaiting, VerdictRunningColor, "Awaiting Clarification");
+                    return (IconWaiting, VerdictRunningColor, "等待澄清");
                 if (data.NodeBTriggered)
-                    return (IconRunning, VerdictRunningColor, "Reviewer running...");
-                return (IconPass, VerdictPassColor, "Intent OK");
+                    return (IconRunning, VerdictRunningColor, "自审中...");
+                return (IconPass, VerdictPassColor, "意图明确");
             }
 
             // Skip
             if (!string.IsNullOrEmpty(data.NodeASkipReason))
-                return (IconSkipped, VerdictSkippedColor, $"Skipped ({data.NodeASkipReason})");
+                return (IconSkipped, VerdictSkippedColor, $"已跳过 ({data.NodeASkipReason})");
 
-            return (IconSkipped, VerdictSkippedColor, "Not triggered");
+            return (IconSkipped, VerdictSkippedColor, "未触发");
         }
 
         private static bool ShouldAutoExpand(SelfChallengeData data)
@@ -207,20 +207,20 @@ namespace AgentCore.Editor.UI.Components
             if (data.NodeATriggered)
             {
                 int interpretationsCount = data.Interpretations?.Count ?? 0;
-                sb.Append($"Intent: {interpretationsCount} interpretations");
-                if (data.IsNodeAContinuation) sb.Append(" [cont]");
-                if (data.NodeARetryCount > 0) sb.Append($" (retry x{data.NodeARetryCount})");
+                sb.Append($"意图理解: {interpretationsCount} 种解读");
+                if (data.IsNodeAContinuation) sb.Append(" [续]");
+                if (data.NodeARetryCount > 0) sb.Append($" (重试 x{data.NodeARetryCount})");
             }
             else
             {
-                sb.Append("Intent: skipped");
+                sb.Append("意图理解: 跳过");
             }
 
             if (data.NodeBTriggered)
             {
-                sb.Append($"  ·  Reviewer: {data.CounterExampleCount} counter-examples");
-                if (data.NodeBRetryCount > 0) sb.Append($" (retry x{data.NodeBRetryCount})");
-                if (data.DraftRegenerated) sb.Append(" [regenerated]");
+                sb.Append($"  ·  输出自审: {data.CounterExampleCount} 处反例");
+                if (data.NodeBRetryCount > 0) sb.Append($" (重试 x{data.NodeBRetryCount})");
+                if (data.DraftRegenerated) sb.Append(" [已重生成]");
             }
 
             return sb.ToString();
@@ -229,87 +229,87 @@ namespace AgentCore.Editor.UI.Components
         private static string BuildDetails(SelfChallengeData data)
         {
             var sb = new StringBuilder(2048);
-            sb.AppendLine("═════ Node A ═════");
+            sb.AppendLine("═════ 意图理解 (Node A) ═════");
             if (!data.NodeATriggered)
             {
-                sb.AppendLine($"[skip] Reason: {data.NodeASkipReason ?? "n/a"}");
+                sb.AppendLine($"[跳过] 原因: {data.NodeASkipReason ?? "无"}");
             }
             else
             {
-                if (data.IsNodeAContinuation) sb.AppendLine("[Continuation mode]");
+                if (data.IsNodeAContinuation) sb.AppendLine("[延续澄清模式]");
 
                 if (data.Interpretations != null && data.Interpretations.Count > 0)
                 {
-                    sb.AppendLine($"Step 1: Interpretations ({data.Interpretations.Count})");
+                    sb.AppendLine($"步骤 1: 提出的解读 ({data.Interpretations.Count} 种)");
                     for (int i = 0; i < data.Interpretations.Count; i++)
                         sb.AppendLine($"  {i + 1}. {data.Interpretations[i]}");
                 }
 
                 if (data.AmbiguitySignals != null && data.AmbiguitySignals.Count > 0)
                 {
-                    sb.AppendLine("Step 2: Ambiguity Signals");
+                    sb.AppendLine("步骤 2: 歧义信号");
                     foreach (var s in data.AmbiguitySignals)
                         sb.AppendLine($"  - {s}");
                 }
 
                 if (!string.IsNullOrEmpty(data.ChosenInterpretation))
                 {
-                    sb.AppendLine("Step 3: Chosen");
+                    sb.AppendLine("步骤 3: 选定的理解");
                     sb.AppendLine($"  → {data.ChosenInterpretation}");
                 }
 
                 if (data.KeyAssumptions != null && data.KeyAssumptions.Count > 0)
                 {
-                    sb.AppendLine("  Key Assumptions:");
+                    sb.AppendLine("  关键假设:");
                     foreach (var a in data.KeyAssumptions)
                         sb.AppendLine($"    - {a}");
                 }
 
-                sb.AppendLine($"Step 4: A={data.Step4A?.ToString() ?? "?"}  B={data.Step4B?.ToString() ?? "?"}  C={data.Step4C?.ToString() ?? "?"}  D={data.Step4D?.ToString() ?? "?"}");
+                sb.AppendLine($"步骤 4: A={data.Step4A?.ToString() ?? "?"}  B={data.Step4B?.ToString() ?? "?"}  C={data.Step4C?.ToString() ?? "?"}  D={data.Step4D?.ToString() ?? "?"}");
                 if (data.InferredWords != null && data.InferredWords.Count > 0)
                 {
-                    sb.AppendLine($"  Inferred words: {string.Join(", ", data.InferredWords)}");
+                    sb.AppendLine($"  推断的词: {string.Join(", ", data.InferredWords)}");
                 }
-                sb.AppendLine($"  Conclusion: {data.Step4Conclusion?.ToString() ?? "?"}");
+                sb.AppendLine($"  结论: {data.Step4Conclusion?.ToString() ?? "?"}");
 
-                sb.AppendLine($"Step 5: Verdict = {data.Step5Verdict?.ToString() ?? "?"}");
+                sb.AppendLine($"步骤 5: 自校验 = {data.Step5Verdict?.ToString() ?? "?"}");
                 if (!string.IsNullOrEmpty(data.Step5CorrectedJudgement))
-                    sb.AppendLine($"  Corrected: {data.Step5CorrectedJudgement}");
+                    sb.AppendLine($"  修正后判断: {data.Step5CorrectedJudgement}");
             }
 
             sb.AppendLine();
-            sb.AppendLine("═════ Node B ═════");
+            sb.AppendLine("═════ 输出自审 (Node B) ═════");
             if (!data.NodeBTriggered)
             {
-                sb.AppendLine($"[skip] Reason: {data.NodeBSkipReason ?? "n/a"}");
+                sb.AppendLine($"[跳过] 原因: {data.NodeBSkipReason ?? "无"}");
             }
             else
             {
-                sb.AppendLine($"Verdict: {data.NodeBVerdict?.ToString() ?? "?"}");
-                sb.AppendLine($"Counter-Examples: {data.CounterExampleCount}");
+                sb.AppendLine($"结论: {data.NodeBVerdict?.ToString() ?? "?"}");
+                sb.AppendLine($"反例数量: {data.CounterExampleCount}");
                 if (data.CounterExampleQuotes != null && data.CounterExampleQuotes.Count > 0)
                 {
                     foreach (var q in data.CounterExampleQuotes)
-                        sb.AppendLine($"  <quote> {q}");
+                        sb.AppendLine($"  <引用> {q}");
                 }
                 if (data.ReviseIssues != null && data.ReviseIssues.Count > 0)
                 {
-                    sb.AppendLine("REVISE Issues:");
+                    sb.AppendLine("需要修正的问题:");
                     foreach (var iss in data.ReviseIssues)
                         sb.AppendLine($"  - {iss}");
                 }
                 if (data.BlockVerifications != null && data.BlockVerifications.Count > 0)
                 {
-                    sb.AppendLine("BLOCK Verifications:");
+                    sb.AppendLine("需要验证的假设:");
                     foreach (var v in data.BlockVerifications)
                         sb.AppendLine($"  - {v}");
                 }
-                if (data.DraftRegenerated) sb.AppendLine("[Draft regenerated after REVISE]");
+                if (data.DraftRegenerated) sb.AppendLine("[已重新生成回复]");
             }
 
             sb.AppendLine();
-            sb.AppendLine($"Total tokens estimate: {data.TotalTokensEstimate}");
-            sb.AppendLine($"Duration: {data.TotalDurationMs}ms");
+            sb.AppendLine($"预估 token: {data.TotalTokensEstimate}");
+            sb.AppendLine($"耗时: {data.TotalDurationMs} 毫秒");
 
             return sb.ToString();
         }

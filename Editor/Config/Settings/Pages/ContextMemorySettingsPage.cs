@@ -51,16 +51,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             EnsureApiKeyDisplays(context);
 
-            DrawContextSourcesCard(context);
-            EditorGUILayout.Space(8);
-
-            DrawContextBudgetCard(context);
+            // ADR-17 极简: 只保留 Compression 总开关 + PROJECT.md/SOUL.ext.md 文件行 + 可选服务
+            // 已删除: Context Sources (Bootstrap Files/Auto Project Context) / Context Budget / Compression 内部参数 / Compression LLM
+            DrawProjectFilesCard(context);
             EditorGUILayout.Space(8);
 
             DrawCompressionCard(context);
-            EditorGUILayout.Space(8);
-
-            DrawCompressionLlmCard(context);
             EditorGUILayout.Space(8);
 
             DrawMemoryServiceCard(context);
@@ -69,135 +65,43 @@ namespace AgentCore.Editor.Config.Settings.Pages
             DrawKnowledgeBaseCard(context);
         }
 
+        // ── PROJECT.md / SOUL.ext.md 文件卡片 (ADR-17 保留) ──
+
+        private static void DrawProjectFilesCard(AgentCoreSettingsContext context)
+        {
+            context.Ui.DrawCard(
+                "项目上下文文件",
+                "PROJECT.md 描述项目约定, SOUL.ext.md 追加行为规则。Agent 会自动读取, 建议提交到版本控制。",
+                () =>
+                {
+                    DrawUserFileRow("PROJECT.md", "项目约定与个人偏好, 团队共享, 建议 VCS 提交。Agent 可以直接编辑此文件。");
+                    DrawUserFileRow("SOUL.ext.md", "Agent 行为规则扩展, 追加到内置 SOUL 后, 建议 VCS 提交。");
+                });
+        }
+
         // ─────────────────────────────────────────────────────────────────────
         // Cards
         // ─────────────────────────────────────────────────────────────────────
 
-        private static void DrawContextSourcesCard(AgentCoreSettingsContext context)
-        {
-            var settings = context.Settings;
+        // ADR-17 极简:
+        //   - DrawContextSourcesCard 已删除, PROJECT.md/SOUL.ext.md 移到 DrawProjectFilesCard
+        //   - DrawContextBudgetCard 已删除 (Max Context Tokens / Reserve Response Tokens 内部化)
 
-            context.Ui.DrawCard("Context Sources", "Bootstrap pipeline and project-local context files.", () =>
-            {
-                EditorGUI.BeginChangeCheck();
-
-                settings.bootstrapEnabled = EditorGUILayout.Toggle(
-                    new GUIContent("Bootstrap Files", "Enable the Bootstrap Files system"),
-                    settings.bootstrapEnabled);
-
-                settings.autoProjectContext = EditorGUILayout.Toggle(
-                    new GUIContent("Auto Project Context", "Automatically collect project context information"),
-                    settings.autoProjectContext);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-
-                EditorGUILayout.Space(6);
-                DrawUserFileRow("PROJECT.md", "Project conventions and personal preferences — team-shared, recommended for VCS commit.");
-                DrawUserFileRow("SOUL.ext.md", "Agent behavior rule extensions — appended to built-in SOUL, recommended for VCS commit.");
-            });
-        }
-
-        private static void DrawContextBudgetCard(AgentCoreSettingsContext context)
-        {
-            var settings = context.Settings;
-
-            context.Ui.DrawCard("Context Budget", null, () =>
-            {
-                EditorGUI.BeginChangeCheck();
-
-                settings.maxContextTokens = EditorGUILayout.IntField(
-                    new GUIContent("Max Context Tokens", "Context window token limit (0 = auto-infer from model name)"),
-                    settings.maxContextTokens);
-                settings.maxContextTokens = Mathf.Max(settings.maxContextTokens, 0);
-
-                settings.reserveResponseTokens = EditorGUILayout.IntField(
-                    new GUIContent("Reserve Response Tokens", "Tokens reserved for the AI response"),
-                    settings.reserveResponseTokens);
-                settings.reserveResponseTokens = Mathf.Clamp(settings.reserveResponseTokens, 500, 16000);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-            });
-        }
-
+        // ADR-17 极简: 只保留一个总开关, 内部参数 (Threshold/Target/Trigger Ratio) 内部化
         private static void DrawCompressionCard(AgentCoreSettingsContext context)
         {
             var settings = context.Settings;
 
-            context.Ui.DrawCard("Compression", null, () =>
-            {
-                EditorGUI.BeginChangeCheck();
-
-                settings.compressionEnabled = EditorGUILayout.Toggle(
-                    new GUIContent("Enable Compression", "Compress tool results and conversation history instead of truncating"),
-                    settings.compressionEnabled);
-
-                EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField("Tool Result", EditorStyles.miniLabel);
-
-                settings.toolResultCompressionThreshold = EditorGUILayout.IntField(
-                    new GUIContent("Threshold", "Tool results exceeding this token count are compressed"),
-                    settings.toolResultCompressionThreshold);
-
-                settings.toolResultTargetTokens = EditorGUILayout.IntField(
-                    new GUIContent("Target", "Target token count after compression"),
-                    settings.toolResultTargetTokens);
-
-                EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField("Conversation", EditorStyles.miniLabel);
-
-                settings.conversationCompressionTrigger = EditorGUILayout.Slider(
-                    new GUIContent("Trigger Ratio", "Trigger conversation compression when context usage exceeds this ratio (0.3–0.95)"),
-                    settings.conversationCompressionTrigger, 0.3f, 0.95f);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-            });
-        }
-
-        private static void DrawCompressionLlmCard(AgentCoreSettingsContext context)
-        {
-            var settings = context.Settings;
-
-            context.Ui.DrawServiceCard(
-                title: "Separate Compression LLM",
-                description: "Use a dedicated LLM for summarizing tool results and conversation history. Falls back to the main LLM when disabled.",
-                enabled: settings.useSeparateCompressionLLM,
-                onEnabledChanged: value =>
-                {
-                    settings.useSeparateCompressionLLM = value;
-                    settings.SaveSettings();
-                },
-                statusHint: settings.useSeparateCompressionLLM && !string.IsNullOrEmpty(settings.compressionLLMEndpoint)
-                    ? $"→ {settings.compressionLLMEndpoint}"
-                    : null,
-                drawEnabledBody: () =>
+            context.Ui.DrawCard(
+                "上下文压缩",
+                "长对话时自动压缩历史消息, 避免超出上下文窗口。默认启用。",
+                () =>
                 {
                     EditorGUI.BeginChangeCheck();
 
-                    settings.compressionLLMEndpoint = EditorGUILayout.TextField(
-                        new GUIContent("Endpoint", "Compression LLM API endpoint"),
-                        settings.compressionLLMEndpoint);
-
-                    settings.compressionLLMModel = EditorGUILayout.TextField(
-                        new GUIContent("Model", "Compression LLM model name"),
-                        settings.compressionLLMModel);
-
-                    context.Ui.DrawApiKeyRow(
-                        "API Key",
-                        "Compression LLM API key",
-                        SecureKeyStorage.HasCompressionLLMApiKey() ? "••••••••••••" : "(not set)",
-                        "Set Compression LLM API Key",
-                        "Enter your compression LLM API key:",
-                        SecureKeyStorage.SetCompressionLLMApiKey,
-                        () => SecureKeyStorage.SetCompressionLLMApiKey(string.Empty));
+                    settings.compressionEnabled = EditorGUILayout.Toggle(
+                        new GUIContent("启用压缩", "长对话超过阈值时自动压缩工具结果和历史消息。关闭则采用截断策略。"),
+                        settings.compressionEnabled);
 
                     if (EditorGUI.EndChangeCheck())
                     {
@@ -206,13 +110,15 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 });
         }
 
+        // ADR-17 极简: DrawCompressionLlmCard 已删除 (useSeparateCompressionLLM 内部化, 极小众功能)
+
         private static void DrawMemoryServiceCard(AgentCoreSettingsContext context)
         {
             var settings = context.Settings;
 
             context.Ui.DrawServiceCard(
-                title: "Memory Service (mem0)",
-                description: "Persistent cross-session memory service. Extracts and recalls key information from conversations.",
+                title: "长期记忆 (mem0)",
+                description: "跨会话的长期记忆服务。Agent 会自动从对话中提取关键信息, 并在后续会话中回忆使用。需要自己部署 mem0 服务。",
                 enabled: settings.mem0Enabled,
                 onEnabledChanged: value =>
                 {
@@ -292,8 +198,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var settings = context.Settings;
 
             context.Ui.DrawServiceCard(
-                title: "Knowledge Base (LightRAG)",
-                description: "Project-specific retrieval augmented generation. Indexes docs and returns relevant snippets on demand.",
+                title: "项目知识库 (LightRAG)",
+                description: "项目文档的向量检索增强。索引项目内的文档, 需要时按语义相关性返回。需要自己部署 LightRAG 服务。",
                 enabled: settings.lightragEnabled,
                 onEnabledChanged: value =>
                 {

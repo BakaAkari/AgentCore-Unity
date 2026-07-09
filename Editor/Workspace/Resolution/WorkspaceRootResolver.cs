@@ -32,16 +32,10 @@ namespace AgentCore.Editor.Workspace.Resolution
                 return (null, WorkspaceResolutionStatus.Error, empty);
             }
 
-            // 优先级 1：用户手动覆盖
-            var settings = AgentCoreSettings.instance;
-            if (settings != null && !string.IsNullOrWhiteSpace(settings.workspaceRootOverride))
-            {
-                var overridePath = UnityRootResolver.NormalizePath(settings.workspaceRootOverride.Trim());
-                var overrideVcs = SvnWorkspaceInfoResolver.Resolve(overridePath);
-                return (overridePath, WorkspaceResolutionStatus.ManualOverride, overrideVcs);
-            }
+            // ADR-17 极简: workspaceRootOverride 字段已删除, 只做自动检测
+            //   若未来需要企业用户手动覆盖, 通过环境变量 AGENTCORE_WORKSPACE_ROOT 传递
 
-            // 优先级 2 & 3：SVN 解析（svn info 或 .svn 探测）
+            // 优先级 1: SVN 解析(svn info 或 .svn 探测)
             var svnInfo = SvnWorkspaceInfoResolver.Resolve(unityRoot);
 
             if (!string.IsNullOrEmpty(svnInfo.RootPath))

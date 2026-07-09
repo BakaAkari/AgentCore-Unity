@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-alpha1] - 2026-07-09
+
+### Added — Self-Challenge (Phase 9) 完整实施
+- **Node A (Intent Self-Challenge)**: 每轮用户消息时让 LLM 挑战对需求的理解 — Prompt 注入 + 流式抽取 + 结构校验 + Correction retry + fallback
+  - [`IntentChallengePromptBuilder.cs`](Editor/Core/SelfChallenge/IntentChallengePromptBuilder.cs) / [`IntentChallengeStreamExtractor.cs`](Editor/Core/SelfChallenge/IntentChallengeStreamExtractor.cs) / [`IntentChallengeParser.cs`](Editor/Core/SelfChallenge/IntentChallengeParser.cs)
+- **Node B (Answer Self-Challenge)**: 输出前独立 reviewer LLM 调用审视 draft — Reviewer prompt + draft-quote 校验 + Verdict (PASS/REVISE/BLOCK) 三分支处理
+  - [`AnswerChallengePromptBuilder.cs`](Editor/Core/SelfChallenge/AnswerChallengePromptBuilder.cs) / [`AnswerChallengeStreamExtractor.cs`](Editor/Core/SelfChallenge/AnswerChallengeStreamExtractor.cs) / [`AnswerChallengeParser.cs`](Editor/Core/SelfChallenge/AnswerChallengeParser.cs)
+- **WaitingForClarification 状态机** ([`MessageTypes.cs`](Editor/Core/MessageTypes.cs)): Node A Step 4 结论 = 反问用户时进入; Tool loop 拒绝分派工具; ChatWindow 状态标签"等待你的澄清..."
+- **Continuation 模式**: Node A 反问后用户回复走精简 Step 3-cont/4-cont/5-cont; 支持 [TOPIC CHANGE DETECTED] 降级
+- **主对话历史清理** (v0.10 §0.6): assistant message 写入历史前剥离 `<intent_challenge>` / `<answer_challenge>` / `<intent_challenge_continuation>` 块, 避免长对话 token 累积
+- **SelfChallengeCard UI** ([`SelfChallengeCard.cs`](Editor/UI/Components/SelfChallengeCard.cs)): 挂在 ThinkingDrawer 与 ToolCallGroup 之间; Verdict 徽标(通过/已修正/已阻止/等待澄清/未触发) + 简短摘要 + 可展开完整数据; 术语已白话中文化对齐 ChatWindow 状态标签风格
+- **AgentLoop 集成层** ([`AgentLoop.SelfChallenge.cs`](Editor/Core/AgentLoop.SelfChallenge.cs)): 集中承载所有 Node A/B 生命周期管理, ~590 行
+
+### Changed — ADR-17 极简即开即用哲学落地
+**推翻**: 设计文档 v0.10 §3.4/§5/§7.1 (用户可控性/可观测性优先) — 详见 [`plans/adr-17-minimalism.md`](plans/adr-17-minimalism.md)
+
+**AgentCoreSettings 字段清理**:
+- **彻底删除 9 个字段**: `intentChallengeEnabled` / `answerChallengeEnabled` / `answerChallengeMaxRetries` / `allowAgentClarificationQuestions` / `legacySelfChallengeDisabled` / `selfChallengeCardCountForcedExpansion` — 合并到统一 `selfChallengeEnabled` 总开关 + 内部常量; `workspaceRootOverride` / `unityRootRelativePathOverride` — 依赖自动检测; `userId` — 已 deprecated
+- **新增 1 个字段**: `selfChallengeEnabled` (默认 true, 即开即用)
+- **添加 [HideInInspector] 25+ 个字段**: `maxToolCallRounds` / `maxTokenBudget` / `fallbackRoutingEnabled` / `autoCompileCheck` / `autoConsoleCapture` / `maxConsecutiveErrors` / `toolFailWarningThreshold` / `toolFailBlockThreshold` / `allToolsFailBlockThreshold` / `bootstrapEnabled` / `autoProjectContext` / `maxContextTokens` / `reserveResponseTokens` / `toolResultCompressionThreshold` / `toolResultTargetTokens` / `conversationCompressionTrigger` / `useSeparateCompressionLLM` / `compressionLLMEndpoint` / `compressionLLMModel` / `enableReasoningOutput` / `reasoningEffort` / `reasoningMaxTokens` / `extraRequestBody` / `streamingEnabled` / `showToolCallDetails` / `workspaceAutoDetectEnabled` / `workspaceConfigVersion` / `autoMemoryEnabled` / `autoMemoryMinTurns` / `disabledToolCategories` / `disabledTools` / `toolScopingEnabled`
+- **SelfChallengeConfig 新增 4 个常量**: `NodeARetryMax = 2` / `NodeBRetryMax = 2` / `AllowClarificationQuestions = true` / `CardForcedExpansionCount = 5`
+
+**Settings 版本迁移 v17 → v18**: 清理孤儿字段, 无破坏性数据丢失。旧 session JSON 反序列化时已删除字段读到默认值忽略, 保留数据向后兼容。
+
+**UI Settings 精简**:
+- **Model & Agent 页面**: 删除 Agent Runtime 卡片(Max Tool Rounds / Token Budget / Fallback Routing) + Self Correction 卡片(Auto Compile Check / Auto Console Capture / Max Consecutive Errors); Model = "auto" 时显示实际选中模型
+- **Context & Memory 页面**: 删除 Context Sources / Context Budget / Compression LLM 卡片; Compression 卡片简化为一个"启用压缩"总开关; mem0/LightRAG 文案白话化("长期记忆"/"项目知识库"); PROJECT.md/SOUL.ext.md 独立成"项目上下文文件"卡片
+- **UI & Diagnostics 页面**: 删除 Chat UI 卡片; 新增"关于"卡片显示插件版本号
+- **Workspace 页面**: 删除 Workspace Root Override / Unity Root Relative Path 字段, 完全依赖自动检测
+- **Tools & Extensions 页面**: 保持现状(工具列表 UI 用户已习惯)
+
+**核心逻辑改动**:
+- [`WorkspaceRootResolver.cs`](Editor/Workspace/Resolution/WorkspaceRootResolver.cs): 删除对 `workspaceRootOverride` 的引用, 只做自动检测
+- [`AgentLoop.SelfChallenge.cs`](Editor/Core/AgentLoop.SelfChallenge.cs): 所有对已删除字段的引用改用 `SelfChallengeConfig.NodeARetryMax` / `SelfChallengeConfig.AllowClarificationQuestions` / `SelfChallengeConfig.NodeBRetryMax` 常量
+
+### Removed
+- Statistics 面板 (v0.10 §5): 永不实施, 从 roadmap 移除
+- 首周引导 tooltip (v0.9 §5.5): 永不实施
+- Legacy Mode kill switch: 使用 `selfChallengeEnabled = false` 等效达成
+
+### Notes
+- **备份基线**: GitHub tag `v1.5.0-alpha1-pre-adr17` 是 ADR-17 重构前的完整状态
+- **可回滚**: 关闭 `selfChallengeEnabled` 即回到 v1.4.9 骨架前行为
+- **v0.10 部分推翻**: 上游设计文档 v0.10 §3.4/§5/§7.1 明确用户可控性/可观测性优先, 与本项目极简哲学冲突; ADR-17 明确本项目采纳一个总开关等效实现, 用户可观测性通过 SelfChallengeCard 被动感知实现, 不建 Statistics UI
+- **相关文档**: [`plans/adr-17-minimalism.md`](plans/adr-17-minimalism.md) / [`plans/minimalism-audit-report.md`](plans/minimalism-audit-report.md) / [`plans/self-challenge-implementation-report.md`](plans/self-challenge-implementation-report.md) / [`plans/self-challenge-stage-plan.md`](plans/self-challenge-stage-plan.md)
+
 ## [1.4.9] - 2026-07-08
 
 ### Added

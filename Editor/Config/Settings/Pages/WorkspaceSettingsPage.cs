@@ -263,43 +263,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 return;
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            // ADR-17 极简: Workspace Root / Unity Root Path Override 字段已删除
+            //   Workspace 依赖自动检测(SVN 探测 + UnityRoot 回退)
+            //   若企业用户真的需要手动覆盖, 通过 AgentCoreSettings 内部字段 API 或未来加环境变量支持
             context.Ui.DrawHelpText(
-                "Override automatic workspace detection. Leave blank to use auto-detection. " +
-                "Changes take effect after 'Refresh Workspace'.");
-            EditorGUILayout.Space(4);
-
-            var settings = context.Settings;
-            bool changed = false;
-
-            // Workspace Root Override
-            EditorGUI.BeginChangeCheck();
-            var newWorkspaceRoot = EditorGUILayout.TextField(
-                new GUIContent("Workspace Root Override",
-                    "Absolute path to the SVN working copy root. Leave blank for auto-detection."),
-                settings.workspaceRootOverride ?? string.Empty);
-            if (EditorGUI.EndChangeCheck())
-            {
-                settings.workspaceRootOverride = string.IsNullOrWhiteSpace(newWorkspaceRoot) ? string.Empty : newWorkspaceRoot.Trim();
-                changed = true;
-            }
-
-            // Unity Root Relative Path Override
-            EditorGUI.BeginChangeCheck();
-            var newUnityRelPath = EditorGUILayout.TextField(
-                new GUIContent("Unity Root Relative Path",
-                    "Relative path from workspace root to the Unity project directory (e.g. 'unity'). Leave blank for auto-detection."),
-                settings.unityRootRelativePathOverride ?? string.Empty);
-            if (EditorGUI.EndChangeCheck())
-            {
-                settings.unityRootRelativePathOverride = string.IsNullOrWhiteSpace(newUnityRelPath) ? string.Empty : newUnityRelPath.Trim();
-                changed = true;
-            }
-
-            if (changed)
-            {
-                settings.SaveSettings();
-            }
-
+                "Workspace 依赖自动检测(SVN 工作副本探测 + UnityRoot 回退)。若探测失败, 请检查 SVN 工作副本状态或使用 'Refresh Workspace' 按钮。");
             EditorGUILayout.Space(4);
 
             // workspace.json config file actions

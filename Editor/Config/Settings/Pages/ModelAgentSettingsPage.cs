@@ -112,54 +112,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.Space(8);
 
-            // ── Agent Runtime ──
-            context.Ui.DrawCard("Agent Runtime", null, () =>
-            {
-                EditorGUI.BeginChangeCheck();
-
-                settings.maxToolCallRounds = EditorGUILayout.IntSlider(
-                    new GUIContent("Max Tool Rounds", "Hard safety limit on tool-call rounds (token budget is the primary limiter)"),
-                    settings.maxToolCallRounds, 1, 200);
-
-                settings.maxTokenBudget = EditorGUILayout.IntField(
-                    new GUIContent("Token Budget", "Maximum token consumption per tool loop (0 = unlimited). When exceeded, Agent summarizes and stops."),
-                    settings.maxTokenBudget);
-                settings.maxTokenBudget = Mathf.Max(0, settings.maxTokenBudget);
-
-                settings.fallbackRoutingEnabled = EditorGUILayout.Toggle(
-                    new GUIContent("Fallback Routing", "Enable failure-recovery strategy routing"),
-                    settings.fallbackRoutingEnabled);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-            });
-
-            EditorGUILayout.Space(8);
-
-            // ── Self Correction ──
-            context.Ui.DrawCard("Self Correction", "Safety and recovery switches used during tool execution.", () =>
-            {
-                EditorGUI.BeginChangeCheck();
-
-                settings.autoCompileCheck = EditorGUILayout.Toggle(
-                    new GUIContent("Auto Compile Check", "Automatically compile after script modifications"),
-                    settings.autoCompileCheck);
-
-                settings.autoConsoleCapture = EditorGUILayout.Toggle(
-                    new GUIContent("Auto Console Capture", "Capture Console errors after each tool round"),
-                    settings.autoConsoleCapture);
-
-                settings.maxConsecutiveErrors = EditorGUILayout.IntSlider(
-                    new GUIContent("Max Consecutive Errors", "Pause and request user intervention after this many consecutive errors"),
-                    settings.maxConsecutiveErrors, 1, 20);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
-            });
+            // ADR-17 极简: 已删除 Agent Runtime 和 Self Correction 两个卡片
+            //   - Max Tool Rounds / Token Budget / Fallback Routing → 内部常量 (maxToolCallRounds=200, maxTokenBudget=0, fallbackRoutingEnabled=true)
+            //   - Auto Compile Check / Auto Console Capture / Max Consecutive Errors → 默认开启, 用户不需要管理
 
             // ── Self-Challenge ──
             // v1.5.0-alpha 极简哲学: 一个开关控制整个双节点机制, 内部策略由工程侧决定最优值。
@@ -204,6 +159,16 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     settings.llmModel = models[newIndex];
                     settings.SaveSettings();
+                }
+
+                // ADR-17: llmModel="auto" 时显示实际选中的模型
+                if (settings.llmModel == "auto" && models.Count > 0)
+                {
+                    var firstNonAuto = models.Find(m => m != "auto");
+                    if (!string.IsNullOrEmpty(firstNonAuto))
+                    {
+                        GUILayout.Label($"→ {firstNonAuto}", EditorStyles.miniLabel, GUILayout.MaxWidth(200));
+                    }
                 }
             }
             else

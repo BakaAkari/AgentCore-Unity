@@ -44,36 +44,43 @@ namespace AgentCore.Editor.Config.Settings.Pages
         /// <inheritdoc />
         public void Draw(AgentCoreSettingsContext context)
         {
-            DrawChatUiCard(context);
-            EditorGUILayout.Space(8);
+            // ADR-17 极简: 已删除 DrawChatUiCard (Streaming Output / Show Tool Call Details 默认开启)
             DrawDiagnosticsCard(context);
             EditorGUILayout.Space(8);
             DrawMaintenanceCard(context);
+            EditorGUILayout.Space(8);
+            DrawVersionInfoCard(context);
         }
 
-        // ── Chat UI ──
+        // ── 版本信息 (ADR-17 新增) ──
 
-        private static void DrawChatUiCard(AgentCoreSettingsContext context)
+        private static void DrawVersionInfoCard(AgentCoreSettingsContext context)
         {
-            var settings = context.Settings;
-
-            context.Ui.DrawCard("Chat UI", "Presentation and interaction preferences for the chat window.", () =>
+            context.Ui.DrawCard("关于", null, () =>
             {
-                EditorGUI.BeginChangeCheck();
-
-                settings.streamingEnabled = EditorGUILayout.Toggle(
-                    new GUIContent("Streaming Output", "Stream LLM responses token-by-token"),
-                    settings.streamingEnabled);
-
-                settings.showToolCallDetails = EditorGUILayout.Toggle(
-                    new GUIContent("Show Tool Call Details", "Display detailed tool execution information"),
-                    settings.showToolCallDetails);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.SaveSettings();
-                }
+                var version = GetPackageVersion();
+                EditorGUILayout.LabelField($"AgentCore Unity  v{version}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Unity Editor 内置 AI Agent 插件", EditorStyles.miniLabel);
             });
+        }
+
+        private static string GetPackageVersion()
+        {
+            try
+            {
+                var packageJsonPath = System.IO.Path.Combine(
+                    UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                        typeof(AgentCoreSettings).Assembly)?.assetPath ?? string.Empty,
+                    "package.json");
+                if (System.IO.File.Exists(packageJsonPath))
+                {
+                    var content = System.IO.File.ReadAllText(packageJsonPath);
+                    var match = System.Text.RegularExpressions.Regex.Match(content, "\"version\"\\s*:\\s*\"([^\"]+)\"");
+                    if (match.Success) return match.Groups[1].Value;
+                }
+            }
+            catch { /* ignore */ }
+            return "unknown";
         }
 
         // ── Diagnostics ──

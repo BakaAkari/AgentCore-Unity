@@ -279,7 +279,7 @@ namespace AgentCore.Editor.Core
             CancellationToken ct)
         {
             var settings = AgentCoreSettings.instance;
-            int maxRetries = Math.Max(0, settings.answerChallengeMaxRetries);
+            int maxRetries = SelfChallengeConfig.NodeARetryMax;
             if (maxRetries == 0) return false;
 
             for (int attempt = 1; attempt <= maxRetries; attempt++)
@@ -369,7 +369,7 @@ namespace AgentCore.Editor.Core
                 return false;
 
             var settings = AgentCoreSettings.instance;
-            if (!settings.allowAgentClarificationQuestions)
+            if (!SelfChallengeConfig.AllowClarificationQuestions)
                 return false;
 
             if (_currentSelfChallengeData.Step4Conclusion == null ||
@@ -514,7 +514,7 @@ namespace AgentCore.Editor.Core
             var reviewMessages = BuildReviewerMessages(userMessage, draftResponse);
 
             // 触发调用 + retry
-            int maxRetries = Math.Max(0, settings.answerChallengeMaxRetries);
+            int maxRetries = SelfChallengeConfig.NodeBRetryMax;
             AnswerChallengeResult resultPayload = null;
 
             for (int attempt = 0; attempt <= maxRetries; attempt++)
