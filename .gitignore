@@ -51,8 +51,20 @@ desktop.ini
 *.dll
 !Packages/**/*.dll
 
-# --- Archive (reference only, not tracked) ---
-_archive/
+# --- Archive ---
+# _archive/ contains historical planning documents (completed phases, deprecated
+# designs, one-off analysis reports) and reference third-party sources
+# (Unity-Skills, unity-mcp-setup). Documents are kept in git for full traceability.
+# Binary caches (pypi wheels, tarballs, node_modules) are excluded to keep the
+# repo lightweight — clone the upstream tools separately if you need to rebuild them.
+_archive/**/pypi-cache/
+_archive/**/node_modules/
+_archive/**/*.whl
+_archive/**/*.tar.gz
+_archive/**/*.tgz
+_archive/**/*.zip
+_archive/**/__pycache__/
+_archive/**/*.pyc
 
 # --- Package build output (npm pack / UPM tarball extraction) ---
 # .tgz release archives are intentionally tracked (see repo history);

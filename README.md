@@ -7,11 +7,11 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ## 当前状态
 
 - **Package**: `com.agentcore.unity`
-- **Version**: `1.3.8`
+- **Version**: `1.5.0-alpha2`
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
-- **Status**: Phase 6 已验收；治理层 G.1~G.3 已完成；后台增量索引、ThinkingDrawer / reasoning 可观测性、Request Enrichment、Token Budget 已完成；Code Indexing 标记为实验性，默认不再自动启用；后续重点为 MCP Server 对外互操作与产品化分发
+- **Status**: Phase 6 已验收；治理层 G.1~G.3 已完成；Phase 7 §3.1/§3.2 后台增量索引 + ThinkingDrawer / reasoning 可观测性 + Request Enrichment 已完成；v1.5.0-alpha1/alpha2 Phase 9 Self-Challenge（Node A/B 双节点 prompt 层幻觉护栏）已上线；ADR-17 极简即开即用哲学全面落地（Settings 精简 25+ 字段隐藏 + 9 字段删除）；Code Indexing 标记为实验性，默认不自动启用；后续重点为 v1.5.0 GA 4 周 kill criteria 实测 + Phase 8 MCP Server 对外互操作 + 产品化分发
 
 ## 核心能力
 

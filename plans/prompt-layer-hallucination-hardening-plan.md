@@ -1,5 +1,11 @@
 # Prompt Layer Hallucination Hardening Plan — v0.10 Codebase Alignment
 
+> **实施状态** (2026-07-09 更新): **v1.5.0-alpha1 已交付核心机制** — Node A/B/UI Card/Continuation/主历史清理/WaitingForClarification 全量落地；v1.5.0-alpha2 修复 Session UI 恢复。**ADR-17 已推翻本文档的以下条款**：§3.4（5+ 用户 Self-Challenge 字段） / §5（Statistics 面板） / §5.4 kill criteria **UI 可视化部分**（kill criteria 概念保留，通过用户直接对话反馈判定）/ §5.5（首周引导 tooltip）。**当前活跃条款**：§0 v0.10 收口决策 + §1~§4 核心机制 + §5.4 4 周实测窗口（无 UI）。历史读者请交叉参照 [`adr-17-minimalism.md`](adr-17-minimalism.md) 与 [`ROADMAP.md`](ROADMAP.md) §3.y 的实际交付状态。
+>
+> **文档定位**: 本文档为 Phase 9 上游设计基线，保留为**历史决策档案**；日常开发以 ROADMAP §3.y 的任务表 + ADR-17 为准。
+>
+> ---
+>
 > **状态**: v0.10 修订，对齐 v1.4.8 现有代码后可开工
 >
 > **v0.9 → v0.10 变更**：对照 [`AgentLoop.LLM.cs`](../Editor/Core/AgentLoop.LLM.cs) / [`AgentLoop.Runner.cs`](../Editor/Core/AgentLoop.Runner.cs) / [`DomainReloadState`](../Editor/Core/DomainReloadState.cs) / [`VisiblePlanningTraceExtractor`](../Editor/Core/VisiblePlanningTraceExtractor.cs) 交叉核对，收口 5 个必须在文档层解决的实施决策。不改核心机制，仅补齐工程边界。修订全部集中在下方 **§0 v0.10 收口决策**；其余章节保留 v0.9 内容不变，实施时以 §0 为准。

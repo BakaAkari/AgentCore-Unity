@@ -1,6 +1,7 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.4.8 | **更新日期**: 2026-07-08 | **状态**: Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台静默 + 增量索引与 §3.2 Chat UI / ThinkingDrawer 可观测性已完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.3–v1.3.7 一系列稳定性修复；v1.3.8 新增工具调用重复循环刹车；v1.4.0 完成 Phase 7 §3.1.1 索引 Scope 层次化与可观测性；v1.4.1 补齐 `package.json` 仓库元数据；v1.4.2 Settings UI 密度优化 + Section registry 死代码清理；v1.4.3 首次修复 VCS 组件在新项目未自动启用问题（项目级 `EditorPrefs` 跟踪）；v1.4.4 修复 v1.4.3 的"标记落下但 define 未写入"死锁 + 新增 `OptionalComponentDefaultsBootstrap` 引导器（`[InitializeOnLoadMethod]` + `EditorApplication.delayCall` 避开 Editor 启动早期 `PlayerSettings` 未就绪的竞态）；**v1.4.5 修复写入/创建/删除类工具未经用户确认即自动执行的安全漏洞**（`ToolRiskPolicy` 之前对 `metadata.RequiresConfirmation` 声明"透传但不使用"，破坏性 action 检测只覆盖 delete/remove/destroy 三个 token；现在 `RequiresConfirmation` 声明真正生效，破坏性 action 扩展到 write/create/copy/move/add_method/add_field 等 20+ 个 token，采用 token-level 匹配避免 read/list/search 误伤，SessionTrust 复用会话内不再重复弹）；**v1.4.6 修复 1.4.5 打包产物缺失 `OptionalComponentDefaultsBootstrap.cs.meta` 导致 VCS 依然不自动启用**（Unity UPM 只读包中缺失 meta 的 `.cs` 会被跳过编译；恢复 `AgentCoreSettings` 静态构造 fallback 双写路径，并新增 `tools/verify-meta.ps1` + `prepack` 钩子强制打包前校验 meta 完整性，杜绝该类问题再次进入发布产物）；**v1.4.7 修复勾选/取消 Optional Component 后不立即触发脚本编译的问题**（`OptionalComponentManager.SetDefine` 在 `PlayerSettings.SetScriptingDefineSymbolsForGroup` 后立即调用 `RequestScriptCompilation`，但 Unity 2021.3~2022.3 上前者延迟持久化，管线读到旧 defines 空转丢弃；现在按顺序 `PlayerSettings.SaveSettings` → `AssetDatabase.SaveAssets` → `Refresh` → `RequestScriptCompilation`，用户不再需要"切窗口重新聚焦"）；**v1.4.8 修复工具执行过程详情不可复制且被静默截断到 200 字符**（`ToolCallCard` 详情框改用只读 `TextField` 支持选择/Ctrl+C 复制、包 `ScrollView` 避免高度裁剪、移除所有 200 字符截断、新增头部"复制"按钮把完整原始内容写入 `EditorGUIUtility.systemCopyBuffer` 供用户诊断）；Plugin 系统已归档（见 ADR-15）；后续仅保留 MCP Server（Phase 8）与产品化分发两个待开发方向
+> **版本**: v1.5.0-alpha2 | **更新日期**: 2026-07-09 | **状态**:
+> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复（工具循环刹车 / 跨平台 define / 索引保守默认值 / 工具主线程超时 / 工具结果不截断且可复制）；v1.4.0 索引 Scope 层次化；v1.4.1 补齐 package.json 元数据；v1.4.2 Settings UI 密度优化；v1.4.3–v1.4.7 VCS 组件自启用修复链 + Optional Component 编译触发修复；v1.4.8 工具卡片详情不截断且可复制；**v1.4.9 Phase 9 Self-Challenge 骨架**（SelfChallengeData / SkipRules / Config + Settings 字段骨架 + 22 单元测试 + v16→v17 迁移）；**v1.5.0-alpha1 Phase 9 完整交付**（Node A Intent Self-Challenge + Node B Answer Self-Challenge 双节点 prompt 层幻觉护栏 + Correction retry + WaitingForClarification 状态机 + Continuation 模式 + SelfChallengeCard UI + 主对话历史清理，~2300 行新增） + **ADR-17 极简即开即用哲学全面落地**（Settings 精简：删除 9 字段 / 隐藏 25+ 字段 / 页面简化 5 处 / SelfChallengeConfig 4 常量替代用户配置；推翻上游 v0.10 §3.4/§5/§7.1 用户可控可观测优先）；**v1.5.0-alpha2 修复 Self-Challenge 卡片会话恢复丢失**（`RebuildMessageBubbles` 接入 `EnsureSelfChallengeCard`）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -88,7 +89,7 @@
 | **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery | G.1~G.3 完成；G.4~G.6 归档（经评估非必要） | [x] 核心完成 |
 | **Phase 7** | 1.0.x ~ 1.x | 索引体验深化、Chat 可观测性与产品化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Chat UI / ThinkingDrawer（v1.2.0）、Request Enrichment（v1.2.1）、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + reasoning 可审计 + 可分发产品 | [>] §3.1/§3.2 完成，§3.4 产品化待启动 |
 | **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中（治理前置 G.1~G.3 已满足） |
-| **Phase 9** | 1.5.x | Prompt 层幻觉护栏（**质量加固**） | Self-Challenge 双节点机制：Node A（读需求时挑战对用户意图的理解）+ Node B（输出前独立 reviewer 审视 draft）；带 §5.4 kill criteria 4 周实测窗口，异常即回滚 | v1.5.0 发布 + Statistics 面板 + 用户可观测 UI | [-] 设计定稿（v0.10），待编码前对齐 |
+| **Phase 9** | 1.5.x | Prompt 层幻觉护栏（**质量加固**） | Self-Challenge 双节点机制：Node A（读需求时挑战对用户意图的理解）+ Node B（输出前独立 reviewer 审视 draft）；带 §5.4 kill criteria 4 周实测窗口，异常即回滚；**ADR-17 推翻 §5 Statistics 面板 / §5.5 首周引导 tooltip** | v1.5.0-alpha1 核心机制上线；v1.5.0-alpha2 Session UI 恢复修复；v1.5.0 GA 待 4 周 kill criteria 验证 | [>] 核心已发布，GA 待观察窗口 |
 
 ---
 
@@ -280,40 +281,47 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 **架构决策**: 详见 ADR-16（Self-Challenge 定位为独立 Phase + 带 kill criteria 实验性发布）
 **治理约束**: 不属于治理层 G 系列——Self-Challenge 是 prompt 输出结构化机制，不涉及工具风险策略、能力授权或 Workspace 边界。与 G.5（已归档）的区别在于 G.5 曾试图引入 Operation Journal 架构层组件，Phase 9 完全在现有 AgentLoop 内做增强，不新增架构层。
 
-### 3.y.1 P0 — 核心机制（v1.5.0）
+### 3.y.1 P0 — 核心机制（v1.5.0-alpha1 已交付）
 
 | # | 任务 | 说明 | 预估 | 状态 |
 |---|------|------|------|------|
-| 9.1.1 | **Node A Intent Self-Challenge 核心机制** | `<intent_challenge>` prompt 模板（5 Step 含 Continuation 模式）+ `IntentChallengeStreamExtractor`（复用 [`VisiblePlanningTraceExtractor`](../Editor/Core/VisiblePlanningTraceExtractor.cs) 骨架，marker 换 XML tag）+ `IntentChallengeParser` 结构校验 + 独立小会话 correction retry | 6 人日 | [ ] |
-| 9.1.2 | **Node B Answer Self-Challenge 核心机制** | Reviewer prompt 模板 + `AnswerChallengeReviewer` 独立 LLM 调用 + 压缩历史组装（保留最近 3 轮 + Node A 关键假设，丢弃旧 answer_challenge）+ `AnswerChallengeParser`（含 `<draft-quote>` 校验）+ 三 Verdict 处理 | 4 人日 | [ ] |
-| 9.1.3 | **Waiting-for-Clarification 状态机** | `AgentState.WaitingForClarification` 枚举 + [`ToolCallDispatcher`](../Editor/Tools/ToolCallDispatcher.cs) 拒绝分发 + [`SessionData`](../Editor/Session/SessionData.cs) / [`DomainReloadState`](../Editor/Core/DomainReloadState.cs) 序列化 + ChatWindow 反问消息专属样式（`[?]` 图标 + 输入框 auto-focus） | 2 人日 | [ ] |
-| 9.1.4 | **主历史清理规则** | [`AgentLoop.Sanitization.cs`](../Editor/Core/AgentLoop.Sanitization.cs) 扩展：写入 `_messages` 时剥离 `<intent_challenge>` 与 `<intent_challenge_continuation>` 块；challenge 内容仅保留在 SelfChallengeData / Session；与 planning trace 清洗哲学一致 | 0.5 人日 | [ ] |
-| 9.1.5 | **强制终止路径 skip Node B** | [`RunToolCallLoopAsync`](../Editor/Core/AgentLoop.Runner.cs:31) 的 4 条强制终止路径（单工具连败 / 全失败 / 同目标重复 / 轮次-Token 上限）传 `skipAnswerChallenge=true`；避免 BLOCK verdict 与循环刹车死锁 | 0.3 人日 | [ ] |
-| 9.1.6 | **REVISE 单次不复审 + Domain Reload 放行 draft** | Node B REVISE verdict 触发 draft 重新生成后直接 `HandleFinalResponse` 输出（不再进 Node B）；Reviewer 调用中 domain reload 恢复时直接放行原 draft（`nodeBSkipReason=domain_reload_interrupt`），不新增 InterruptPhase | 0.5 人日 | [ ] |
-| 9.1.7 | **SelfChallengeData 序列化 + 3 个 AgentEvent** | `SelfChallengeData` 完整 schema 挂到 [`SerializableConversationTurn`](../Editor/Session/SessionData.cs)；新增 `IntentChallengeCompleted` / `AnswerChallengeCompleted` / `AnswerChallengeRegenerating` / `AnswerChallengeRegenerated` 事件 | 1 人日 | [ ] |
-| 9.1.8 | **SelfChallengeCard UI（默认折叠）** | Verdict 徽标（`[v]` / `[~]` / `[!]` / `[?]`）+ Node A 4 Step + Node B 4 Step 展开内容 + 复用 [`ToolCallCard`](../Editor/UI/Components/ToolCallCard.cs) v1.4.8 复制按钮模式 + 异常自动展开（REVISE/BLOCK/Awaiting Clarification）+ Domain Reload 重建 | 4 人日 | [ ] |
-| 9.1.9 | **AgentCoreSettings 配置项** | `intentChallengeEnabled` / `answerChallengeEnabled` / `answerChallengeMaxRetries`（默认 2，仅结构重试）/ `allowAgentClarificationQuestions` / `legacySelfChallengeDisabled` 5 个字段 + 版本迁移 | 0.5 人日 | [ ] |
-| 9.1.10 | **首周引导条款** | 首次启动 Chat 窗口一次性 tooltip + Self-Challenge Card 前 5 次强制展开 + README/CHANGELOG "如何判断 Self-Challenge 是否生效" 段落 | 0.9 人日 | [ ] |
+| 9.1.1 | **Node A Intent Self-Challenge 核心机制** | `<intent_challenge>` prompt 模板（5 Step 含 Continuation 模式）+ [`IntentChallengeStreamExtractor`](../Editor/Core/SelfChallenge/IntentChallengeStreamExtractor.cs)（复用 [`VisiblePlanningTraceExtractor`](../Editor/Core/VisiblePlanningTraceExtractor.cs) 骨架）+ [`IntentChallengeParser`](../Editor/Core/SelfChallenge/IntentChallengeParser.cs) 9 项结构校验 + 独立小会话 correction retry | 6 人日 | [x] v1.5.0-alpha1 |
+| 9.1.2 | **Node B Answer Self-Challenge 核心机制** | Reviewer prompt 模板 + `AnswerChallengeReviewer` 独立 LLM 调用 + 压缩历史（最近 3 轮 + Node A 关键假设）+ [`AnswerChallengeParser`](../Editor/Core/SelfChallenge/AnswerChallengeParser.cs)（`<draft-quote>` substring 校验）+ 三 Verdict 处理 | 4 人日 | [x] v1.5.0-alpha1 |
+| 9.1.3 | **Waiting-for-Clarification 状态机** | [`AgentState.WaitingForClarification`](../Editor/Core/MessageTypes.cs) 枚举 + [`ToolCallDispatcher`](../Editor/Tools/ToolCallDispatcher.cs) 拒绝分发 + [`SessionData`](../Editor/Session/SessionData.cs) / [`DomainReloadState`](../Editor/Core/DomainReloadState.cs) 序列化 + ChatWindow 反问消息状态标签 | 2 人日 | [x] v1.5.0-alpha1 |
+| 9.1.4 | **主历史清理规则** | [`AgentLoop.SelfChallenge.cs`](../Editor/Core/AgentLoop.SelfChallenge.cs) 的 `StripChallengeBlocks`：写入 `_messages` 时剥离 `<intent_challenge>` / `<answer_challenge>` / `<intent_challenge_continuation>` 三种块 | 0.5 人日 | [x] v1.5.0-alpha1 |
+| 9.1.5 | **强制终止路径 skip Node B** | [`RunToolCallLoopAsync`](../Editor/Core/AgentLoop.Runner.cs) 4 条强制终止路径（单工具连败 / 全失败 / 同目标重复 / 轮次-Token 上限）skip Node B；避免 BLOCK 与循环刹车死锁 | 0.3 人日 | [x] v1.5.0-alpha1 |
+| 9.1.6 | **REVISE 单次不复审 + Domain Reload 放行 draft** | Node B REVISE draft 重新生成后直接 `HandleFinalResponse` 不再进 Node B；Reviewer 调用中 domain reload 恢复时放行原 draft | 0.5 人日 | [~] v1.5.0-alpha1（REVISE 已做，Domain Reload 兜底部分实现待 alpha3） |
+| 9.1.7 | **SelfChallengeData 序列化 + AgentEvent** | `SelfChallengeData` 完整 schema 挂到 [`SerializableConversationTurn`](../Editor/Session/SessionData.cs)；新增 `IntentChallengeCompleted` / `AnswerChallengeCompleted` / `AnswerChallengeRegenerating` / `AnswerChallengeRegenerated` 事件 | 1 人日 | [x] v1.5.0-alpha1 + alpha2 UI 恢复修复 |
+| 9.1.8 | **SelfChallengeCard UI（默认折叠）** | Verdict 徽标（`[v]` / `[~]` / `[!]` / `[?]`）+ 中文 Verdict 标签（通过/已修正/已阻止/等待澄清/意图明确/未触发）+ 复用 [`ToolCallCard`](../Editor/UI/Components/ToolCallCard.cs) 复制按钮模式 + 异常自动展开 | 4 人日 | [x] v1.5.0-alpha1 |
+| 9.1.9 | ~~**AgentCoreSettings 配置项**~~ | ~~5 个用户可见字段~~ — **ADR-17 推翻，改为 1 个 `selfChallengeEnabled` 总开关 + 4 个内部常量（[`SelfChallengeConfig`](../Editor/Core/SelfChallenge/SelfChallengeConfig.cs)）** | 0.5 人日 | [x] v1.5.0-alpha1（按 ADR-17 精简版实施） |
+| 9.1.10 | ~~**首周引导条款**~~ | ~~一次性 tooltip + 前 5 次强制展开~~ — **ADR-17 推翻**：用户直接观察 Verdict 徽标即可自然感知，不建 tooltip 层 | 0.9 人日 | [x] ADR-17 永不实施 |
 
-### 3.y.2 P1 — Statistics 面板 + 4 周 kill criteria（v1.5.0 上线后）
+### 3.y.2 ~~P1 — Statistics 面板 + 4 周 kill criteria（v1.5.0 上线后）~~ — 已被 ADR-17 部分推翻
+
+> **ADR-17 决议（2026-07-09）**: Statistics 面板 UI 永不实施；4 周 kill criteria 保留但通过用户直接对话反馈判定，不建可视化面板。
 
 | # | 任务 | 说明 | 预估 | 状态 |
 |---|------|------|------|------|
-| 9.2.1 | **SelfChallengeStatistics 数据层** | ScriptableSingleton 累计最近 200 次 self-challenge 原始数据 + `RecordFallback` 记录 retry exhausted + 3 个 Key Metrics（Node B PASS 占比 / 反问触发占比 / retry 耗尽占比）实时计算 + Health badge 三态 | 1 人日 | [ ] |
-| 9.2.2 | **UiDiagnosticsSettingsPage 卡片** | "Self-Challenge Statistics" 卡片按 §11.6 v0.9 精简版布局：3 个 Key Metrics + Health badge + 详细数据折叠区 + Export CSV / Clear All / Refresh | 1 人日 | [ ] |
-| 9.2.3 | **4 周窗口 formal review** | 上线后 4 周内数据收集；review 时按 §5.4 5 项健康阈值判定：全绿 → 保留；1~2 项异常 → 局部调整；3+ 项异常 → 触发 retrospective 考虑回滚到"仅 UI 展示"轻量方案 | 用户决策 | [ ] |
+| 9.2.1 | ~~**SelfChallengeStatistics 数据层**~~ | ~~ScriptableSingleton 累计 + 3 个 Key Metrics + Health badge~~ | 1 人日 | [x] ADR-17 永不实施 |
+| 9.2.2 | ~~**UiDiagnosticsSettingsPage 卡片**~~ | ~~"Self-Challenge Statistics" 卡片（3 个 Key Metrics + Health badge + Export CSV）~~ | 1 人日 | [x] ADR-17 永不实施 |
+| 9.2.3 | **4 周窗口 formal review** | v1.5.0 GA 上线后 4 周内基于用户对话反馈判定；异常触发 retrospective 考虑回滚到"仅 UI 展示"轻量方案 | 用户决策 | [ ] v1.5.0 GA 后启动 |
 
-### 3.y.3 Phase 9 里程碑
+### 3.y.3 Phase 9 里程碑（实际交付）
 
 ```
-v1.5.0 — Phase 9 核心机制 + UI + 引导 + Statistics 面板（9.1.1 ~ 9.1.10, 9.2.1 ~ 9.2.2）
-v1.5.x — 4 周实测窗口内的 patch 修复（9.2.3 review 前）
+v1.4.9        — Self-Challenge 骨架（SelfChallengeData / SkipRules / Config + 22 单元测试）
+v1.5.0-alpha1 — 完整核心机制（Node A + Node B + Waiting for Clarification + Continuation + UI Card）
+              + ADR-17 极简即开即用哲学全面落地（Settings 精简 25+ 字段隐藏 + 9 字段删除）
+v1.5.0-alpha2 — Session 反序列化后 SelfChallengeCard UI 恢复修复
+v1.5.0-alpha3 (未定期) — Domain Reload 兜底完整实施 / BLOCK verdict 回 tool loop 完整实施 / Node A/B 单元测试
+v1.5.0-beta   — pre-GA 稳定性冲刺 + P1-11 PROJECT.md 模板按钮 + P2-12 AGENTS.md 极简规则沉淀
+v1.5.0 GA     — 4 周 kill criteria 实测窗口开启
 v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 ```
 
-**预估总工作量**: 17~20 人日（相较 v0.9 的 14~16 人日增加约 3~4 人日，用于流式抽取 + 主历史清理 + 5 个 v0.10 收口决策落地）
+**实际工作量**: v1.4.9 骨架 ~1.5 人日 + v1.5.0-alpha1 全量核心 ~15 人日 + alpha2 修复 ~0.5 人日 ≈ **17 人日**（与 v0.10 §0.7 估算 17-20 人日一致）
 
-**Legacy Mode**: v1.5.0 上线首日通过 `legacySelfChallengeDisabled = true` 提供关闭开关，用户可临时回到 v1.4.x 行为做 A/B 对比。
+**Kill switch**: `selfChallengeEnabled = false` 一键回到 v1.4.9 骨架前行为。
 
 ---
 
@@ -518,6 +526,41 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 - **不影响**:
   - 现有 `OptionalComponentManager` / `IAgentCorePanelContribution` / `IAgentCoreSettingsContribution` 扩展机制保持不变（这些是内置可选组件用的，不是用户 Plugin 用的）
   - 用户仍可通过 Editor asmdef + `[AgentTool]` 自行添加工具（这是框架天然能力，不需要"Plugin 系统"）
+
+### ADR-17: 极简即开即用哲学 (Minimalism Everywhere)
+
+**状态**: `已决策 — 全面落地` | **日期**: 2026-07-09 | **详见**: [`adr-17-minimalism.md`](adr-17-minimalism.md)
+
+- **决策**: 全产品采纳"用户装了就能用，零配置默认最优，只有必要时才暴露选项"的极简哲学，作为产品设计基线
+- **触发**: Self-Challenge 从 6 个用户字段简化到 1 个总开关（方案乙）后，用户明确要求将此哲学贯彻到全产品
+- **5 条实施规则**（写入 AGENTS.md 顶层）:
+  1. **默认最优，不问用户**: 若 80% 用户会选同一个值，就写死为默认，**不给 UI 选项**
+  2. **一件事一个开关**: 抽出总开关，内部细节写死
+  3. **术语必须白话**: 严禁 "Node A" / "Fallback Routing" / "Token Budget" 等工程术语出现在**用户可见字段名**
+  4. **高级功能有 Advanced foldout**: 默认折叠 + 明确警告标签
+  5. **可选服务用 ServiceCard 模式**: 服务默认关闭，用户明确开启后才展开配置
+- **推翻的设计文档条款**:
+  - **v0.10 §3.4 (5+ 用户 Self-Challenge 字段)**: 改为 1 个 `selfChallengeEnabled` 总开关 + 4 个内部常量（[`SelfChallengeConfig`](../Editor/Core/SelfChallenge/SelfChallengeConfig.cs)）
+  - **v0.10 §5 (Statistics 面板)**: 彻底删除，永不实施
+  - **v0.10 §5.4 (4 周 kill criteria 可视化 UI)**: 保留 kill criteria 概念，但通过用户直接对话反馈判断，不建 UI
+  - **v0.9 §5.5 (首周引导 tooltip)**: 彻底删除；Verdict 徽标本身就是可观测反馈
+- **v1.5.0-alpha1 落地内容**:
+  - **AgentCoreSettings 字段清理**: 删除 9 字段、[HideInInspector] 25+ 字段、v17→v18 迁移
+  - **5 个 Settings Pages 精简**: Model & Agent / Context & Memory / UI & Diagnostics / Workspace / Tools & Extensions
+  - **VCS Settings Contribution 精简**
+  - **SelfChallengeConfig 4 常量**: `NodeARetryMax` / `NodeBRetryMax` / `AllowClarificationQuestions` / `CardForcedExpansionCount`
+- **语言策略**（ADR-17 定稿后追加决议）:
+  - **Settings 界面**: 英文（避免字体缺失导致乱码；配置项本身信息密度需要）
+  - **ChatWindow / SelfChallengeCard / AgentEvent 状态标签**: 中文（面向最终用户对话体验）
+- **相关文档**: [`plans/minimalism-audit-report.md`](_archive/analysis/minimalism-audit-report.md)（审计报告，已归档）；[`plans/adr-17-minimalism.md`](adr-17-minimalism.md)（决策记录，活跃）
+- **不影响**:
+  - 治理层 G.1~G.3 边界策略（Tool Risk Policy 等仍生效）
+  - Self-Challenge 双节点核心机制本身（只影响用户可见字段与 UI 呈现）
+  - Legacy Mode 关闭能力（`selfChallengeEnabled = false` 一键回退）
+- **拒绝替代方案**:
+  - "保留用户可控性优先" — v0.10 §3.4 已被推翻，因为多数用户不需要为技术细节做决策
+  - "改用中文简化 Settings" — 中文导致字体缺失设备显示错误；改为英文简练短述
+  - "留 Advanced 折叠区暴露 25+ 内部字段" — 违反规则 1；直接 [HideInInspector]
 
 ---
 

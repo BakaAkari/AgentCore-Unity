@@ -6,7 +6,7 @@
 
 1. Unity Editor → Window → Package Manager
 2. 左上角 `+` → **Add package from tarball...**
-3. 选择 `com.agentcore.unity-1.3.8.tgz`
+3. 选择当前 `com.agentcore.unity-<version>.tgz`（当前发行版：`1.5.0-alpha2`；具体文件名以 [`package.json`](package.json) 中 `version` 字段为准）
 4. 等待导入完成
 
 **要求**: Unity 2021.3+
