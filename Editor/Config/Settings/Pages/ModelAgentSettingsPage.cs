@@ -160,6 +160,25 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     settings.SaveSettings();
                 }
             });
+
+            // ── Self-Challenge ──
+            // v1.5.0-alpha 极简哲学: 一个开关控制整个双节点机制, 内部策略由工程侧决定最优值。
+            context.Ui.DrawCard(
+                "Self-Challenge",
+                "在每次对话时让 Agent 挑战自己对你需求的理解, 输出前再自审一遍。会稍微增加响应时间与 token 用量, 但降低误解和幻觉。默认启用。",
+                () =>
+                {
+                    EditorGUI.BeginChangeCheck();
+
+                    settings.selfChallengeEnabled = EditorGUILayout.Toggle(
+                        new GUIContent("Enable Self-Challenge", "启用后 Agent 会在每次对话前挑战自己对需求的理解, 输出前也会自审一遍。关闭则回到不带自挑战的行为。"),
+                        settings.selfChallengeEnabled);
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        settings.SaveSettings();
+                    }
+                });
         }
 
         // ── Model Selector ──

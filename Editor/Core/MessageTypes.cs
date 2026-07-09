@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using System.Linq;
+using AgentCore.Editor.Core.SelfChallenge;
 using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Core
@@ -30,6 +31,13 @@ namespace AgentCore.Editor.Core
 
         /// <summary>正在压缩上下文（Phase 5）</summary>
         Compressing,
+
+        /// <summary>
+        /// 等待用户澄清 — Node A(Intent Self-Challenge)Step 4 结论 = 反问用户时进入。
+        /// 该状态下 ToolCallDispatcher 拒绝分发任何工具调用。用户回复后走 Node A Continuation 模式。
+        /// v1.4.9 Phase 9 骨架起引入枚举值; Stage 4 完整实施状态机行为。
+        /// </summary>
+        WaitingForClarification,
 
         /// <summary>发生错误</summary>
         Error
@@ -103,7 +111,33 @@ namespace AgentCore.Editor.Core
         ReasoningToken,
 
         /// <summary>reasoning / planning trace 已完成</summary>
-        ReasoningCompleted
+        ReasoningCompleted,
+
+        // === Phase 9 (v1.4.9 骨架) 新增 ===
+        // 实际 emit 由 Stage 2/3/5 完成；v1.4.9 仅登记枚举值供 UI/日志侧代码提前分发。
+
+        /// <summary>
+        /// Node A（Intent Self-Challenge）完成 — 无论是 skip 还是完整执行都触发。
+        /// Payload：<see cref="AgentEvent.SelfChallenge"/> 里 Node A 相关字段已填充；Node B 字段为默认值。
+        /// </summary>
+        IntentChallengeCompleted,
+
+        /// <summary>
+        /// Node B（Answer Self-Challenge）完成 — 无论是 skip 还是完整执行都触发。
+        /// Payload：<see cref="AgentEvent.SelfChallenge"/> 里 Node A + Node B 字段全部填充完毕。
+        /// </summary>
+        AnswerChallengeCompleted,
+
+        /// <summary>
+        /// Node B Verdict = REVISE 且 draft 重新生成开始时触发（UI 显示"正在修正..."）。
+        /// </summary>
+        AnswerChallengeRegenerating,
+
+        /// <summary>
+        /// draft 重新生成完成后触发（<see cref="AnswerChallengeRegenerating"/> 的收尾）；
+        /// 触发后 UI 恢复正常显示；v0.10 §0.4：新 draft 不再进 Node B，直接输出。
+        /// </summary>
+        AnswerChallengeRegenerated
     }
 
     #endregion
@@ -188,6 +222,20 @@ namespace AgentCore.Editor.Core
         public ThinkingTraceSource ReasoningSource { get; }
 
         /// <summary>
+        /// Self-Challenge 数据（Phase 9，v1.4.9 骨架起）；
+        /// 仅 <see cref="AgentEventType.IntentChallengeCompleted"/> /
+        /// <see cref="AgentEventType.AnswerChallengeCompleted"/> /
+        /// <see cref="AgentEventType.AnswerChallengeRegenerating"/> /
+        /// <see cref="AgentEventType.AnswerChallengeRegenerated"/> 事件有值。
+        /// </summary>
+        public SelfChallengeData SelfChallenge { get; }
+
+        /// <summary>
+        /// 关联的 turn ID（Phase 9）；供 UI 侧定位到具体的 SelfChallengeCard。
+        /// </summary>
+        public string TurnId { get; }
+
+        /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
         private AgentEvent(
@@ -207,7 +255,9 @@ namespace AgentCore.Editor.Core
             List<FileChangeSummary> fileChanges = null,
             ToolPolicyDecision? policy = null,
             ToolConfirmationRequest confirmationRequest = null,
-            ThinkingTraceSource reasoningSource = ThinkingTraceSource.None)
+            ThinkingTraceSource reasoningSource = ThinkingTraceSource.None,
+            SelfChallengeData selfChallenge = null,
+            string turnId = null)
         {
             Type = type;
             State = state;
@@ -226,6 +276,8 @@ namespace AgentCore.Editor.Core
             Policy = policy;
             ConfirmationRequest = confirmationRequest;
             ReasoningSource = reasoningSource;
+            SelfChallenge = selfChallenge;
+            TurnId = turnId;
         }
 
         #region Phase 1 工厂方法
@@ -486,6 +538,70 @@ namespace AgentCore.Editor.Core
         }
 
         #endregion
+
+        #region Phase 9 (v1.4.9 骨架) 工厂方法
+
+        /// <summary>
+        /// 创建 Node A 完成事件（Phase 9）。
+        /// 无论 Node A 是 skip 还是完整执行都在最后触发；<paramref name="data"/> 包含本轮的 Node A 快照。
+        /// </summary>
+        /// <param name="data">Self-Challenge 数据，Node A 部分已填充</param>
+        /// <param name="turnId">关联的 assistant turn ID</param>
+        public static AgentEvent IntentChallengeCompleted(SelfChallengeData data, string turnId)
+        {
+            return new AgentEvent(
+                AgentEventType.IntentChallengeCompleted,
+                selfChallenge: data,
+                turnId: turnId
+            );
+        }
+
+        /// <summary>
+        /// 创建 Node B 完成事件（Phase 9）。
+        /// 无论 Node B 是 skip 还是完整执行都在最后触发；<paramref name="data"/> 包含本轮完整的 A+B 快照。
+        /// </summary>
+        /// <param name="data">Self-Challenge 数据，Node A + Node B 部分均已填充</param>
+        /// <param name="turnId">关联的 assistant turn ID</param>
+        public static AgentEvent AnswerChallengeCompleted(SelfChallengeData data, string turnId)
+        {
+            return new AgentEvent(
+                AgentEventType.AnswerChallengeCompleted,
+                selfChallenge: data,
+                turnId: turnId
+            );
+        }
+
+        /// <summary>
+        /// 创建 Node B REVISE draft 重新生成开始事件（Phase 9）。
+        /// v0.10 §0.4：REVISE 后 draft 重新生成，新 draft 不再进 Node B，直接输出。
+        /// </summary>
+        /// <param name="data">Self-Challenge 数据，<see cref="SelfChallengeData.ReviseIssues"/> 已填充</param>
+        /// <param name="turnId">关联的 assistant turn ID</param>
+        public static AgentEvent AnswerChallengeRegenerating(SelfChallengeData data, string turnId)
+        {
+            return new AgentEvent(
+                AgentEventType.AnswerChallengeRegenerating,
+                selfChallenge: data,
+                turnId: turnId
+            );
+        }
+
+        /// <summary>
+        /// 创建 Node B REVISE draft 重新生成完成事件（Phase 9）。
+        /// 触发时新 draft 已生成，UI 恢复正常显示。
+        /// </summary>
+        /// <param name="data">Self-Challenge 数据，<see cref="SelfChallengeData.DraftRegenerated"/> = true</param>
+        /// <param name="turnId">关联的 assistant turn ID</param>
+        public static AgentEvent AnswerChallengeRegenerated(SelfChallengeData data, string turnId)
+        {
+            return new AgentEvent(
+                AgentEventType.AnswerChallengeRegenerated,
+                selfChallenge: data,
+                turnId: turnId
+            );
+        }
+
+        #endregion
     }
 
     #endregion
@@ -633,6 +749,12 @@ namespace AgentCore.Editor.Core
 
         /// <summary>本轮的工具调用信息列表（Phase 2 新增，可为 null 表示无工具调用）</summary>
         public List<ToolCallInfo> ToolCalls { get; set; }
+
+        /// <summary>
+        /// Self-Challenge 数据（Phase 9，v1.4.9 骨架起）；
+        /// 未参与 self-challenge 的 turn 为 <c>null</c>，UI 层遇到 null 不渲染卡片。
+        /// </summary>
+        public SelfChallengeData SelfChallenge { get; set; }
 
         /// <summary>
         /// 创建一个新的对话轮次。

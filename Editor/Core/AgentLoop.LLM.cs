@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config;
@@ -67,6 +68,9 @@ namespace AgentCore.Editor.Core
             // 每次 LLM 调用重新识别可见规划 trace；reasoning 内容保留在同一个 assistant turn 中追加。
             _visiblePlanningTraceExtractor.Reset();
 
+            // Phase 9: 每次 LLM 调用前重置 SelfChallenge extractors (Node A / Node B stream 抽取器)
+            ResetSelfChallengeExtractorsForNewRound();
+
             // 切换到 Streaming 状态
             SetState(AgentState.Streaming);
 
@@ -82,6 +86,15 @@ namespace AgentCore.Editor.Core
                 ct: ct,
                 onStatusUpdate: status => EmitEvent(AgentEvent.ErrorEvent($"[Retry] {status}"))
             );
+
+            // Phase 9: 如果 Node A 结构校验失败, 触发独立小会话 correction retry (v0.9 §11.5)
+            if (_pendingNodeAValidationIssues != null && _pendingNodeAValidationIssues.Count > 0)
+            {
+                var lastUser = _messages.LastOrDefault(m => m.Role == "user")?.Content ?? string.Empty;
+                var issuesSnapshot = _pendingNodeAValidationIssues;
+                _pendingNodeAValidationIssues = null;
+                await TryNodeACorrectionRetryAsync(lastUser, assistantTurn, issuesSnapshot, ct);
+            }
 
             return assistantMessage;
         }
@@ -143,7 +156,11 @@ namespace AgentCore.Editor.Core
             if (string.IsNullOrEmpty(content) || assistantTurn == null)
                 return;
 
-            var delta = _visiblePlanningTraceExtractor.Append(content);
+            // Phase 9: 先过 SelfChallenge extractors (Node A / Node B), 剥离 challenge 块后再送 VisiblePlanningTraceExtractor
+            string filtered = ProcessTokenThroughSelfChallengeExtractors(content, assistantTurn);
+            if (string.IsNullOrEmpty(filtered)) return;
+
+            var delta = _visiblePlanningTraceExtractor.Append(filtered);
             assistantTurn.PlanningTraceState = delta.State;
 
             if (!string.IsNullOrEmpty(delta.ReasoningContent))

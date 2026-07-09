@@ -21,7 +21,7 @@ namespace AgentCore.Editor.UI
     /// 左侧 Hub Rail 导航栏切换模块，中间 Context Sidebar 显示模块上下文，右侧 Main Content 显示模块内容。
     /// </para>
     /// <para>
-    /// 通过菜单 Window -> AgentCore（快捷键 Ctrl+Shift+A）打开。
+    /// 通过菜单 Window -> AgentCore（快捷键 Ctrl+Shift+Q）打开。
     /// </para>
     /// </summary>
     public partial class ChatWindow : EditorWindow
@@ -167,9 +167,9 @@ namespace AgentCore.Editor.UI
 
         /// <summary>
         /// 通过 Unity 菜单打开 AgentCore 主窗口。
-        /// 快捷键：Ctrl+Shift+A (Windows) / Cmd+Shift+A (macOS)。
+        /// 快捷键：Ctrl+Shift+Q (Windows) / Cmd+Shift+Q (macOS)。
         /// </summary>
-        [MenuItem("Window/AgentCore %#a")]
+        [MenuItem("Window/AgentCore %#q")]
         public static void ShowWindow()
         {
             var window = GetWindow<ChatWindow>();

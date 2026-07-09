@@ -81,6 +81,14 @@ namespace AgentCore.Editor.UI
                 case AgentEventType.FileChangesUpdated:
                     _fileChangeSummaryPanel?.UpdateChanges(evt.FileChanges);
                     break;
+
+                // Phase 9: Self-Challenge 事件
+                case AgentEventType.IntentChallengeCompleted:
+                case AgentEventType.AnswerChallengeCompleted:
+                case AgentEventType.AnswerChallengeRegenerating:
+                case AgentEventType.AnswerChallengeRegenerated:
+                    HandleSelfChallengeEvent(evt);
+                    break;
             }
 
             // Phase 6.0.4: 每次事件后更新上下文使用情况面板
@@ -113,6 +121,12 @@ namespace AgentCore.Editor.UI
                     UpdateStatusLabel("回复中...");
                     SetSendEnabled(false);
                     SetCancelVisible(true);
+                    break;
+
+                case AgentState.WaitingForClarification:
+                    UpdateStatusLabel("等待你的澄清...");
+                    SetSendEnabled(true);
+                    SetCancelVisible(false);
                     break;
 
                 case AgentState.ExecutingTool:

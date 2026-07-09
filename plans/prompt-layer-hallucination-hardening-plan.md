@@ -1,6 +1,8 @@
-# Prompt Layer Hallucination Hardening Plan — v0.9 Self-Challenge + Purified from Enumeration Regressions
+# Prompt Layer Hallucination Hardening Plan — v0.10 Codebase Alignment
 
-> **状态**: 设计定稿，v0.9 修正版，可直接进入 v1.5.0 实施
+> **状态**: v0.10 修订，对齐 v1.4.8 现有代码后可开工
+>
+> **v0.9 → v0.10 变更**：对照 [`AgentLoop.LLM.cs`](../Editor/Core/AgentLoop.LLM.cs) / [`AgentLoop.Runner.cs`](../Editor/Core/AgentLoop.Runner.cs) / [`DomainReloadState`](../Editor/Core/DomainReloadState.cs) / [`VisiblePlanningTraceExtractor`](../Editor/Core/VisiblePlanningTraceExtractor.cs) 交叉核对，收口 5 个必须在文档层解决的实施决策。不改核心机制，仅补齐工程边界。修订全部集中在下方 **§0 v0.10 收口决策**；其余章节保留 v0.9 内容不变，实施时以 §0 为准。
 >
 > **v0.7 → v0.8 变更**：审计 v0.7 发现 7 处 gap + 3 处冲突，v0.8 补齐（但引入回归风险）
 >
@@ -47,9 +49,143 @@
 
 ---
 
-## 0. 核心洞察与假设
+## 0. v0.10 收口决策（实施时以本节为准）
 
-### 0.1 从 v0.3 学到的两件事（不能忘的教训）
+对照 v1.4.8 实际代码，v0.9 有 5 处工程边界文档未覆盖。本节以**最简方案**定案，不做架构重构。
+
+### 0.1 Node A 输出的流式抽取（对齐 VisiblePlanningTrace 抽取器）
+
+**问题**：Node A 在同一 LLM 请求内输出 `<intent_challenge>` 块，[`OnStreamChunkReceived()`](../Editor/Core/AgentLoop.LLM.cs:96) 会把 content token 实时渲染到 UI 气泡；不做抽取，challenge 块直接进入用户可见的消息。
+
+**方案**：**复用 [`VisiblePlanningTraceExtractor`](../Editor/Core/VisiblePlanningTraceExtractor.cs) 的 marker 抽取模式**，新增 `IntentChallengeStreamExtractor`（同一份代码骨架，只换 marker）。marker 用 XML tag `<intent_challenge>` / `</intent_challenge>`（Node A）与 `<intent_challenge_continuation>` / `</intent_challenge_continuation>`（Continuation）。
+
+**流式处理规则**（与 planning trace 对齐）：
+- 未命中起始 marker 前，content token 按现有逻辑正常渲染到气泡
+- 命中起始 marker 后进入 buffering，buffer 内容送到 SelfChallengeCard 的实时预览而不是气泡（复用 `ReasoningToken` 事件通道，`ReasoningSource` 新增枚举值 `IntentChallenge`）
+- 命中结束 marker 后 buffer 完整移交给 `IntentChallengeParser` 做结构校验
+- 主气泡最终显示的 `Content` = challenge 块**之外**的 assistant 内容（通常应为空；若非空说明模型违反了"完成 challenge 前禁止调工具"的 prompt 约束，见 §0.2）
+
+**Node B 不需要流式抽取**：Node B 是独立 LLM 调用，draft 已生成、review 输出不进入用户气泡，直接完整解析。
+
+**工作量修正**：新增约 **2 人日**（复用现有抽取器骨架，主要成本在事件管线接线和边界测试）。
+
+### 0.2 challenge 块残缺 / 与 tool_calls 并存的处理
+
+**问题**：模型可能在同一响应里输出残缺 challenge 块 + tool_calls；correction retry 用独立小会话重新生成 block 时，主会话已拿到的 tool_calls 如何处理未定义。
+
+**方案**：**challenge 结构校验失败即丢弃本轮 tool_calls，进入独立 retry**。
+
+具体规则：
+1. 流式结束后先做结构校验。若结构失败：
+   - 本轮 `assistantMessage.ToolCalls` **不写入 `_messages`**，也不 dispatch 到 [`ToolCallDispatcher`](../Editor/Tools/ToolCallDispatcher.cs)
+   - 本轮 `assistantMessage.Content` 中的残缺 challenge 块**也不写入 `_messages`**（避免污染后续压缩 / 上下文）
+   - 走 §11.5 的独立小会话 retry，最多 `answerChallengeMaxRetries` 次
+2. Retry 成功 → 用 retry 产物的 challenge 块 + 决策结论覆盖本轮结果，主历史里补一条精简的 `ChatMessage.Assistant(challengeBlock)`（不含 tool_calls），然后：
+   - Step 4 结论 = 直接执行 → 下一轮 LLM 调用会重新产生 tool_calls（Node A prompt 里的"完成 challenge 后开始调工具"由 LLM 自然接续；一次多花一轮 LLM 往返换清洁历史）
+   - Step 4 结论 = 反问 → 进入 `WaitingForClarification`，正常流程
+3. Retry 全部失败（exhausted）→ §11.5 fallback：接受 v0.9 定义的"尽力解析"结果 + Statistics 记录，主历史照常写入 assistant message（含 tool_calls），不阻塞用户任务
+
+**理由**：v0.9 §11.5 已经把 retry 定为独立小会话，本决策只是把"主会话侧的清理规则"补齐——**结构失败时宁可重跑一轮，也不让残缺内容进主历史**。这与现有 `PrepareAssistantMessageForHistory` 的"清洗后再写入历史"哲学一致。
+
+### 0.3 强制终止路径 skip Node B
+
+**问题**：[`RunToolCallLoopAsync()`](../Editor/Core/AgentLoop.Runner.cs:31) 有 4 条强制终止路径（单工具连败 block / 全失败 block / 同目标重复 block / 轮次/Token 上限）都会走 `HandleFinalResponse`。若这些"被迫总结"触发 Node B 且 verdict = BLOCK（语义是"回 tool loop"）→ 死锁。
+
+**方案**：**强制终止路径产生的 final response 无条件 skip Node B**。
+
+具体实施：
+- `HandleFinalResponse` 增加 `bool skipAnswerChallenge` 参数（默认 false）
+- 4 条强制终止路径调用时传 `skipAnswerChallenge: true`
+- Node B 触发判定第一条：`if (skipAnswerChallenge) return draft;`
+- SelfChallengeData 里 `nodeBSkipReason = "forced_termination"`；Statistics 单独归类，不计入 PASS/REVISE/BLOCK 分布，避免污染 §5.4 健康阈值判定
+
+**理由**：强制终止的总结**本来就不是模型的自然结论**，是工程侧硬压出来的降级答复，让 Reviewer 挑战它没有意义，而且 BLOCK verdict 与"已经强制退出"直接矛盾。这是护栏优先级问题，循环刹车（既有护栏）优先于 self-challenge（新护栏）。
+
+### 0.4 REVISE 循环上限
+
+**问题**：`answerChallengeMaxRetries` 只管 Node B 结构校验重试。REVISE verdict 触发 draft 重新生成后，新 draft 是否再过 Node B？v0.9 未定义。
+
+**方案**：**REVISE 后重新生成的 draft 不再过 Node B，直接输出**。
+
+具体实施：
+- Node B 第一次 verdict = REVISE → 发送 `AnswerChallengeRegenerating` 事件，用 `reviseIssues` 作为 system feedback 重新调 LLM 生成新 draft
+- 新 draft 生成完成 → 发送 `AnswerChallengeRegenerated` 事件，**直接走 `HandleFinalResponse` 输出给用户，不再进 Node B**
+- SelfChallengeData 里 `draftRegenerated = true` 明确记录本次是"修正后输出"
+
+**理由**：
+- REVISE 循环本质是"模型审查模型自己刚改的东西"——一致性偏差最严重的场景，反复循环极可能永远 REVISE 或永远 PASS，没有收敛保证
+- 一次 REVISE 已经把 Reviewer 提出的问题作为 feedback 强制注入，改写后的 draft 已经比原始 draft 严格；再审查 ROI 极低但成本翻倍
+- UI 层 Verdict 徽标显示 `[~] REVISED`（v0.9 §3.5.3 已有）已经足够向用户说明"本轮 draft 被修正过"
+- 用户可通过后续对话继续追问，这是自然的 human-in-the-loop 兜底
+
+**BLOCK verdict 不受影响**：BLOCK 语义是"必须先做验证性 tool call"，回到 tool loop 后新一轮的 final response 会再过 Node B（那是一个新的 draft，不是同一个 draft 的修正）。
+
+### 0.5 Node B 在飞时的 Domain Reload
+
+**问题**：[`InterruptPhase`](../Editor/Core/DomainReloadState.cs:11) 只有 Streaming/ExecutingTool/WaitingCompilation。Node B reviewer 调用中发生 domain reload（draft 已生成、review 未完成）无恢复策略。
+
+**方案**：**Node B in-flight 时的 domain reload 直接放行原始 draft，不做恢复**。
+
+具体实施：
+- **不新增 InterruptPhase**（避免为一个低频路径引入枚举 + 状态机分支）
+- Node B 开始前 draft 已经完整生成（v0.9 §1.3.2 明确设计），domain reload 前 draft 已在内存中即将被消费
+- 在 `AnswerChallengeReviewer.ReviewAsync` 内部，把当前 draft 作为**兜底数据**写入 [`DomainReloadState`](../Editor/Core/DomainReloadState.cs)（复用现有 `_lastAssistantContent` 字段族即可，不新增字段）
+- Reload 恢复时若 `_lastAssistantContent` 是完整 assistant 文本且未包含 challenge block → 视为"Reviewer 未完成"，直接调用 `HandleFinalResponse(draft, skipAnswerChallenge: true)` 输出
+- SelfChallengeData 里 `nodeBSkipReason = "domain_reload_interrupt"`
+
+**理由**：
+- Node B 是**额外一次 LLM 调用**（v0.9 §4.2 明确），本质是可选的加固层。丢失一次 Review 对最终 draft 内容**没有损坏**（draft 已经完整生成），只是失去了本轮的额外挑战
+- 重跑 Review 的替代方案需要新增 InterruptPhase + `DomainReloadState` 字段 + 状态机分支 + `TryResumeAfterReload` 分支 + UI 恢复逻辑，工作量约 2 人日，收益是"低频场景下多做一次挑战"——**性价比不成立**
+- Domain reload 本身对用户可见（Chat 窗口会显示恢复过程），用户看到 Verdict 徽标显示 `interrupted` 状态即可理解
+
+### 0.6 主历史里旧 `<intent_challenge>` 块的清理
+
+**问题**：v0.9 §11.1 只规定 Node B 压缩时丢弃旧 `<answer_challenge>`，但主会话历史里**每轮都会累积 `<intent_challenge>` 块**（v0.7 起 Node A 每轮触发）。10 轮对话后主历史里有 10 个 challenge 块，全部参与后续 LLM 请求，token 无谓膨胀。
+
+**方案**：**在 [`AgentLoop.Sanitization.cs`](../Editor/Core/AgentLoop.Sanitization.cs) 新增清理规则：写入 `_messages` 时剥离 challenge 块**，只保留本轮 assistant 的实际内容。
+
+具体实施：
+- `PrepareAssistantMessageForHistory` 已经在做类似清洗（剥离 visible planning trace），扩展为同时剥离 `<intent_challenge>...</intent_challenge>` 和 `<intent_challenge_continuation>...</intent_challenge_continuation>`
+- 完整 challenge 块**只保留在** `SelfChallengeData`（供 UI 卡片渲染 + Statistics）和 SessionData 序列化，**不进入** LLM 上下文历史
+- 追责链不受影响：Node B 需要引用 Node A 关键假设时，`AnswerChallengeReviewer.BuildReviewerMessages` 从 `SelfChallengeData` 读取 challenge 块拼接到 reviewer prompt（v0.9 §11.1 已经这样设计，本决策只是明确"主历史不带、reviewer prompt 从旁路带"）
+
+**理由**：与现有清洗哲学一致（planning trace 也是"UI 层保留 / LLM 历史不带"），无新概念。
+
+### 0.7 v0.10 工作量重估
+
+| 项目 | v0.9 估算 | v0.10 修正 |
+|------|----------|-----------|
+| 核心机制（Parser / Reviewer / Prompt） | 6~8 人日 | 6~8 人日（不变） |
+| 强制反问用户 + WaitingForClarification | 2 人日 | 2 人日（不变） |
+| 用户可观测 UI（SelfChallengeCard） | 3~4 人日 | 3~4 人日（不变） |
+| **§0.1 流式抽取（新增）** | 未估 | **+2 人日** |
+| **§0.2 主历史清理规则（新增）** | 未估 | **+0.5 人日** |
+| **§0.3 强制终止 skip Node B（新增）** | 未估 | **+0.3 人日** |
+| **§0.4 REVISE 单次不复审（新增）** | 未估 | **+0 人日**（本来就是简化） |
+| **§0.5 domain reload 放行 draft（新增）** | 未估 | **+0.5 人日**（仅补 skip 分支） |
+| **§0.6 主历史清理（新增）** | 未估 | **+0.5 人日** |
+| Statistics 面板 | 2~3 人日 | 2~3 人日（不变） |
+| **合计** | **14~16 人日** | **17~20 人日** |
+
+比 v0.9 增加约 3~4 人日，代价换来 5 个边界决策清晰、可直接编码。
+
+### 0.8 v0.10 文档遗留清理清单（低优）
+
+以下 v0.9 内容与本次修订不一致，实施时按此清单对齐：
+
+- **§4.1** "Node A 只在首次调用触发"改为"每轮触发"（v0.7 起决策，v0.9 §4.1 漏改）
+- **§11.2** `MessageTurn` 类不存在，改为 [`ConversationTurn`](../Editor/Core/MessageTypes.cs:600) / `SerializableConversationTurn`；`selfChallenge` 字段按现有 `SerializableConversationTurn` 序列化模式添加
+- **§11.8 清单**：删除"Re-run canary probes 按钮"（§11.7 已取消）；SkipRules 从 R1-R5 改为 R1+R3（v0.9 §1.2.1 已取消 R2/R4/R5）
+- **§11.2 `SelfChallengeData` 注释**里的 `nodeASkipReason` 值列表从 5 条缩为 2 条：`"R1_short"` / `"R3_url"` / `null`；新增 `"forced_termination"` / `"domain_reload_interrupt"`（§0.3 / §0.5）
+- **§3.4 配置项**：`answerChallengeMaxRetries` 语义明确为"Node B 结构校验重试上限"，不包含 REVISE 重生成次数（REVISE 固定 1 次，§0.4）
+
+---
+
+## 0-legacy. v0.9 核心洞察与假设（保留供追溯，不作为实施依据）
+
+> 以下小节编号 0.1 / 0.2 / 0.3 属于 v0.9 遗留，与 §0 中的 v0.10 收口决策**编号无关**。实施时请以 §0 为准，本节仅用于理解 v0.4→v0.9 立场演化。
+
+### 0-legacy.1 从 v0.3 学到的两件事（不能忘的教训）
 
 **教训 1：幻觉的触发点是"看似完整的部分答案"**
 - 工具返回结构漂亮 + 字段齐全 → LLM 认为答案正确
@@ -61,7 +197,7 @@
 - 但这是被用户追问后才做的
 - 说明 self-review 能力**存在**，只是**没有在正确的时机自动触发**
 
-### 0.2 v0.4 的唯一策略
+### 0-legacy.2 v0.4 的唯一策略
 
 **在两个明确的时间点，工程侧强制注入 self-challenge，激活 LLM 已有但被动的元认知能力。**
 
@@ -74,7 +210,7 @@
 - **只在两个节点触发**：不是每轮都问，避免 token 浪费和干扰有效推理
 - **依赖 LLM 已有能力**：图 3 证明 LLM 有 self-review 能力，只是被动
 
-### 0.3 关键设计难题（本方案的核心工程挑战）
+### 0-legacy.3 关键设计难题（本方案的核心工程挑战）
 
 **难题 1：如何避免 self-challenge 沦为 rubber-stamp？**
 

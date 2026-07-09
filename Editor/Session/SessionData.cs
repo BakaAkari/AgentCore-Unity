@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.Core;
+using AgentCore.Editor.Core.SelfChallenge;
 using AgentCore.Editor.LLM;
 using Newtonsoft.Json;
 
@@ -350,6 +351,13 @@ namespace AgentCore.Editor.Session
         public List<SerializableToolCallInfo> ToolCalls { get; set; }
 
         /// <summary>
+        /// Self-Challenge 数据（Phase 9，v1.4.9 骨架起）；
+        /// 未参与 self-challenge 的 turn（例如 v1.4.x 及以前的旧 session）反序列化时为 <c>null</c>，UI 层遇到 null 直接不渲染。
+        /// </summary>
+        [JsonProperty("self_challenge", NullValueHandling = NullValueHandling.Ignore)]
+        public SelfChallengeData SelfChallenge { get; set; }
+
+        /// <summary>
         /// 从运行时 ConversationTurn 创建可序列化版本。
         /// </summary>
         public static SerializableConversationTurn FromConversationTurn(ConversationTurn turn)
@@ -366,7 +374,8 @@ namespace AgentCore.Editor.Session
                 ReasoningDurationMs = turn.ReasoningDurationMs,
                 RawAssistantContent = string.IsNullOrEmpty(turn.RawAssistantContent) ? null : turn.RawAssistantContent,
                 PlanningTraceState = turn.PlanningTraceState,
-                Timestamp = turn.Timestamp
+                Timestamp = turn.Timestamp,
+                SelfChallenge = turn.SelfChallenge
             };
 
             if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
@@ -401,7 +410,8 @@ namespace AgentCore.Editor.Session
                 ReasoningSource = ReasoningSource,
                 ReasoningDurationMs = ReasoningDurationMs,
                 RawAssistantContent = RawAssistantContent ?? string.Empty,
-                PlanningTraceState = PlanningTraceState
+                PlanningTraceState = PlanningTraceState,
+                SelfChallenge = SelfChallenge
             };
 
             // 通过 internal set 直接恢复原始 Id 和 Timestamp，

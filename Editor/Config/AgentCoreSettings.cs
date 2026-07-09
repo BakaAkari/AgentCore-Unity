@@ -57,7 +57,7 @@ namespace AgentCore.Editor.Config
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
         [SerializeField] private bool vcsDefaultEnabled = false;
-        private const int CurrentVersion = 16;
+        private const int CurrentVersion = 17;
 
         // --- LLM 配置 ---
         [Header("LLM Configuration")]
@@ -190,6 +190,39 @@ namespace AgentCore.Editor.Config
 
         [Tooltip("启用工具作用域管理（G.3 ActiveToolScope）— 按需暴露工具，降低 token 消耗")]
         public bool toolScopingEnabled = true;
+// --- Self-Challenge (Phase 9, v1.5.0-alpha 启用) ---
+// 用户仅感知一个总开关 selfChallengeEnabled(默认 true, 即开即用)。
+// 内部字段 intentChallengeEnabled / answerChallengeEnabled / retry max / clarification /
+// first-week guidance / legacy 全部由 selfChallengeEnabled 驱动或写死为最优值,
+// 不再向用户暴露(v1.5.0-alpha 极简哲学: 一个开关即可启停整个机制)。
+// 依据设计文档 §3.4 但已简化(推翻 6 字段方案)。
+[Tooltip("启用 Self-Challenge — Node A 挑战对用户意图的理解 + Node B 输出前 reviewer 审视 draft; 每轮对话 token +10~50%")]
+public bool selfChallengeEnabled = true;
+
+// ─── 以下字段为内部使用, 不在 Settings UI 暴露 ───
+// 保留字段用于 SessionData 反序列化兼容 + 内部代码 refactor 前的过渡。
+// 所有对以下字段的读取应改用 SelfChallengeSettings.* 静态属性 (见文件末尾)。
+
+[HideInInspector]
+public bool intentChallengeEnabled = true;
+
+[HideInInspector]
+public bool answerChallengeEnabled = true;
+
+[HideInInspector]
+[Range(0, 3)]
+public int answerChallengeMaxRetries = 2;
+
+[HideInInspector]
+public bool allowAgentClarificationQuestions = true;
+
+[HideInInspector]
+public bool legacySelfChallengeDisabled = false;
+
+[HideInInspector]
+[Range(0, 20)]
+public int selfChallengeCardCountForcedExpansion = 5;
+
 
         /// <summary>
         /// 检查指定工具是否被禁用。
@@ -481,6 +514,17 @@ namespace AgentCore.Editor.Config
                 {
                     Debug.Log("[AgentCore] Settings migrated v15→v16: VCS default enablement already applied");
                 }
+            }
+
+            // v16 → v17: Phase 9 (Self-Challenge) 骨架字段引入。
+            // 全部字段有合理默认值（Node A/B 默认 false，需用户在 v1.5.0 之后手动启用），
+            // 无实际数据迁移；仅标记版本以避免下次启动时重复触发。
+            if (settingsVersion < 17)
+            {
+                // intentChallengeEnabled = false, answerChallengeEnabled = false — 骨架版本禁用
+                // answerChallengeMaxRetries = 2, allowAgentClarificationQuestions = true
+                // legacySelfChallengeDisabled = false, selfChallengeCardCountForcedExpansion = 5
+                Debug.Log("[AgentCore] Settings migrated v16→v17: Phase 9 Self-Challenge scaffolding fields introduced (mechanism disabled by default)");
             }
 
             settingsVersion = CurrentVersion;

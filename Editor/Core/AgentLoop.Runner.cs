@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config;
+using AgentCore.Editor.Core.SelfChallenge;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
 using AgentCore.Editor.Tools;
@@ -93,6 +94,17 @@ namespace AgentCore.Editor.Core
                     assistantMessage.ToolCalls.Count == 0)
                 {
                     // 纯文本回复 — 循环结束
+                    HandleFinalResponse(assistantMessage, assistantTurn);
+                    break;
+                }
+
+                // Phase 9: WaitingForClarification 状态下拒绝分发任何 tool_calls
+                //   Node A Step 4 结论 = 反问用户时 Agent 已进入 WaitingForClarification;
+                //   若 LLM 忽略指令仍然输出 tool_calls, 视为 bug 并强制降级为 final response。
+                if (CurrentState == AgentState.WaitingForClarification)
+                {
+                    Debug.LogWarning($"[AgentCore][SelfChallenge] LLM returned {assistantMessage.ToolCalls.Count} tool_call(s) while in WaitingForClarification state. Rejecting tool dispatch and forcing final response.");
+                    assistantMessage.ToolCalls.Clear();
                     HandleFinalResponse(assistantMessage, assistantTurn);
                     break;
                 }
@@ -350,9 +362,132 @@ namespace AgentCore.Editor.Core
                 Debug.LogWarning("[AgentCore] HandleFinalResponse: Assistant content is empty, using fallback message.");
             }
 
+            // Phase 9: Node A 完成后的分派 — 若结论 = 反问用户, 进入 WaitingForClarification 状态
+            //   注意: 使用 assistantTurn.RawAssistantContent(未剥离 challenge 块)判定, 因为 [CLARIFICATION NEEDED] 可能在 challenge 块之外
+            string rawForNodeAAnalysis = !string.IsNullOrEmpty(assistantTurn.RawAssistantContent)
+                ? assistantTurn.RawAssistantContent
+                : assistantTurn.Content;
+            string userMessageForContext = GetLastUserMessageContent();
+            bool entersClarification = HandleNodeAConclusionForFinalResponse(userMessageForContext, assistantTurn, rawForNodeAAnalysis);
+
+            // Phase 9: Node B 触发(仅当未进入 WaitingForClarification 且总开关 selfChallengeEnabled=true)
+            //   Node B 与 Node A 共享单一开关(v1.5.0-alpha 极简哲学: 一开全开)
+            if (!entersClarification)
+            {
+                var settings = AgentCoreSettings.instance;
+                if (settings.selfChallengeEnabled)
+                {
+                    _ = TriggerNodeBAsync(assistantMessage, assistantTurn);
+                }
+            }
+
             // 发送完整助手消息事件
             EmitEvent(AgentEvent.AssistantMessage(assistantTurn.Content, assistantTurn.Id));
             ResetReasoningRuntimeState();
+        }
+
+        /// <summary>
+        /// 获取最后一条 user message 的内容, 供 Node A / Node B 分析使用。
+        /// </summary>
+        private string GetLastUserMessageContent()
+        {
+            for (int i = _messages.Count - 1; i >= 0; i--)
+            {
+                if (_messages[i].Role == "user")
+                    return _messages[i].Content;
+            }
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// 触发 Node B(Answer Self-Challenge)独立 LLM 调用, 并根据 verdict 处理 REVISE / BLOCK 分支。
+        /// 该方法是 fire-and-forget, 不阻塞主循环 — 因为设计文档 §1.3.2 允许 Node B 异步完成。
+        /// </summary>
+        private async System.Threading.Tasks.Task TriggerNodeBAsync(ChatMessage assistantMessage, ConversationTurn assistantTurn)
+        {
+            try
+            {
+                var draftContent = assistantTurn?.Content ?? string.Empty;
+                var userMessage = GetLastUserMessageContent();
+                var ct = _currentCts?.Token ?? System.Threading.CancellationToken.None;
+
+                var reviewResult = await InvokeNodeBAsync(draftContent, userMessage, assistantTurn, ct);
+
+                if (reviewResult.Skipped) return;
+
+                // REVISE: 重新生成 draft(v0.10 §0.4: 新 draft 不再过 Node B)
+                if (reviewResult.Verdict == NodeBVerdict.REVISE && reviewResult.ReviseIssues != null && reviewResult.ReviseIssues.Count > 0)
+                {
+                    EmitEvent(AgentEvent.AnswerChallengeRegenerating(assistantTurn.SelfChallenge, assistantTurn.Id));
+                    await RegenerateDraftForReviseAsync(assistantMessage, assistantTurn, reviewResult.ReviseIssues, ct);
+                    if (assistantTurn.SelfChallenge != null)
+                        assistantTurn.SelfChallenge.DraftRegenerated = true;
+                    EmitEvent(AgentEvent.AnswerChallengeRegenerated(assistantTurn.SelfChallenge, assistantTurn.Id));
+                }
+
+                // BLOCK: 需要触发验证性 tool call, 此处 v1.5.0-alpha 仅记录, 完整实施留给 v1.5.0-beta
+                if (reviewResult.Verdict == NodeBVerdict.BLOCK)
+                {
+                    Debug.LogWarning("[AgentCore][SelfChallenge] Node B verdict = BLOCK. Verification-loop back to tool loop not implemented in v1.5.0-alpha; accepting draft with warning.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore][SelfChallenge] Node B invocation failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Node B verdict = REVISE 时, 用 reviewer issues 作为 feedback, 让 LLM 重新生成 final response。
+        /// v0.10 §0.4: 新 draft 不再过 Node B, 单次不复审。
+        /// </summary>
+        private async System.Threading.Tasks.Task RegenerateDraftForReviseAsync(
+            ChatMessage originalDraft,
+            ConversationTurn assistantTurn,
+            IReadOnlyList<string> reviseIssues,
+            System.Threading.CancellationToken ct)
+        {
+            try
+            {
+                // 追加 feedback 到主历史
+                var feedback = AnswerChallengePromptBuilder.BuildDraftRegenerationFeedback(reviseIssues);
+                _messages.Add(ChatMessage.System(feedback));
+
+                Debug.Log($"[AgentCore][SelfChallenge] REVISE: regenerating draft with {reviseIssues.Count} issue(s).");
+
+                assistantTurn.IsStreaming = true;
+                SetState(AgentState.Thinking);
+
+                // 复用 CallLLMStreamAsync 触发流式重生成, 但**禁用 Node A 抽取**(Node A 已完成)
+                var newMessage = await CallLLMStreamAsync(assistantTurn, tools: null, ct);
+
+                if (newMessage != null)
+                {
+                    PrepareAssistantMessageForHistory(newMessage, assistantTurn);
+                    // 替换主历史中最后一条 assistant message
+                    for (int i = _messages.Count - 1; i >= 0; i--)
+                    {
+                        if (_messages[i] == originalDraft)
+                        {
+                            _messages[i] = newMessage;
+                            break;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(newMessage.Content))
+                    {
+                        assistantTurn.Content = newMessage.Content;
+                        EmitEvent(AgentEvent.AssistantMessage(assistantTurn.Content, assistantTurn.Id));
+                    }
+                }
+
+                assistantTurn.IsStreaming = false;
+                SetState(AgentState.Idle);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AgentCore][SelfChallenge] Draft regeneration failed: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -369,6 +504,15 @@ namespace AgentCore.Editor.Core
             if (!string.IsNullOrEmpty(rawContent))
             {
                 assistantTurn.RawAssistantContent = rawContent;
+            }
+
+            // Phase 9 v0.10 §0.6: 剥离主历史里的 SelfChallenge 块, 避免 token 无谓膨胀
+            //   完整 challenge 块只保留在 SelfChallengeData (供 UI + Session JSON)
+            var challengeStripped = StripChallengeBlocks(rawContent);
+            if (!string.Equals(challengeStripped, rawContent, StringComparison.Ordinal))
+            {
+                assistantMessage.Content = challengeStripped;
+                rawContent = challengeStripped;
             }
 
             var finalResult = VisiblePlanningTraceExtractor.FinalizeContent(rawContent);

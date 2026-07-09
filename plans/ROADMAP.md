@@ -79,6 +79,7 @@
 治理层 (1.0.x):    LLM/Agent 架构安全收口（Tool Risk Policy / WorkspacePathPolicy 强制接入 / Lazy Tool Discovery）— G.1~G.3 完成
 派生 (1.0.x+):    后台静默 + 增量索引（v1.1.0）→ Chat UI / ThinkingDrawer 可观测性（v1.2.0）→ Request Enrichment 修复 reasoning 触发（v1.2.1）→ 兼容用户原本 IDE/CLI 习惯（MCP）
 中期 (1.x):        Phase 8 对外互操作（MCP Server）+ 产品化分发（UPM / 文档站 / 示例 / Asset Store）
+质量加固 (1.5.x):  Phase 9 Prompt 层幻觉护栏（Self-Challenge 双节点机制，带 4 周 kill criteria 实测决定去留）
 ```
 
 | 阶段 | 版本 | 定位 | 核心目标 | 关键成果 | 状态 |
@@ -87,6 +88,7 @@
 | **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery | G.1~G.3 完成；G.4~G.6 归档（经评估非必要） | [x] 核心完成 |
 | **Phase 7** | 1.0.x ~ 1.x | 索引体验深化、Chat 可观测性与产品化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Chat UI / ThinkingDrawer（v1.2.0）、Request Enrichment（v1.2.1）、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + reasoning 可审计 + 可分发产品 | [>] §3.1/§3.2 完成，§3.4 产品化待启动 |
 | **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中（治理前置 G.1~G.3 已满足） |
+| **Phase 9** | 1.5.x | Prompt 层幻觉护栏（**质量加固**） | Self-Challenge 双节点机制：Node A（读需求时挑战对用户意图的理解）+ Node B（输出前独立 reviewer 审视 draft）；带 §5.4 kill criteria 4 周实测窗口，异常即回滚 | v1.5.0 发布 + Statistics 面板 + 用户可观测 UI | [-] 设计定稿（v0.10），待编码前对齐 |
 
 ---
 
@@ -270,6 +272,51 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 ---
 
+## 3.y Phase 9 — Prompt 层幻觉护栏（质量加固 / v1.5.x）
+
+**主题**: 通过在两个通用节点强制注入 self-challenge，激活 LLM 已有但被动的元认知能力，降低"结构漂亮但语义粒度不匹配"型幻觉。**质量加固而非新能力**——不涉及新工具、新协议、新对外暴露，纯 prompt + 输出解析 + UI 呈现。
+**触发原因**: 多模型（尤其 Qwen 3 VL 等 mid-tier LLM）在 Unity 工作流中反复出现"看似完整的部分答案"型幻觉（原案例："帮我获取选中 object 的 material" → 只返回第一个材质但用户可能期望全部）。SOUL.md 规则已到语义层限制，需要工程侧引入结构化 self-review 补充。
+**设计文档**: [`prompt-layer-hallucination-hardening-plan.md`](prompt-layer-hallucination-hardening-plan.md)（v0.10 定稿）
+**架构决策**: 详见 ADR-16（Self-Challenge 定位为独立 Phase + 带 kill criteria 实验性发布）
+**治理约束**: 不属于治理层 G 系列——Self-Challenge 是 prompt 输出结构化机制，不涉及工具风险策略、能力授权或 Workspace 边界。与 G.5（已归档）的区别在于 G.5 曾试图引入 Operation Journal 架构层组件，Phase 9 完全在现有 AgentLoop 内做增强，不新增架构层。
+
+### 3.y.1 P0 — 核心机制（v1.5.0）
+
+| # | 任务 | 说明 | 预估 | 状态 |
+|---|------|------|------|------|
+| 9.1.1 | **Node A Intent Self-Challenge 核心机制** | `<intent_challenge>` prompt 模板（5 Step 含 Continuation 模式）+ `IntentChallengeStreamExtractor`（复用 [`VisiblePlanningTraceExtractor`](../Editor/Core/VisiblePlanningTraceExtractor.cs) 骨架，marker 换 XML tag）+ `IntentChallengeParser` 结构校验 + 独立小会话 correction retry | 6 人日 | [ ] |
+| 9.1.2 | **Node B Answer Self-Challenge 核心机制** | Reviewer prompt 模板 + `AnswerChallengeReviewer` 独立 LLM 调用 + 压缩历史组装（保留最近 3 轮 + Node A 关键假设，丢弃旧 answer_challenge）+ `AnswerChallengeParser`（含 `<draft-quote>` 校验）+ 三 Verdict 处理 | 4 人日 | [ ] |
+| 9.1.3 | **Waiting-for-Clarification 状态机** | `AgentState.WaitingForClarification` 枚举 + [`ToolCallDispatcher`](../Editor/Tools/ToolCallDispatcher.cs) 拒绝分发 + [`SessionData`](../Editor/Session/SessionData.cs) / [`DomainReloadState`](../Editor/Core/DomainReloadState.cs) 序列化 + ChatWindow 反问消息专属样式（`[?]` 图标 + 输入框 auto-focus） | 2 人日 | [ ] |
+| 9.1.4 | **主历史清理规则** | [`AgentLoop.Sanitization.cs`](../Editor/Core/AgentLoop.Sanitization.cs) 扩展：写入 `_messages` 时剥离 `<intent_challenge>` 与 `<intent_challenge_continuation>` 块；challenge 内容仅保留在 SelfChallengeData / Session；与 planning trace 清洗哲学一致 | 0.5 人日 | [ ] |
+| 9.1.5 | **强制终止路径 skip Node B** | [`RunToolCallLoopAsync`](../Editor/Core/AgentLoop.Runner.cs:31) 的 4 条强制终止路径（单工具连败 / 全失败 / 同目标重复 / 轮次-Token 上限）传 `skipAnswerChallenge=true`；避免 BLOCK verdict 与循环刹车死锁 | 0.3 人日 | [ ] |
+| 9.1.6 | **REVISE 单次不复审 + Domain Reload 放行 draft** | Node B REVISE verdict 触发 draft 重新生成后直接 `HandleFinalResponse` 输出（不再进 Node B）；Reviewer 调用中 domain reload 恢复时直接放行原 draft（`nodeBSkipReason=domain_reload_interrupt`），不新增 InterruptPhase | 0.5 人日 | [ ] |
+| 9.1.7 | **SelfChallengeData 序列化 + 3 个 AgentEvent** | `SelfChallengeData` 完整 schema 挂到 [`SerializableConversationTurn`](../Editor/Session/SessionData.cs)；新增 `IntentChallengeCompleted` / `AnswerChallengeCompleted` / `AnswerChallengeRegenerating` / `AnswerChallengeRegenerated` 事件 | 1 人日 | [ ] |
+| 9.1.8 | **SelfChallengeCard UI（默认折叠）** | Verdict 徽标（`[v]` / `[~]` / `[!]` / `[?]`）+ Node A 4 Step + Node B 4 Step 展开内容 + 复用 [`ToolCallCard`](../Editor/UI/Components/ToolCallCard.cs) v1.4.8 复制按钮模式 + 异常自动展开（REVISE/BLOCK/Awaiting Clarification）+ Domain Reload 重建 | 4 人日 | [ ] |
+| 9.1.9 | **AgentCoreSettings 配置项** | `intentChallengeEnabled` / `answerChallengeEnabled` / `answerChallengeMaxRetries`（默认 2，仅结构重试）/ `allowAgentClarificationQuestions` / `legacySelfChallengeDisabled` 5 个字段 + 版本迁移 | 0.5 人日 | [ ] |
+| 9.1.10 | **首周引导条款** | 首次启动 Chat 窗口一次性 tooltip + Self-Challenge Card 前 5 次强制展开 + README/CHANGELOG "如何判断 Self-Challenge 是否生效" 段落 | 0.9 人日 | [ ] |
+
+### 3.y.2 P1 — Statistics 面板 + 4 周 kill criteria（v1.5.0 上线后）
+
+| # | 任务 | 说明 | 预估 | 状态 |
+|---|------|------|------|------|
+| 9.2.1 | **SelfChallengeStatistics 数据层** | ScriptableSingleton 累计最近 200 次 self-challenge 原始数据 + `RecordFallback` 记录 retry exhausted + 3 个 Key Metrics（Node B PASS 占比 / 反问触发占比 / retry 耗尽占比）实时计算 + Health badge 三态 | 1 人日 | [ ] |
+| 9.2.2 | **UiDiagnosticsSettingsPage 卡片** | "Self-Challenge Statistics" 卡片按 §11.6 v0.9 精简版布局：3 个 Key Metrics + Health badge + 详细数据折叠区 + Export CSV / Clear All / Refresh | 1 人日 | [ ] |
+| 9.2.3 | **4 周窗口 formal review** | 上线后 4 周内数据收集；review 时按 §5.4 5 项健康阈值判定：全绿 → 保留；1~2 项异常 → 局部调整；3+ 项异常 → 触发 retrospective 考虑回滚到"仅 UI 展示"轻量方案 | 用户决策 | [ ] |
+
+### 3.y.3 Phase 9 里程碑
+
+```
+v1.5.0 — Phase 9 核心机制 + UI + 引导 + Statistics 面板（9.1.1 ~ 9.1.10, 9.2.1 ~ 9.2.2）
+v1.5.x — 4 周实测窗口内的 patch 修复（9.2.3 review 前）
+v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
+```
+
+**预估总工作量**: 17~20 人日（相较 v0.9 的 14~16 人日增加约 3~4 人日，用于流式抽取 + 主历史清理 + 5 个 v0.10 收口决策落地）
+
+**Legacy Mode**: v1.5.0 上线首日通过 `legacySelfChallengeDisabled = true` 提供关闭开关，用户可临时回到 v1.4.x 行为做 A/B 对比。
+
+---
+
 ## 4. ADR (Architecture Decision Records)
 
 ### ADR-1: 不实现 Markdown 渲染
@@ -432,6 +479,27 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
   - Phase 7/8 保持产品模块定位，但实现顺序受治理层约束。
   - §7 下一步行动建议改为优先执行治理层 G.1。
 
+### ADR-16: Self-Challenge 定位为独立 Phase 9 + 带 kill criteria 实验性发布
+
+**状态**: `已决策 — 独立质量加固 Phase，4 周实测决定去留` | **日期**: 2026-07-08
+
+- **决策**: 把 Prompt 层幻觉护栏（Self-Challenge 双节点机制）设为独立的 **Phase 9**，与 Phase 7 / Phase 8 平行，定位为"质量加固"而非"新能力"；v1.5.0 上线时**带 §5.4 4 周 kill criteria**——上线后 4 周内基于 Statistics 面板 5 项健康阈值做 formal review，异常即回滚或降级
+- **核心理由**:
+  - **不属于治理层 G 系列**: G.4~G.6 已归档，理由是"架构宇航员式设计"。Self-Challenge 完全在现有 AgentLoop 内做 prompt 输出结构化增强，不新增架构层（无 Operation Journal / Planner-Executor-Verifier 分层），与 G.5/G.6 的归档理由不冲突
+  - **不属于 Phase 7 / Phase 8**: Phase 7 = 对内产品化（索引 / UI / UPM），Phase 8 = 对外互操作（MCP）；Self-Challenge 既不改产品分发也不涉及对外协议，独立编排避免优先级污染
+  - **必须带 kill switch**: 方案设计文档 §5.4 明确承认 R7/R16/R17 三条根本性风险无法在设计阶段消除（LLM 追责链只能抓 LLM 意识到的假设 / self-challenge 在 Unity Agent 场景无直接证据证明有效 / SOUL 里更严格的规则已经不生效凭什么相信新加的会生效）。**只能靠上线数据判定**，不接受"设计确信"作为交付依据
+  - **成本代价可接受**: v0.10 修订估算 17~20 人日，Token 增量 +10~50% 但对短对话稀释后可接受；提供 `legacySelfChallengeDisabled` 关闭开关兜底
+- **影响**:
+  - §1 战略目标表新增 Phase 9 行
+  - §3.y 新增 Phase 9 完整任务表（9.1.1 ~ 9.2.3）
+  - §5 风险评估新增"Self-Challenge 对弱模型结构化输出合规能力依赖 / rubber-stamp / 用户感知变慢"三条风险
+  - §6 文档索引新增 `prompt-layer-hallucination-hardening-plan.md` 条目
+  - §7 下一步行动优先级不受 Self-Challenge 影响（MCP 与产品化仍为 P0/P1，Self-Challenge 待用户决策是否进入 P0 队列）
+- **拒绝替代方案**:
+  - "把 Self-Challenge 作为治理层 G.7" — 违背 G.4~G.6 归档时确立的"治理层不做 prompt 加固，只做架构级安全约束"边界
+  - "作为 Phase 7 §3.5 内的一个子任务" — 与 Phase 7 产品化任务在优先级和风险栈上没有关联，混编会打乱两者节奏
+  - "直接合入 v1.4.x patch" — 17~20 人日规模不属于 patch，且带 kill switch 的实验性发布应该走 Minor 版本以便回滚
+
 ### ADR-15: 归档 Plugin 系统 — MCP + 现有 ToolAutoDiscovery 已覆盖需求
 
 **状态**: `已决策 — 归档不实现` | **日期**: 2026-06-29
@@ -465,6 +533,10 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | MCP Server 跨进程暴露增加攻击面 | 中 | 高 | 默认仅 stdio + 本机 loopback；HTTP 传输延后；实现前先完成治理层 G.1/G.2/G.3，并与 `WorkspacePathPolicy` 对齐写操作边界 |
 | MCP 协议演进导致客户端兼容性问题 | 中 | 中 | 遵循 MCP 官方版本协商；至少覆盖 Claude Desktop / Cursor / Continue / 自定义 CLI 四类客户端验证 |
 | ~~Plugin / Extension 系统引入用户工具崩溃 Editor~~ | — | — | 已归档（见 ADR-15）；用户通过 asmdef 自定义工具仍受 `ToolAutoDiscovery` 异常包装保护 |
+| Phase 9 弱模型无法稳定输出结构化 `<intent_challenge>` / `<answer_challenge>` 块 | 高 | 中 | correction retry 独立小会话 2 次上限 + retry exhausted 后 fallback 放行主任务；Statistics 面板暴露"结构校验失败率"作为 §5.4 kill criteria 5 项之一（>30% 判定 prompt 失效） |
+| Phase 9 Node B rubber-stamp（LLM 认自己写的对） | 中 | 高 | 5 道防线（角色扮演 + 强制格式 + 结构校验 + 假设显式化 + 空转检测）；Statistics 暴露 Verdict 分布（>95% PASS 判定 rubber-stamp）；4 周窗口不达标即回滚 |
+| Phase 9 用户感知延迟增加（Node B 额外一次 LLM 调用 +1~3s） | 高 | 中 | Skip 规则（≤15 字符 / 纯 URL）覆盖简短消息；强制终止路径 skip Node B；REVISE 单次不复审；提供 `legacySelfChallengeDisabled` 关闭开关；Statistics 暴露"用户手动关闭比例"作为 kill criteria |
+| Phase 9 Token 成本增量 +10~50% | 中 | 中 | 通过压缩后的历史 + Node B 只带最近 3 轮 + 独立 retry 会话不带主历史控制上限；同 kill criteria 5 项监控 |
 | 示例项目维护成本过高 | 低 | 低 | 示例项目独立仓库，AgentCore 作为 UPM 依赖引入 |
 
 ---
@@ -480,6 +552,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) | **Phase 7 §3.1** 后台静默 + 增量索引详细设计（v1.1.0 上游依据） | `plans/` 顶层 |
 | [`indexing-scope-layered-and-status-awareness-design.md`](indexing-scope-layered-and-status-awareness-design.md) | **Phase 7 §3.1.1** Scope 层次化索引 + LLM 状态感知详细设计（v1.4.0 上游依据） | `plans/` 顶层 |
 | [`mcp-server-feasibility.md`](mcp-server-feasibility.md) | **Phase 8 §3.x** MCP 对外互操作可行性分析与初步设计；实现受治理层 G.1/G.2/G.3 约束 | `plans/` 顶层 |
+| [`prompt-layer-hallucination-hardening-plan.md`](prompt-layer-hallucination-hardening-plan.md) | **Phase 9 §3.y** Prompt 层幻觉护栏详细设计（v0.10 定稿，v1.5.0 上游依据）；带 §5.4 4 周 kill criteria 实测决定去留 | `plans/` 顶层 |
 | [`vcs-treeview-refactor-plan.md`](_archive/features/vcs-treeview-refactor-plan.md) | ~~已废弃~~ — TreeView 方案废弃，改为扁平列表（v0.9.3 完成），已归档 | `_archive/features/` |
 | [`codebase-indexing-phase2-plan.md`](_archive/features/codebase-indexing-phase2-plan.md) | 已完成（v0.9.3）— SQLite 迁移 + 依赖图 + FTS5，已归档 | `_archive/features/` |
 | **其他已完成计划** | 历史归档 | [`_archive/features/`](_archive/features/) |
@@ -501,6 +574,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|
 | P0 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作核心需求；治理前置 G.1/G.2/G.3 已满足，可直接启动设计与实现 |
+| P0 (待用户决策) | **Phase 9 §3.y Self-Challenge 核心机制（9.1.1 ~ 9.1.10）** | 设计文档 v0.10 已定稿；用户已登记进 ROADMAP。**开工前必须按 AGENTS.md §12.4 编码前对齐清单逐项确认**：分阶段交付方案 / 每阶段版本号 / 各阶段验收标准 / 首阶段 500 行代码上限拆分。不建议一次性推 17~20 人日 |
 | P1 | **Phase 8 §3.x MCP Server 传输与兼容性（8.1.5 ~ 8.1.7）** | stdio 稳定后扩展 HTTP/SSE 传输；覆盖 Claude Desktop / Cursor / Continue / CLI 四类客户端 |
 | P1 | **Phase 7 §3.4 产品化 — UPM 发布流程（7.4.1）** | v1.2.1 已是稳定产品，发布流程可沉淀为自动化脚本 |
 | P2 | **Phase 7 §3.4 产品化 — 文档站 + 示例项目（7.4.2 ~ 7.4.5）** | 降低新用户上手门槛；可与 MCP 开发并行推进 |

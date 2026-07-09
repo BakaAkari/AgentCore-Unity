@@ -351,7 +351,10 @@ namespace AgentCore.Editor.Core
                 throw new InvalidOperationException("[AgentCore] AgentLoop is not initialized. Call Initialize() first.");
             }
 
-            if (CurrentState != AgentState.Idle)
+            // Phase 9: 允许 Idle 或 WaitingForClarification 状态下发送消息
+            //   Idle → 正常新一轮
+            //   WaitingForClarification → 走 Node A Continuation 模式
+            if (CurrentState != AgentState.Idle && CurrentState != AgentState.WaitingForClarification)
             {
                 throw new InvalidOperationException(
                     $"[AgentCore] Cannot send message while in {CurrentState} state. Wait for current operation to complete.");
@@ -377,10 +380,26 @@ namespace AgentCore.Editor.Core
             };
             _conversationTurns.Add(assistantTurn);
 
+            // Phase 9: 为本轮 SelfChallenge 准备数据 + 判定是否 Node A 触发
+            SetCurrentSelfChallengeTurnId(assistantTurn.Id);
+            var selfChallengeData = PrepareSelfChallengeDataForNewTurn(userMessage);
+            if (selfChallengeData != null)
+            {
+                assistantTurn.SelfChallenge = selfChallengeData;
+            }
+
             try
             {
                 // 5. 获取配置
                 var settings = AgentCoreSettings.instance;
+
+                // Phase 9: 追加 Node A instruction 到 messages 里(作为独立 system message, 位置在 user message 之后)
+                var nodeAInstruction = BuildNodeAInstructionForCurrentTurn();
+                if (!string.IsNullOrEmpty(nodeAInstruction))
+                {
+                    _messages.Add(ChatMessage.System(nodeAInstruction));
+                    Debug.Log($"[AgentCore][SelfChallenge] Node A instruction injected (~{nodeAInstruction.Length / 3} tokens estimated).");
+                }
 
                 // 5.5 自动记忆召回：搜索与用户消息相关的记忆并注入上下文
                 if (settings.mem0Enabled && !string.IsNullOrEmpty(settings.mem0Endpoint))
@@ -445,8 +464,11 @@ namespace AgentCore.Editor.Core
                 // 7. 工具调用循环（P0-2 fix: 提取为公共方法，消除与 TriggerResumeLLMCall 的代码重复）
                 await RunToolCallLoopAsync(assistantTurn, toolDefinitions, ct);
 
-                // 8. 回到 Idle 状态
-                SetState(AgentState.Idle);
+                // 8. 回到 Idle 状态 (WaitingForClarification 状态由 HandleNodeAConclusionForFinalResponse 设置; 若未进入该状态, 走正常 Idle)
+                if (CurrentState != AgentState.WaitingForClarification)
+                {
+                    SetState(AgentState.Idle);
+                }
             }
             catch (OperationCanceledException)
             {

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.9] - 2026-07-08
+
+### Added
+- **Phase 9 Self-Challenge 骨架基础设施（无用户可见行为变化）**：为 v1.5.0 计划中的 prompt 层幻觉护栏机制（[`plans/prompt-layer-hallucination-hardening-plan.md`](plans/prompt-layer-hallucination-hardening-plan.md) v0.10 定稿）铺设编译期基础设施。该机制核心（Node A / Node B 双节点 Self-Challenge、Reviewer 独立 LLM 调用、Verdict 分支处理、UI 卡片、Statistics 面板等）**将在 v1.5.0-alpha1 起分阶段交付**；v1.4.9 仅登记类型、字段、事件、配置项，无任何运行时行为改变。参见 [`plans/ROADMAP.md`](plans/ROADMAP.md) §3.y Phase 9 与 ADR-16。
+- **[`Editor/Core/SelfChallenge/SelfChallengeData.cs`](Editor/Core/SelfChallenge/SelfChallengeData.cs)**：完整 schema，含 Node A 15 个字段 + Node B 10 个字段 + Metadata 3 个字段 + 7 个类型安全的 enum（`Step4Ambiguity` / `Step4Severity` / `Step4OperationRisk` / `Step4Attribution` / `Step4Conclusion` / `Step5Verdict` / `NodeBVerdict`）+ 1 个 `FallbackType` enum。JSON 序列化通过 `Newtonsoft.Json` 特性标注，全字段配 `NullValueHandling.Ignore` 保证向后兼容。
+- **[`Editor/Core/SelfChallenge/SelfChallengeConfig.cs`](Editor/Core/SelfChallenge/SelfChallengeConfig.cs)**：工程侧硬编码常量集合（marker 字符串 / skip 阈值 / 结构校验最小值 / statistics 上限 / 首周引导展开次数）。与 [`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs) 中的用户配置互补——用户可改的走 Settings，marker/长度/格式类边界走 Config。
+- **[`Editor/Core/SelfChallenge/SelfChallengeSkipRules.cs`](Editor/Core/SelfChallenge/SelfChallengeSkipRules.cs)**：Node A skip 判定规则实现（v0.9 §1.2.1 精简版：只保留 R1 消息长度 ≤15 字符 + R3 纯 URL；v0.8 曾包含的 R2/R4/R5 已按 v0.9 立场取消，理由是含关键词穷举违反"不做穷举"的核心立场）。R1 使用 `char.IsWhiteSpace` 去空白后按 Unicode 字符数计算，中英文一视同仁；R3 使用编译后的 `^\s*https?://\S+\s*$` 正则。API 采用 `ShouldSkip(msg, out reason)` 模式。
+- **[`Editor/Tests/Core/SelfChallengeSkipRulesTests.cs`](Editor/Tests/Core/SelfChallengeSkipRulesTests.cs)**：Skip Rules 单元测试 20 case，覆盖 R1 边界（null / 空 / 全空白 / 中文短句 / 英文短句 / 空格穿插 / 恰好 15 字符 / 16 字符 / 长消息）、R3 边界（纯 URL / URL 带前后空白 / URL 前后夹杂文本 / 双 URL / 无 scheme URL）、R1 优先于 R3 的组合边界。
+- **`AgentEventType` 4 个新枚举值**（[`Editor/Core/MessageTypes.cs`](Editor/Core/MessageTypes.cs)）：`IntentChallengeCompleted` / `AnswerChallengeCompleted` / `AnswerChallengeRegenerating` / `AnswerChallengeRegenerated`。骨架版本仅登记枚举与工厂方法，实际 `EmitEvent` 由后续 Stage 完成。
+- **`AgentEvent` 新字段 + 4 个工厂方法**：`SelfChallenge` 字段（`SelfChallengeData` 类型）+ `TurnId` 字段；配套 4 个静态工厂方法与 3 个原 Phase 事件工厂并列。
+- **`ConversationTurn.SelfChallenge` 属性 + `SerializableConversationTurn.SelfChallenge` 字段**（[`Editor/Session/SessionData.cs`](Editor/Session/SessionData.cs)）：Self-Challenge 数据随 Session JSON 序列化持久化；未参与 self-challenge 的 turn 为 `null`，UI 层遇 null 直接不渲染卡片。
+- **`AgentCoreSettings` 6 个 Self-Challenge 字段**（[`Editor/Config/AgentCoreSettings.cs`](Editor/Config/AgentCoreSettings.cs)）：`intentChallengeEnabled` / `answerChallengeEnabled` / `answerChallengeMaxRetries`（Range 0-3，默认 2；仅结构校验 retry，不含 REVISE 重生成——REVISE 固定单次不复审）/ `allowAgentClarificationQuestions` / `legacySelfChallengeDisabled`（Legacy Mode 关闭开关）/ `selfChallengeCardCountForcedExpansion`（首周引导剩余展开次数，Range 0-20 默认 5）。
+- **Settings 版本迁移 v16 → v17**：添加 Phase 9 骨架字段版本标记；所有字段使用声明时默认值，无实际数据迁移需求。
+
+### Changed
+- **[`Editor/Session/SessionData.cs`](Editor/Session/SessionData.cs)** 新增 `using AgentCore.Editor.Core.SelfChallenge;`；`SerializableConversationTurn.FromConversationTurn` 与 `ToConversationTurn` 增加 `SelfChallenge` 字段的传递。
+- **[`Editor/Core/MessageTypes.cs`](Editor/Core/MessageTypes.cs)** 新增 `using AgentCore.Editor.Core.SelfChallenge;`；`AgentEvent` 私有构造函数增加 `selfChallenge` / `turnId` 两个可选参数。
+
+### Notes
+- **零用户可见变化**：所有新增字段默认 `false` / `null`；`intentChallengeEnabled` 与 `answerChallengeEnabled` 默认 **false**，需在 v1.5.0 之后由用户手动启用。骨架不接入任何执行路径。
+- **向后兼容验证**：v1.4.x 及以前的 SessionData JSON 文件反序列化时 `SelfChallenge` 字段读到默认 `null`，`SerializableConversationTurn` 的所有已有字段序列化/反序列化行为不变；`SettingsData` 版本从 16 迁移到 17 只标版本号不修改任何已有字段。
+- **未接入 Executor**：v1.4.9 **没有**创建 `IntentChallengePromptBuilder` / `IntentChallengeStreamExtractor` / `IntentChallengeParser` / `AnswerChallengeReviewer` 等执行组件。这些是 Stage 2-3（v1.5.0-alpha1/2）的范围。骨架版本仅确保后续 Stage 编码时"数据结构 + 事件通道 + 配置开关 + skip 规则"全部就位。
+- **skip 规则可独立测试**：R1/R3 是纯静态方法，无外部依赖；v1.4.9 已提供 20 case 单元测试覆盖，供 Stage 2 调用方引用与回归验证。
+- **v0.10 §0 收口决策已在骨架层锁定**：`SelfChallengeData.NodeASkipReason` / `NodeBSkipReason` 的字符串常量在 `SelfChallengeConfig` 中列出 6 种可能值（`R1_short` / `R3_url` / `short_response` / `pure_question` / `forced_termination` / `domain_reload_interrupt`），对应 v0.10 §0.3（强制终止 skip Node B）与 §0.5（domain reload 放行 draft）的两个新增 skip 原因；后续 Stage 只需消费这些常量。
+
 ## [1.4.8] - 2026-07-08
 
 ### Fixed

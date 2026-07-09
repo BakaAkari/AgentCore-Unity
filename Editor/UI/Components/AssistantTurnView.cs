@@ -9,6 +9,7 @@ namespace AgentCore.Editor.UI.Components
     public class AssistantTurnView : VisualElement
     {
         private readonly VisualElement _thinkingSlot;
+        private readonly VisualElement _selfChallengeSlot;
         private readonly VisualElement _toolSlot;
         private readonly VisualElement _bubbleSlot;
 
@@ -16,6 +17,11 @@ namespace AgentCore.Editor.UI.Components
         /// 当前 ThinkingDrawer。
         /// </summary>
         public ThinkingDrawer ThinkingDrawer { get; }
+
+        /// <summary>
+        /// 当前 SelfChallengeCard (Phase 9); 默认 null, 通过 <see cref="EnsureSelfChallengeCard"/> 创建。
+        /// </summary>
+        public SelfChallengeCard SelfChallengeCard { get; private set; }
 
         /// <summary>
         /// 当前消息气泡。
@@ -42,6 +48,11 @@ namespace AgentCore.Editor.UI.Components
             _thinkingSlot.style.flexDirection = FlexDirection.Column;
             Add(_thinkingSlot);
 
+            // Phase 9: Self-Challenge Card 挂载点(位于 ThinkingDrawer 之下、ToolCallGroup 之上)
+            _selfChallengeSlot = new VisualElement { name = $"self-challenge-slot-{messageId}" };
+            _selfChallengeSlot.style.flexDirection = FlexDirection.Column;
+            Add(_selfChallengeSlot);
+
             _toolSlot = new VisualElement { name = $"tool-slot-{messageId}" };
             _toolSlot.style.flexDirection = FlexDirection.Column;
             Add(_toolSlot);
@@ -52,6 +63,20 @@ namespace AgentCore.Editor.UI.Components
 
             ThinkingDrawer = new ThinkingDrawer();
             _thinkingSlot.Add(ThinkingDrawer);
+        }
+
+        /// <summary>
+        /// 确保 SelfChallengeCard 存在; 若已存在直接返回。
+        /// </summary>
+        /// <param name="messageId">assistant turn ID。</param>
+        /// <returns>SelfChallengeCard 实例。</returns>
+        public SelfChallengeCard EnsureSelfChallengeCard(string messageId)
+        {
+            if (SelfChallengeCard != null) return SelfChallengeCard;
+
+            SelfChallengeCard = new SelfChallengeCard(messageId);
+            _selfChallengeSlot.Add(SelfChallengeCard);
+            return SelfChallengeCard;
         }
 
         /// <summary>
