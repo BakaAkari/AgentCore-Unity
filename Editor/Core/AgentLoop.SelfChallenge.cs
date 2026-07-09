@@ -26,8 +26,28 @@ namespace AgentCore.Editor.Core
     {
         #region 私有字段 — SelfChallenge 相关
 
-        /// <summary>当前 assistant turn 的 Node A stream extractor(完整模式与 Continuation 模式共用一个实例, 每轮 Reset 时切换 mode)。</summary>
+        /// <summary>
+        /// Node A 完整模式 stream extractor。
+        /// <para>
+        /// **常驻实例**: 与 <see cref="_nodeAEnabledThisTurn"/> 解耦, 每轮 LLM 调用前都会 Reset。
+        /// 无论 Node A 是否启用(即使 skip / disabled), 都会参与流式剥离,
+        /// 防止 LLM 因上文学习或幻觉而泄漏 <c>&lt;intent_challenge&gt;</c> 块到 UI 气泡。
+        /// </para>
+        /// <para>
+        /// 结构校验 + IntentChallengeCompleted 事件仅在 <see cref="_nodeAEnabledThisTurn"/> 为 true
+        /// 且当前模式匹配(即 <see cref="_nodeATriggerContinuation"/> = false)时触发。
+        /// </para>
+        /// </summary>
         private IntentChallengeStreamExtractor _intentChallengeStreamExtractor;
+
+        /// <summary>
+        /// Node A Continuation 模式 stream extractor(常驻兜底)。
+        /// <para>
+        /// 与 <see cref="_intentChallengeStreamExtractor"/> 并行剥离, marker 不同(<c>&lt;intent_challenge_continuation&gt;</c>)。
+        /// 结构校验 + 事件仅在 <see cref="_nodeAEnabledThisTurn"/> 为 true 且 <see cref="_nodeATriggerContinuation"/> = true 时触发。
+        /// </para>
+        /// </summary>
+        private IntentChallengeStreamExtractor _intentChallengeContinuationExtractor;
 
         /// <summary>当前 assistant turn 的 Node B stream extractor。</summary>
         private AnswerChallengeStreamExtractor _answerChallengeStreamExtractor;
@@ -66,11 +86,26 @@ namespace AgentCore.Editor.Core
         /// <summary>
         /// 每次新一轮 LLM 调用开始前, 重置 SelfChallenge 运行时状态。
         /// 由 <see cref="CallLLMStreamAsync"/> 调用。
+        /// <para>
+        /// v1.5.0 修复: extractor 常驻实例, 若未初始化在此处懒创建。
+        /// 与 <see cref="_nodeAEnabledThisTurn"/> 解耦, 使得即使 Node A 被 skip 也能兜底剥离
+        /// LLM 意外泄漏的 <c>&lt;intent_challenge&gt;</c> / <c>&lt;intent_challenge_continuation&gt;</c> 块。
+        /// </para>
         /// </summary>
         private void ResetSelfChallengeExtractorsForNewRound()
         {
             _intentChallengeEmittedThisTurn = false;
-            _intentChallengeStreamExtractor?.Reset();
+
+            if (_intentChallengeStreamExtractor == null)
+                _intentChallengeStreamExtractor = new IntentChallengeStreamExtractor(IntentChallengeStreamExtractor.Mode.Full);
+            else
+                _intentChallengeStreamExtractor.Reset();
+
+            if (_intentChallengeContinuationExtractor == null)
+                _intentChallengeContinuationExtractor = new IntentChallengeStreamExtractor(IntentChallengeStreamExtractor.Mode.Continuation);
+            else
+                _intentChallengeContinuationExtractor.Reset();
+
             _answerChallengeStreamExtractor?.Reset();
         }
 
@@ -116,20 +151,8 @@ namespace AgentCore.Editor.Core
                 _currentSelfChallengeData.PreviousTurnNodeAId = _pendingClarificationPreviousTurnId;
             }
 
-            // 初始化 stream extractor(按模式)
-            if (_intentChallengeStreamExtractor == null || _intentChallengeStreamExtractor.ExtractorMode !=
-                (isContinuation ? IntentChallengeStreamExtractor.Mode.Continuation : IntentChallengeStreamExtractor.Mode.Full))
-            {
-                _intentChallengeStreamExtractor = new IntentChallengeStreamExtractor(
-                    isContinuation
-                        ? IntentChallengeStreamExtractor.Mode.Continuation
-                        : IntentChallengeStreamExtractor.Mode.Full);
-            }
-            else
-            {
-                _intentChallengeStreamExtractor.Reset();
-            }
-
+            // v1.5.0 修复: extractor 由 ResetSelfChallengeExtractorsForNewRound() 常驻懒创建,
+            // 此处不再按模式切换实例, 而是通过 _nodeATriggerContinuation 决定哪个 extractor 参与结构校验/事件。
             return _currentSelfChallengeData;
         }
 
@@ -170,8 +193,14 @@ namespace AgentCore.Editor.Core
         #region Node A 流式抽取器接线
 
         /// <summary>
-        /// 供 <see cref="HandleContentToken"/> 调用: 把 token 先过 Node A extractor, 再过 Node B extractor,
-        /// 最后剩余 visible 部分交给 VisiblePlanningTraceExtractor。
+        /// 供 <see cref="HandleContentToken"/> 调用: 把 token 先过 Node A extractor(Full + Continuation 并行),
+        /// 再过 Node B extractor, 最后剩余 visible 部分交给 VisiblePlanningTraceExtractor。
+        /// <para>
+        /// v1.5.0 修复(§防止 challenge 块泄漏到 UI):
+        /// 两个 Node A extractor(Full / Continuation)**始终参与流式剥离**, 与 <see cref="_nodeAEnabledThisTurn"/> 解耦,
+        /// 即使 Node A 被 skip 或整体 disabled, 也能防御性剥离 LLM 因上文学习而泄漏的 challenge 块。
+        /// 结构校验 + IntentChallengeCompleted 事件仅在 Node A 启用且模式匹配时触发。
+        /// </para>
         /// </summary>
         /// <param name="token">原始 content token。</param>
         /// <param name="assistantTurn">当前 assistant turn。</param>
@@ -182,22 +211,38 @@ namespace AgentCore.Editor.Core
 
             string visible = token;
 
-            // Node A 抽取(仅本轮启用时激活)
-            if (_nodeAEnabledThisTurn && _intentChallengeStreamExtractor != null &&
+            // Node A 完整模式抽取(常驻兜底)
+            if (_intentChallengeStreamExtractor != null &&
                 _intentChallengeStreamExtractor.State != IntentChallengeExtractorState.Invalid)
             {
-                var deltaA = _intentChallengeStreamExtractor.Append(visible);
-                visible = deltaA.VisibleContent;
+                var deltaFull = _intentChallengeStreamExtractor.Append(visible);
+                visible = deltaFull.VisibleContent;
 
-                // 完成时触发结构校验 + 事件
-                if (deltaA.State == IntentChallengeExtractorState.Completed &&
+                // 仅当本轮启用 Node A 且为 Full 模式时才触发结构校验 + 事件
+                if (_nodeAEnabledThisTurn && !_nodeATriggerContinuation &&
+                    deltaFull.State == IntentChallengeExtractorState.Completed &&
                     !_intentChallengeEmittedThisTurn)
                 {
                     OnNodeAExtractorCompleted(_intentChallengeStreamExtractor.ExtractedBlock, assistantTurn);
                 }
             }
 
-            // Node B 抽取(仅本 turn 处于 Node B reviewer 调用中时激活)
+            // Node A Continuation 模式抽取(常驻兜底)
+            if (_intentChallengeContinuationExtractor != null &&
+                _intentChallengeContinuationExtractor.State != IntentChallengeExtractorState.Invalid)
+            {
+                var deltaCont = _intentChallengeContinuationExtractor.Append(visible);
+                visible = deltaCont.VisibleContent;
+
+                if (_nodeAEnabledThisTurn && _nodeATriggerContinuation &&
+                    deltaCont.State == IntentChallengeExtractorState.Completed &&
+                    !_intentChallengeEmittedThisTurn)
+                {
+                    OnNodeAExtractorCompleted(_intentChallengeContinuationExtractor.ExtractedBlock, assistantTurn);
+                }
+            }
+
+            // Node B 抽取(dead code 保留兜底; Node B 实际走独立 ChatCompletionAsync 非流式路径)
             if (_answerChallengeStreamExtractor != null &&
                 _answerChallengeStreamExtractor.State != AnswerChallengeExtractorState.Invalid)
             {
