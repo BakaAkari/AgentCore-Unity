@@ -52,15 +52,15 @@ namespace AgentCore.Editor.Config.Settings.Pages
             DrawVersionInfoCard(context);
         }
 
-        // ── 版本信息 (ADR-17 新增) ──
+        // ── About (ADR-17 added) ──
 
         private static void DrawVersionInfoCard(AgentCoreSettingsContext context)
         {
-            context.Ui.DrawCard("关于", null, () =>
+            context.Ui.DrawCard("About", null, () =>
             {
                 var version = GetPackageVersion();
                 EditorGUILayout.LabelField($"AgentCore Unity  v{version}", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField("Unity Editor 内置 AI Agent 插件", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Unity Editor built-in AI Agent plugin", EditorStyles.miniLabel);
             });
         }
 

@@ -54,14 +54,14 @@ namespace AgentCore.Editor.Extensions
             {
                 new OptionalComponentInfo(
                     "vcs",
-                    "版本控制",
-                    "支持 Git / SVN / Perforce 状态查看与操作, Chat 窗口顶部会显示 VCS 面板。",
+                    "Version Control",
+                    "Git / SVN / Perforce panel in Chat window.",
                     VcsDefine,
                     IsVcsEnabled()),
                 new OptionalComponentInfo(
                     "indexing",
-                    "代码索引 (实验性)",
-                    "基于 Roslyn 的 C# 符号索引, 让 Agent 能通过 search_code 工具精准查找类/方法/字段。大项目上后台索引可能影响 Editor 响应速度, 谨慎启用。",
+                    "Code Indexing (experimental)",
+                    "Roslyn-based C# symbol index for search_code tool. May impact Editor performance on large projects.",
                     IndexingDefine,
                     IsIndexingEnabled())
             };

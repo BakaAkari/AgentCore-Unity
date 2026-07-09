@@ -76,10 +76,10 @@ namespace AgentCore.Editor.Config.Settings
                 }
                 catch (Exception ex)
                 {
-                    // 防御性处理：内容回调异常不能破坏外层 layout 平衡。
+                    // Defensive handling: exception in content callback must not break outer layout balance.
                     UnityEngine.Debug.LogException(ex);
                     EditorGUILayout.HelpBox(
-                        $"绘制此卡片内容时发生异常：{ex.Message}\n详细信息见 Console。",
+                        $"Error drawing this card content: {ex.Message}\nSee Console for details.",
                         UnityEditor.MessageType.Error);
                 }
             }
@@ -163,7 +163,7 @@ namespace AgentCore.Editor.Config.Settings
                     {
                         UnityEngine.Debug.LogException(ex);
                         EditorGUILayout.HelpBox(
-                            $"绘制此服务卡内容时发生异常：{ex.Message}\n详细信息见 Console。",
+                            $"Error drawing this service card content: {ex.Message}\nSee Console for details.",
                             UnityEditor.MessageType.Error);
                     }
                 }

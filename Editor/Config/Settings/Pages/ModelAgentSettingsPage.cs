@@ -112,21 +112,21 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.Space(8);
 
-            // ADR-17 极简: 已删除 Agent Runtime 和 Self Correction 两个卡片
-            //   - Max Tool Rounds / Token Budget / Fallback Routing → 内部常量 (maxToolCallRounds=200, maxTokenBudget=0, fallbackRoutingEnabled=true)
-            //   - Auto Compile Check / Auto Console Capture / Max Consecutive Errors → 默认开启, 用户不需要管理
+            // ADR-17: Removed Agent Runtime and Self Correction cards
+            //   - Max Tool Rounds / Token Budget / Fallback Routing → internal constants (maxToolCallRounds=200, maxTokenBudget=0, fallbackRoutingEnabled=true)
+            //   - Auto Compile Check / Auto Console Capture / Max Consecutive Errors → enabled by default, users don't need to manage
 
             // ── Self-Challenge ──
-            // v1.5.0-alpha 极简哲学: 一个开关控制整个双节点机制, 内部策略由工程侧决定最优值。
+            // v1.5.0-alpha minimalism: one toggle controls the whole dual-node mechanism; internal policies use best defaults.
             context.Ui.DrawCard(
                 "Self-Challenge",
-                "在每次对话时让 Agent 挑战自己对你需求的理解, 输出前再自审一遍。会稍微增加响应时间与 token 用量, 但降低误解和幻觉。默认启用。",
+                "Have the agent challenge its own understanding before responding and self-review before output. Slightly increases latency and token usage but reduces misunderstanding and hallucination. Enabled by default.",
                 () =>
                 {
                     EditorGUI.BeginChangeCheck();
 
                     settings.selfChallengeEnabled = EditorGUILayout.Toggle(
-                        new GUIContent("Enable Self-Challenge", "启用后 Agent 会在每次对话前挑战自己对需求的理解, 输出前也会自审一遍。关闭则回到不带自挑战的行为。"),
+                        new GUIContent("Enable Self-Challenge", "When enabled, the agent challenges its understanding of your request before acting and self-reviews before output."),
                         settings.selfChallengeEnabled);
 
                     if (EditorGUI.EndChangeCheck())

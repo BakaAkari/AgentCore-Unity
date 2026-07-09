@@ -263,11 +263,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 return;
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            // ADR-17 极简: Workspace Root / Unity Root Path Override 字段已删除
-            //   Workspace 依赖自动检测(SVN 探测 + UnityRoot 回退)
-            //   若企业用户真的需要手动覆盖, 通过 AgentCoreSettings 内部字段 API 或未来加环境变量支持
+            // ADR-17: Workspace Root / Unity Root Path Override fields removed
+            //   Workspace uses auto-detection (SVN probe + UnityRoot fallback)
+            //   If enterprise users really need manual override, use internal API or env vars
             context.Ui.DrawHelpText(
-                "Workspace 依赖自动检测(SVN 工作副本探测 + UnityRoot 回退)。若探测失败, 请检查 SVN 工作副本状态或使用 'Refresh Workspace' 按钮。");
+                "Workspace uses auto-detection (SVN working copy probe + UnityRoot fallback). If detection fails, check SVN state or use 'Refresh Workspace'.");
             EditorGUILayout.Space(4);
 
             // workspace.json config file actions

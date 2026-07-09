@@ -65,17 +65,17 @@ namespace AgentCore.Editor.Config.Settings.Pages
             DrawKnowledgeBaseCard(context);
         }
 
-        // ── PROJECT.md / SOUL.ext.md 文件卡片 (ADR-17 保留) ──
+        // ── Project Files card (ADR-17 kept) ──
 
         private static void DrawProjectFilesCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "项目上下文文件",
-                "PROJECT.md 描述项目约定, SOUL.ext.md 追加行为规则。Agent 会自动读取, 建议提交到版本控制。",
+                "Project Files",
+                "PROJECT.md describes project conventions; SOUL.ext.md adds behavior rules. Both are auto-loaded by the agent; recommended to commit to VCS.",
                 () =>
                 {
-                    DrawUserFileRow("PROJECT.md", "项目约定与个人偏好, 团队共享, 建议 VCS 提交。Agent 可以直接编辑此文件。");
-                    DrawUserFileRow("SOUL.ext.md", "Agent 行为规则扩展, 追加到内置 SOUL 后, 建议 VCS 提交。");
+                    DrawUserFileRow("PROJECT.md", "Project conventions and personal preferences — team-shared, recommended for VCS commit. Agent can edit this file directly.");
+                    DrawUserFileRow("SOUL.ext.md", "Agent behavior rule extensions — appended to built-in SOUL, recommended for VCS commit.");
                 });
         }
 
@@ -87,20 +87,20 @@ namespace AgentCore.Editor.Config.Settings.Pages
         //   - DrawContextSourcesCard 已删除, PROJECT.md/SOUL.ext.md 移到 DrawProjectFilesCard
         //   - DrawContextBudgetCard 已删除 (Max Context Tokens / Reserve Response Tokens 内部化)
 
-        // ADR-17 极简: 只保留一个总开关, 内部参数 (Threshold/Target/Trigger Ratio) 内部化
+        // ADR-17: single toggle only; internal params (Threshold/Target/Trigger Ratio) hidden
         private static void DrawCompressionCard(AgentCoreSettingsContext context)
         {
             var settings = context.Settings;
 
             context.Ui.DrawCard(
-                "上下文压缩",
-                "长对话时自动压缩历史消息, 避免超出上下文窗口。默认启用。",
+                "Context Compression",
+                "Auto-compress conversation history when context window fills up. Enabled by default.",
                 () =>
                 {
                     EditorGUI.BeginChangeCheck();
 
                     settings.compressionEnabled = EditorGUILayout.Toggle(
-                        new GUIContent("启用压缩", "长对话超过阈值时自动压缩工具结果和历史消息。关闭则采用截断策略。"),
+                        new GUIContent("Enable Compression", "Compress tool results and history instead of truncating."),
                         settings.compressionEnabled);
 
                     if (EditorGUI.EndChangeCheck())
@@ -117,8 +117,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var settings = context.Settings;
 
             context.Ui.DrawServiceCard(
-                title: "长期记忆 (mem0)",
-                description: "跨会话的长期记忆服务。Agent 会自动从对话中提取关键信息, 并在后续会话中回忆使用。需要自己部署 mem0 服务。",
+                title: "Long-Term Memory (mem0)",
+                description: "Cross-session persistent memory. Agent extracts key info from conversations and recalls in later sessions. Requires self-hosted mem0.",
                 enabled: settings.mem0Enabled,
                 onEnabledChanged: value =>
                 {
@@ -198,8 +198,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var settings = context.Settings;
 
             context.Ui.DrawServiceCard(
-                title: "项目知识库 (LightRAG)",
-                description: "项目文档的向量检索增强。索引项目内的文档, 需要时按语义相关性返回。需要自己部署 LightRAG 服务。",
+                title: "Knowledge Base (LightRAG)",
+                description: "Project doc vector search. Indexes project docs and returns semantically relevant snippets. Requires self-hosted LightRAG.",
                 enabled: settings.lightragEnabled,
                 onEnabledChanged: value =>
                 {

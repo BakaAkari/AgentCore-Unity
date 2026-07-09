@@ -53,39 +53,39 @@ namespace AgentCore.Editor.Config
         // 用户 UI 可见字段 (共 ~10 个, 极简哲学: 只保留必要)
         // ═══════════════════════════════════════════════════════════════
 
-        // --- LLM 连接 (Model & Agent 页面, 必要用户配置) ---
-        [Tooltip("LLM API 端点地址（OpenAI 兼容）")]
+        // --- LLM connection (Model & Agent page, essential config) ---
+        [Tooltip("LLM API endpoint (OpenAI-compatible)")]
         public string llmEndpoint = "http://172.16.248.60:8000/v1";
 
-        [Tooltip("LLM 模型名称")]
+        [Tooltip("LLM model name")]
         public string llmModel = "auto";
 
-        [Tooltip("生成温度 (0.0-2.0)")]
+        [Tooltip("Sampling temperature (0.0-2.0)")]
         [Range(0f, 2f)]
         public float temperature = 0.7f;
 
-        [Tooltip("最大输出 token 数")]
+        [Tooltip("Max output tokens")]
         public int maxTokens = 16000;
 
-        // --- Self-Challenge (ADR-17: 唯一总开关) ---
-        [Tooltip("启用 Self-Challenge — Node A 挑战对用户意图的理解 + Node B 输出前 reviewer 审视 draft; 每轮对话 token +10~50%")]
+        // --- Self-Challenge (ADR-17: single toggle) ---
+        [Tooltip("Enable Self-Challenge — Node A challenges intent + Node B reviews draft; +10~50% tokens per turn")]
         public bool selfChallengeEnabled = true;
 
-        // --- Memory / Knowledge Base (External Enhancements 抽屉, 默认折叠) ---
-        [Tooltip("启用 mem0 记忆服务")]
+        // --- Memory / Knowledge Base (optional cloud services) ---
+        [Tooltip("Enable mem0 memory service")]
         public bool mem0Enabled = false;
 
-        [Tooltip("mem0 服务端点")]
+        [Tooltip("mem0 service endpoint")]
         public string mem0Endpoint = "";
 
-        [Tooltip("启用 LightRAG 知识库")]
+        [Tooltip("Enable LightRAG knowledge base")]
         public bool lightragEnabled = false;
 
-        [Tooltip("LightRAG 服务端点")]
+        [Tooltip("LightRAG service endpoint")]
         public string lightragEndpoint = "";
 
-        // --- Compression (UI 只暴露总开关) ---
-        [Tooltip("启用上下文压缩")]
+        // --- Compression (UI exposes toggle only) ---
+        [Tooltip("Enable context compression")]
         public bool compressionEnabled = true;
 
         // ═══════════════════════════════════════════════════════════════

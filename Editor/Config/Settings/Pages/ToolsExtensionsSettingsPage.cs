@@ -52,22 +52,22 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             var settings = context.Settings;
 
-            context.Ui.DrawCard("能力概览", "当前可用的 Agent 能力汇总。", () =>
+            context.Ui.DrawCard("Capability Overview", "Summary of currently available agent capabilities.", () =>
             {
                 var allTools = ToolRegistry.Instance.GetAllTools();
                 if (allTools != null && allTools.Count > 0)
                 {
                     var enabledCount = allTools.Count(tool =>
                         tool?.Metadata != null && !settings.IsToolDisabled(tool.Metadata.Name, tool.Metadata.Category));
-                    EditorGUILayout.LabelField($"已启用工具: {enabledCount}/{allTools.Count}", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField($"Tools enabled: {enabledCount}/{allTools.Count}", EditorStyles.miniLabel);
                 }
                 else
                 {
-                    EditorGUILayout.LabelField("工具尚未初始化", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField("Tools not initialized yet.", EditorStyles.miniLabel);
                 }
 
                 var vcsEnabled = OptionalComponentManager.IsVcsEnabled();
-                EditorGUILayout.LabelField($"版本控制组件: {(vcsEnabled ? "已启用" : "未启用")}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"VCS component: {(vcsEnabled ? "enabled" : "disabled")}", EditorStyles.miniLabel);
             });
         }
 
@@ -76,8 +76,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawToolVisibilityCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "工具管理",
-                "启用或禁用工具分类, 减少 prompt 体积并聚焦 Agent 能力。",
+                "Tool Visibility",
+                "Toggle tool categories to reduce prompt size.",
                 () => DrawToolManagement(context));
         }
 
@@ -305,8 +305,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawOptionalComponentsCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "扩展组件",
-                "启用或禁用可选的扩展功能。切换后 Unity 会自动重新编译脚本。",
+                "Optional Components",
+                "Enable/disable optional components. Toggling triggers script recompile.",
                 () =>
                 {
                     foreach (var component in OptionalComponentManager.GetComponents())
@@ -325,10 +325,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField(component.DisplayName, EditorStyles.boldLabel);
             context.Ui.DrawHelpText(component.Description);
-            // ADR-17 极简: 隐藏 "Define: AGENTCORE_XXX" 工程细节, 用户不关心 scripting define symbols
+            // ADR-17: Hide "Define: AGENTCORE_XXX" — scripting define symbols are engineering detail
 
             EditorGUI.BeginChangeCheck();
-            var enabled = EditorGUILayout.ToggleLeft("启用", component.Enabled);
+            var enabled = EditorGUILayout.ToggleLeft("Enabled", component.Enabled);
             if (EditorGUI.EndChangeCheck())
             {
                 SetComponentEnabled(component, enabled);
