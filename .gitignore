@@ -60,6 +60,23 @@ _archive/
 package/
 package.meta
 
+# --- Host Unity project pollution ---
+# When this package is loaded as an in-project Package by an outer Unity project,
+# the host project's editor generates meta files for top-level directories
+# (Assets/, Packages/, ProjectSettings/, UserSettings/, tools/, Logs/) and
+# sub-Packages/ProjectSettings folders inside this package. None of these belong
+# to the plugin repo. Tracking history: tools/*.ps1 have no .meta; *.tgz has no .meta.
+/Assets.meta
+/Logs.meta
+/Packages.meta
+/Packages/
+/ProjectSettings.meta
+/ProjectSettings/
+/UserSettings.meta
+/tools.meta
+/tools/*.meta
+*.tgz.meta
+
 # --- Python / Docker (if local-ragmem is re-added) ---
 __pycache__/
 *.pyc
