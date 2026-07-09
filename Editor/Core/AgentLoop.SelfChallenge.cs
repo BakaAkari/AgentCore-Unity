@@ -368,9 +368,7 @@ namespace AgentCore.Editor.Core
             if (_currentSelfChallengeData == null || !_currentSelfChallengeData.NodeATriggered)
                 return false;
 
-            var settings = AgentCoreSettings.instance;
-            if (!SelfChallengeConfig.AllowClarificationQuestions)
-                return false;
+            // ADR-17: AllowClarificationQuestions 现为常量 true, 不再检查(检查是死代码)
 
             if (_currentSelfChallengeData.Step4Conclusion == null ||
                 _currentSelfChallengeData.Step4Conclusion == Step4Conclusion.DirectExecute)
