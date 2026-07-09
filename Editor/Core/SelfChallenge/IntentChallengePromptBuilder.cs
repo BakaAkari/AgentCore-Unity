@@ -236,6 +236,21 @@ namespace AgentCore.Editor.Core.SelfChallenge
             }
             sb.Append("Do not skip any Step and do not add prose outside these structured sections.\n");
 
+            // L4-A HARD CONSTRAINT: 输出必须以 open marker 开头、close marker 结尾, 消除 prose 前缀导致 FinalizeContent state=None
+            sb.Append("\n[HARD CONSTRAINT]\n");
+            sb.Append("Your ENTIRE output must be wrapped in the markers below — no prose before the opening marker or after the closing marker:\n");
+            if (isContinuation)
+            {
+                sb.Append(SelfChallengeConfig.NodeAContinuationOpenMarker).Append(" ... ")
+                  .Append(SelfChallengeConfig.NodeAContinuationCloseMarker).Append('\n');
+            }
+            else
+            {
+                sb.Append(SelfChallengeConfig.NodeAOpenMarker).Append(" ... ")
+                  .Append(SelfChallengeConfig.NodeACloseMarker).Append('\n');
+            }
+            sb.Append("Start your response with the opening marker and end with the closing marker. Any text outside these markers will cause validation failure.\n");
+
             return sb.ToString();
         }
     }

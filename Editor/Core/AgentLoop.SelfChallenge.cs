@@ -129,6 +129,19 @@ namespace AgentCore.Editor.Core
                 return null;
             }
 
+            // ADR: self-challenge-model-tier-escape — 高级模型具备 native reasoning,
+            // 自挑战与其重复 → 逃逸 Node A, 依赖 native thinking。extractor 仍常驻兜底剥离。
+            // 热插拔: 每轮实时读取 selfChallengeEscapeEnabled + llmModel, 不缓存。
+            if (settings.selfChallengeEscapeEnabled &&
+                ModelCapabilityDetector.HasNativeReasoning(settings.llmModel))
+            {
+                _currentSelfChallengeData.NodeATriggered = false;
+                _currentSelfChallengeData.NodeASkipReason = "模型具备原生推理";
+                _nodeAEnabledThisTurn = false;
+                Debug.Log($"[AgentCore][SelfChallenge] Node A escaped: model '{settings.llmModel}' has native reasoning.");
+                return _currentSelfChallengeData;
+            }
+
             // WaitingForClarification 状态下, 走 Continuation 模式
             bool isContinuation = CurrentState == AgentState.WaitingForClarification;
 
@@ -534,27 +547,28 @@ namespace AgentCore.Editor.Core
             string draftResponse,
             string userMessage,
             ConversationTurn assistantTurn,
-            CancellationToken ct)
+            CancellationToken ct,
+            SelfChallengeData turnBoundData)
         {
             var settings = AgentCoreSettings.instance;
-            if (_currentSelfChallengeData == null)
-                _currentSelfChallengeData = new SelfChallengeData();
+            // ADR §3.4 B1: turn-bound 数据隔离 — 不再读写实例字段 _currentSelfChallengeData
+            var nodeBData = turnBoundData ?? new SelfChallengeData();
 
             // Skip 判定
             if (ShouldSkipNodeB(draftResponse, out var skipReason))
             {
-                _currentSelfChallengeData.NodeBTriggered = false;
-                _currentSelfChallengeData.NodeBSkipReason = skipReason;
-                if (assistantTurn != null) assistantTurn.SelfChallenge = _currentSelfChallengeData;
-                EmitEvent(AgentEvent.AnswerChallengeCompleted(_currentSelfChallengeData, _currentSelfChallengeTurnId ?? assistantTurn?.Id));
+                nodeBData.NodeBTriggered = false;
+                nodeBData.NodeBSkipReason = skipReason;
+                if (assistantTurn != null) assistantTurn.SelfChallenge = nodeBData;
+                EmitEvent(AgentEvent.AnswerChallengeCompleted(nodeBData, _currentSelfChallengeTurnId ?? assistantTurn?.Id));
                 return new AnswerChallengeResult(NodeBVerdict.PASS, null, null, skipped: true);
             }
 
-            _currentSelfChallengeData.NodeBTriggered = true;
-            _currentSelfChallengeData.NodeBSkipReason = null;
+            nodeBData.NodeBTriggered = true;
+            nodeBData.NodeBSkipReason = null;
 
             // 组装 reviewer messages(压缩后完整对话 + 强角色扮演, v0.7)
-            var reviewMessages = BuildReviewerMessages(userMessage, draftResponse);
+            var reviewMessages = BuildReviewerMessages(userMessage, draftResponse, nodeBData);
 
             // 触发调用 + retry
             int maxRetries = SelfChallengeConfig.NodeBRetryMax;
@@ -584,15 +598,15 @@ namespace AgentCore.Editor.Core
                         continue;
                     }
 
-                    var parseResult = AnswerChallengeParser.Parse(final.ExtractedBlock, draftResponse, _currentSelfChallengeData);
-                    _currentSelfChallengeData.NodeBRetryCount = attempt;
+                    var parseResult = AnswerChallengeParser.Parse(final.ExtractedBlock, draftResponse, nodeBData);
+                    nodeBData.NodeBRetryCount = attempt;
 
                     if (parseResult.Success)
                     {
                         resultPayload = new AnswerChallengeResult(
-                            _currentSelfChallengeData.NodeBVerdict ?? NodeBVerdict.PASS,
-                            _currentSelfChallengeData.ReviseIssues,
-                            _currentSelfChallengeData.BlockVerifications,
+                            nodeBData.NodeBVerdict ?? NodeBVerdict.PASS,
+                            nodeBData.ReviseIssues,
+                            nodeBData.BlockVerifications,
                             skipped: false);
                         break;
                     }
@@ -610,13 +624,13 @@ namespace AgentCore.Editor.Core
             if (resultPayload == null)
             {
                 Debug.LogWarning($"[AgentCore][SelfChallenge] Node B correction retry exhausted after {maxRetries + 1} attempts. Accepting draft with best-effort parse.");
-                _currentSelfChallengeData.NodeBRetryCount = maxRetries + 1;
-                _currentSelfChallengeData.NodeBVerdict = NodeBVerdict.PASS; // Fallback: 接受 draft
+                nodeBData.NodeBRetryCount = maxRetries + 1;
+                nodeBData.NodeBVerdict = NodeBVerdict.PASS; // Fallback: 接受 draft
                 resultPayload = new AnswerChallengeResult(NodeBVerdict.PASS, null, null, skipped: false);
             }
 
-            if (assistantTurn != null) assistantTurn.SelfChallenge = _currentSelfChallengeData;
-            EmitEvent(AgentEvent.AnswerChallengeCompleted(_currentSelfChallengeData, _currentSelfChallengeTurnId ?? assistantTurn?.Id));
+            if (assistantTurn != null) assistantTurn.SelfChallenge = nodeBData;
+            EmitEvent(AgentEvent.AnswerChallengeCompleted(nodeBData, _currentSelfChallengeTurnId ?? assistantTurn?.Id));
 
             return resultPayload;
         }
@@ -630,7 +644,7 @@ namespace AgentCore.Editor.Core
         /// 组装 Reviewer 的 messages 列表: 压缩后主对话历史 + 角色扮演 system prompt + 结构化 payload。
         /// v0.10 §0.6: 主历史里的 &lt;intent_challenge&gt; 块已被剥离; Node A 关键假设通过独立的 reviewer prompt 携带。
         /// </summary>
-        private List<ChatMessage> BuildReviewerMessages(string userMessage, string draftResponse)
+        private List<ChatMessage> BuildReviewerMessages(string userMessage, string draftResponse, SelfChallengeData turnBoundData)
         {
             var settings = AgentCoreSettings.instance;
             int maxTokens = settings.maxContextTokens > 0
@@ -644,10 +658,11 @@ namespace AgentCore.Editor.Core
             var reviewMessages = new List<ChatMessage>(compressedHistory);
 
             // Reviewer 角色 prompt + payload
+            // ADR §3.4 B1: 使用 turnBoundData 而非 _currentSelfChallengeData 实例字段
             var reviewerInstruction = AnswerChallengePromptBuilder.BuildReviewerInstruction(
                 userMessage,
                 draftResponse,
-                _currentSelfChallengeData?.NodeAOutput ?? string.Empty);
+                turnBoundData?.NodeAOutput ?? string.Empty);
 
             reviewMessages.Add(ChatMessage.System(reviewerInstruction));
             return reviewMessages;

@@ -464,8 +464,11 @@ namespace AgentCore.Editor.Core
                 // 7. 工具调用循环（P0-2 fix: 提取为公共方法，消除与 TriggerResumeLLMCall 的代码重复）
                 await RunToolCallLoopAsync(assistantTurn, toolDefinitions, ct);
 
-                // 8. 回到 Idle 状态 (WaitingForClarification 状态由 HandleNodeAConclusionForFinalResponse 设置; 若未进入该状态, 走正常 Idle)
-                if (CurrentState != AgentState.WaitingForClarification)
+                // 8. 回到 Idle 状态
+                //   WaitingForClarification 由 HandleNodeAConclusionForFinalResponse 设置, 不覆盖
+                //   ReviewingAnswer 由 HandleFinalResponse Node B 触发设置, 由 TriggerNodeBAsync 完成时恢复, 不覆盖
+                if (CurrentState != AgentState.WaitingForClarification &&
+                    CurrentState != AgentState.ReviewingAnswer)
                 {
                     SetState(AgentState.Idle);
                 }

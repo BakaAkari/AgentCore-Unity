@@ -372,12 +372,19 @@ namespace AgentCore.Editor.Core
 
             // Phase 9: Node B 触发(仅当未进入 WaitingForClarification 且总开关 selfChallengeEnabled=true)
             //   Node B 与 Node A 共享单一开关(v1.5.0-alpha 极简哲学: 一开全开)
+            //   ADR: self-challenge-model-tier-escape — 高级模型逃逸 Node B, 避免与 native reasoning 重复
+            //   ADR §3.4 B1 — Node B 触发前进入 ReviewingAnswer 状态, 隔离本轮数据, 完成时由 TriggerNodeBAsync 恢复 Idle
             if (!entersClarification)
             {
                 var settings = AgentCoreSettings.instance;
-                if (settings.selfChallengeEnabled)
+                bool nodeBShouldRun = settings.selfChallengeEnabled &&
+                    !(settings.selfChallengeEscapeEnabled &&
+                      ModelCapabilityDetector.HasNativeReasoning(settings.llmModel));
+
+                if (nodeBShouldRun)
                 {
-                    _ = TriggerNodeBAsync(assistantMessage, assistantTurn);
+                    SetState(AgentState.ReviewingAnswer);
+                    _ = TriggerNodeBAsync(assistantMessage, assistantTurn, _currentSelfChallengeData);
                 }
             }
 
@@ -402,8 +409,13 @@ namespace AgentCore.Editor.Core
         /// <summary>
         /// 触发 Node B(Answer Self-Challenge)独立 LLM 调用, 并根据 verdict 处理 REVISE / BLOCK 分支。
         /// 该方法是 fire-and-forget, 不阻塞主循环 — 因为设计文档 §1.3.2 允许 Node B 异步完成。
+        /// ADR §3.4 B1: 接收 turnBoundData 参数隔离本轮 SelfChallengeData, 避免跨 turn 实例字段覆盖。
+        ///   完成时(任何路径)恢复 Idle 状态(若仍处于 ReviewingAnswer)。
         /// </summary>
-        private async System.Threading.Tasks.Task TriggerNodeBAsync(ChatMessage assistantMessage, ConversationTurn assistantTurn)
+        private async System.Threading.Tasks.Task TriggerNodeBAsync(
+            ChatMessage assistantMessage,
+            ConversationTurn assistantTurn,
+            SelfChallengeData turnBoundData)
         {
             try
             {
@@ -411,7 +423,7 @@ namespace AgentCore.Editor.Core
                 var userMessage = GetLastUserMessageContent();
                 var ct = _currentCts?.Token ?? System.Threading.CancellationToken.None;
 
-                var reviewResult = await InvokeNodeBAsync(draftContent, userMessage, assistantTurn, ct);
+                var reviewResult = await InvokeNodeBAsync(draftContent, userMessage, assistantTurn, ct, turnBoundData);
 
                 if (reviewResult.Skipped) return;
 
@@ -434,6 +446,15 @@ namespace AgentCore.Editor.Core
             catch (Exception ex)
             {
                 Debug.LogError($"[AgentCore][SelfChallenge] Node B invocation failed: {ex.Message}");
+            }
+            finally
+            {
+                // ADR §3.4 B1: Node B 生命周期结束 → 恢复 Idle
+                //   仅当仍处于 ReviewingAnswer 时才恢复; 若期间用户已取消/进入其他状态, 不覆盖
+                if (CurrentState == AgentState.ReviewingAnswer)
+                {
+                    SetState(AgentState.Idle);
+                }
             }
         }
 

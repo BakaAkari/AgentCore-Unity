@@ -71,6 +71,13 @@ namespace AgentCore.Editor.Config
         [Tooltip("Enable Self-Challenge — Node A challenges intent + Node B reviews draft; +10~50% tokens per turn")]
         public bool selfChallengeEnabled = true;
 
+        // --- Self-Challenge Model-Tier Escape (ADR: self-challenge-model-tier-escape) ---
+        // 高级模型(claude-opus / o-series / gpt-5 / deepseek-r / gemini-2.5)具备 native reasoning,
+        // 自挑战与其重复 → 默认逃逸,跳过 Node A + Node B,依赖 native thinking。
+        // 热插拔:每轮实时读取,无需重启。selfChallengeEnabled=false 时此开关无意义。
+        [Tooltip("Enable model-tier escape — advanced models with native reasoning skip Self-Challenge to avoid duplicate thinking cost")]
+        public bool selfChallengeEscapeEnabled = true;
+
         // --- Memory / Knowledge Base (optional cloud services) ---
         [Tooltip("Enable mem0 memory service")]
         public bool mem0Enabled = false;
@@ -402,6 +409,7 @@ namespace AgentCore.Editor.Config
             temperature = 0.7f;
             maxTokens = 16000;
             selfChallengeEnabled = true;
+            selfChallengeEscapeEnabled = true;  // ADR: model-tier escape 默认开启
             mem0Enabled = false;
             mem0Endpoint = "";
             lightragEnabled = false;

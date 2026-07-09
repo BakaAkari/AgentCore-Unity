@@ -129,6 +129,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         new GUIContent("Enable Self-Challenge", "When enabled, the agent challenges its understanding of your request before acting and self-reviews before output."),
                         settings.selfChallengeEnabled);
 
+                    // ADR: self-challenge-model-tier-escape — 高级模型自动跳过(灰醒:总开关关闭时无意义)
+                    bool prevEnabled = GUI.enabled;
+                    GUI.enabled = settings.selfChallengeEnabled;
+                    settings.selfChallengeEscapeEnabled = EditorGUILayout.Toggle(
+                        new GUIContent("Skip for Advanced Models", "Advanced models with native reasoning (e.g. Claude Opus, o-series, GPT-5) skip Self-Challenge to avoid duplicate thinking cost."),
+                        settings.selfChallengeEscapeEnabled);
+                    GUI.enabled = prevEnabled;
+
                     if (EditorGUI.EndChangeCheck())
                     {
                         settings.SaveSettings();

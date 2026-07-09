@@ -39,6 +39,14 @@ namespace AgentCore.Editor.Core
         /// </summary>
         WaitingForClarification,
 
+        /// <summary>
+        /// 正在审阅答案(Node B Answer Self-Challenge 运行中)。
+        /// 该状态下拒绝新的用户发送(Node B 是独立 LLM 调用, 需隔离本轮 SelfChallengeData)。
+        /// Node B 完成 / 跳过 / 取消后回到 Idle。
+        /// ADR: self-challenge-model-tier-escape §3.4 B1 — Node B 生命周期状态。
+        /// </summary>
+        ReviewingAnswer,
+
         /// <summary>发生错误</summary>
         Error
     }

@@ -24,9 +24,14 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
-            if (_agentLoop.CurrentState != AgentState.Idle)
+            // ADR: self-challenge-model-tier-escape §3.4 B1 — 与 AgentLoop.SendMessageAsync gate 对齐
+            //   Idle → 正常新一轮
+            //   WaitingForClarification → 走 Node A Continuation
+            //   ReviewingAnswer → 拒绝(Node B 运行中, 需隔离本轮数据)
+            if (_agentLoop.CurrentState != AgentState.Idle &&
+                _agentLoop.CurrentState != AgentState.WaitingForClarification)
             {
-                Debug.LogWarning("[AgentCore] Cannot send message while agent is busy.");
+                Debug.LogWarning($"[AgentCore] Cannot send message while agent is in {_agentLoop.CurrentState} state.");
                 return;
             }
 

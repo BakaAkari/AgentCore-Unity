@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-alpha4] - 2026-07-09
+
+### Summary
+Self-Challenge 模型分层逃逸机制落地 + 原始 bug 收尾修复。高级模型(Claude Opus / GPT-o / DeepSeek-R / Gemini 2.5 等具备 native reasoning)通过 L1-L4 逃逸门跳过 Node A + Node B,避免 thinking 重复消耗与上下文污染;低性能模型路径保留原 Self-Challenge,并修复 A/B1 两个次生失效。B2(clarification 卡片)推迟至 beta。
+
+ADR: [`plans/adr-self-challenge-model-tier-escape.md`](plans/adr-self-challenge-model-tier-escape.md)
+
+### Fixed — 原始 bug(原 v1.5.0-alpha3 tag 内容,并入本版)
+- **`<intent_challenge>` 块泄漏到聊天气泡**:Node A 流式 extractor 在 Continuation 模式下未激活,导致 challenge block 原样输出到用户可见内容。
+  - 修复:extractor 改为始终激活(Full / Continuation 统一),无论当前轮次模式。
+  - commit: 18f9b44(原 alpha3 tag 指向此 commit,但 package.json 未同步 bump,tag 为空壳,本版正式收录)
+
+### Added — L1-L4 模型分层逃逸
+- **L1 — 模型能力检测** ([`ModelCapabilityDetector.cs`](Editor/Core/ModelCapabilityDetector.cs)):前缀匹配识别 native reasoning 模型(claude-opus / gpt-o / deepseek-r / gemini-2.5 等),返回 `HasNativeReasoning`。
+- **L3 — 逃逸开关** ([`AgentCoreSettings.cs`](Editor/Config/AgentCoreSettings.cs) `selfChallengeEscapeEnabled` 字段 + [`ModelAgentSettingsPage.cs`](Editor/Config/Settings/Pages/ModelAgentSettingsPage.cs) UI toggle):默认 true;检测到高级模型时灰醒提示已自动逃逸。热插拔,实时生效。
+- **L2 — Node A / Node B 逃逸门** ([`AgentLoop.SelfChallenge.cs`](Editor/Core/AgentLoop.SelfChallenge.cs)):`PrepareSelfChallengeDataForNewTurn` Node A 门 + `HandleFinalResponse` Node B 门,`escapeEnabled && detector.HasNativeReasoning` 时跳过注入与触发。
+- **L4-A — retry prompt 硬约束** ([`IntentChallengePromptBuilder.cs`](Editor/Core/SelfChallenge/IntentChallengePromptBuilder.cs) + [`AnswerChallengePromptBuilder.cs`](Editor/Core/SelfChallenge/AnswerChallengePromptBuilder.cs)):Correction / Revise retry 指令强制 HARD CONSTRAINT,禁止模型再次输出 challenge block,仅输出修正内容。
+
+### Fixed — L4-B1 Node B 生命周期与 send gate
+- **send gate 阻断澄清回复** ([`ChatWindow.Input.cs`](Editor/UI/ChatWindow.Input.cs)):`OnSendClicked` 仅允许 Idle,阻断 WaitingForClarification 状态下的用户回复。修复为 `Idle || WaitingForClarification` 对齐 [`AgentLoop.SendMessageAsync`](Editor/Core/AgentLoop.cs) gate。
+- **Node B fire-and-forget 状态泄漏**:Node B 异步运行期间无独立状态,用户可触发新一轮导致 turn-bound 数据串写。
+  - 新增 [`AgentState.ReviewingAnswer`](Editor/Core/MessageTypes.cs):Node B 触发前 `SetState(ReviewingAnswer)`,`TriggerNodeBAsync` finally 恢复 Idle。
+  - [`ChatWindow.Events.cs`](Editor/UI/ChatWindow.Events.cs) 新增 ReviewingAnswer UI 分支:状态标签"审阅答案中...",禁用发送,显示取消。
+  - [`AgentLoop.Runner.cs`](Editor/Core/AgentLoop.Runner.cs) `TriggerNodeBAsync` 签名新增 `turnBoundData` 参数;`InvokeNodeBAsync` + `BuildReviewerMessages` 全部改用 turn-bound 局部变量 `nodeBData`,不再读写实例字段 `_currentSelfChallengeData`,消除跨轮覆盖。
+  - [`AgentLoop.cs`](Editor/Core/AgentLoop.cs) post-loop Idle 检查新增 `ReviewingAnswer` 例外,避免被提前覆盖。
+- **Cancel 安全性**:`Cancel()` 已设 Idle,`TriggerNodeBAsync` finally 仅在仍处于 ReviewingAnswer 时才恢复,无双重 SetState。DomainReload switch default → `InterruptPhase.None`,ReviewingAnswer 安全降级。
+
+### Notes
+- B2(ClarificationOptionCard 可点击澄清选项)推迟至 v1.5.0-beta;B1 已修复核心 send gate,B2 纯 UI 增强可后续迭代。
+- alpha3 tag 保留为历史标记(指向 18f9b44 extractor 修复),但从未独立发布 tarball,其内容已并入 alpha4。
+- 集成验证(高级模型逃逸 + 低性能模型补丁 + 热插拔)待执行。
+
 ## [1.5.0-alpha2] - 2026-07-09
 
 ### Fixed

@@ -126,6 +126,14 @@ namespace AgentCore.Editor.Core.SelfChallenge
               .Append(" tags (each ≥")
               .Append(SelfChallengeConfig.MinDraftQuoteLength)
               .Append(" chars quoted verbatim from the draft), and a clear PASS/REVISE/BLOCK verdict.\n");
+
+            // L4-A HARD CONSTRAINT: 输出必须以 NodeB marker 包裹, 消除 prose 前缀导致 FinalizeContent state=None
+            sb.Append("\n[HARD CONSTRAINT]\n");
+            sb.Append("Your ENTIRE output must be wrapped in the markers below — no prose before the opening marker or after the closing marker:\n");
+            sb.Append(SelfChallengeConfig.NodeBOpenMarker).Append(" ... ")
+              .Append(SelfChallengeConfig.NodeBCloseMarker).Append('\n');
+            sb.Append("Start your response with the opening marker and end with the closing marker. Any text outside these markers will cause validation failure.\n");
+
             return sb.ToString();
         }
 

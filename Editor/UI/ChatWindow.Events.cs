@@ -129,6 +129,13 @@ namespace AgentCore.Editor.UI
                     SetCancelVisible(false);
                     break;
 
+                case AgentState.ReviewingAnswer:
+                    // ADR: self-challenge-model-tier-escape §3.4 B1 — Node B 运行中
+                    UpdateStatusLabel("审阅答案中...");
+                    SetSendEnabled(false);
+                    SetCancelVisible(true);
+                    break;
+
                 case AgentState.ExecutingTool:
                     UpdateStatusLabel("执行工具...");
                     SetSendEnabled(false);
