@@ -286,11 +286,19 @@ namespace AgentCore.Editor.UI
                 }
                 else if (turn.Role == "assistant")
                 {
-                    // 助手消息使用固定 turn 容器：ThinkingDrawer -> ToolCallGroup -> MessageBubble
+                    // 助手消息使用固定 turn 容器：ThinkingDrawer -> SelfChallengeCard -> ToolCallGroup -> MessageBubble
                     var turnView = EnsureAssistantTurnView(turn.Id);
                     turnView.RestoreThinking(turn);
                     var bubble = turnView.EnsureBubble(turn.Id, turn.Content, isStreaming: false);
                     _messageBubbles[turn.Id] = bubble;
+
+                    // 恢复 Self-Challenge 卡片（v1.5.0-alpha2）
+                    // 兼容性：v1.4.x 及以前的会话 turn.SelfChallenge == null，直接跳过不渲染卡片。
+                    if (turn.SelfChallenge != null)
+                    {
+                        var scCard = turnView.EnsureSelfChallengeCard(turn.Id);
+                        scCard.SetData(turn.SelfChallenge);
+                    }
 
                     // 恢复工具调用卡片（统一放入分组容器）
                     if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)

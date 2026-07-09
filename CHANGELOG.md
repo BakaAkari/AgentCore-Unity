@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-alpha2] - 2026-07-09
+
+### Fixed
+- **Self-Challenge 卡片会话恢复丢失**：Domain Reload / 切换会话 / 重开 Unity 后，历史 assistant turn 的 [`SelfChallengeCard`](Editor/UI/Components/SelfChallengeCard.cs) 不再随对话内容一起重建。
+  - 根因：[`ChatWindow.Messages.cs`](Editor/UI/ChatWindow.Messages.cs) 中 `RebuildMessageBubbles` 恢复 assistant turn 时未调用 [`AssistantTurnView.EnsureSelfChallengeCard`](Editor/UI/Components/AssistantTurnView.cs) — 数据层（[`SessionData.SerializableConversationTurn.SelfChallenge`](Editor/Session/SessionData.cs)）已正确读写，纯 UI 恢复路径缺口。
+  - 修复：在 `RebuildMessageBubbles` 的 assistant 分支恢复 bubble 之后、恢复 ToolCallGroup 之前，接入 `EnsureSelfChallengeCard + SetData(turn.SelfChallenge)`；`turn.SelfChallenge == null` 时跳过，v1.4.x 及以前的旧会话向前兼容。
+- 场景覆盖：Session 切换、Domain Reload（Unity 编译回来）、重开 Unity Editor。
+
+### Impact
+- 用户可见：进入历史会话时，之前触发过 Self-Challenge 的助手气泡上方会重新出现 Verdict 徽标 + 摘要 + 可展开完整块。
+- 无破坏性变更：新会话流程 / 实时事件路由（[`ChatWindow.SelfChallenge.cs`](Editor/UI/ChatWindow.SelfChallenge.cs)）不受影响。
+- 无数据迁移：v1.5.0-alpha1 已有的 session JSON 直接生效，无需重建索引。
+
+### Notes
+- 仅 1 个文件、4 行接线；数据层在 alpha1 就已就绪，属于 alpha1 收尾遗漏。
+- 相关背景：[`plans/self-challenge-implementation-report.md`](plans/self-challenge-implementation-report.md) Stage 10 遗留项之一。
+
 ## [1.5.0-alpha1] - 2026-07-09
 
 ### Added — Self-Challenge (Phase 9) 完整实施
