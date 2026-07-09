@@ -52,22 +52,22 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             var settings = context.Settings;
 
-            context.Ui.DrawCard("Capability Overview", "Summary of currently available agent capabilities.", () =>
+            context.Ui.DrawCard("能力概览", "当前可用的 Agent 能力汇总。", () =>
             {
                 var allTools = ToolRegistry.Instance.GetAllTools();
                 if (allTools != null && allTools.Count > 0)
                 {
                     var enabledCount = allTools.Count(tool =>
                         tool?.Metadata != null && !settings.IsToolDisabled(tool.Metadata.Name, tool.Metadata.Category));
-                    EditorGUILayout.LabelField($"Native Tools: {enabledCount}/{allTools.Count} enabled", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField($"已启用工具: {enabledCount}/{allTools.Count}", EditorStyles.miniLabel);
                 }
                 else
                 {
-                    EditorGUILayout.LabelField("Native Tools: not initialized yet", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField("工具尚未初始化", EditorStyles.miniLabel);
                 }
 
                 var vcsEnabled = OptionalComponentManager.IsVcsEnabled();
-                EditorGUILayout.LabelField($"VCS Component: {(vcsEnabled ? "enabled" : "disabled")}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"版本控制组件: {(vcsEnabled ? "已启用" : "未启用")}", EditorStyles.miniLabel);
             });
         }
 
@@ -76,8 +76,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawToolVisibilityCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "Tool Visibility",
-                "Enable or disable tool categories to reduce prompt size and focus agent capabilities.",
+                "工具管理",
+                "启用或禁用工具分类, 减少 prompt 体积并聚焦 Agent 能力。",
                 () => DrawToolManagement(context));
         }
 
@@ -305,22 +305,15 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawOptionalComponentsCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "Optional Components",
-                "Enable or disable bundled AgentCore components. Changes update scripting define symbols and request Unity script recompilation.",
+                "扩展组件",
+                "启用或禁用可选的扩展功能。切换后 Unity 会自动重新编译脚本。",
                 () =>
                 {
-                    var buildTargetGroup = EditorUserBuildSettings.selectedBuildTargetGroup;
-                    EditorGUILayout.LabelField($"Active Build Target Group: {buildTargetGroup}", EditorStyles.miniLabel);
-                    context.Ui.DrawHelpText("This toggle only updates the active BuildTargetGroup. If you build multiple platforms, enable the component again after switching target groups.");
-                    EditorGUILayout.Space(4);
-
                     foreach (var component in OptionalComponentManager.GetComponents())
                     {
                         DrawOptionalComponentCard(context, component);
                         EditorGUILayout.Space(4);
                     }
-
-                    context.Ui.DrawHelpText("After toggling a component, Unity refreshes assets and requests script recompilation.");
                 });
         }
 
@@ -332,17 +325,15 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField(component.DisplayName, EditorStyles.boldLabel);
             context.Ui.DrawHelpText(component.Description);
-            EditorGUILayout.LabelField($"Define: {component.DefineSymbol}", EditorStyles.miniLabel);
+            // ADR-17 极简: 隐藏 "Define: AGENTCORE_XXX" 工程细节, 用户不关心 scripting define symbols
 
             EditorGUI.BeginChangeCheck();
-            var enabled = EditorGUILayout.ToggleLeft("Enabled", component.Enabled);
+            var enabled = EditorGUILayout.ToggleLeft("启用", component.Enabled);
             if (EditorGUI.EndChangeCheck())
             {
                 SetComponentEnabled(component, enabled);
             }
 
-            // Inline contribution(s) belonging to this component, displayed as a foldout
-            // so the open/close state matches users' mental model of "this component's settings".
             DrawInlineComponentSettings(context, component);
 
             EditorGUILayout.EndVertical();
