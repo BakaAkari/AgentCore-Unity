@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-07-10
+
+### Summary
+放弃 `1.5.0-alpha1 ~ 1.5.0-alpha5` 预发布序列，将 5 个 alpha 视为已消耗的补丁位，直接以 **1.5.6** 作为首个稳定版发布。汇总 alpha 段全部功能（Self-Challenge Phase 9 / ADR-17 极简哲学 / L1-L4 模型分层逃逸 / GLM-5.2 全链路适配 / Settings 分页精简 6→5），**新增 PreferencesFolder 目录不存在导致 Save 卡死 Editor 的关键修复**，并**附带面向已受影响用户的紧急离线卸载脚本 + 文档**。历史 alpha 段落保留在下方作为演进记录。
+
+### Added — 紧急离线卸载（面向已因旧版卡死无法启动 Unity 的用户）
+- 新增 [`EMERGENCY-UNINSTALL.md`](EMERGENCY-UNINSTALL.md)（**随 tarball 发布**，用户解压 tarball 或访问仓库均可看到）：分步说明在 **不打开 Unity Editor** 的前提下清理 `Packages/manifest.json` 依赖 + `Packages/com.agentcore/` embedded 目录 + `Library/PackageCache/com.agentcore.unity*/` + `Library/AgentCore/`，以及可选的 `%APPDATA%/Unity/Editor-*/Preferences/AgentCore/` 全局偏好目录。
+- 新增 [`tools/emergency-uninstall.bat`](tools/emergency-uninstall.bat)（**源码仓库维护，不进 tarball**）：纯 `cmd.exe` 内置命令实现，**不依赖 PowerShell**，双击即可运行。自动 kill Unity 进程释放文件锁 → 清 embedded / PackageCache / Library/AgentCore / packages-lock.json → 可选 `/prefs` 清全局 Preferences；`manifest.json` 编辑刻意留给用户手工完成（避免脚本破坏 JSON 结构），脚本最后自动为用户打开 Notepad。支持位置参数 `"项目路径"` + 开关 `/prefs` / `/yes`。
+- 背景：1.5.6 之前旧版本装完后 Unity 一启动即弹 Force Quit 卡死，用户根本无法进 Package Manager 卸载；且部分企业沙盘 / 精简 Windows 环境无 PowerShell 可用，因此采用 BAT 作为最兼容的落地形态。
+
+### Fixed — PreferencesFolder/AgentCore 目录不存在导致 Save 失败卡死 Editor
+- **现象**：全新安装时 Editor 报错 `Moving F:/.../Unity/Temp/UnityTempFile-<hash> to C:/Users/<user>/AppData/Roaming/Unity/Editor-5.x/Preferences/AgentCore/Settings.asset: 系统找不到指定的路径`，弹出 Force Quit 对话框，需强制退出。
+- **根因**：AgentCore 的三个 [`ScriptableSingleton`](https://docs.unity3d.com/ScriptReference/ScriptableSingleton_1.html)（[`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs) / [`IndexingSettings`](Editor/Indexing/Config/IndexingSettings.cs) / [`DomainReloadState`](Editor/Core/DomainReloadState.cs)）均使用 `[FilePath("AgentCore/<name>.asset", PreferencesFolder)]`，写入路径位于 Unity 全局偏好目录下的 `AgentCore/` 子目录。Unity 内部 `SaveToSerializedFileAndForget` 使用 `Move(temp → target)` 语义，但**不会自动创建父目录**。全新用户从未有插件在 `Preferences/AgentCore/` 写过文件时，该子目录不存在，Move 失败并抛出对话框。
+- **修复**：
+  - 新增 [`PreferencesFolderPathHelper`](Editor/Config/PreferencesFolderPathHelper.cs)：通过反射优先使用 `InternalEditorUtility.unityPreferencesFolder`，回退到平台特定路径（Windows `%APPDATA%/Unity/Editor-{major}.x/Preferences`、macOS/Linux 对应位置），在首次 Save 前 `Directory.CreateDirectory` 确保 `AgentCore/` 子目录存在，结果缓存避免重复 IO。
+  - 三个 Singleton 各新增 `SafeSave(bool)` 包装：先调 `EnsureAgentCoreDirectory()`，再 `Save`，异常统一 `LogWarning` 而非抛出，Editor 再无被卡死的可能。
+  - 全项目 14 处 `Save(true)` 调用全部替换为 `SafeSave(true)`（[`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs) 5 处、[`IndexingSettings`](Editor/Indexing/Config/IndexingSettings.cs) 2 处、[`DomainReloadState`](Editor/Core/DomainReloadState.cs) 7 处）。
+- **影响面**：0 破坏；纯防御性加固。现有用户无感（目录已存在时直接短路）；新用户从此不再触发首次安装卡死。
+
+### Notes
+- 版本号跳过 1.5.0 ~ 1.5.5：alpha1~alpha5 视为已消耗的 5 个补丁位（含未 tag 的 alpha3 占位）；本稳定版直接从 1.5.6 起步。alpha 段功能已全部并入本版；旧 alpha tarball 归档至 [`_archive/tarballs/`](_archive/tarballs)。
+- 验证建议：删除 `%APPDATA%/Unity/Editor-*/Preferences/AgentCore/` 后重启 Unity，首次打开 `Project Settings > AgentCore`，确认不再弹出 Force Quit。
+
+---
+
 ## [1.5.0-alpha4] - 2026-07-09
 
 ### Summary

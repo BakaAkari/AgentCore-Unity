@@ -73,8 +73,10 @@ _archive/**/*.psd
 _archive/**/*.blend
 
 # --- Package build output (npm pack / UPM tarball extraction) ---
-# .tgz release archives are intentionally tracked (see repo history);
-# the extracted 'package/' directory is a build artifact and should not be committed.
+# .tgz tarballs are release artifacts; distribute via GitHub Releases
+# (upload as asset on the vX.Y.Z tag), not via git. This keeps the repo lightweight.
+# The extracted 'package/' directory is also a build artifact.
+/*.tgz
 package/
 package.meta
 

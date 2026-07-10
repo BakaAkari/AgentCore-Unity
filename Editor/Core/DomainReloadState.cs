@@ -1,4 +1,5 @@
 using System;
+using AgentCore.Editor.Config;
 using UnityEditor;
 using UnityEngine;
 
@@ -245,7 +246,7 @@ namespace AgentCore.Editor.Core
             _compilationErrors = string.Empty;
 
             // ScriptableSingleton 需要显式标记脏以确保序列化
-            Save(true);
+            SafeSave(true);
 
             Debug.Log($"[AgentCore] DomainReloadState: Marked interrupted — session={sessionId}, phase={phase}, " +
                       $"tool={lastToolName}, pendingToolCalls={hadPendingToolCalls}, " +
@@ -264,7 +265,7 @@ namespace AgentCore.Editor.Core
         {
             _compilationSucceeded = succeeded;
             _compilationErrors = errors ?? string.Empty;
-            Save(true);
+            SafeSave(true);
 
             Debug.Log($"[AgentCore] DomainReloadState: Compilation result set — succeeded={succeeded}, " +
                       $"errors={(!string.IsNullOrEmpty(errors) ? errors.Substring(0, Math.Min(errors.Length, 200)) : "(none)")}");
@@ -279,7 +280,7 @@ namespace AgentCore.Editor.Core
         public void SaveFileChangeRecords(string json)
         {
             _fileChangeRecordsJson = json ?? string.Empty;
-            Save(true);
+            SafeSave(true);
         }
 
         /// <summary>
@@ -289,7 +290,7 @@ namespace AgentCore.Editor.Core
         public void ClearFileChangeRecords()
         {
             _fileChangeRecordsJson = string.Empty;
-            Save(true);
+            SafeSave(true);
         }
 
         /// <summary>
@@ -314,7 +315,7 @@ namespace AgentCore.Editor.Core
             _totalTokensSaved = totalTokensSaved;
             _toolResultOriginalTokens = toolResultOriginalTokens;
             _conversationOriginalTokens = conversationOriginalTokens;
-            Save(true);
+            SafeSave(true);
 
             Debug.Log($"[AgentCore] DomainReloadState: Compression metrics saved — " +
                       $"toolResults={toolResultSuccessCount}, conversations={conversationSuccessCount}, " +
@@ -332,7 +333,7 @@ namespace AgentCore.Editor.Core
             _totalTokensSaved = 0;
             _toolResultOriginalTokens = 0;
             _conversationOriginalTokens = 0;
-            Save(true);
+            SafeSave(true);
         }
 
         /// <summary>
@@ -364,11 +365,29 @@ namespace AgentCore.Editor.Core
             _interruptedToolCallId = string.Empty;
             // 注意：不清除 _fileChangeRecordsJson 和压缩统计数据，这些数据独立于中断状态
 
-            Save(true);
+            SafeSave(true);
 
             if (wasInterrupted)
             {
                 Debug.Log($"[AgentCore] DomainReloadState: Interruption cleared for session {sessionId}.");
+            }
+        }
+
+        /// <summary>
+        /// Safe wrapper around <see cref="ScriptableSingleton{T}.Save(bool)"/> that ensures the
+        /// shared AgentCore preferences directory exists before writing. See
+        /// <see cref="PreferencesFolderPathHelper"/> for details.
+        /// </summary>
+        internal void SafeSave(bool saveAsText)
+        {
+            PreferencesFolderPathHelper.EnsureAgentCoreDirectory();
+            try
+            {
+                Save(saveAsText);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] DomainReloadState.Save failed: {ex.Message}");
             }
         }
 

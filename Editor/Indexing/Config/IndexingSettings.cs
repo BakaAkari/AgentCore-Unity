@@ -1,4 +1,7 @@
+using System;
+using AgentCore.Editor.Config;
 using UnityEditor;
+using UnityEngine;
 
 namespace AgentCore.Editor.Components.Indexing.Config
 {
@@ -23,7 +26,7 @@ namespace AgentCore.Editor.Components.Indexing.Config
                 if (AutoSettings == null)
                 {
                     AutoSettings = new IndexingAutoSettings();
-                    Save(true);
+                    SafeSave(true);
                 }
 
                 return AutoSettings;
@@ -35,7 +38,25 @@ namespace AgentCore.Editor.Components.Indexing.Config
         /// </summary>
         public void SaveSettings()
         {
-            Save(true);
+            SafeSave(true);
+        }
+
+        /// <summary>
+        /// Safe wrapper around <see cref="ScriptableSingleton{T}.Save(bool)"/> that ensures the
+        /// shared AgentCore preferences directory exists before writing. See
+        /// <see cref="PreferencesFolderPathHelper"/> for details.
+        /// </summary>
+        internal void SafeSave(bool saveAsText)
+        {
+            PreferencesFolderPathHelper.EnsureAgentCoreDirectory();
+            try
+            {
+                Save(saveAsText);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] IndexingSettings.Save failed: {ex.Message}");
+            }
         }
     }
 }

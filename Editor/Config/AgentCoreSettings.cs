@@ -324,11 +324,7 @@ namespace AgentCore.Editor.Config
 
             EditorApplication.delayCall += () =>
             {
-                try { Save(true); }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"[AgentCore] Deferred settings save failed: {ex.Message}");
-                }
+                SafeSave(true);
             };
         }
 
@@ -347,7 +343,7 @@ namespace AgentCore.Editor.Config
                     Debug.Log("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
                 }
                 settings.vcsDefaultEnabled = true;
-                settings.Save(true);
+                settings.SafeSave(true);
             }
             catch (Exception ex)
             {
@@ -384,7 +380,7 @@ namespace AgentCore.Editor.Config
                     if (!string.IsNullOrEmpty(firstModel))
                     {
                         llmModel = firstModel;
-                        Save(true);
+                        SafeSave(true);
                         Debug.Log($"[AgentCore] Fetched models, set default to: {firstModel}");
                     }
                 }
@@ -450,7 +446,7 @@ namespace AgentCore.Editor.Config
             streamingEnabled = true;
             showToolCallDetails = true;
             settingsVersion = CurrentVersion;
-            Save(true);
+            SafeSave(true);
         }
 
         /// <summary>
@@ -463,8 +459,32 @@ namespace AgentCore.Editor.Config
         /// </summary>
         public void SaveSettings()
         {
-            Save(true);
+            SafeSave(true);
             OnSettingsChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// Safe wrapper around <see cref="ScriptableSingleton{T}.Save(bool)"/> that ensures the
+        /// preferences directory exists and swallows IO/access failures so the Editor is never
+        /// blocked by a corrupt or missing preferences root.
+        /// </summary>
+        /// <remarks>
+        /// See <see cref="PreferencesFolderPathHelper"/> for the reason this exists: Unity's
+        /// underlying <c>SaveToSerializedFileAndForget</c> Move step fails hard when the target
+        /// parent directory (e.g. <c>%APPDATA%/Unity/Editor-*.x/Preferences/AgentCore/</c>) does
+        /// not exist, which has been observed to leave the Editor stuck on fresh installs.
+        /// </remarks>
+        internal void SafeSave(bool saveAsText)
+        {
+            PreferencesFolderPathHelper.EnsureAgentCoreDirectory();
+            try
+            {
+                Save(saveAsText);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] AgentCoreSettings.Save failed: {ex.Message}");
+            }
         }
 
         /// <summary>
