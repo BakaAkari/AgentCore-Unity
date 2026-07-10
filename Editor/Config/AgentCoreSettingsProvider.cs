@@ -37,7 +37,6 @@ namespace AgentCore.Editor.Config
                 new ContextMemorySettingsPage(),
                 new ToolsExtensionsSettingsPage(),
                 new WorkspaceSettingsPage(),
-                new UiDiagnosticsSettingsPage(),
             };
 
             // Merge with dynamically discovered pages from optional component assemblies.

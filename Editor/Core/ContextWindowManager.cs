@@ -61,6 +61,16 @@ namespace AgentCore.Editor.Core
             // Qwen 系列 — 128k
             ("qwen-", 128000),
 
+            // GLM 系列（Z.ai）— 按版本细分，更具体前缀优先
+            // GLM-5.2 — 1M context（含量化变体 W4AFP8 等）
+            ("glm-5.2", 1048576),
+            // GLM-5 / GLM-5.1 / GLM-5-turbo / GLM-5v-turbo — 200k~262k
+            ("glm-5", 202752),
+            // GLM-4.5~4.7 — 128k~200k（取 200k 上限）
+            ("glm-4", 200000),
+            // GLM 其他系列（保守估计）
+            ("glm-", 128000),
+
             // Gemini 系列 — 1M（Google 最新模型）
             ("gemini-", 1000000),
 

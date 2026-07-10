@@ -143,7 +143,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
         private static void DrawQuickActionsCard(AgentCoreSettingsContext context)
         {
-            context.Ui.DrawCard("Quick Actions", "Common shortcuts to AgentCore features.", () =>
+            context.Ui.DrawCard("Quick Actions", "Common shortcuts and maintenance actions.", () =>
             {
                 EditorGUILayout.BeginHorizontal();
 
@@ -160,7 +160,76 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                 GUILayout.FlexibleSpace();
                 EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+
+                if (GUILayout.Button("Open Logs", GUILayout.Width(140)))
+                {
+                    var logPath = GetEditorLogPath();
+                    if (!string.IsNullOrEmpty(logPath) && File.Exists(logPath))
+                    {
+                        EditorUtility.OpenWithDefaultApp(logPath);
+                    }
+                    else
+                    {
+                        EditorUtility.DisplayDialog("Open Logs", "Could not locate the Unity Editor log file.", "OK");
+                    }
+                }
+
+                if (GUILayout.Button("Reset Settings", GUILayout.Width(150)))
+                {
+                    if (EditorUtility.DisplayDialog(
+                        "Reset Settings",
+                        "This will reset all AgentCore settings to their default values.\n\nThis action cannot be undone.",
+                        "Reset",
+                        "Cancel"))
+                    {
+                        context.Settings.ResetToDefaults();
+                        Debug.Log("[AgentCore] Settings reset to defaults.");
+                    }
+                }
+
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+
+                if (GUILayout.Button("Clear Secure Keys", GUILayout.Width(150)))
+                {
+                    if (EditorUtility.DisplayDialog(
+                        "Clear Secure Keys",
+                        "This will clear all stored API keys (LLM, mem0, LightRAG, Compression LLM).\n\nThis action cannot be undone.",
+                        "Clear",
+                        "Cancel"))
+                    {
+                        SecureKeyStorage.ClearAll();
+                        Debug.Log("[AgentCore] All secure keys cleared.");
+                    }
+                }
+
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
             });
+        }
+
+        private static string GetEditorLogPath()
+        {
+            var os = SystemInfo.operatingSystemFamily;
+            if (os == OperatingSystemFamily.Windows)
+            {
+                var localAppData = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
+                return Path.Combine(localAppData, "Unity", "Editor", "Editor.log");
+            }
+            else if (os == OperatingSystemFamily.MacOSX)
+            {
+                var home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal);
+                return Path.Combine(home, "Library", "Logs", "Unity", "Editor.log");
+            }
+            else
+            {
+                var home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal);
+                return Path.Combine(home, ".config", "unity3d", "Editor.log");
+            }
         }
 
         private static string GetPackageVersion()

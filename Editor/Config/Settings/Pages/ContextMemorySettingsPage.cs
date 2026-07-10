@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using AgentCore.Editor.Bootstrap;
+using AgentCore.Editor.Cloud;
+using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
 
@@ -24,6 +26,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
         // Foldout keys for advanced / optional configuration groups nested inside service cards.
         private const string AutoMemoryFoldoutKey = "context-memory.auto-memory";
+
+        // Connection-test state keys (migrated from UiDiagnosticsSettingsPage — see ADR below).
+        private const string TestMem0RunningKey = "context-memory.testMem0Running";
+        private const string TestMem0StatusKey = "context-memory.testMem0Status";
+        private const string TestLightRAGRunningKey = "context-memory.testLightRAGRunning";
+        private const string TestLightRAGStatusKey = "context-memory.testLightRAGStatus";
 
         /// <inheritdoc />
         public string Id => "context-memory";
@@ -164,6 +172,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         settings.SaveSettings();
                     }
 
+                    // Connection test — migrated from UiDiagnostics (settings page consolidation).
+                    DrawTestMem0Button(context);
+
                     // Auto Memory — advanced, collapsed by default.
                     EditorGUILayout.Space(4);
                     var autoExpanded = context.State.GetFoldout(AutoMemoryFoldoutKey, FoldoutDefaults.Advanced);
@@ -238,7 +249,134 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     {
                         settings.SaveSettings();
                     }
+
+                    // Connection test — migrated from UiDiagnostics (settings page consolidation).
+                    DrawTestLightRAGButton(context);
                 });
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Connection Tests (migrated from UiDiagnosticsSettingsPage — page consolidation)
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static void DrawTestMem0Button(AgentCoreSettingsContext context)
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = !IsRunning(context, TestMem0RunningKey);
+            if (GUILayout.Button(IsRunning(context, TestMem0RunningKey) ? "Testing..." : "Test mem0",
+                GUILayout.MinWidth(120), GUILayout.MaxWidth(160)))
+            {
+                TestMem0Connection(context);
+            }
+            GUI.enabled = true;
+
+            context.Ui.DrawStatusLabel(
+                context.State.GetStatusMessage(TestMem0StatusKey),
+                context.State.GetStatusLevel(TestMem0StatusKey));
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private static void DrawTestLightRAGButton(AgentCoreSettingsContext context)
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = !IsRunning(context, TestLightRAGRunningKey);
+            if (GUILayout.Button(IsRunning(context, TestLightRAGRunningKey) ? "Testing..." : "Test LightRAG",
+                GUILayout.MinWidth(140), GUILayout.MaxWidth(180)))
+            {
+                TestLightRAGConnection(context);
+            }
+            GUI.enabled = true;
+
+            context.Ui.DrawStatusLabel(
+                context.State.GetStatusMessage(TestLightRAGStatusKey),
+                context.State.GetStatusLevel(TestLightRAGStatusKey));
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private static void TestMem0Connection(AgentCoreSettingsContext context)
+        {
+            SetRunning(context, TestMem0RunningKey, true);
+            context.State.SetStatus(TestMem0StatusKey, "Testing...", SettingsStatusLevel.Loading);
+            var endpoint = context.Settings.mem0Endpoint;
+            var apiKey = SecureKeyStorage.GetMem0ApiKey();
+            var userId = context.Settings.EffectiveUserId;
+
+            AsyncHelper.RunAsync(async () =>
+            {
+                try
+                {
+                    var client = new Mem0Client(endpoint, apiKey, userId);
+                    var (success, message) = await client.TestConnectionAsync();
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        context.State.SetStatus(
+                            TestMem0StatusKey,
+                            success ? $"[OK] {message}" : $"[FAIL] {message}",
+                            success ? SettingsStatusLevel.Success : SettingsStatusLevel.Error);
+                        SetRunning(context, TestMem0RunningKey, false);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        context.State.SetStatus(TestMem0StatusKey, $"[FAIL] {ex.Message}", SettingsStatusLevel.Error);
+                        SetRunning(context, TestMem0RunningKey, false);
+                    });
+                }
+            });
+        }
+
+        private static void TestLightRAGConnection(AgentCoreSettingsContext context)
+        {
+            SetRunning(context, TestLightRAGRunningKey, true);
+            context.State.SetStatus(TestLightRAGStatusKey, "Testing...", SettingsStatusLevel.Loading);
+            var endpoint = context.Settings.lightragEndpoint;
+            var apiKey = SecureKeyStorage.GetLightRAGApiKey();
+
+            AsyncHelper.RunAsync(async () =>
+            {
+                try
+                {
+                    var client = new LightRAGClient(endpoint, apiKey);
+                    var success = await client.TestConnectionAsync();
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        context.State.SetStatus(
+                            TestLightRAGStatusKey,
+                            success ? "[OK] Connected" : "[FAIL] Unhealthy",
+                            success ? SettingsStatusLevel.Success : SettingsStatusLevel.Error);
+                        SetRunning(context, TestLightRAGRunningKey, false);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        context.State.SetStatus(TestLightRAGStatusKey, $"[FAIL] {ex.Message}", SettingsStatusLevel.Error);
+                        SetRunning(context, TestLightRAGRunningKey, false);
+                    });
+                }
+            });
+        }
+
+        private static bool IsRunning(AgentCoreSettingsContext context, string key)
+        {
+            return context.State.RunningTasks.Contains(key);
+        }
+
+        private static void SetRunning(AgentCoreSettingsContext context, string key, bool running)
+        {
+            if (running)
+            {
+                context.State.RunningTasks.Add(key);
+            }
+            else
+            {
+                context.State.RunningTasks.Remove(key);
+            }
         }
 
         // ─────────────────────────────────────────────────────────────────────

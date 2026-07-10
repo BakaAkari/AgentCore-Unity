@@ -58,14 +58,14 @@ namespace AgentCore.Editor.Config
         public string llmEndpoint = "http://172.16.248.60:8000/v1";
 
         [Tooltip("LLM model name")]
-        public string llmModel = "auto";
+        public string llmModel = "glm-5.2";
 
         [Tooltip("Sampling temperature (0.0-2.0)")]
         [Range(0f, 2f)]
         public float temperature = 0.7f;
 
         [Tooltip("Max output tokens")]
-        public int maxTokens = 16000;
+        public int maxTokens = 65536;
 
         // --- Self-Challenge (ADR-17: single toggle) ---
         [Tooltip("Enable Self-Challenge — Node A challenges intent + Node B reviews draft; +10~50% tokens per turn")]
@@ -189,7 +189,7 @@ namespace AgentCore.Editor.Config
 
         // --- Request Enrichment ---
         [HideInInspector]
-        public bool enableReasoningOutput = false;
+        public bool enableReasoningOutput = true;  // GLM-5.2 适配:逃逸 Self-Challenge 后依赖 native reasoning,注入空 reasoning:{} 触发 reasoning_content 返回
 
         [HideInInspector]
         public string reasoningEffort = "";
@@ -405,9 +405,9 @@ namespace AgentCore.Editor.Config
         public void ResetToDefaults()
         {
             llmEndpoint = "http://172.16.248.60:8000/v1";
-            llmModel = "auto";
+            llmModel = "glm-5.2";
             temperature = 0.7f;
-            maxTokens = 16000;
+            maxTokens = 65536;
             selfChallengeEnabled = true;
             selfChallengeEscapeEnabled = true;  // ADR: model-tier escape 默认开启
             mem0Enabled = false;
@@ -443,7 +443,7 @@ namespace AgentCore.Editor.Config
             conversationCompressionTrigger = 0.7f;
             workspaceAutoDetectEnabled = true;
             workspaceConfigVersion = 0;
-            enableReasoningOutput = false;
+            enableReasoningOutput = true;  // GLM-5.2 适配:逃逸 Self-Challenge 后依赖 native reasoning
             reasoningEffort = "";
             reasoningMaxTokens = 0;
             extraRequestBody = "";

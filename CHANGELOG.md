@@ -37,6 +37,37 @@ ADR: [`plans/adr-self-challenge-model-tier-escape.md`](plans/adr-self-challenge-
 - alpha3 tag 保留为历史标记(指向 18f9b44 extractor 修复),但从未独立发布 tarball,其内容已并入 alpha4。
 - 集成验证(高级模型逃逸 + 低性能模型补丁 + 热插拔)待执行。
 
+## [1.5.0-alpha5] - 2026-07-10
+
+### Summary
+Settings 分页精简(6→5,UiDiagnostics 拆解合并)+ GLM-5.2(Z.ai 1M context reasoning model)全链路适配:加入 native reasoning 白名单逃逸 Self-Challenge,上下文窗口映射对齐 1M,默认参数面向 GLM-5.2 调优。
+
+### Changed — GLM-5.2 全链路适配
+- **L1 白名单**:[`ModelCapabilityDetector.NativeReasoningPrefixes`](Editor/Core/ModelCapabilityDetector.cs) 新增 `"glm-5"` 前缀(GLM-5 系列为 Z.ai large-scale reasoning model,含 5.2 量化变体如 W4AFP8)。`HasNativeReasoning("glm-5.2")` → true → Self-Challenge Node A/B 双 gate 跳过,依赖 native reasoning。
+- **上下文窗口映射**:[`ContextWindowManager.ModelPrefixMap`](Editor/Core/ContextWindowManager.cs) 新增 4 条 GLM 条目(最长前缀优先):
+  - `("glm-5.2", 1048576)` — GLM-5.2 1M context
+  - `("glm-5", 202752)` — GLM-5/5.1/5-turbo/5v-turbo
+  - `("glm-4", 200000)` — GLM-4.5~4.7(取上限)
+  - `("glm-", 128000)` — GLM 其他保守估计
+- **默认参数面向 GLM-5.2 调优**:[`AgentCoreSettings`](Editor/Config/AgentCoreSettings.cs)
+  - `llmModel`:`"auto"` → `"glm-5.2"`(代理接受显式名,前缀匹配生效)
+  - `maxTokens`:`16000` → `65536`(GLM-5.2 max_completion_tokens=101376,取 64K 留余量)
+  - `enableReasoningOutput`:`false` → `true`(逃逸 Self-Challenge 后注入空 `reasoning:{}` 触发 reasoning_content 返回,UI thinking trace 可展示;effort/maxTokens 留空让模型默认推理)
+  - `temperature=0.7` / `reserveResponseTokens=32000` 保持不变
+  - ResetToDefaults 同步更新
+
+### Changed — Settings 分页精简(6→5)
+- **UiDiagnosticsSettingsPage 拆解删除**:原 6 分页(Dashboard/ModelAgent/ContextMemory/ToolsExtensions/Workspace/UiDiagnostics)中,UiDiagnostics 功能与其他页重复(Test LLM 重复 ModelAgent,Refresh Tool Registry 重复 Dashboard,About 重复 Dashboard footer,Open PROJECT.md 重复 ContextMemory),Description 撒谎(Chat UI preferences 但 DrawChatUiCard 已被 ADR-17 删除)。
+- **迁移**:
+  - Test mem0 / Test LightRAG → [`ContextMemorySettingsPage`](Editor/Config/Settings/Pages/ContextMemorySettingsPage.cs)(MemoryService/KnowledgeBase 卡片新增 Test 按钮)
+  - Open Logs / Reset Settings / Clear Secure Keys → [`DashboardSettingsPage`](Editor/Config/Settings/Pages/DashboardSettingsPage.cs)(QuickActions 卡片扩展为 3 行)
+  - 删除 UiDiagnosticsSettingsPage.cs + .meta(git rm)
+- [`AgentCoreSettingsProvider.BuildPageList`](Editor/Config/AgentCoreSettingsProvider.cs) 移除 UiDiagnostics 注册。
+
+### Notes
+- B2(ClarificationOptionCard 可点击澄清选项)仍推迟至 beta。
+- 集成验证(GLM-5.2 逃逸 + reasoning 注入 + 1M 窗口 + 低性能模型 Self-Challenge 回退)待执行。
+
 ## [1.5.0-alpha2] - 2026-07-09
 
 ### Fixed

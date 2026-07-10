@@ -26,6 +26,7 @@ namespace AgentCore.Editor.Core
         /// - OpenAI: openai/o1-*, openai/o3-*, openai/o4-*, openai/gpt-5*
         /// - DeepSeek: deepseek/deepseek-r*
         /// - Gemini: google/gemini-2.5-*
+        /// - Z.ai: z-ai/glm-5*(GLM-5 系列为 large-scale reasoning model, OpenRouter supported_parameters 含 reasoning/reasoning_effort/include_reasoning)
         /// 注意: o1-mini 不具备完整 reasoning,但 prefix "o1-" 会命中 — 已知偏差,
         /// 用户可通过 selfChallengeEscapeEnabled=false 手动覆盖。
         /// </remarks>
@@ -40,6 +41,7 @@ namespace AgentCore.Editor.Core
             "gpt-5",             // GPT-5
             "deepseek-r",        // DeepSeek R 系列(推理模型)
             "gemini-2.5",        // Gemini 2.5 Pro(具备 thinking)
+            "glm-5",             // GLM-5 系列(Z.ai reasoning model, 含 5.2 量化变体如 W4AFP8)
         };
 
         /// <summary>
