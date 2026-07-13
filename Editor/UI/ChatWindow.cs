@@ -81,6 +81,12 @@ namespace AgentCore.Editor.UI
         /// <summary>当前工具调用分组容器（一次 Agent 交互中的所有工具调用共享一个分组）</summary>
         private ToolCallGroup _currentToolCallGroup;
 
+        /// <summary>
+        /// 用户点击发送后、真正 assistant turn 出现前的 pending 占位气泡。
+        /// 由 <see cref="OnSendClicked"/> 创建；真正的 assistant turn 出现或错误时被 <see cref="DismissPendingIndicator"/> 移除。
+        /// </summary>
+        private Components.PendingIndicator _pendingIndicator;
+
         #endregion
 
         #region UI 元素引用
@@ -93,6 +99,15 @@ namespace AgentCore.Editor.UI
 
         /// <summary>消息容器（ScrollView 内部）</summary>
         private VisualElement _messageContainer;
+
+        /// <summary>"跳到最新"浮动按钮（用户上翻时显示）</summary>
+        private Button _scrollToBottomButton;
+
+        /// <summary>用户是否手动上翻（true 时禁用自动追底）</summary>
+        private bool _userScrolledUp;
+
+        /// <summary>输入框滚动包装</summary>
+        private ScrollView _inputScrollView;
 
         /// <summary>文本输入框</summary>
         private TextField _inputField;
@@ -245,9 +260,11 @@ namespace AgentCore.Editor.UI
                     _messageListManager.AttachScrollView(_messageScrollView);
             }
 
+            _inputScrollView = rootVisualElement.Q<ScrollView>("input-scroll-view");
             _inputField = rootVisualElement.Q<TextField>("input-field");
             _sendButton = rootVisualElement.Q<Button>("send-button");
             _cancelButton = rootVisualElement.Q<Button>("cancel-button");
+            _scrollToBottomButton = rootVisualElement.Q<Button>("scroll-to-bottom-button");
             _statusLabel = rootVisualElement.Q<Label>("status-label");
 
             // 3.5 查询 Hub 导航与面板 UI 元素引用
@@ -276,9 +293,17 @@ namespace AgentCore.Editor.UI
             // 4. 绑定按钮事件
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());
             _cancelButton?.RegisterCallback<ClickEvent>(_ => OnCancelClicked());
+            _scrollToBottomButton?.RegisterCallback<ClickEvent>(_ => OnScrollToBottomClicked());
 
             // 4.5 绑定会话侧边栏按钮事件
             _newSessionButton?.RegisterCallback<ClickEvent>(_ => OnNewSessionClicked());
+
+            // 4.6 消息滚动区域检测用户手动上翻（禁用自动追底）
+            if (_messageScrollView != null)
+            {
+                _messageScrollView.verticalScroller.valueChanged += OnMessageScrollValueChanged;
+                _messageScrollView.RegisterCallback<WheelEvent>(_ => CheckUserScrolled(force: true), TrickleDown.TrickleDown);
+            }
 
             // 5. 绑定输入框键盘事件（Enter 发送，Shift+Enter 换行，Escape 取消）
             _inputField?.RegisterCallback<KeyDownEvent>(OnInputFieldKeyDown);

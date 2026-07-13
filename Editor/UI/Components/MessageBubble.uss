@@ -179,3 +179,52 @@
 .streaming-cursor--visible {
     display: flex;
 }
+
+/* --- 复制按钮（气泡右上角） --- */
+.bubble-copy-button {
+    margin-left: 6px;
+    margin-right: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    font-size: 9px;
+    border-radius: 3px;
+    border-width: 1px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #999999;
+    -unity-text-align: middle-center;
+}
+
+.bubble-copy-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #d4d4d4;
+}
+
+.bubble-copy-button:active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.message-bubble--user .bubble-copy-button {
+    color: #a0c4e8;
+    border-color: rgba(160, 196, 232, 0.25);
+}
+
+.message-bubble--user .bubble-copy-button:hover {
+    color: #ffffff;
+    background-color: rgba(160, 196, 232, 0.2);
+}
+
+.message-bubble--error .bubble-copy-button {
+    color: #c07070;
+    border-color: rgba(192, 112, 112, 0.3);
+}
+
+.message-bubble--error .bubble-copy-button:hover {
+    color: #ffb0b0;
+    background-color: rgba(192, 112, 112, 0.2);
+}

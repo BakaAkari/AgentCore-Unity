@@ -25,12 +25,30 @@ namespace AgentCore.Editor.LLM
         /// <param name="responseStream">HTTP 响应流</param>
         /// <param name="onChunk">每个解析出的 chunk 的回调</param>
         /// <param name="ct">取消令牌</param>
+        /// <summary>
+        /// 主线程连续占用 <see cref="YieldBudgetMs"/> 毫秒后强制让出一次。
+        /// 依据：Unity 内置 "Hold on / UnitySynchronization.ExecuteTasks" 保护阈值约 500ms。
+        /// 设置为 200ms 提供 2.5x 安全余量；同时避免像"每 N chunk 让步"那样在高吞吐时过频 yield，
+        /// 导致 EditorApplication tick 恢复延迟叠加，出现"吐字变慢"的可见回退。
+        /// </summary>
+        private const long YieldBudgetMs = 200;
+
+        /// <summary>
+        /// 解析 SSE 流，通过回调逐 chunk 推送解析结果。
+        /// </summary>
+        /// <param name="responseStream">HTTP 响应流</param>
+        /// <param name="onChunk">每个解析出的 chunk 的回调</param>
+        /// <param name="ct">取消令牌</param>
         public async Task ParseStreamAsync(
             Stream responseStream,
             Action<StreamChunk> onChunk,
             CancellationToken ct = default)
         {
             using var reader = new StreamReader(responseStream);
+
+            // ADR-19: 用 Stopwatch 实现"基于时间的让步预算"，避免固定 N chunk 阈值在
+            //   不同吞吐场景下要么过频（吐字慢）要么过疏（Hold on 复现）。
+            var yieldTimer = System.Diagnostics.Stopwatch.StartNew();
 
             while (!reader.EndOfStream && !ct.IsCancellationRequested)
             {
@@ -71,6 +89,14 @@ namespace AgentCore.Editor.LLM
                 {
                     Debug.LogWarning($"[AgentCore] SSE chunk parse error: {ex.Message}\nData: {data}");
                     // 解析错误不中断流，继续处理下一行
+                }
+
+                // ADR-19: 主线程连续占用满 YieldBudgetMs 才让步，
+                //   让出去后重置计时器，继续在主线程 parse。
+                if (yieldTimer.ElapsedMilliseconds >= YieldBudgetMs)
+                {
+                    await Task.Yield();
+                    yieldTimer.Restart();
                 }
             }
 

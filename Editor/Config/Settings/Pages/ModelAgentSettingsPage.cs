@@ -175,7 +175,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     var firstNonAuto = models.Find(m => m != "auto");
                     if (!string.IsNullOrEmpty(firstNonAuto))
                     {
-                        GUILayout.Label($"→ {firstNonAuto}", EditorStyles.miniLabel, GUILayout.MaxWidth(200));
+                        GUILayout.Label($"-> {firstNonAuto}", EditorStyles.miniLabel, GUILayout.MaxWidth(200));
                     }
                 }
             }

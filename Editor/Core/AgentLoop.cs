@@ -303,6 +303,9 @@ namespace AgentCore.Editor.Core
             _toolScopeState = new ToolScopeState();
             AgentCore.Editor.Tools.Native.Meta.RequestToolsTool.SetScopeState(_toolScopeState);
 
+            // ADR-18 Skill System: 初始化 Skill 作用域状态并注入到 LoadSkillTool
+            InitializeSkillContext();
+
             _isInitialized = true;
 
             // Phase 3: 会话创建始终延迟到 TryRestoreSession() 中处理。
@@ -431,6 +434,11 @@ namespace AgentCore.Editor.Core
                     }
                 }
 
+                // ADR-19: 首次让出主线程一次，确保 UI 已渲染 PendingIndicator，
+                //   随后进入 HTTP 请求 / 首轮 Cold-Start 快照阶段。
+                //   Yield 通过 UnitySynchronizationContext 回到主线程，不改变线程亲和性。
+                await System.Threading.Tasks.Task.Yield();
+
                 // §3.3 + §3.6: 会话首轮自动注入 Deferred Context + Workspace 运行时快照
                 if (IsFirstUserMessage())
                 {
@@ -455,6 +463,19 @@ namespace AgentCore.Editor.Core
                     catch (Exception ex)
                     {
                         Debug.LogWarning($"[AgentCore] Cold-start snapshot failed (non-blocking): {ex.Message}");
+                    }
+                }
+
+                // ADR-18: 每轮发送前同步 skill messages 到 _messages 集合
+                if (AgentCoreSettings.instance.skillsEnabled)
+                {
+                    try
+                    {
+                        SyncSkillMessages();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[AgentCore][Skills] SyncSkillMessages failed (non-blocking): {ex.Message}");
                     }
                 }
 
@@ -565,6 +586,9 @@ namespace AgentCore.Editor.Core
             // 3.6 Phase 5: 清空压缩统计数据
             _compressionMetrics?.Reset();
             DomainReloadState.instance.ClearCompressionMetrics();
+
+            // 3.7 ADR-18: 清空 Skill 加载状态（skill message 会随 _messages.Clear() 一并清空）
+            ResetSkillContext();
 
             // 4. 不再通过 EmitEvent 发送 ConversationReset 事件。
             // EmitEvent 使用 EditorApplication.delayCall 延迟执行，会导致 ClearMessages()
@@ -765,6 +789,9 @@ namespace AgentCore.Editor.Core
 
             // FallbackRouter 无需 Dispose（无事件订阅）
             _fallbackRouter = null;
+
+            // ADR-18: 释放 Skill Context（解除事件订阅 + 清空 tool 引用）
+            DisposeSkillContext();
 
             // 释放取消令牌
             if (_currentCts != null)

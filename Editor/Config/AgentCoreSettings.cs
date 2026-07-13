@@ -143,6 +143,13 @@ namespace AgentCore.Editor.Config
         [HideInInspector]
         public bool autoProjectContext = true;
 
+        /// <summary>
+        /// ADR-18 Skill System: 是否启用 Skill 加载机制（默认启用）。
+        /// 关闭后 <c>load_skill</c> 工具会返回错误，已加载 skill 保持不变（不主动卸载）。
+        /// </summary>
+        [HideInInspector]
+        public bool skillsEnabled = true;
+
         // --- Memory Auto (原 Auto Memory 折叠区) ---
         [HideInInspector]
         public bool autoMemoryEnabled = false;
@@ -426,6 +433,7 @@ namespace AgentCore.Editor.Config
             allToolsFailBlockThreshold = 4;
             bootstrapEnabled = true;
             autoProjectContext = true;
+            skillsEnabled = true;
             autoMemoryEnabled = false;
             autoMemoryMinTurns = 3;
             disabledToolCategories = new List<string>();

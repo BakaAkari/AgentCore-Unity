@@ -44,6 +44,8 @@ namespace AgentCore.Editor.UI
                     break;
 
                 case AgentEventType.AssistantMessage:
+                    // pending 气泡不再需要，真实回复已到达
+                    DismissPendingIndicator();
                     FinalizeAssistantMessage(evt.Content, evt.MessageId);
                     // 助手消息完成后，结束当前工具调用分组（下次工具调用创建新分组）
                     _currentToolCallGroup = null;
@@ -53,6 +55,7 @@ namespace AgentCore.Editor.UI
                     break;
 
                 case AgentEventType.Error:
+                    DismissPendingIndicator();
                     ShowError(evt.Content, evt.Detail);
                     break;
 
@@ -107,6 +110,8 @@ namespace AgentCore.Editor.UI
                     UpdateStatusLabel("就绪");
                     SetSendEnabled(true);
                     SetCancelVisible(false);
+                    // Idle 表示本轮已彻底结束（正常/取消/错误），清理 pending 保险
+                    DismissPendingIndicator();
                     break;
 
                 case AgentState.Thinking:
@@ -115,6 +120,8 @@ namespace AgentCore.Editor.UI
                     SetCancelVisible(true);
                     // 创建助手消息气泡占位（流式模式）
                     EnsureAssistantBubbleExists();
+                    // 真实 turn view 已就绪，pending 完成使命
+                    DismissPendingIndicator();
                     break;
 
                 case AgentState.Streaming:
@@ -150,8 +157,12 @@ namespace AgentCore.Editor.UI
 
                 case AgentState.Error:
                     UpdateStatusLabel("错误", true);
+                    DismissPendingIndicator();
                     break;
             }
+
+            // pending 若仍存在（LLM 未开始 stream），根据状态同步文字
+            SyncPendingIndicatorFromState(state);
 
             // Phase 6.0.4: 状态变更后更新上下文使用情况面板
             UpdateContextUsagePanel();

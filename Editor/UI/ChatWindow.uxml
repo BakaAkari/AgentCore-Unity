@@ -33,14 +33,21 @@
         <ui:VisualElement name="chat-panel">
           <!-- 聊天内容区域 -->
           <ui:VisualElement name="chat-area">
-            <!-- 消息列表区域（可滚动） -->
-            <ui:ScrollView name="message-scroll-view">
-              <ui:VisualElement name="message-container" />
-            </ui:ScrollView>
+            <!-- 消息列表 + 跳底部浮动按钮 -->
+            <ui:VisualElement name="message-scroll-wrapper" style="flex-grow: 1; position: relative;">
+              <ui:ScrollView name="message-scroll-view">
+                <ui:VisualElement name="message-container" />
+              </ui:ScrollView>
+              <!-- 浮动"跳到底部"按钮：只在用户上翻时显示 -->
+              <ui:Button name="scroll-to-bottom-button" text="跳到最新" style="display: none;" tooltip="回到最新消息" />
+            </ui:VisualElement>
 
             <!-- 底部输入区域 -->
             <ui:VisualElement name="input-area">
-              <ui:TextField name="input-field" multiline="true" />
+              <!-- 输入框滚动包装：内容多时可滚动，光标位置跟随 -->
+              <ui:ScrollView name="input-scroll-view">
+                <ui:TextField name="input-field" multiline="true" />
+              </ui:ScrollView>
               <ui:VisualElement name="input-buttons">
                 <ui:Button name="send-button" text="发送" />
                 <ui:Button name="cancel-button" text="取消" />

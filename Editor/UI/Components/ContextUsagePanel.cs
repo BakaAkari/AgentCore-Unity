@@ -107,6 +107,9 @@ namespace AgentCore.Editor.UI.Components
 
             // Initialize with empty data
             UpdateDisplay(new Core.ContextBudgetInfo());
+
+            // 默认折叠（v1.6.4：占用聊天区空间过大，用户主动展开时再显示详情）
+            SetCollapsed(true);
         }
         #endregion
 

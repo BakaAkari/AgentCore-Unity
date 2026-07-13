@@ -367,7 +367,13 @@ namespace AgentCore.Editor.UI.Components
                     statParts.Add($"{_failedCalls} 失败");
 
                 if (_runningCalls > 0)
-                    statParts.Add($"{_runningCalls} 执行中");
+                {
+                    // 附加当前正在执行的工具名（第一个 running 的），让折叠状态下用户也能看到进度
+                    var runningToolName = FindFirstRunningToolName();
+                    statParts.Add(string.IsNullOrEmpty(runningToolName)
+                        ? $"{_runningCalls} 执行中"
+                        : $"{_runningCalls} 执行中: {runningToolName}");
+                }
 
                 var pending = _totalCalls - _completedCalls - _failedCalls - _runningCalls;
                 if (pending > 0)
@@ -379,6 +385,24 @@ namespace AgentCore.Editor.UI.Components
             _summaryLabel.text = parts.Count > 0
                 ? $"[{string.Join(" | ", parts)}]"
                 : "";
+
+            // 折叠状态下有工具执行中：加脉动指示；无 running 工具则移除脉动
+            var isActive = _runningCalls > 0;
+            if (isActive) AddToClassList("active-pulse");
+            else RemoveFromClassList("active-pulse");
+        }
+
+        /// <summary>
+        /// 查找第一个处于 Running 状态的 ToolCallCard 的工具名。找不到返回 null。
+        /// </summary>
+        private string FindFirstRunningToolName()
+        {
+            foreach (var card in _cards)
+            {
+                if (card != null && card.Status == ToolCallStatus.Running)
+                    return card.ToolName;
+            }
+            return null;
         }
 
         /// <summary>

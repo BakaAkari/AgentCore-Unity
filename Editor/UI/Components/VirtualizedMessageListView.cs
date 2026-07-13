@@ -294,7 +294,7 @@ namespace AgentCore.Editor.UI.Components
             placeholder.style.marginBottom = 4;
 
             var btn = new Button(() => LoadMoreItems());
-            btn.text = $"↑ 加载更多历史消息（已隐藏 {_hiddenCount} 条）";
+            btn.text = $"加载更多历史消息（已隐藏 {_hiddenCount} 条）";
             btn.style.fontSize = 11;
             btn.style.color = new StyleColor(new Color(0.6f, 0.8f, 1f));
             btn.style.backgroundColor = new StyleColor(new Color(0.15f, 0.2f, 0.3f, 0.8f));
@@ -363,7 +363,7 @@ namespace AgentCore.Editor.UI.Components
             var btn = _loadMorePlaceholder.Q<Button>();
             if (btn != null)
             {
-                btn.text = $"↑ 加载更多历史消息（已隐藏 {_hiddenCount} 条）";
+                btn.text = $"加载更多历史消息（已隐藏 {_hiddenCount} 条）";
             }
         }
 

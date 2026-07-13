@@ -134,7 +134,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     settings.SaveSettings();
                 },
                 statusHint: settings.mem0Enabled && !string.IsNullOrEmpty(settings.mem0Endpoint)
-                    ? $"→ {settings.mem0Endpoint}"
+                    ? $"-> {settings.mem0Endpoint}"
                     : null,
                 drawEnabledBody: () =>
                 {
@@ -218,7 +218,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     settings.SaveSettings();
                 },
                 statusHint: settings.lightragEnabled && !string.IsNullOrEmpty(settings.lightragEndpoint)
-                    ? $"→ {settings.lightragEndpoint}"
+                    ? $"-> {settings.lightragEndpoint}"
                     : null,
                 drawEnabledBody: () =>
                 {

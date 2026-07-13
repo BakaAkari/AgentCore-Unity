@@ -5,6 +5,473 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] - 2026-07-13
+
+### 附加 UI 修复 & D2/D3 实施（本次追加，与 D1 一起发布）
+
+#### UI-1. Thinking Drawer 加独立"展开/折叠"按钮
+- [`ThinkingDrawer.cs`](Editor/UI/Components/ThinkingDrawer.cs)：将左侧的静态 Arrow Label 替换为独立 `Button`（`▶ / ▼`）
+- 用户明确要求"可视化按钮化"，此按钮响应可靠，不受 header 拖拽选中干扰
+- header 空白区依然响应点击（双入口冗余）
+
+#### UI-2. 输入框内容过多可滚动
+- [`ChatWindow.uxml`](Editor/UI/ChatWindow.uxml)：`input-field` 用 `input-scroll-view` (ScrollView) 包裹
+- [`ChatWindow.uss`](Editor/UI/ChatWindow.uss)：`input-area` max-height 从 140px 上调至 260px；`input-scroll-view` max-height 220px；`input-field` 移除 max-height 让内容撑高由 ScrollView 承载
+- 用户注入超长 context 后可通过 ScrollView 上下翻查检查内容
+- 未加"清空"按钮：Ctrl+A 全选 + Delete 已足够，避免按钮堆积
+
+#### UI-3. 流式回复时用户可上翻 + "跳到最新"浮动按钮
+- [`ChatWindow.uxml`](Editor/UI/ChatWindow.uxml)：`message-scroll-view` 包在 `message-scroll-wrapper` (relative position) 里，右下角浮动 `scroll-to-bottom-button`
+- [`ChatWindow.uss`](Editor/UI/ChatWindow.uss)：新增 `#scroll-to-bottom-button` 浮动圆角按钮样式
+- [`ChatWindow.Messages.cs`](Editor/UI/ChatWindow.Messages.cs)：
+  - `IsScrollAtBottom()` 检测：距底部 40px 内视为"在底部"
+  - `CheckUserScrolled()` 主动检测 + 更新按钮可见性
+  - `OnMessageScrollValueChanged` + `WheelEvent` 监听用户上翻
+  - `ScrollToBottom(force=false)` 只在**未上翻**时自动追底，`force=true` 时**强制**追底 + 重置 `_userScrolledUp`
+- [`ChatWindow.Input.cs`](Editor/UI/ChatWindow.Input.cs)：`OnSendClicked` 里 `ScrollToBottom(force: true)`，用户主动发送新消息一定回到底部
+
+#### D2. 消息内引用可点击跳转/点亮（"消息底部资源栏"方案）
+- 新增 [`MessageReferenceExtractor`](Editor/UI/Components/MessageReferenceExtractor.cs)：Regex 识别
+  - 反引号包裹的 `Assets/**/*.{cs,md,shader,unity,prefab,...}`（可选 `:line` 后缀）
+  - `` `hierarchy: A/B/C` `` 格式的 Hierarchy 路径
+  - `[GameObject: Name]` 标签
+- 新增 [`MessageReferenceBar`](Editor/UI/Components/MessageReferenceBar.cs)：chip 按钮渲染
+  - 📄 图标 = 资源；🎮 图标 = GameObject
+  - 点击资源 → `AssetDatabase.OpenAsset(obj, line)`
+  - 点击 GameObject → `Selection.activeGameObject` + `EditorGUIUtility.PingObject`
+  - 找不到目标 → Console warning，不 crash
+- [`MessageBubble.cs`](Editor/UI/Components/MessageBubble.cs)：新增 `_referenceBar` 字段，在 `FinalizeContent` / `SetupStaticMode` 完成后 `Rebuild(content)`
+- 仅对 assistant 消息生效；无引用时 chip 栏隐藏
+
+#### D3. Play Mode 中禁止写操作（工具层 preflight）
+- 新增 [`PlayModePreflight`](Editor/Tools/Safety/PlayModePreflight.cs)：基于 `ToolCapability` 位标志判定 write 类工具
+  - Write 位：`WriteProjectFiles / DeleteProjectFiles / ModifyScene / ModifyAssets / ModifyScripts / ExecuteCode / InstallPackages / BuildPlayer / VersionControlWrite / ModifyProjectSettings / ModifyAgentConfig / BatchExecute`
+  - Read 类（`ReadProject / NetworkAccess-only`）不受影响
+- [`ToolCallDispatcher.cs`](Editor/Tools/ToolCallDispatcher.cs) 在 Schema 校验之后、G.1 policy 之前插入检查
+- Play Mode 下 write 工具执行时返回 `ToolResult.Fail("Play Mode 中禁止执行 write 类工具...")`，LLM 会转达给用户
+- 无新增设置项；硬规则符合 ADR-17
+
+### 影响面 & 破坏性（追加部分）
+- 0 API 破坏；纯 UI + 工具层安全增强
+- 新增 4 个文件（`PlayModePreflight` / `MessageReferenceExtractor` / `MessageReferenceBar` / 已有 D1 的 10 个）
+- 修改 6 个文件（uxml/uss/ChatWindow.cs/ChatWindow.Messages.cs/ChatWindow.Input.cs/MessageBubble.cs/ThinkingDrawer.cs/ToolCallDispatcher.cs）
+- 不影响会话序列化 / 消息压缩
+
+### 测试重点（本次追加）
+1. **Thinking 展开/折叠** — 点击 `▶` 按钮切换（不是点 header）
+2. **输入框长内容** — 用 Ctrl+Shift+X 注入 Scene collector 长内容 → 输入框内应可上下滚动
+4. **流式回复时上翻** — 让 LLM 生成长回复 → 滚滚轮上翻 → 右下角出现"↓ 跳到最新"按钮 → 按钮点击回到底部
+5. **发送新消息回到底部** — 上翻状态下发送新消息 → 应强制回到底部
+6. **消息引用点击** — 让 LLM 提到 `` `Assets/Foo.cs:42` `` → 应看到 chip → 点击应打开
+7. **GameObject 引用** — 让 LLM 说 `[GameObject: Cube]` → 应看到 chip → 点击应在 Hierarchy 高亮
+8. **Play Mode preflight** — 进入 Play Mode → 让 LLM 修改脚本 → 应收到 `Play Mode 中禁止...` 错误
+
+---
+
+## [1.6.4] - 2026-07-11 (D1)
+
+### Summary
+新增 **Context Ingest** 模块：全局快捷键 `Ctrl+Shift+X` 作为**通用查询入口**——用户对任何 Unity 界面元素（GameObject / Asset / Console log / Project Settings 设置项 / Package Manager 里的包 / 陌生自定义窗口）按下快捷键，都能采集相关上下文注入到 ChatWindow 输入框。支持单选/多选/大 Scene 自动降级采样，遵循 ADR-17 极简哲学（默认最佳，无设置项）。
+
+### 核心定位
+"我不认识/不知道这是什么" → 按 Ctrl+Shift+X → LLM 帮我解释
+
+覆盖场景：
+- Hierarchy / SceneView / Inspector 里选中 GameObject → 采完整组件字段快照
+- Project Browser 选中 asset → 采类型专项元数据（Script/Texture/Prefab/Material）
+- Console 焦点 → 采最近 error/warning
+- Project Settings / Preferences 焦点 → **反射当前 SettingsProvider**（category path/label/scope）
+- Package Manager 焦点 → **反射选中 package**（name/version/description）
+- Animation Window 焦点 → **反射 active clip / GameObject**
+- 其他任何未知窗口 → **UI Toolkit Pick 光标下 element** + 窗口元数据 + Selection 备注
+- 完全无上下文 → 静默打开 ChatWindow
+
+### Added — 全局快捷键 `Ctrl+Shift+X` Context 注入
+- 用 Unity `[Shortcut("AgentCore/Ingest Context", KeyCode.X, ShortcutModifiers.Shift | ShortcutModifiers.Action)]` 注册
+- **任意 Unity 窗口聚焦时都可触发**（Hierarchy / SceneView / Project / Console / Inspector 等）
+- 触发时自动打开 ChatWindow（如未打开），文本追加到输入框光标位置（不清空已有输入）
+- 用户可在 Unity Shortcut Manager 中改键
+
+### Added — Context Collector 基础设施
+新增独立 namespace [`AgentCore.Editor.UI.Context`](Editor/UI/Context/) 内 6 个类：
+- [`ContextIngestResult`](Editor/UI/Context/ContextIngestResult.cs) — 采集结果 DTO（Label + Content + Truncated + Warning）+ 所有阈值常量集中在 `ContextIngestLimits`
+- [`ContextIngestFormatter`](Editor/UI/Context/ContextIngestFormatter.cs) — 统一 markdown 格式化（`[@Label]\n\`\`\`\n{content}\n\`\`\`\n`）+ 超长自动截断
+- [`ContextIngestRouter`](Editor/UI/Context/ContextIngestRouter.cs) — 根据 focusedWindow + Selection 状态路由到最合适的 Collector
+- [`SelectionContextCollector`](Editor/UI/Context/SelectionContextCollector.cs) — Hierarchy 选中 GO（单/多选）+ 组件 SerializedProperty 字段快照
+- [`AssetContextCollector`](Editor/UI/Context/AssetContextCollector.cs) — Project 选中 asset，类型专项元数据（Script/Texture/Prefab/Material 分别处理）
+- [`ConsoleContextCollector`](Editor/UI/Context/ConsoleContextCollector.cs) — 反射访问 `UnityEditor.LogEntries` 采集最近 error/warning（独立于 ReadConsoleTool，避免重复实现，但字段签名一致）
+- [`SceneContextCollector`](Editor/UI/Context/SceneContextCollector.cs) — 全 Scene Hierarchy 摘要 + 大 Scene 分层采样
+
+### Added — 焦点窗口反射 + UI Toolkit Pick（"通用查询入口"关键实现）
+
+新增两个类：
+- [`FocusedWindowCollector`](Editor/UI/Context/FocusedWindowCollector.cs) — 处理"非已知全局 Selection 窗口"的采集：
+  - Layer 1：已知专项窗口反射（`SettingsWindow.m_CurrentProvider` / `PackageManagerWindow.m_SelectedPackage` / `AnimationWindow.activeAnimationClip`）
+  - Layer 2：UI Toolkit `rootVisualElement.panel.Pick(mousePos)` 采光标下 element（name + type + 父链前 5 层 + text/tooltip）
+  - Layer 3：窗口元数据（title + 类型全名 + Global Selection 备注,明确标注"可能与你的问题无关"）
+- [`MouseTracker`](Editor/UI/Context/MouseTracker.cs) — 持续追踪鼠标位置（Unity Shortcut 触发时 `Event.current` 为 null,必须靠预先追踪的静态字段）
+  - `[InitializeOnLoadMethod]` 启动时给所有 EditorWindow 挂 MouseMoveEvent / MouseEnterEvent / PointerMoveEvent
+  - 新窗口打开时通过 `EditorApplication.update` 持续扫描 + 挂钩
+  - 样本 3 秒过期，防止读到陈旧位置
+
+### 路由优先级（v1.6.4 严格版，避免"错的默认"）
+
+```
+1. Console 焦点             → ConsoleCollector
+2. Project 焦点 + asset 选中 → AssetCollector
+3. Hierarchy/SceneView/Inspector + GO 选中 → SelectionCollector
+4. 其他 EditorWindow 焦点   → FocusedWindowCollector（反射 + Pick + 元数据）
+5. 无匹配 + 全局 GO 选中    → SelectionCollector
+6. 无匹配 + 全局 asset 选中 → AssetCollector
+7. 最后回退                 → SceneCollector
+```
+
+关键改动 vs 旧版：**分支 4 优先于全局 Selection**。在 Project Settings / Preferences / 自定义窗口按快捷键，不再错误地采集"上次在 Hierarchy 选中的 Cube"。
+
+### Sampling 策略（Selection / Scene 分级降级）
+
+| 场景 | 策略 |
+|------|------|
+| Selection ≤ 20 GO | 完整组件字段快照 |
+| Selection 20-100 GO | 名称 + 组件类型（无字段） |
+| Selection > 100 GO | 只列前 100 名称 + `...(N more)` |
+| Scene < 100 GO | 完整 Hierarchy tree |
+| Scene 100-1000 GO | 前 3 层 + 每层最多 50 GO |
+| Scene 1000-10000 GO | 前 2 层 + 每层最多 20 GO |
+| Scene > 10000 GO | **拒绝注入**，提示改用精确选中 |
+| Assets ≤ 20 | 完整类型专项元数据 |
+| Assets > 20 | 只列路径 + 类型 |
+
+Token 硬上限：单次注入内容 > 15000 字符时自动截断并 warn。
+
+### 已知限制
+
+- **IMGUI 窗口内的光标下元素无法识别**（Inspector 大部分字段、Console 内部条目、老 EditorWindow）
+  - Unity IMGUI 无 hover API，Pick 只对 UI Toolkit 有效
+  - IMGUI 场景下，走 Layer 3 元数据兜底
+- **反射依赖 Unity 内部字段名**（`m_CurrentProvider` / `m_SelectedPackage` 等）
+  - Unity 版本升级时可能改名，届时特定窗口回退到 Layer 2/3
+  - 反射失败会 log 到 Console，不 crash
+- **鼠标位置追踪仅覆盖 UI Toolkit 区域**
+  - Editor 窗口的 IMGUI 部分不触发 MouseMoveEvent
+  - 但 `Panel.Pick` 依然可用（因为 root 是 UI Toolkit）
+- **Ctrl+Shift+X 触发瞬间光标未必指着"想问的"元素**
+  - 用户需要主动**移动鼠标到目标元素上再按快捷键**
+  - 未来考虑在 ChatWindow 里加个 log 提示"当前采集了 xxx，如非所需请调整光标"
+
+### Added — ChatWindow 外部注入 API
+[`ChatWindow.Input.cs`](Editor/UI/ChatWindow.Input.cs) 新增：
+- `AppendToInputField(string text)` — 追加到光标位置，自动处理换行粘连，光标定位到注入后
+- `FocusInputField()` — 供快捷键触发但无内容采集时聚焦输入框
+
+### 路由优先级
+
+```
+1. Console 焦点 → ConsoleCollector
+2. Project 焦点 + asset 选中 → AssetCollector
+3. Selection.gameObjects 非空 → SelectionCollector
+4. Selection.assetGUIDs 非空 → AssetCollector
+5. SceneView / Hierarchy 焦点 → SceneCollector
+6. 其他 → SceneCollector（最后回退）
+```
+
+### 已删除的候选设计（供留档）
+
+- ❌ InspectorCollector — Inspector 显示对象 = Selection.activeObject，与 SelectionCollector 完全重合
+- ❌ 输入框 `@` 触发（原 D1 UI 方案）— 用户明确要求全部走快捷键
+- ❌ ContextChip 视觉组件 — 直接以纯文本注入，用户可手动编辑/删除
+
+### 影响面 & 破坏性
+- 0 API 破坏；仅新增文件 + 新 partial + 新快捷键
+- 无新增设置项（符合 ADR-17；快捷键可在 Unity Shortcut Manager 改键）
+- 快捷键冲突检查：`Ctrl+Shift+X` 未与 Unity 内置快捷键 / 本项目已有快捷键冲突
+- `Ctrl+Shift+E` 保留为"导出会话"，`Ctrl+Shift+Q` 保留为"打开 ChatWindow"
+
+### 测试重点
+1. **Hierarchy 单选 GO** → 按 `Ctrl+Shift+X` → 检查输入框注入 `[@Selection: <name>]` + 组件字段
+2. **Hierarchy 多选 GO**（3-5 个）→ 按快捷键 → 每个 GO 组件字段
+3. **Hierarchy 大量多选**（50+）→ 只列名称 + 组件类型
+4. **Hierarchy 极端多选**（100+）→ 只列前 100 名称 + warning
+5. **Project 单选 script** → 注入路径 + 前 30 行预览
+6. **Project 单选 texture** → 注入 TextureType/MaxSize/sRGB/尺寸
+7. **Project 多选 assets**（20+）→ 只列路径 + 类型
+8. **Console 焦点**（有 error）→ 注入最近 error/warning
+9. **SceneView 焦点无 Selection** → Scene 摘要（含大 Scene 采样）
+10. **无任何上下文**（新 EditorWindow）→ 静默但打开 ChatWindow
+
+---
+
+## [1.6.3] - 2026-07-11
+
+### Summary
+[1.6.2](#162---2026-07-11) 用 "每 8 chunk `Task.Yield()`" 消除了 Hold on 对话框，但用户实测**流式吐字速度明显变慢**（约 -30%）。根因：`Task.Yield` 在 Unity Editor 主线程上通过 `EditorApplication.delayCall` 恢复，恢复延迟叠加在每次 yield 上；固定 N chunk 阈值在高吞吐时过频 yield（一个 8 chunk 窗口 ≈ 200ms 数据，加上 50ms 恢复延迟 ≈ 25% 额外开销）。
+
+### Changed — SSE Yield 策略从 "每 N chunk" 改为 "每 N 毫秒"
+- [`StreamingResponseParser.cs`](Editor/LLM/StreamingResponseParser.cs)：
+  - 删除 `YieldEveryNChunks = 8` 常量
+  - 新增 `YieldBudgetMs = 200`：主线程连续占用满 200ms **才**让步一次
+  - 用 `Stopwatch` 度量真实占用时间，让步后 `Restart()`
+- **性能权衡**：
+  - Unity Hold on 阈值 ≈ 500ms → 200ms 提供 2.5x 安全余量
+  - 高吞吐场景（40 chunk/s）：一个 yield 窗口容纳 ~8 chunk，与 1.6.2 一致
+  - 低吞吐场景（4 chunk/s）：一个 yield 窗口容纳 ~40 chunk 或整个流，几乎不 yield，吐字延迟归零
+  - 短回复（~1-2 chunk）：整个流可能在 200ms 内完成，**根本不 yield**，无额外延迟
+- **仍防 Hold on**：因为 200ms << 500ms，任何长回复必然被 yield 打断至少一次
+
+### 影响面 & 破坏性
+- 0 API 破坏；仅 [`StreamingResponseParser.ParseStreamAsync`](Editor/LLM/StreamingResponseParser.cs:33) 内部逻辑调整
+- 无新增设置项（`YieldBudgetMs` 是内部常量，未来若 Unity 主线程行为变化可单点调优）
+- 不影响 [1.6.2](#162---2026-07-11) 的 UI 感知修复（PendingIndicator / active-pulse / ThinkingDrawer preview）
+
+---
+
+## [1.6.2] - 2026-07-11
+
+### Summary
+解决用户反馈的**"点击发送后 UI 无反应，像卡死了"感知问题**。诊断发现：LLM 请求 in-flight 期间到 Streaming 状态之间有 5-30 秒空窗期，消息流区域完全空白；ThinkingDrawer / ToolCallGroup 默认折叠且无活动指示，用户不打开面板看不到内部正在流式更新。
+
+对标 ChatGPT / Cursor / Windsurf / Cline / Perplexity 等 IDE 的用户感知设计（骨架屏 / 就地叙事 / 进度分解），落地两级方案：**P0 消息流内 Pending 占位气泡（覆盖点击→Thinking 空窗期）** + **P1 折叠面板活跃度指示器（ThinkingDrawer 尾部流式预览 + ToolCallGroup running 工具名 + active-pulse CSS class）**。
+
+### Added — P0 Pending Indicator（消息流内占位气泡）
+- 新增 [`Editor/UI/Components/PendingIndicator.cs`](Editor/UI/Components/PendingIndicator.cs)：
+  - 独立的灰色气泡组件，末尾带 3 点循环动画（用 `IVisualElementScheduledItem` 驱动，避开 Unity UI Toolkit 缺失的 `@keyframes` 支持）
+  - `SetActionText(text)` 更新描述；`Dismiss()` 停止动画并从消息列表移除
+- 新增 [`Editor/UI/ChatWindow.PendingIndicator.cs`](Editor/UI/ChatWindow.PendingIndicator.cs) partial：
+  - `ShowPendingIndicator(initialText)` 在消息列表末尾插入 pending 气泡
+  - `UpdatePendingIndicatorAction(text)` 更新现有 pending 的文本
+  - `SyncPendingIndicatorFromState(state)` 将 Agent 状态映射为动作描述（"思考中"→"调用工具中"→"回复中"→"压缩上下文"→"审阅答案"）
+  - `DismissPendingIndicator()` 移除 pending 气泡
+- 修改 [`ChatWindow.cs`](Editor/UI/ChatWindow.cs) 字段区：新增 `_pendingIndicator` 引用
+- 修改 [`ChatWindow.Input.cs`](Editor/UI/ChatWindow.Input.cs) `OnSendClicked`：在异步发送**前**立即 `ShowPendingIndicator("思考中")`，错误回调时 `DismissPendingIndicator`
+- 修改 [`ChatWindow.Events.cs`](Editor/UI/ChatWindow.Events.cs)：
+  - `AssistantMessage` / `Error` 事件到达时 `DismissPendingIndicator`（真实回复已就绪，pending 完成使命）
+  - `Idle` / `Thinking` / `Error` 状态变化时同步 `DismissPendingIndicator`（防止 leak）
+  - 所有其他状态调用 `SyncPendingIndicatorFromState` 更新文本
+
+### Added — P1 折叠面板活跃度指示器
+- 修改 [`ThinkingDrawer.cs`](Editor/UI/Components/ThinkingDrawer.cs)：
+  - 新增 `_previewLabel` — header 里的斜体尾部预览文本
+  - `UpdatePreview()` — 显示 reasoning 尾部最多 60 字符（去除换行让单行不跳动，超长时用 `"..."` 前缀）
+  - `AppendReasoning` 折叠状态时调用 `UpdatePreview` 让用户不展开也能看到实时内容
+  - `SetExpanded` 切换 preview visibility（展开时隐藏，折叠时刷新）
+  - `AppendReasoning` 首次触发时 `AddToClassList("active-pulse")`；`Complete` 时 `RemoveFromClassList("active-pulse")`
+- 修改 [`ToolCallGroup.cs`](Editor/UI/Components/ToolCallGroup.cs)：
+  - `UpdateSummaryText` 附加第一个 Running 工具的名字（如 `[3 个调用: 1 成功, 1 执行中: read_console, 1 等待]`）—— 折叠状态下用户也能看到当前正在跑的工具
+  - `FindFirstRunningToolName()` 遍历 `_cards` 找 Status=Running 的第一个 ToolCallCard
+  - `_runningCalls > 0` 时 `AddToClassList("active-pulse")`；否则移除
+
+### Added — CSS `active-pulse` 类
+- [`ChatWindow.uss`](Editor/UI/ChatWindow.uss) 追加：
+  ```css
+  .active-pulse {
+      border-*-color: #4A90D9;  /* 蓝色边框 */
+      transition-property: border-color;
+      transition-duration: 0.5s;
+  }
+  ```
+- **限制**：Unity UI Toolkit 不支持 `@keyframes`，因此不做真正的脉动动画；改用静态高对比色 + `transition-duration: 0.5s` 让 class 切换时颜色平滑变化，视觉上区分"运行中"和"完成"两种状态
+- **未来方向**：若 Unity 后续版本支持 `@keyframes`，可扩展为真正脉动；当前静态色差已足够传达"活跃"信号
+
+### 覆盖阶段矩阵
+
+| 用户交互阶段 | 修补前 | 修补后 |
+|-------------|--------|-------|
+| 点击发送 → LLM 首次响应（5-30s） | 消息区空白 | **PendingIndicator** 显示"思考中..." + 3 点动画 |
+| Thinking 状态（reasoning 流入） | ThinkingDrawer 折叠无提示 | **ThinkingDrawer 预览尾部 60 字符** + 蓝色边框 |
+| ExecutingTool | ToolCallGroup 只显示"1 执行中" | **附加工具名** "1 执行中: read_console" + 蓝色边框 |
+| Streaming | 消息气泡开始流出正文 | 无变化（已有） |
+| AssistantMessage 完成 | pending 遗留（本次修复前不存在） | 明确 `DismissPendingIndicator` |
+| Error | pending 遗留 | 明确 `DismissPendingIndicator` |
+
+### 竞品对标依据（[事实]）
+- **ChatGPT / Claude.ai**：三点动画 + 灰色骨架气泡 — 本方案的 PendingIndicator 采纳
+- **Cursor**：消息区显示 "Thinking..." / "Running tool: X" — 本方案的 ToolCallGroup running 工具名采纳
+- **Windsurf Cascade**：动作叙事（"Reading file X"）— 本方案的 SyncPendingIndicatorFromState 映射采纳
+- **Cline / RooCode**：透明性 — AgentCore 原本已有 ToolCallCard，本方案在**折叠状态下**也传达进度信号
+
+### 影响面 & 破坏性
+- 0 API 破坏；仅 UI 层增强
+- 新增 1 个类 + 1 个 partial + 4 个文件修改 + 1 处 USS 追加
+- 未新增设置项，符合 ADR-17 极简（"用户感知"属于默认体验，不该给开关）
+- Compression / 消息序列化不涉及；pending 只在内存中存在
+
+### Fixed — 消息发送时 Unity 弹出 "Hold on / UnitySynchronization.ExecuteTasks" 对话框（ADR-19）
+
+**症状**：LLM 流式回复期间 Unity 弹 Hold on 模态框，PendingIndicator / ThinkingDrawer / ToolCallGroup 的所有 UI 动画完全无法渲染（UI 消息泵被抢占）。
+
+**Spike 诊断结果**（[事实]，可回退探针见 [`plans/adr-19-main-thread-unblocking.md`](plans/adr-19-main-thread-unblocking.md)）：
+- `SendMessageAsync` 主线程同步段仅 39ms（原假设 1-4s，**否定**）
+- `WorkspaceSnapshotBuilder.Build` 仅 32ms（原假设 500-2000ms，**否定**）
+- 流式回调线程 = 主线程（thread=1, isPoolThread=False）
+- 流式 chunk 速率 ≈ 38.7/s，`EmitEvent` 速率 ≈ 38.5/s
+- 短回复（1 chunk）不触发 Hold on；长回复（数百 chunk × 25ms）稳定触发
+- **根因**：`StreamingResponseParser.ParseStreamAsync` 的 `while` 循环 + `ReadLineAsync + ParseChunkJson + onChunk` 全在主线程同步执行，Unity 主线程 >500ms 无空闲窗口，触发内置 Hold on 保护
+
+**修复**：
+- [`StreamingResponseParser.cs`](Editor/LLM/StreamingResponseParser.cs) `ParseStreamAsync` 每 `YieldEveryNChunks = 8` 个 chunk 主动 `await Task.Yield()`，让 `UnitySynchronizationContext` 消息泵有机会刷新 UI/GUI，然后立即回到主线程继续 parse
+- 8 chunk × ~25ms/chunk ≈ 200ms 让步一次，远低于 Unity 的 500ms Hold on 阈值，且不影响流式感知（token 更新仍是逐 chunk）
+- [`AgentLoop.SendMessageAsync`](Editor/Core/AgentLoop.cs:344) 在同步准备段后追加一次 `await Task.Yield()`，保证 PendingIndicator 至少渲染一帧再进入 HTTP 请求
+
+**关键设计取舍**：
+- ❌ 未采用后台线程搬迁方案（ADR-19 §Plan B 全量重构）：Spike 证明真正的瓶颈只在 stream 循环，不需要跨模块重构 `SendMessageAsync` / `WorkspaceSnapshotBuilder` / `EmitEvent`
+- ✅ 保留所有 API 契约，仅在 SSE 解析循环内加 4 行代码
+- ✅ 遵循 "证据优先" 原则：ADR-19 原设计假设未通过 spike 验证，**及时收窄修复范围**，避免 6-9h 无效重构
+
+**影响面**：
+- 0 API 破坏；`StreamingResponseParser.ParseStreamAsync` 签名不变
+- 无新增设置项（符合 ADR-17；Hold on 是 bug，不是可选项）
+- 让步策略是常量 (`YieldEveryNChunks = 8`)，未来若 Unity 主线程行为变化可单点调优
+
+---
+
+## [1.6.1] - 2026-07-11
+
+### Summary
+配套 [1.6.0](#160---2026-07-11) 的 Skill 加载机制，加固 Prompt 层的**意图验证**和**能力发现**规则。诊断发现 [`SOUL.md`](Editor/Bootstrap/Resources/SOUL.md) 缺两条关键指令：(1) 明确禁止猜测用户意图并强制反问收束；(2) 让 LLM 知道 Skill 系统存在（虽然 tool description 已有，但 SOUL.md 层缺失导致高性能模型可能跳过 Node A 反问机制时也没有 fallback）。本次修补两处，同时顺手修复原 §1 存在的编号 bug（两个 "5."）。
+
+### Fixed — SOUL.md §1 编号 bug
+- **现象**：原 [`SOUL.md §1`](Editor/Bootstrap/Resources/SOUL.md) 存在两个编号为 5 的条目（"Minimal changes" 和 "Tools first"），后续 6/7/8 因此错位
+- **修复**：重新编号为连续的 1~10，插入新增的 "Verify intent before acting" 作为 §1.1
+
+### Added — SOUL.md §1.1 "Verify intent before acting"
+- **规则内容**（永驻 system prompt）：
+  > Never guess what the user means. If a request is vague, broad, or has multiple plausible interpretations, ask clarifying questions until the target is unambiguous. Confirm scope with the user before starting work that involves destructive operations, multi-file changes, or architectural decisions. Repeat clarification cycles as needed — do not proceed with self-invented assumptions. Only skip clarification when the request is fully unambiguous AND non-destructive.
+- **作用面**：所有模型，包括高性能模型（Claude Opus / GPT-o 等因 L1-L4 escape 机制跳过 Node A 运行时反问的模型）
+- **与 Node A 运行时机制互补**：低性能模型走 [`SelfChallenge Node A`](Editor/Core/SelfChallenge/) Combo1/Combo2 触发运行时反问；高性能模型走本 SOUL.md prompt 层约束
+
+### Added — SOUL.md §4 "Skills are on-demand domain guidance"
+- **规则内容**（永驻 system prompt Context Awareness 段）：
+  > Skills are on-demand domain guidance — use `load_skill(action="list")` to discover available skill guides (workflows / conventions / checklists for animation, prefab, shader, patterns, testing, etc.); use `action="load"` when a task matches a skill's scope. Prefer loading a skill over asking the user for guidance you should already have. Skill content stays in context until unloaded.
+- **理由**：ADR-18 的 D6-b 决策"不改 SOUL.md，只强化 tool description"—— 但用户明确要求 SOUL.md 层保底覆盖。改动成本极低（一行文本）+ 收益明确（LLM 无需依赖 tool description 才能发现 skill 系统），修改。**推翻 ADR-18 D6-b 决策**，改为 D6-a（SOUL.md 补路由指令）。
+
+### 影响面 & 破坏性
+- SOUL.md 从 ~50 行增至 ~55 行（+10% token 增长，可控）
+- 覆盖了 [1.6.0](#160---2026-07-11) 的 Skill 系统在 SOUL.md 层的可见性缺口
+- 覆盖了 Node A 逃逸机制下高性能模型对"用户意图不清"场景的行为缺陷
+- 0 API/schema 破坏；仅系统提示词内容变化
+
+### Notes — ADR-18 D6 决策更新
+[`plans/adr-18-skill-loading-mechanism.md §5.2 D6`](plans/adr-18-skill-loading-mechanism.md) 原推荐 D6-b（不改 SOUL.md），因本次用户实际使用中发现 prompt 层缺口，改为 D6-a（在 SOUL.md 补 skill 触发指令 + 意图验证约束）。ADR-18 文档保留原推荐作为演进记录，实际实施走 D6-a。
+
+---
+
+## [1.6.0] - 2026-07-11
+
+### Summary
+两项功能一起 ship：**(1) Skill 加载机制 MVP**（ADR-18 Phase 1，突破 Bootstrap "会话开始一次性全量装配" 的架构限制，让 AgentCore 具备类 Claude Code Skills 语义）；**(2) 消息气泡一键复制按钮**（气泡右上角显示"复制"按钮，一键将 assistant / error 气泡完整 markdown 原文复制到系统剪贴板）。
+
+已在使用者项目内 embedded 模式下实机验证通过：`list_skills` 正确返回 53 个 Unity skill，`load unity-patterns` 后 LLM 明显引用 skill 内容回答设计模式选择问题，`unload` 后清理干净。
+
+minor 版本 bump 反映功能级新增；对现有会话零破坏。
+
+### Added — Skill 加载机制（ADR-18 §5 / §6）
+- 新增 [`Editor/Skills/`](Editor/Skills/) 目录 5 个文件：
+  - [`SkillMetadata`](Editor/Skills/SkillMetadata.cs) — 元数据（不含全文，供 list 展示）
+  - [`SkillContentBuilder`](Editor/Skills/SkillContentBuilder.cs) — 定义 `Marker = "# [SKILL] "` 常量 + system message 构造
+  - [`SkillScopeState`](Editor/Skills/SkillScopeState.cs) — 会话级已加载 skill 集合（结构镜像 `ToolScopeState`）
+  - [`SkillRegistry`](Editor/Skills/SkillRegistry.cs) — 磁盘扫描 + 缓存，全文延迟加载
+  - [`SkillFrontmatterParser`](Editor/Skills/SkillFrontmatterParser.cs) — 极简 YAML frontmatter 解析（不引入 YamlDotNet 依赖）
+- 新增 [`LoadSkillTool`](Editor/Tools/Native/Meta/LoadSkillTool.cs) 元工具（Category=Meta, Visibility=AlwaysVisible）：
+  - `list` — 枚举所有可用 skill（含名称、描述、分类、估算 token、是否已加载）
+  - `load` — 按名称加载单个 skill；重复加载返回 already_loaded
+  - `list_loaded` — 查看当前已加载 skill 集合与总 token 数
+  - `unload` — 卸载单个 skill（下一轮 skill message 从 `_messages` 移除）
+  - `reload` — 强制刷新 registry 缓存（Phase 1 保持 unload+load 语义）
+  - 软 token budget = 15000（超过时在 tool_result 附带 warning，不阻塞）
+- 新增 [`Editor/Core/AgentLoop.SkillContext.cs`](Editor/Core/AgentLoop.SkillContext.cs) partial：
+  - `InitializeSkillContext` — 创建 `SkillScopeState` 并注入到 `LoadSkillTool.SetScopeState`
+  - `SyncSkillMessages` — 每轮 `SendMessageAsync` 发送前同步 skill message 到 `_messages`（插入最后一条 user message 前，位置与 Deferred Context 同级）
+  - `ResetSkillContext` / `DisposeSkillContext` — 会话切换与销毁清理
+
+### Fixed / Changed — 集成点
+- [`AgentLoop.cs:302`](Editor/Core/AgentLoop.cs) `Initialize()` — 在 `ToolScopeState` 初始化后追加 `InitializeSkillContext()` 调用
+- [`AgentLoop.cs:461`](Editor/Core/AgentLoop.cs) `SendMessageAsync` — 在构建 tool definitions 前调用 `SyncSkillMessages()`，try/catch 保证异常非阻塞
+- [`AgentLoop.cs:568`](Editor/Core/AgentLoop.cs) `ResetConversation` — 追加 `ResetSkillContext()` 调用（skill message 随 `_messages.Clear()` 一并清空）
+- [`AgentLoop.cs:768`](Editor/Core/AgentLoop.cs) `Dispose` — 追加 `DisposeSkillContext()` 解除事件订阅并清空 tool 引用
+- [`ConversationCompressor.cs:180-191`](Editor/Core/Compression/ConversationCompressor.cs) skip-list 新增第 4 类跳过条件 `SkillContentBuilder.Marker`，保证已加载 skill 在长会话中不被压缩
+- [`AgentCoreSettings.cs`](Editor/Config/AgentCoreSettings.cs) 新增 `skillsEnabled` 字段（默认 true, `[HideInInspector]`），关闭后 `load_skill` 返回错误
+
+### Skill 文件格式（兼容 AGENTS.md §7.2 现有约定）
+- 目录：`<project-root>/.agents/skills/<name>/SKILL.md`（首选）或 `<project-root>/Assets/.agents/skills/<name>/SKILL.md`（Unity 项目内覆盖）
+- 支持可选 YAML frontmatter（`name` / `description` / `category` / `version`），缺失时从目录名和首个 `# 标题` 自动推断
+- 现有 AGENTS.md §7.2 定义的 8 个 skill 目录（`unity-runtime-dev` / `unity-blueprints` / `unity-scene-contracts` 等）**零改动即可被 AgentCore 识别**
+
+### Compression 契约扩展
+- 现有 3 类跳过标记（`SummaryMessageMarker` / `WorkspaceSnapshotBuilder.SnapshotMarker` / `"# Available Tools"`）新增第 4 类：`SkillContentBuilder.Marker = "# [SKILL] "`
+- 未来添加新的"运行时静态上下文"类别时应遵循同样模式：定义独立 marker + 在 `ConversationCompressor.FindCompressibleRange` skip-list 补一条
+
+### Design Decisions（ADR-18 §5.2）
+- **D1-a** Skill 目录沿用 `.agents/skills/`（复用 AGENTS.md §7.2 约定）
+- **D2-a** 会话级生命周期，新会话清空，不做 Domain Reload 持久化（Phase 3 可选）
+- **D3-a** 拒绝重复 load，`reload` 显式强制刷新
+- **D4-a** 永驻 system message（不作为 tool_result 一次性返回）
+- **D5-b** 软 token budget 15K（warning 不阻塞）
+- **D6-b** 不改 SOUL.md，只在 `load_skill` 工具描述里强化"何时使用"信号
+
+### Limitations（Phase 1 有意的简化）
+- `reload` action 只刷新 registry 磁盘缓存，会话中的旧 skill message 内容不会自动替换 —— 用户需要 `unload` + `load` 才能看到新内容。Phase 2 再增强。
+- Skill 状态不做 Domain Reload 持久化；脚本重编译后 LLM 需要根据 message history 上下文重新决定是否 `load_skill`。
+- 没有 Settings UI 卡片（Phase 2 加）；`skillsEnabled` 用 `[HideInInspector]` 隐藏，默认启用。
+
+### 影响面 & 破坏性（Skill 系统）
+- 0 破坏；对未启用 skill 系统的会话完全透明
+- 现有 tool schema 未变，`request_tools` / `ToolScopeState` 等基础设施保持不动
+- Compression 主流程未改，仅扩展 skip-list
+
+### Added — 消息气泡一键复制按钮
+- 在 [`MessageBubble.uxml`](Editor/UI/Components/MessageBubble.uxml) header 里新增 `copy-button`
+- [`MessageBubble.cs`](Editor/UI/Components/MessageBubble.cs) 新增：
+  - `_lastFullContent` 字段：缓存原始 markdown 文本（未经 ContentFilter/Markdown 渲染），保证复制到剪贴板的是 markdown 源码而不是 UI 渲染后的富文本
+  - `RawContent` 公开只读属性
+  - `SetupCopyButton` — 只对 `assistant` / `error` 显示，`user` 隐藏（用户已知自己输入了什么）
+  - `HandleCopyClicked` — 写 `EditorGUIUtility.systemCopyBuffer` + 1.2 秒 "已复制" 视觉反馈 + 异常时显示 "失败"
+  - `AppendStreamToken` / `FinalizeContent` / `SetupStaticMode` / `SetupStreamingMode` 4 处更新 `_lastFullContent`
+  - `CreateFallbackLayout` 也加了 copy-button 保证 UXML 加载失败场景仍可用
+- [`MessageBubble.uss`](Editor/UI/Components/MessageBubble.uss) 新增 `.bubble-copy-button` 样式 + hover / active / user / error 变体
+- **Focus 处理**：按钮 `focusable = false`，避免抢焦点导致文本选中丢失
+
+### 影响面 & 破坏性（Copy 按钮）
+- 0 破坏；仅扩展现有 UI；user 气泡样式无变化（按钮 display:none）
+- 无新增字段/设置项，符合 ADR-17 极简哲学（一键操作，无配置需求）
+
+---
+
+## [1.5.8] - 2026-07-10
+
+### Summary
+紧急修复 [1.5.7](#157---2026-07-10) 中 [`VcsExternalToolLauncher.cs`](Editor/VCS/Tools/VcsExternalToolLauncher.cs) 因同时 `using System.Diagnostics;` 和 `using UnityEngine;` 导致 `Debug` 引用二义（`System.Diagnostics.Debug` vs `UnityEngine.Debug`）编译失败（CS0104）。1.5.7 tarball 已在发布后立即拉回，未进入实机验证，本 1.5.8 视为对 1.5.7 功能内容的原地补丁。
+
+### Fixed — VcsExternalToolLauncher CS0104 编译失败
+- **现象**：安装 1.5.7 后 Unity 编译报错 `error CS0104: 'Debug' is an ambiguous reference between 'System.Diagnostics.Debug' and 'UnityEngine.Debug'` 于 [`VcsExternalToolLauncher.cs:116,123`](Editor/VCS/Tools/VcsExternalToolLauncher.cs)。
+- **根因**：新文件同时引入 `System.Diagnostics`（用于 `Process` / `ProcessStartInfo`）和 `UnityEngine`（用于 `Debug.Log`），两个命名空间都定义 `Debug` 类型，C# 无法自动消歧。
+- **修复**：移除 `using System.Diagnostics;`，改用完全限定名 `System.Diagnostics.Process` / `System.Diagnostics.ProcessStartInfo`，让文件里的裸 `Debug` 唯一指向 `UnityEngine.Debug`。这与仓库现有约定一致（`SvnAdapter.cs` / `GitAdapter.cs` 等均已采用同一模式）。
+- **影响面**：0 破坏；纯编译修复。1.5.7 的所有功能内容照旧。
+
+---
+
+## [1.5.7] - 2026-07-10 (yanked)
+
+### Summary
+> **⚠️ 已拉回**：该版本因 CS0104 编译失败导致装完即坏，未进入实机验证阶段即被 [1.5.8](#158---2026-07-10) 顶替。功能描述保留作为演进记录。
+
+修复 Scene View 顶部黄色 VCS 更新提示条点击 "Update Now" 后**无任何反应**的严重体验缺陷。原实现走 `_ = VcsRemoteStatusMonitor.SyncAsync()` fire-and-forget，既不唤起外部 VCS GUI（TortoiseSVN / Git GUI / P4V），也不显示进度、结果、异常，Task 结果被完全丢弃。用户视角是"点了没反应"；Console 里出现的那段 log 只是 `EditorUtility.DisplayDialog` 自身的 stack trace，与 Sync 是否执行无关。
+
+按外部 GUI 优先方案落地：新增 [`VcsExternalToolLauncher`](Editor/VCS/Tools/VcsExternalToolLauncher.cs) 统一启动器（SVN → TortoiseProc / Git → git-gui / Perforce → p4v），返回 `(bool, reason)` 便于调用方决策；[`VcsSceneViewUpdateBanner`](Editor/VCS/UI/VcsSceneViewUpdateBanner.cs) 点击流程重构为"外部 GUI 优先 → 找不到时回退到 CLI + 进度条 + 结果弹窗 + AssetDatabase.Refresh"。
+
+### Fixed — SceneView VCS Banner Update 按钮无反应
+- **现象**：Scene View 顶部黄色横幅出现后点击横幅，弹出"Version Control Update"确认框，点 "Update Now"，什么都没发生。TortoiseSVN 不启动，Unity 里没有进度条，没有成功/失败反馈，只有一段横幅弹窗自身的调用栈 log。
+- **根因**：[`VcsSceneViewUpdateBanner.cs:52`](Editor/VCS/UI/VcsSceneViewUpdateBanner.cs) 使用 `_ = VcsRemoteStatusMonitor.SyncAsync()` fire-and-forget 直接调用内嵌 SVN CLI 子进程，Task 结果被丢弃：成功/失败/异常/冲突全部静默；且从未打算唤起外部 GUI，与用户对"Update"按钮的直觉预期（打开 TortoiseSVN 的 Update 窗口）不符。
+- **修复**：
+  - 新增 [`VcsExternalToolLauncher.cs`](Editor/VCS/Tools/VcsExternalToolLauncher.cs)：`TryOpenUpdateWindow(out reason)` 按当前 VCS 类型分派到对应 GUI 启动命令；`TryStartProcess` 通用 `UseShellExecute=true` 启动器；`BuildUnavailableMessage` 生成友好未安装提示。
+  - 重构 [`VcsSceneViewUpdateBanner.cs`](Editor/VCS/UI/VcsSceneViewUpdateBanner.cs) 点击流程：确认对话框按钮改为 "Open Update Window"（如实描述）；确认后先调 `VcsExternalToolLauncher.TryOpenUpdateWindow`，成功则延迟触发 `VcsRemoteStatusMonitor.RequestCheck()` 让 banner 在 GUI 完成后消失；失败弹二次对话框询问是否走 CLI 回退，用户同意后 async 运行 `SyncAsync` + `EditorUtility.DisplayProgressBar` + 结果弹窗 + `AssetDatabase.Refresh()`。全流程 try/catch，进度条保证在异常路径清理。
+- **影响面**：0 破坏；仅重构 Banner 一个入口点，[`VcsRemoteStatusMonitor.SyncAsync`](Editor/VCS/Tools/VcsRemoteStatusMonitor.cs) 与 [`VersionControlPanel`](Editor/VCS/UI/VersionControlPanel.cs) 现有 external-tool 私有实现保持不变。
+
+### Notes
+- 已知技术债：[`VersionControlPanel.cs:1406-1462`](Editor/VCS/UI/VersionControlPanel.cs) 里 `TryOpenExternalUpdateWindow` / `TryStartExternalProcess` 私有实现与新静态类构成局部重复。范围仅限 update-window 一个动作，暂不迁移，避免本次跨模块改动扩散；下次触及 Panel 的外部工具分支再一并收敛到 `VcsExternalToolLauncher`。
+- 验证：在 Scene View 触发 banner 后点击横幅 → 应弹出新版对话框（按钮 "Open Update Window" / "Cancel"）→ 确认后 TortoiseSVN Update 窗口应弹出，Console 打印 `[Version Control] Launched TortoiseSVN update window: ...`；关闭 TortoiseSVN 后 banner 会在下一次远端状态检查时消失。若 TortoiseProc 不在 PATH，会先说明未检测到 GUI，再询问是否走 CLI 回退。
+
+---
+
 ## [1.5.6] - 2026-07-10
 
 ### Summary

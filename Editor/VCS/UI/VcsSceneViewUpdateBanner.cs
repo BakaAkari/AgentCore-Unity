@@ -1,3 +1,4 @@
+using System;
 using AgentCore.Editor.Components.VCS.Config;
 using AgentCore.Editor.Components.VCS.Tools;
 using UnityEditor;
@@ -43,17 +44,108 @@ namespace AgentCore.Editor.Components.VCS.UI
             EditorGUIUtility.AddCursorRect(rect, MouseCursor.Link);
             if (GUI.Button(rect, label, style))
             {
-                if (EditorUtility.DisplayDialog(
-                        "Version Control Update",
-                        BuildConfirmationMessage(status),
-                        "Update Now",
-                        "Cancel"))
-                {
-                    _ = VcsRemoteStatusMonitor.SyncAsync();
-                }
+                HandleBannerClick(status);
             }
 
             Handles.EndGUI();
+        }
+
+        private static void HandleBannerClick(VcsSyncStatus status)
+        {
+            var confirmed = EditorUtility.DisplayDialog(
+                "Version Control Update",
+                BuildConfirmationMessage(status),
+                "Open Update Window",
+                "Cancel");
+
+            if (!confirmed)
+                return;
+
+            if (VcsExternalToolLauncher.TryOpenUpdateWindow(out var reason))
+            {
+                // External GUI is now driving the update. We do not know when it finishes,
+                // so refresh remote status shortly after launch to keep the banner in sync.
+                ScheduleStatusRecheck();
+                return;
+            }
+
+            // External GUI unavailable. Offer an in-process fallback so the user is not stuck.
+            OfferCliFallback(reason);
+        }
+
+        private static void OfferCliFallback(string launchReason)
+        {
+            var vcsType = VcsDetector.DetectVcs();
+            var message =
+                $"Could not launch the external VCS GUI:\n{launchReason}\n\n" +
+                VcsExternalToolLauncher.BuildUnavailableMessage(vcsType, "Update") +
+                "\n\nRun the built-in CLI update instead? Local conflicts will be marked but not resolved.";
+
+            if (!EditorUtility.DisplayDialog(
+                    "Version Control Update",
+                    message,
+                    "Run CLI Update",
+                    "Cancel"))
+            {
+                return;
+            }
+
+            RunInlineSyncAsync();
+        }
+
+        private static async void RunInlineSyncAsync()
+        {
+            try
+            {
+                EditorUtility.DisplayProgressBar(
+                    "Version Control Update",
+                    "Running VCS update...",
+                    0.5f);
+
+                var result = await VcsRemoteStatusMonitor.SyncAsync();
+
+                EditorUtility.ClearProgressBar();
+
+                if (result != null && result.Success)
+                {
+                    AssetDatabase.Refresh();
+
+                    var conflictSuffix = (result.ConflictedFiles != null && result.ConflictedFiles.Count > 0)
+                        ? $"\n\nConflicts detected in {result.ConflictedFiles.Count} file(s). Resolve them before continuing."
+                        : string.Empty;
+
+                    EditorUtility.DisplayDialog(
+                        "Version Control Update",
+                        (string.IsNullOrEmpty(result.Message) ? "Update completed." : result.Message) + conflictSuffix,
+                        "OK");
+                }
+                else
+                {
+                    var errorMessage = result?.ErrorMessage
+                                       ?? result?.Message
+                                       ?? "Update failed. Check the Unity Console for details.";
+                    EditorUtility.DisplayDialog(
+                        "Version Control Update Failed",
+                        errorMessage,
+                        "OK");
+                }
+            }
+            catch (Exception ex)
+            {
+                EditorUtility.ClearProgressBar();
+                Debug.LogException(ex);
+                EditorUtility.DisplayDialog(
+                    "Version Control Update Failed",
+                    $"Unexpected error: {ex.Message}",
+                    "OK");
+            }
+        }
+
+        private static void ScheduleStatusRecheck()
+        {
+            // Give the external GUI a moment to spin up; then refresh remote status so the
+            // banner disappears once the user actually pulls the changes.
+            EditorApplication.delayCall += () => VcsRemoteStatusMonitor.RequestCheck();
         }
 
         private static string BuildBannerText(VcsSyncStatus status)
@@ -78,7 +170,8 @@ namespace AgentCore.Editor.Components.VCS.UI
                     message += $"... and {status.RemoteChangedFiles.Count - previewCount} more file(s).\n";
             }
 
-            message += "\nThis will run the VCS update/sync command. Local conflicts are not auto-resolved.";
+            message += "\nThis will open the corresponding external VCS update window (e.g. TortoiseSVN / Git GUI / P4V).";
+            message += "\nLocal conflicts are not auto-resolved in Unity.";
             return message;
         }
     }

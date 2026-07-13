@@ -123,18 +123,18 @@ namespace AgentCore.Editor.Config.Settings.Pages
             if (isEnabled)
             {
                 text = string.IsNullOrEmpty(enabledDetail)
-                    ? $"● {serviceName}: Enabled"
-                    : $"● {serviceName}: Enabled ({enabledDetail})";
+                    ? $"[ON]  {serviceName}: Enabled"
+                    : $"[ON]  {serviceName}: Enabled ({enabledDetail})";
                 level = SettingsStatusLevel.Success;
             }
             else if (disabledIsError)
             {
-                text = $"✗ {serviceName}: Missing configuration";
+                text = $"[FAIL] {serviceName}: Missing configuration";
                 level = SettingsStatusLevel.Error;
             }
             else
             {
-                text = $"○ {serviceName}: Disabled";
+                text = $"[OFF] {serviceName}: Disabled";
                 level = SettingsStatusLevel.None;
             }
 

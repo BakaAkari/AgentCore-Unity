@@ -255,7 +255,7 @@ namespace AgentCore.Editor.UI.Components
                 if (!string.IsNullOrEmpty(data.ChosenInterpretation))
                 {
                     sb.AppendLine("步骤 3: 选定的理解");
-                    sb.AppendLine($"  → {data.ChosenInterpretation}");
+                    sb.AppendLine($"  - {data.ChosenInterpretation}");
                 }
 
                 if (data.KeyAssumptions != null && data.KeyAssumptions.Count > 0)

@@ -320,6 +320,12 @@
 }
 
 /* --- 消息滚动区域 --- */
+#message-scroll-wrapper {
+    flex-grow: 1;
+    flex-shrink: 1;
+    position: relative;
+}
+
 #message-scroll-view {
     flex-grow: 1;
     flex-shrink: 1;
@@ -337,6 +343,26 @@
     padding: 4px 0;
 }
 
+/* --- "跳到最新"浮动按钮（用户上翻时显示） --- */
+#scroll-to-bottom-button {
+    position: absolute;
+    right: 14px;
+    bottom: 12px;
+    height: 26px;
+    padding: 0 12px;
+    background-color: #4a86c8;
+    color: #ffffff;
+    border-width: 0;
+    border-radius: 13px;
+    font-size: 11px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+}
+
+#scroll-to-bottom-button:hover {
+    background-color: #5a96d8;
+}
+
 /* --- 底部输入区域 --- */
 #input-area {
     flex-direction: row;
@@ -348,24 +374,39 @@
     border-top-width: 1px;
     border-top-color: #555555;
     min-height: 44px;
-    max-height: 140px;
+    max-height: 260px;
+}
+
+/* 输入框滚动包装：内容多时可上下滚动查看 */
+#input-scroll-view {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-height: 28px;
+    max-height: 220px;
+    margin-right: 8px;
+    background-color: #2b2b2b;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #555555;
+}
+
+#input-scroll-view > #unity-content-container {
+    flex-grow: 1;
+    flex-shrink: 0;
+    padding: 0;
 }
 
 #input-field {
     flex-grow: 1;
     flex-shrink: 1;
     min-height: 28px;
-    max-height: 100px;
-    margin-right: 8px;
     font-size: 13px;
     color: #d4d4d4;
-    background-color: #2b2b2b;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: #555555;
+    background-color: transparent;
+    border-width: 0;
     padding: 4px 8px;
     white-space: normal;
-    overflow: hidden;
+    overflow: visible;
 }
 
 #input-field:focus {
@@ -381,14 +422,14 @@
 
 /* Unity TextField multiline 内部 TextInput 容器 */
 #input-field > #unity-text-input {
-    background-color: #2b2b2b;
+    background-color: transparent;
     border-width: 0;
     padding: 4px 8px;
     min-height: 20px;
-    max-height: 92px;
     white-space: normal;
-    overflow: hidden;
+    overflow: visible;
 }
+
 
 #input-buttons {
     flex-direction: row;
@@ -1356,4 +1397,24 @@
     color: #888888;
     border-color: #555555;
     background-color: #2a2a2a;
+}
+
+/* ============================================================
+ * Active Pulse — 用于运行中组件的视觉信号
+ * Unity UI Toolkit 无 @keyframes，改用高对比边框色 + transition 做静态活动指示
+ * 通过 AddToClassList("active-pulse") / RemoveFromClassList("active-pulse") 切换
+ * ============================================================ */
+.active-pulse {
+    border-left-color: #4A90D9;
+    border-right-color: #4A90D9;
+    border-top-color: #4A90D9;
+    border-bottom-color: #4A90D9;
+    transition-property: border-color;
+    transition-duration: 0.5s;
+    transition-timing-function: ease-in-out;
+}
+
+/* --- 折叠状态下 ThinkingDrawer 的预览文本 --- */
+.thinking-drawer__preview {
+    max-width: 400px;
 }

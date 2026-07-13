@@ -181,7 +181,7 @@ namespace AgentCore.Editor.Config.Settings
         /// <param name="width">Badge width in pixels.</param>
         public void DrawServiceStatusBadge(bool enabled, float width = 74f)
         {
-            var text = enabled ? "● Enabled" : "○ Disabled";
+            var text = enabled ? "[ON] Enabled" : "[OFF] Disabled";
             var style = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
             style.normal.textColor = enabled ? GetStatusColor(SettingsStatusLevel.Success) : new Color(0.55f, 0.55f, 0.55f);
             EditorGUILayout.LabelField(text, style, GUILayout.Width(width));

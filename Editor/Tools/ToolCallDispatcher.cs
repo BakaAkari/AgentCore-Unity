@@ -252,6 +252,19 @@ namespace AgentCore.Editor.Tools
                     );
                 }
 
+                // 3.5 Play Mode preflight（D3）—— write 类工具在 Play Mode 中一律 Block
+                if (Safety.PlayModePreflight.IsBlockedInPlayMode(tool.Metadata.Capabilities, out var playModeReason))
+                {
+                    stopwatch.Stop();
+                    Debug.LogWarning($"{LogPrefix}Tool '{toolName}' blocked by Play Mode preflight.");
+                    return new ToolCallResult(
+                        toolCall,
+                        ToolResult.Fail(playModeReason, stopwatch.Elapsed.TotalMilliseconds),
+                        toolName,
+                        stopwatch.Elapsed.TotalMilliseconds
+                    );
+                }
+
                 // 4. 治理层策略评估 (G.1)
                 var action = ExtractActionFromParameters(parameters);
                 var paramSummary = BuildParameterSummary(parameters);

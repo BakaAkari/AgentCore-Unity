@@ -4,6 +4,7 @@
       <ui:Label name="role-label" />
       <ui:VisualElement name="header-spacer" />
       <ui:Label name="time-label" />
+      <ui:Button name="copy-button" class="bubble-copy-button" tooltip="复制气泡完整内容到剪贴板" />
     </ui:VisualElement>
     <ui:VisualElement name="bubble-content">
       <ui:Label name="content-label" />

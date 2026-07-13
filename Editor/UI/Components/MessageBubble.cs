@@ -74,6 +74,31 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>是否处于流式输出模式</summary>
         private bool _isStreaming;
 
+        /// <summary>
+        /// 最新一次的完整文本内容（未经 ContentFilter / Markdown 转换的原始文本）。
+        /// 供"复制气泡内容"按钮读取；用 StreamingTextElement 的话 UI 里保留的是已渲染 block，
+        /// 无法反向抠出 markdown，因此本地缓存原始文本是最可靠的做法。
+        /// </summary>
+        private string _lastFullContent = string.Empty;
+
+        /// <summary>复制按钮引用（如果 UXML 中存在）</summary>
+        private Button _copyButton;
+
+        /// <summary>底部资源引用栏（仅 assistant 消息使用，含消息里出现的文件/GO 引用 chip）</summary>
+        private MessageReferenceBar _referenceBar;
+
+        /// <summary>复制按钮闪回原文的定时任务句柄</summary>
+        private IVisualElementScheduledItem _copyResetTask;
+
+        #endregion
+
+        #region 公开属性 (扩展)
+
+        /// <summary>
+        /// 当前气泡显示的完整原始文本内容（供外部读取或复制使用）。
+        /// </summary>
+        public string RawContent => _lastFullContent ?? string.Empty;
+
         #endregion
 
         #region 构造函数
@@ -121,12 +146,16 @@ namespace AgentCore.Editor.UI.Components
             var timeLabel = this.Q<Label>("time-label");
             _contentLabel = this.Q<Label>("content-label");
             _bubbleContent = this.Q<VisualElement>("bubble-content");
+            _copyButton = this.Q<Button>("copy-button");
 
             // 启用内容文本选择，允许用户选中和复制文本（Unity 2022.2+）
             if (_contentLabel != null)
             {
                 _contentLabel.selection.isSelectable = true;
             }
+
+            // 初始化复制按钮（user 角色不显示——用户已经知道自己输入了什么）
+            SetupCopyButton();
 
             // 设置角色样式类
             if (_bubbleRoot != null)
@@ -170,6 +199,7 @@ namespace AgentCore.Editor.UI.Components
         {
             if (!_isStreaming || _streamingText == null) return;
             _streamingText.AppendText(token);
+            _lastFullContent += token ?? string.Empty;
         }
 
         /// <summary>
@@ -180,6 +210,7 @@ namespace AgentCore.Editor.UI.Components
         public void FinalizeContent(string fullContent)
         {
             var content = fullContent ?? "";
+            _lastFullContent = content;
 
             if (_streamingText != null)
             {
@@ -195,6 +226,10 @@ namespace AgentCore.Editor.UI.Components
             }
 
             _isStreaming = false;
+
+            // D2: 提取消息中的文件/GameObject 引用并渲染为可点击 chip 栏
+            EnsureReferenceBar();
+            _referenceBar?.Rebuild(content);
 
             // v1.4.0 fix: SetFinalText 动态添加 block 元素（表格、列表等）后，Unity UI Toolkit
             // 的 layout 计算有时会出现"父容器 background 只覆盖到初始 height"的问题，导致后添加
@@ -407,6 +442,7 @@ namespace AgentCore.Editor.UI.Components
             if (!string.IsNullOrEmpty(initialContent))
             {
                 _streamingText.AppendText(initialContent);
+                _lastFullContent = initialContent;
             }
         }
 
@@ -419,6 +455,7 @@ namespace AgentCore.Editor.UI.Components
         private void SetupStaticMode(string content)
         {
             var text = content ?? "";
+            _lastFullContent = text;
 
             // 助手消息：使用 block rendering 保留富文本格式（标题、代码块、表格等）
             if (Role == "assistant" && !string.IsNullOrEmpty(text))
@@ -445,6 +482,10 @@ namespace AgentCore.Editor.UI.Components
 
                 // v1.4.0 fix: 同 FinalizeContent，强制刷 layout 保证 bubble background 覆盖所有 block
                 ForceLayoutRefresh();
+
+                // D2: 静态渲染场景下同样构建引用栏（例如从会话恢复的历史消息）
+                EnsureReferenceBar();
+                _referenceBar?.Rebuild(text);
                 return;
             }
 
@@ -474,6 +515,83 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
+        /// 确保 _referenceBar 存在。只对 assistant 消息创建（用户消息通常不含引用）。
+        /// </summary>
+        private void EnsureReferenceBar()
+        {
+            if (Role != "assistant") return;
+            if (_referenceBar != null) return;
+
+            _referenceBar = new MessageReferenceBar();
+            _referenceBar.style.display = DisplayStyle.None;
+
+            if (_bubbleContent != null)
+                _bubbleContent.Add(_referenceBar);
+            else
+                Add(_referenceBar);
+        }
+
+        /// <summary>
+        /// 初始化气泡右上角的复制按钮。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 仅对 <c>assistant</c> 和 <c>error</c> 角色显示；<c>user</c> 角色隐藏
+        /// （用户已经知道自己输入了什么，一键复制价值低）。
+        /// </para>
+        /// <para>
+        /// 复制内容来源：<see cref="_lastFullContent"/> 缓存的原始文本（未经 Markdown 渲染），
+        /// 保证复制粘贴到别处仍是 markdown 源码。
+        /// </para>
+        /// </remarks>
+        private void SetupCopyButton()
+        {
+            if (_copyButton == null) return;
+
+            // 只对 assistant 和 error 显示（user 消息用户已知道内容）
+            if (Role != "assistant" && Role != "error")
+            {
+                _copyButton.style.display = DisplayStyle.None;
+                return;
+            }
+
+            _copyButton.text = "复制";
+            _copyButton.focusable = false; // 避免抢焦点导致文本选中丢失
+
+            _copyButton.clicked += HandleCopyClicked;
+        }
+
+        /// <summary>
+        /// 复制按钮点击处理：写入系统剪贴板 + 短暂显示"已复制"反馈。
+        /// </summary>
+        private void HandleCopyClicked()
+        {
+            if (_copyButton == null) return;
+
+            var payload = _lastFullContent ?? string.Empty;
+            try
+            {
+                EditorGUIUtility.systemCopyBuffer = payload;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AgentCore] Copy to clipboard failed: {ex.Message}");
+                _copyButton.text = "失败";
+                schedule.Execute(() => { if (_copyButton != null) _copyButton.text = "复制"; }).StartingIn(1200);
+                return;
+            }
+
+            _copyButton.text = "已复制";
+
+            // 1.2 秒后恢复原文
+            _copyResetTask?.Pause();
+            _copyResetTask = schedule.Execute(() =>
+            {
+                if (_copyButton != null) _copyButton.text = "复制";
+            }).StartingIn(1200);
+        }
+
+        /// <summary>
         /// 当 UXML 模板加载失败时，创建兜底布局。
         /// </summary>
         private void CreateFallbackLayout()
@@ -496,6 +614,10 @@ namespace AgentCore.Editor.UI.Components
             var timeLabel = new Label { name = "time-label" };
             timeLabel.style.fontSize = 9;
             header.Add(timeLabel);
+
+            var copyBtn = new Button { name = "copy-button" };
+            copyBtn.AddToClassList("bubble-copy-button");
+            header.Add(copyBtn);
 
             bubbleRoot.Add(header);
 

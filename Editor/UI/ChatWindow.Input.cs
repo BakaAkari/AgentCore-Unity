@@ -45,10 +45,20 @@ namespace AgentCore.Editor.UI
             // 添加用户消息气泡
             AddUserMessage(text);
 
+            // 用户主动发送新消息 → 强制回到底部并恢复自动追底
+            ScrollToBottom(force: true);
+
+            // 立刻显示 pending 占位气泡（解决"点击发送 → 5-30 秒 UI 无反应"的感知问题）
+            ShowPendingIndicator("思考中");
+
             // 异步发送消息
             AsyncHelper.RunAsync(
                 () => _agentLoop.SendMessageAsync(text),
-                onError: ex => Debug.LogError($"[AgentCore] SendMessage error: {ex.Message}")
+                onError: ex =>
+                {
+                    Debug.LogError($"[AgentCore] SendMessage error: {ex.Message}");
+                    DismissPendingIndicator();
+                }
             );
         }
 
@@ -162,6 +172,56 @@ namespace AgentCore.Editor.UI
                     _inputField?.Focus();
                     break;
             }
+        }
+
+        #endregion
+
+        #region 外部注入 API (ContextIngest / 扩展)
+
+        /// <summary>
+        /// 将文本追加到输入框光标位置。不会清空已有输入。
+        /// 主要供 <see cref="ContextIngestEntry"/> 全局快捷键注入 Context 使用。
+        /// </summary>
+        /// <param name="text">要注入的文本（通常是已格式化的 markdown 块）</param>
+        public void AppendToInputField(string text)
+        {
+            if (_inputField == null || string.IsNullOrEmpty(text)) return;
+
+            var current = _inputField.value ?? string.Empty;
+            var cursor = _inputField.cursorIndex;
+
+            // 边界修正（cursor 可能超出当前 value 长度）
+            if (cursor < 0 || cursor > current.Length) cursor = current.Length;
+
+            var head = current.Substring(0, cursor);
+            var tail = current.Substring(cursor);
+
+            // 头部如果非空且不以换行结尾，追加一个换行避免粘连
+            if (head.Length > 0 && !head.EndsWith("\n")) head += "\n";
+
+            var newValue = head + text + tail;
+            _inputField.value = newValue;
+            _inputField.Focus();
+
+            // 将光标定位到注入内容之后（用户可以直接继续输入）
+            var newCursor = head.Length + text.Length;
+            try
+            {
+                _inputField.cursorIndex = newCursor;
+                _inputField.selectIndex = newCursor;
+            }
+            catch
+            {
+                // 某些 Unity 版本上 cursorIndex 只读或延迟生效，忽略即可
+            }
+        }
+
+        /// <summary>
+        /// 聚焦输入框（用于快捷键触发但无内容注入的场景）。
+        /// </summary>
+        public void FocusInputField()
+        {
+            _inputField?.Focus();
         }
 
         #endregion

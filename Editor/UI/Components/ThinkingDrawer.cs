@@ -17,15 +17,19 @@ namespace AgentCore.Editor.UI.Components
         private static readonly Color BorderColor = new Color(0.25f, 0.25f, 0.25f);
         private static readonly Color AccentColor = new Color(0.60f, 0.45f, 0.85f);
 
+        // ASCII-only 三角箭头（避免 Unity 默认字体不支持 BMP Geometric Shapes 时渲染成方块）
         private const string ArrowCollapsed = ">";
         private const string ArrowExpanded = "v";
 
         private readonly VisualElement _header;
-        private readonly Label _arrowLabel;
+        private readonly Button _toggleButton;
         private readonly Label _titleLabel;
         private readonly Label _sourceLabel;
+        private readonly Label _previewLabel;
         private readonly VisualElement _content;
         private readonly Label _reasoningLabel;
+
+        private const int PreviewMaxChars = 60;
 
         private string _reasoningText = string.Empty;
         private bool _isExpanded;
@@ -82,13 +86,32 @@ namespace AgentCore.Editor.UI.Components
             accent.style.borderBottomRightRadius = 2;
             _header.Add(accent);
 
-            _arrowLabel = new Label(ArrowCollapsed);
-            _arrowLabel.style.fontSize = 10;
-            _arrowLabel.style.color = TextSecondary;
-            _arrowLabel.style.marginRight = 6;
-            _arrowLabel.style.minWidth = 14;
-            _arrowLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
-            _header.Add(_arrowLabel);
+            // 独立的展开/折叠按钮（用户明确要求：可视化按钮）
+            _toggleButton = new Button(() => SetExpanded(!_isExpanded))
+            {
+                text = ArrowCollapsed
+            };
+            _toggleButton.AddToClassList("thinking-drawer__toggle");
+            _toggleButton.style.fontSize = 10;
+            _toggleButton.style.color = TextSecondary;
+            _toggleButton.style.marginRight = 6;
+            _toggleButton.style.marginLeft = 0;
+            _toggleButton.style.marginTop = 0;
+            _toggleButton.style.marginBottom = 0;
+            _toggleButton.style.paddingLeft = 4;
+            _toggleButton.style.paddingRight = 4;
+            _toggleButton.style.paddingTop = 0;
+            _toggleButton.style.paddingBottom = 0;
+            _toggleButton.style.minWidth = 22;
+            _toggleButton.style.height = 20;
+            _toggleButton.style.backgroundColor = new Color(0.24f, 0.24f, 0.24f);
+            _toggleButton.style.borderTopLeftRadius = 3;
+            _toggleButton.style.borderTopRightRadius = 3;
+            _toggleButton.style.borderBottomLeftRadius = 3;
+            _toggleButton.style.borderBottomRightRadius = 3;
+            _toggleButton.style.unityTextAlign = TextAnchor.MiddleCenter;
+            _toggleButton.tooltip = "展开 / 折叠 Thinking";
+            _header.Add(_toggleButton);
 
             _titleLabel = new Label("思考中 · 0s");
             _titleLabel.style.fontSize = 12;
@@ -100,14 +123,29 @@ namespace AgentCore.Editor.UI.Components
             _sourceLabel = new Label(string.Empty);
             _sourceLabel.style.fontSize = 11;
             _sourceLabel.style.color = TextSecondary;
-            _sourceLabel.style.flexGrow = 1;
-            _sourceLabel.style.overflow = Overflow.Hidden;
-            _sourceLabel.style.textOverflow = TextOverflow.Ellipsis;
+            _sourceLabel.style.flexShrink = 0;
+            _sourceLabel.style.marginRight = 6;
             _header.Add(_sourceLabel);
+
+            // 折叠状态下显示 reasoning 尾部预览（让用户不展开也能感知内容正在流入）
+            _previewLabel = new Label(string.Empty);
+            _previewLabel.AddToClassList("thinking-drawer__preview");
+            _previewLabel.style.fontSize = 11;
+            _previewLabel.style.color = TextSecondary;
+            _previewLabel.style.flexGrow = 1;
+            _previewLabel.style.overflow = Overflow.Hidden;
+            _previewLabel.style.textOverflow = TextOverflow.Ellipsis;
+            _previewLabel.style.unityFontStyleAndWeight = FontStyle.Italic;
+            _header.Add(_previewLabel);
 
             _header.RegisterCallback<MouseEnterEvent>(_ => _header.style.backgroundColor = HeaderBgHover);
             _header.RegisterCallback<MouseLeaveEvent>(_ => _header.style.backgroundColor = HeaderBg);
-            _header.RegisterCallback<ClickEvent>(_ => SetExpanded(!_isExpanded));
+            // header 点击也 toggle（除按钮外的空白区）— 双入口，用户拖拽选中不受影响
+            _header.RegisterCallback<ClickEvent>(evt =>
+            {
+                if (evt.target == _toggleButton) return; // 按钮已单独处理
+                SetExpanded(!_isExpanded);
+            });
             Add(_header);
 
             _content = new VisualElement();
@@ -143,6 +181,8 @@ namespace AgentCore.Editor.UI.Components
                 _isRunning = true;
                 _startedAt = EditorTime;
                 StartTimer();
+                // 开始接收 reasoning 时启用脉动动画
+                AddToClassList("active-pulse");
             }
 
             _source = MergeSource(_source, source);
@@ -151,6 +191,10 @@ namespace AgentCore.Editor.UI.Components
             if (_isExpanded)
             {
                 _reasoningLabel.text = ContentFilter.SanitizeUnsupportedEmoji(_reasoningText);
+            }
+            else
+            {
+                UpdatePreview();
             }
             UpdateTitle();
         }
@@ -192,14 +236,36 @@ namespace AgentCore.Editor.UI.Components
             StopTimer();
             UpdateSourceLabel();
             UpdateTitle();
+            // 完成后不再需要脉动
+            RemoveFromClassList("active-pulse");
         }
 
         private void SetExpanded(bool expanded)
         {
             _isExpanded = expanded;
-            _arrowLabel.text = expanded ? ArrowExpanded : ArrowCollapsed;
+            _toggleButton.text = expanded ? ArrowExpanded : ArrowCollapsed;
+            _toggleButton.tooltip = expanded ? "折叠 Thinking" : "展开 Thinking";
             _content.style.display = expanded ? DisplayStyle.Flex : DisplayStyle.None;
             _reasoningLabel.text = expanded ? ContentFilter.SanitizeUnsupportedEmoji(_reasoningText) : string.Empty;
+            // 展开时隐藏 preview（避免重复展示），折叠时刷新 preview
+            _previewLabel.style.display = expanded ? DisplayStyle.None : DisplayStyle.Flex;
+            if (!expanded) UpdatePreview();
+        }
+
+        /// <summary>
+        /// 更新折叠状态下的尾部预览（最新 <see cref="PreviewMaxChars"/> 字符）。
+        /// </summary>
+        private void UpdatePreview()
+        {
+            if (_previewLabel == null) return;
+
+            var text = _reasoningText ?? string.Empty;
+            // 只取最新片段，去除换行让单行显示不跳动
+            var trimmed = text.Replace('\r', ' ').Replace('\n', ' ');
+            if (trimmed.Length > PreviewMaxChars)
+                trimmed = "..." + trimmed.Substring(trimmed.Length - PreviewMaxChars);
+
+            _previewLabel.text = trimmed;
         }
 
         private void StartTimer()

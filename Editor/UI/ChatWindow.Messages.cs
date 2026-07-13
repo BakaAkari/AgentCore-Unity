@@ -356,6 +356,13 @@ namespace AgentCore.Editor.UI
         
         private void ScrollToBottom(bool force = false)
         {
+            // 用户手动上翻后禁止自动追底（除非 force 传入,如"跳到最新"按钮或新用户消息）
+            if (!force && _userScrolledUp)
+            {
+                UpdateScrollToBottomButtonVisibility();
+                return;
+            }
+
             if (!force)
             {
                 var now = EditorApplication.timeSinceStartup;
@@ -366,6 +373,8 @@ namespace AgentCore.Editor.UI
 
             if (force)
             {
+                _userScrolledUp = false;
+                UpdateScrollToBottomButtonVisibility();
                 // force 模式：延迟两帧，确保 DOM 布局（包括 MessageListManager 的 DOM 变更）完成后再滚动
                 _messageScrollView?.schedule.Execute(() =>
                 {
@@ -384,6 +393,60 @@ namespace AgentCore.Editor.UI
                         _messageScrollView.scrollOffset = new Vector2(0, float.MaxValue);
                 });
             }
+        }
+
+        // ========== 用户上翻检测 & 跳到最新按钮 ==========
+
+        /// <summary>
+        /// 判断消息滚动区当前是否处于"接近底部"状态。
+        /// 阈值：距底部 40px 以内视为在底部。
+        /// </summary>
+        private bool IsScrollAtBottom()
+        {
+            if (_messageScrollView == null) return true;
+            var scroller = _messageScrollView.verticalScroller;
+            if (scroller == null) return true;
+            // 高值 = 最底部
+            return scroller.value >= scroller.highValue - 40f;
+        }
+
+        /// <summary>
+        /// 检查用户是否已手动上翻，同步 _userScrolledUp + 更新按钮可见性。
+        /// </summary>
+        /// <param name="force">true 时不管 flag 强制刷新（用户滚滚轮时用）</param>
+        private void CheckUserScrolled(bool force = false)
+        {
+            var atBottom = IsScrollAtBottom();
+            if (force || _userScrolledUp != !atBottom)
+            {
+                _userScrolledUp = !atBottom;
+                UpdateScrollToBottomButtonVisibility();
+            }
+        }
+
+        /// <summary>
+        /// ScrollView 值变化的持续回调（滚动条被拖动 / 滚轮）
+        /// </summary>
+        private void OnMessageScrollValueChanged(float _)
+        {
+            CheckUserScrolled();
+        }
+
+        /// <summary>
+        /// 更新"跳到最新"浮动按钮的可见性。
+        /// </summary>
+        private void UpdateScrollToBottomButtonVisibility()
+        {
+            if (_scrollToBottomButton == null) return;
+            _scrollToBottomButton.style.display = _userScrolledUp ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        /// <summary>
+        /// "跳到最新"按钮点击 — 重置追底 + 强制滚到底。
+        /// </summary>
+        private void OnScrollToBottomClicked()
+        {
+            ScrollToBottom(force: true);
         }
 
         #endregion
