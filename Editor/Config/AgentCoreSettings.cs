@@ -538,11 +538,20 @@ namespace AgentCore.Editor.Config
             int adaptiveReserve = Mathf.RoundToInt(maxModelLen * ReserveRatio);
             adaptiveReserve = Mathf.Clamp(adaptiveReserve, ReserveMin, ReserveMax);
             reserveResponseTokens = adaptiveReserve;
+        }
 
-            // maxTokens 不超过 reserveResponseTokens（completion 不能比预留还大）
-            // 保留用户/迁移设置的 maxTokens 值，但如果超过 reserve 则限制
-            if (maxTokens > reserveResponseTokens)
-                maxTokens = reserveResponseTokens;
+        /// <summary>
+        /// v1.6.5+: 计算实际发送给 LLM API 的 max_tokens 值。
+        /// GLM-5.2 等 native reasoning 模型中，SGLang 的 max_tokens 是
+        /// reasoning + content 的总上限。如果只发 maxTokens，reasoning 会吃光预算，
+        /// 导致 content 为空（finish_reason=length）。
+        /// 解决：max_tokens = maxTokens (content) + reasoningMaxTokens (reasoning 预算)
+        /// </summary>
+        public int GetEffectiveMaxTokens()
+        {
+            if (enableReasoningOutput && reasoningMaxTokens > 0)
+                return maxTokens + reasoningMaxTokens;
+            return maxTokens;
         }
     }
 }

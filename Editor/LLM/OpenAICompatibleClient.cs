@@ -41,7 +41,7 @@ namespace AgentCore.Editor.LLM
                 Tools = tools?.Count > 0 ? tools : null,
                 Stream = false,
                 Temperature = settings.temperature,
-                MaxTokens = settings.maxTokens
+                MaxTokens = settings.GetEffectiveMaxTokens()
             };
 
             var json = RequestEnrichment.BuildEnrichedJson(request, settings);
@@ -99,7 +99,7 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model
                 Tools = tools?.Count > 0 ? tools : null,
                 Stream = true,
                 Temperature = settings.temperature,
-                MaxTokens = settings.maxTokens
+                MaxTokens = settings.GetEffectiveMaxTokens()
             };
 
             var json = RequestEnrichment.BuildEnrichedJson(request, settings);
