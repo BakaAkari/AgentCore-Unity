@@ -895,6 +895,13 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>是否已切换到 block 渲染模式</summary>
         private bool _isBlockMode;
 
+        // --- v1.6.5 性能优化：token 缓冲 + 帧节流 ---
+        // 旧实现：每 token 跑 FilterStreaming(全量文本) + Label.text 赋值 → 高频 UI relayout 卡死主线程
+        // 新实现：token 累积到 _pendingBuffer，每帧只 flush 一次
+        private StringBuilder _pendingBuffer = new();
+        private bool _flushScheduled;
+        private const int FlushIntervalMs = 16; // ~1 帧
+
         #endregion
 
         #region 构造函数
@@ -947,19 +954,49 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>
         /// 追加流式文本。
         /// 每次收到一个 token 时调用此方法，文本会累积显示。
+        /// v1.6.5: token 先累积到 _pendingBuffer，由 flush 定时器每帧合并写一次 Label。
         /// </summary>
         /// <param name="text">要追加的文本片段</param>
         public void AppendText(string text)
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            // 使用 StringBuilder 避免 string += 的性能问题
+            // 累积到 builder（用于最终化）
             if (_currentTextBuilder == null)
                 _currentTextBuilder = new StringBuilder();
             _currentTextBuilder.Append(text);
-            // 流式过滤：移除已完成的标签对，截断不完整标签
-            _textLabel.text = ContentFilter.FilterStreaming(_currentTextBuilder.ToString());
+
+            // 累积到 pending buffer，稍后 flush
+            _pendingBuffer.Append(text);
             ShowCursor();
+            ScheduleFlush();
+        }
+
+        /// <summary>
+        /// 调度一次延迟 flush。如果已有 flush 排队则不重复调度。
+        /// </summary>
+        private void ScheduleFlush()
+        {
+            if (_flushScheduled) return;
+            _flushScheduled = true;
+            schedule.Execute(FlushPending).StartingIn(FlushIntervalMs);
+        }
+
+        /// <summary>
+        /// 将 _pendingBuffer 中的累积文本一次性写入 Label。
+        /// 跑一次 FilterStreaming（全量），赋值一次 Label.text — 每 16ms 最多一次。
+        /// </summary>
+        private void FlushPending()
+        {
+            _flushScheduled = false;
+            if (_pendingBuffer.Length == 0) return;
+
+            // 合并到主 builder 的快照，跑一次过滤
+            var fullText = _currentTextBuilder?.ToString() ?? "";
+            _textLabel.text = ContentFilter.FilterStreaming(fullText);
+
+            // 清空 pending buffer（已合并到 Label）
+            _pendingBuffer.Clear();
         }
 
         /// <summary>
@@ -969,6 +1006,13 @@ namespace AgentCore.Editor.UI.Components
         /// <param name="text">完整的最终文本</param>
         public void SetFinalText(string text)
         {
+            // v1.6.5: 切换到 block 模式前 flush 残留 token
+            if (_flushScheduled)
+            {
+                _flushScheduled = false;
+            }
+            _pendingBuffer.Clear();
+
             _currentText = text ?? "";
             HideCursor();
 
@@ -1020,6 +1064,8 @@ namespace AgentCore.Editor.UI.Components
         {
             _currentText = "";
             _textLabel.text = "";
+            _pendingBuffer.Clear();
+            _flushScheduled = false;
             _blockContainer?.Clear();
             HideCursor();
 

@@ -39,6 +39,13 @@ namespace AgentCore.Editor.UI.Components
         private ThinkingTraceSource _source = ThinkingTraceSource.None;
         private IVisualElementScheduledItem _timer;
 
+        // --- v1.6.5 性能优化：reasoning token 缓冲 + 帧节流 ---
+        // 旧实现：每 token 调 UpdatePreview/UpdateTitle/UpdateSourceLabel → 高频 UI relayout
+        // 新实现：token 累积到 _reasoningPending，每帧只 flush 一次
+        private StringBuilder _reasoningPending = new();
+        private bool _reasoningFlushScheduled;
+        private const int ReasoningFlushIntervalMs = 16;
+
         /// <summary>
         /// 创建 ThinkingDrawer。
         /// </summary>
@@ -187,6 +194,31 @@ namespace AgentCore.Editor.UI.Components
 
             _source = MergeSource(_source, source);
             _reasoningText += token;
+
+            // v1.6.5: 累积 token，帧节流 flush — 不每 token 更新 UI
+            _reasoningPending.Append(token);
+            ScheduleReasoningFlush();
+        }
+
+        /// <summary>
+        /// 调度一次延迟 reasoning flush。已排队则跳过。
+        /// </summary>
+        private void ScheduleReasoningFlush()
+        {
+            if (_reasoningFlushScheduled) return;
+            _reasoningFlushScheduled = true;
+            schedule.Execute(FlushReasoningPending).StartingIn(ReasoningFlushIntervalMs);
+        }
+
+        /// <summary>
+        /// 将累积的 reasoning token 一次性更新到 UI。
+        /// 每 16ms 最多一次：UpdateSourceLabel + UpdatePreview/Label + UpdateTitle。
+        /// </summary>
+        private void FlushReasoningPending()
+        {
+            _reasoningFlushScheduled = false;
+            if (_reasoningPending.Length == 0) return;
+
             UpdateSourceLabel();
             if (_isExpanded)
             {
@@ -197,6 +229,8 @@ namespace AgentCore.Editor.UI.Components
                 UpdatePreview();
             }
             UpdateTitle();
+
+            _reasoningPending.Clear();
         }
 
         /// <summary>
@@ -229,6 +263,10 @@ namespace AgentCore.Editor.UI.Components
         public void Complete(double durationMs, ThinkingTraceSource source)
         {
             if (style.display == DisplayStyle.None && string.IsNullOrEmpty(_reasoningText)) return;
+
+            // v1.6.5: 完成时 flush 残留 token
+            _reasoningFlushScheduled = false;
+            _reasoningPending.Clear();
 
             _durationMs = Mathf.Max(0, (float)durationMs);
             _source = MergeSource(_source, source);
