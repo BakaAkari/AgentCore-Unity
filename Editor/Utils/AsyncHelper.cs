@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -11,14 +12,37 @@ namespace AgentCore.Editor.Utils
     /// </summary>
     public static class AsyncHelper
     {
+        // v1.6.5: 事件批处理队列 — 后台线程入队，主线程每帧 drain
+        // 旧实现：每 token 注册一个 EditorApplication.delayCall → 高频下主线程被 delayCall 队列淹没
+        // 新实现：ConcurrentQueue + EditorApplication.update 每帧批量执行
+        private static readonly ConcurrentQueue<Action> _mainThreadQueue = new();
+        private static bool _updateHookRegistered;
+
         /// <summary>
         /// 将操作调度到 Unity 主线程执行。
-        /// 使用 EditorApplication.delayCall 确保在主线程安全执行。
+        /// v1.6.5: 使用 ConcurrentQueue 批处理，每帧通过 EditorApplication.update drain 一次。
         /// </summary>
         public static void RunOnMainThread(Action action)
         {
             if (action == null) return;
-            EditorApplication.delayCall += () =>
+            _mainThreadQueue.Enqueue(action);
+            EnsureUpdateHook();
+        }
+
+        private static void EnsureUpdateHook()
+        {
+            if (_updateHookRegistered) return;
+            _updateHookRegistered = true;
+            EditorApplication.update += DrainMainThreadQueue;
+        }
+
+        private static void DrainMainThreadQueue()
+        {
+            // 每帧最多处理 256 个回调，防止极端积压下卡死一帧
+            int processed = 0;
+            const int MaxPerFrame = 256;
+
+            while (processed < MaxPerFrame && _mainThreadQueue.TryDequeue(out var action))
             {
                 try
                 {
@@ -28,7 +52,8 @@ namespace AgentCore.Editor.Utils
                 {
                     Debug.LogError($"[AgentCore] Main thread callback error: {ex}");
                 }
-            };
+                processed++;
+            }
         }
 
         /// <summary>

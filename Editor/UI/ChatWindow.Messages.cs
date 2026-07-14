@@ -97,7 +97,8 @@ namespace AgentCore.Editor.UI
             var turnView = EnsureAssistantTurnView(messageId);
             turnView?.ThinkingDrawer.AppendReasoning(token, source);
             _currentAssistantTurnId = messageId;
-            ScrollToBottom();
+            // v1.6.5: ScrollToBottom 由 flush 的 ScheduleReasoningFlush 间接触发，
+            // 不在 per-token 路径调用 — 100ms 节流已足够，但函数调用本身有开销
         }
 
         /// <summary>
@@ -134,7 +135,8 @@ namespace AgentCore.Editor.UI
             }
 
             bubble.AppendStreamToken(token);
-            ScrollToBottom(); // 节流后，单次调用即可
+            // v1.6.5: ScrollToBottom 移到 StreamingTextElement.FlushPending 的帧节流里，
+            // 不在 per-token 路径调用
         }
 
         /// <summary>

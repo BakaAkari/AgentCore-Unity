@@ -33,10 +33,12 @@ namespace AgentCore.Editor.UI
 
                 case AgentEventType.StreamToken:
                     AppendStreamToken(evt.Content, evt.MessageId);
+                    ThrottledScrollToBottom();
                     break;
 
                 case AgentEventType.ReasoningToken:
                     AppendReasoningToken(evt.Content, evt.MessageId, evt.ReasoningSource);
+                    ThrottledScrollToBottom();
                     break;
 
                 case AgentEventType.ReasoningCompleted:
@@ -186,6 +188,19 @@ namespace AgentCore.Editor.UI
             {
                 Debug.LogWarning($"[AgentCore.UI] Failed to update context usage panel: {ex.Message}");
             }
+        }
+
+        // v1.6.5: 帧节流滚动 — 每 100ms 最多一次，不阻塞 per-token 路径
+        private bool _scrollScheduled;
+        private void ThrottledScrollToBottom()
+        {
+            if (_scrollScheduled) return;
+            _scrollScheduled = true;
+            _messageScrollView?.schedule.Execute(() =>
+            {
+                _scrollScheduled = false;
+                ScrollToBottom();
+            }).StartingIn(100);
         }
 
         #endregion
