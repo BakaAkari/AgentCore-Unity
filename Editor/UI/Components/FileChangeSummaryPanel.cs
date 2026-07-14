@@ -71,7 +71,7 @@ namespace AgentCore.Editor.UI.Components
 
         #region 状态
 
-        private bool _isExpanded = true;
+        private bool _isExpanded = false;
         private readonly Dictionary<VisualElement, long> _lastClickTimes = new Dictionary<VisualElement, long>();
 
         #endregion
@@ -121,7 +121,7 @@ namespace AgentCore.Editor.UI.Components
             Add(_header);
 
             // 箭头
-            _arrowLabel = new Label(ArrowExpanded);
+            _arrowLabel = new Label(ArrowCollapsed);
             _arrowLabel.style.fontSize = 10;
             _arrowLabel.style.color = TextSecondary;
             _arrowLabel.style.marginRight = 6;
@@ -214,7 +214,7 @@ namespace AgentCore.Editor.UI.Components
                 _fileListContainer.Add(row);
             }
 
-            // 确保展开状态正确
+            // 确保折叠状态正确（默认折叠）
             _content.style.display = _isExpanded ? DisplayStyle.Flex : DisplayStyle.None;
         }
 

@@ -15,11 +15,12 @@ namespace AgentCore.Editor.UI.Components
     {
         #region 常量
 
-        private static readonly Color BgColor = new Color(0.16f, 0.16f, 0.16f);
-        private static readonly Color TopBorderColor = new Color(0.22f, 0.22f, 0.22f);
-        private static readonly Color ColorIdle = new Color(0.53f, 0.53f, 0.53f);
-        private static readonly Color ColorActive = new Color(0.29f, 0.57f, 0.85f);
-        private static readonly Color ColorError = new Color(0.9f, 0.4f, 0.4f);
+        private static readonly Color BgColor = new Color(0.14f, 0.14f, 0.14f);
+        private static readonly Color TopBorderColor = new Color(0.30f, 0.30f, 0.30f);
+        private static readonly Color ColorIdle = new Color(0.60f, 0.60f, 0.60f);
+        private static readonly Color ColorActive = new Color(0.35f, 0.66f, 1.0f);
+        private static readonly Color ColorError = new Color(0.95f, 0.35f, 0.35f);
+        private static readonly Color ColorActiveText = new Color(0.75f, 0.85f, 1.0f);
 
         private const int PulseIntervalMs = 600;
 
@@ -43,31 +44,34 @@ namespace AgentCore.Editor.UI.Components
         {
             style.flexDirection = FlexDirection.Row;
             style.alignItems = Align.Center;
-            style.paddingLeft = 12;
-            style.paddingRight = 12;
-            style.paddingTop = 3;
-            style.paddingBottom = 3;
-            style.height = 22;
+            style.paddingLeft = 14;
+            style.paddingRight = 14;
+            style.paddingTop = 5;
+            style.paddingBottom = 5;
+            style.height = 28;
             style.flexShrink = 0;
             style.backgroundColor = BgColor;
             style.borderTopWidth = 1;
             style.borderTopColor = TopBorderColor;
+            style.borderBottomWidth = 1;
+            style.borderBottomColor = TopBorderColor;
 
             _dot = new Label("●");
-            _dot.style.fontSize = 9;
-            _dot.style.marginRight = 6;
+            _dot.style.fontSize = 13;
+            _dot.style.marginRight = 8;
             _dot.style.color = ColorIdle;
             _dot.style.unityTextAlign = TextAnchor.MiddleCenter;
             _dot.style.unityFontStyleAndWeight = FontStyle.Bold;
             Add(_dot);
 
             _text = new Label("就绪");
-            _text.style.fontSize = 11;
+            _text.style.fontSize = 13;
             _text.style.color = ColorIdle;
             _text.style.flexGrow = 1;
             _text.style.unityTextAlign = TextAnchor.MiddleLeft;
             _text.style.overflow = Overflow.Hidden;
             _text.style.textOverflow = TextOverflow.Ellipsis;
+            _text.style.unityFontStyleAndWeight = FontStyle.Bold;
             Add(_text);
 
             // 呼吸动画调度器
@@ -95,7 +99,7 @@ namespace AgentCore.Editor.UI.Components
             }
             else if (isActive)
             {
-                _text.style.color = ColorActive;
+                _text.style.color = ColorActiveText;
                 _dot.style.color = ColorActive;
                 _dot.style.opacity = 1f;
                 _isAnimating = true;
