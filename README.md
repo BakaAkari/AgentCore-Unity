@@ -7,12 +7,12 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ## 当前状态
 
 - **Package**: `com.agentcore.unity`
-- **Version**: `1.6.5`
+- **Version**: `1.7.0`
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
 - **Code Scale**: 288 个 .cs 文件，约 97K 行代码，51 个原生工具
-- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge alpha 上线；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化；后续重点为 Phase 8 MCP Server + 产品化分发
+- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge alpha 上线；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化；v1.7.0 Settings v20 死字段清理 + VCS 模块修复（进程泄漏/事件泄漏/日志风暴/设置极简化/多 VCS 支持）；后续重点为 Phase 8 MCP Server + 产品化分发
 
 ## 核心能力
 
@@ -20,7 +20,7 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 
 - OpenAI-compatible Chat Completions 工具调用循环
 - 多轮 tool call：LLM 可规划、调用工具、读取结果并继续执行
-- Fallback routing、自动编译检查、Console 错误捕获与工具结果回灌
+- Fallback routing、自动编译检查（内部常量）、Console 错误捕获与工具结果回灌
 - Domain Reload 恢复：脚本修改触发重编译后恢复会话、pending tool calls、assistant content、reasoning / planning trace 状态
 
 ### Unity 原生工具系统
@@ -153,6 +153,7 @@ com.agentcore.unity/
 - v1.2.1：Request Enrichment 修复 reasoning 触发
 - Phase 9 alpha：Self-Challenge 双节点 prompt 层幻觉护栏 + ADR-17 极简哲学
 - v1.6.x：Context Ingest（Ctrl+Shift+X）、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、ThinkingDrawer 独立展开按钮、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配、自适应 LLM 配置（ModelCapabilityProbe）、统一 LLM 管道（消灭 CompressionLLMClient）、气泡溢出修复（flex-shrink + overflow + 双向 height sync）、流式 UI 性能优化（三层帧节流 + ConcurrentQueue + 4000 字符窗口）
+- v1.7.0：Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens + SecureKeyStorage Compression LLM 死方法删除 + workspaceAutoDetectEnabled 假 toggle 删除）、VCS 模块修复（VcsDetector Process using 防泄漏 + VersionControlPanel DetachFromPanelEvent 防事件泄漏 + VcsProjectWindowIntegration 全量重写删 Debug.Log 风暴 + 多 VCS 支持 + VcsSettings 8→2 极简化 + VcsRemoteStatusMonitor 删重复 RepaintAll）
 
 后续重点：
 

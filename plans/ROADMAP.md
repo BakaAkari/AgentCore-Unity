@@ -1,7 +1,7 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.6.5 | **更新日期**: 2026-07-14 | **状态**:
-> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）
+> **版本**: v1.7.0 | **更新日期**: 2026-07-14 | **状态**:
+> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）；**v1.7.0 Settings v20 死字段清理 + VCS 模块修复**（12 字段删除 / 进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -37,11 +37,11 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.6.5)
+### 0.4 当前项目快照 (v1.7.0)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.6.5 (2026-07-14) — v1.6.x 系列产品化体验冲刺：Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化 |
+| **版本** | 1.7.0 (2026-07-14) — v1.7.0: Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens）+ VCS 模块修复（进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持 / Perforce ignore 标注） |
 | **代码规模** | 288 个 .cs 文件，约 97K 行代码，51 个原生工具 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
@@ -52,14 +52,15 @@
 | **工具确认** | YOLO 模式 3 按钮布局（Deny / Trust Low-Med / YOLO All）；SessionState 持久化跨 Domain Reload；PlayModePreflight Play Mode 禁止 write 类工具 |
 | **日志分级** | AgentCoreLog 5 档（Silent/Error/Warning/Info/Debug）；默认 Info 级，Debug 级 30 处热点被跳过；Settings 中可热切换 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用（OnDemand 可见性） |
-| **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪 |
+| **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪；v1.7.0 修复：Process using 防泄漏 + DetachFromPanelEvent 防事件泄漏 + Project 窗口多 VCS 支持 + 设置 8→2 极简化 |
 | **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；后台静默 + 增量索引；per-root 状态层次化；**标记为实验性，需手动在 Extensions 设置中开启** |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
 | **上下文参数** | reserveResponseTokens 由 ApplyAdaptiveDefaults 动态计算（max_model_len × 4%, clamp 4096~65536）；ContextWindowManager GLM-5.2 映射=200K（ModelCapabilityProbe 启动时探测）；对话压缩 70% 阈值；工具结果压缩 >2000 tokens 触发；压缩请求预算守卫（budget = modelMax - effectiveMax - systemPrompt - 200） |
 | **LLM 管道** | 统一管道：所有 LLM 调用走 OpenAICompatibleClient → RequestEnrichment → GetEffectiveMaxTokens(contentMaxTokens?)；CompressionLLMClient 已删除；压缩器传 contentMaxTokens:512 独立预算；FallbackRouter 非流式空内容重试，流式 warning-only |
-| **Reasoning 参数** | maxTokens=8192(HiddenInInspector), reasoningMaxTokens=2048, reasoningEffort="low"（GLM-5.2 适配）；reasoning native 不可关闭；GetEffectiveMaxTokens() = maxTokens + reasoningMaxTokens |
+| **Reasoning 参数** | maxTokens=8192(HiddenInInspector), reasoningMaxTokens=2048, reasoningEffort="low"（GLM-5.2 适配）；reasoning native 不可关闭；GetEffectiveMaxTokens() = maxTokens + reasoningMaxTokens；Model Info 显示 effective 值（v1.7.0 修正） |
 | **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
 | **Reasoning 可观测性** | ThinkingDrawer 默认折叠 + 尾部 60 字符预览；多轮独立思考窗口；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages`；Request Enrichment 自动注入 `reasoning` 参数 |
+| **Settings 架构** | v20（v1.7.0）— 删除 12 个死字段（streamingEnabled / showToolCallDetails / fallbackRoutingEnabled / autoCompileCheck / autoConsoleCapture / maxConsecutiveErrors / workspaceConfigVersion / vcsDefaultEnabled / useSeparateCompressionLLM / compressionLLMEndpoint / compressionLLMModel / workspaceAutoDetectEnabled）；disabledTools 默认值改为空列表；SecureKeyStorage 删除 Compression LLM 4 个死方法；workspaceAutoDetectEnabled 假 toggle 删除 |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
 | **Phase 6 验收** | 完成 — 见 ADR-11 |
 | **治理层进度** | G.1~G.3 全面完成（v1.1.0）；G.4~G.6 已归档（经分析评估为非必要，见 §2.x 说明） |
@@ -324,6 +325,7 @@ v1.5.0-alpha4 — model-tier escape (L1-L4-B1) — 高级模型逃逸 Node B
 v1.5.0-alpha5 — Settings 分页精简(6→5) + GLM-5.2 全链路适配
 v1.5.6~v1.5.7 — 稳定性修复（PreferencesFolder Save hang + offline uninstall）
 v1.6.0~v1.6.5 — 产品化体验冲刺（详见 §3.z）
+v1.7.0        — Settings v20 死字段清理 + VCS 模块修复（详见 §3.z Z.18/Z.19）
 v1.5.0-alpha3 (未定期) — Domain Reload 兜底完整实施 / BLOCK verdict 回 tool loop 完整实施 / Node A/B 单元测试
 v1.5.0-beta   — pre-GA 稳定性冲刺 + P1-11 PROJECT.md 模板按钮 + P2-12 AGENTS.md 极简规则沉淀
 v1.5.0 GA     — 4 周 kill criteria 实测窗口开启
@@ -336,7 +338,7 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ---
 
-## 3.z v1.6.x — 产品化体验冲刺 (v1.6.0 ~ v1.6.5)
+## 3.z v1.6.x — 产品化体验冲刺 (v1.6.0 ~ v1.6.5) + v1.7.0 代码质量修复
 
 **主题**: 在 Phase 9 alpha 稳定运行的基础上，集中解决用户实战反馈的 UX 感知、工具确认效率、日志噪声和 LLM 适配问题。这一系列不属于任何特定 Phase，是独立的产品化体验冲刺。
 
@@ -361,6 +363,8 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 | Z.15 | v1.6.5+ | **统一 LLM 管道** | 消灭 CompressionLLMClient 割裂管道，所有 LLM 调用走 OpenAICompatibleClient → RequestEnrichment → GetEffectiveMaxTokens；压缩器传 contentMaxTokens:512 独立预算 | [x] |
 | Z.16 | v1.6.5+ | **气泡溢出修复** | content-label flex-shrink:0→1 + overflow:hidden；MessageReferenceBar chip flex-shrink:0→1 + textOverflow:Ellipsis；SyncBubbleContentHeight 单向→双向 | [x] |
 | Z.17 | v1.6.5+ | **流式 UI 性能优化** | 三层帧节流：StreamingTextElement/ThinkingDrawer 16ms flush + AsyncHelper ConcurrentQueue 批处理替代 delayCall + 流式文本窗口 4000 字符 + StringBuilder 替代字符串拼接 + ScrollToBottom 100ms flag-gated | [x] |
+| Z.18 | v1.7.0 | **Settings v20 死字段清理** | 删除 12 个零引用死字段（streamingEnabled / showToolCallDetails / fallbackRoutingEnabled / autoCompileCheck / autoConsoleCapture / maxConsecutiveErrors / workspaceConfigVersion / vcsDefaultEnabled / useSeparateCompressionLLM / compressionLLMEndpoint / compressionLLMModel / workspaceAutoDetectEnabled）；disabledTools 默认值从 `["execute_code"]` 改为空列表；SecureKeyStorage 删除 Compression LLM 4 个死方法/常量；WorkspaceSettingsPage 删除假 Auto-Detect toggle；ModelAgentSettingsPage Model Info 显示 effective max tokens（content + reasoning）；settingsVersion 19→20 + migration block | [x] |
+| Z.19 | v1.7.0 | **VCS 模块修复** | VcsDetector Process 加 using 防句柄泄漏；VcsRemoteStatusMonitor 删重复 SceneView.RepaintAll；VersionControlPanel 加 DetachFromPanelEvent → Dispose 防事件泄漏；VcsProjectWindowIntegration 全量重写（删 9 个 Debug.Log 风暴 + 支持 Git/SVN/Perforce + 用 VcsExternalToolLauncher）；VcsSettings 8 EditorPrefs → 2 user-facing + 6 const；VcsSettingsContribution 8 控件 → 2；VersionControlTool 标注 Perforce 不支持 ignore | [x] |
 
 ---
 
@@ -651,7 +655,7 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ## 7. 下一步行动建议
 
-> v1.2.1 已发布。治理层核心（G.1~G.3）已完成，Phase 7 §3.1/§3.2 已交付。后续两个开发方向：MCP Server（Phase 8）和产品化分发（Phase 7 §3.4）。
+> v1.7.0 已发布。治理层核心（G.1~G.3）已完成，Phase 7 §3.1/§3.2 已交付，v1.7.0 代码质量修复完成。后续两个开发方向：MCP Server（Phase 8）和产品化分发（Phase 7 §3.4）。
 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|

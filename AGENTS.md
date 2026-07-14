@@ -581,6 +581,25 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - `MessageReferenceBar` chip：`flex-shrink:0 + NoWrap` → `flex-shrink:1 + maxWidth:100% + whiteSpace:Normal + textOverflow:Ellipsis`，长文件名自动截断
 - `SyncBubbleContentHeight`：从单向（只增不减）改为双向（`Mathf.Abs(diff) > 1`），block 模式重新排版后 minHeight 跟随实际高度收缩
 
+### 6.6 v1.7.0 架构模式补充
+
+#### Settings v20 死字段清理
+
+- **原则**：零引用字段 = 死代码，必须删除而非保留。`[HideInInspector]` 不是永久墓地——版本迁移时清理。
+- **迁移模式**：`CurrentVersion` bump → migration block 中删除旧字段 → `ResetToDefaults()` 同步更新 → 消费侧 grep 验证零残留
+- **假 toggle 检测**：UI 暴露开关但 Service 层不检查该字段 = 假 toggle。`workspaceAutoDetectEnabled` 在 `WorkspaceContextService` 中零引用，用户可关但不生效，必须删除 UI + 字段
+- **disabledTools 默认值**：默认值引用不存在的工具名（`["execute_code"]`）= 配置漂移。改为空列表
+- **Model Info 显示值**：UI 显示 `settings.maxTokens`（8192）但 API 实际收到 `GetEffectiveMaxTokens()`（10240 = 8192 + 2048）= 显示不一致。改为显示 effective 值，reasoning 启用时分两行
+
+#### VCS 模块修复模式
+
+- **Process 生命周期**：`new Process()` 必须包裹 `using`——即使 `WaitForExit` 返回后，Process 对象的句柄仍需显式释放
+- **UIEventsPanel 生命周期**：UI Toolkit 面板订阅 `EditorApplication.update` 或外部事件后，必须在 `DetachFromPanelEvent` 中 `Dispose()`——面板关闭不等于 GC 立即回收
+- **Debug.Log 风暴**：`MenuItem` 的 `validate` 方法每次右键菜单展开都会调用全部条目。validate 方法中**禁止** `Debug.Log`，只做轻量 bool 判断
+- **SceneView.RepaintAll 去重**：事件发布者不应直接调用 `SceneView.RepaintAll()`——订阅者自行决定是否重绘。`VcsSceneViewUpdateBanner` 已订阅 `StatusChanged` 并自行 `RepaintAll`，发布者重复调用 = 双倍开销
+- **设置极简化**：可选组件的设置项应区分"用户运行时受益于调整"与"内部最佳默认值"。VCS 的 6 个操作参数（检查间隔/刷新间隔/banner 开关等）改为 `const`，只保留 `AutoRefreshOnOpen` + `MaxCommitEntries` 两个用户可见设置
+- **多 VCS 支持**：Project 窗口右键菜单不应硬编码单一 VCS 工具路径（`TortoiseProc.exe`）。统一走 `VcsExternalToolLauncher.TryStartProcess` + switch 表达式按 `VcsType` 分发
+
 ---
 
 ## 7. 编码硬规则
