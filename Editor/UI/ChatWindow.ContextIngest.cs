@@ -1,4 +1,4 @@
-using AgentCore.Editor.UI.Context;
+﻿using AgentCore.Editor.UI.Context;
 using UnityEditor;
 using UnityEditor.ShortcutManagement;
 using UnityEngine;
@@ -82,11 +82,11 @@ namespace AgentCore.Editor.UI
             // 5. Warning toast（在 Console 中提示，避免破坏输入焦点）
             if (!string.IsNullOrEmpty(result.Warning))
             {
-                Debug.Log($"[AgentCore][ContextIngest] {result.Warning}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][ContextIngest] {result.Warning}");
             }
             else
             {
-                Debug.Log($"[AgentCore][ContextIngest] Injected \"{result.Label}\" (~{result.EstimatedTokens} tokens).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][ContextIngest] Injected \"{result.Label}\" (~{result.EstimatedTokens} tokens).");
             }
         }
 

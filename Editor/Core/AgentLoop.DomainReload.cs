@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -26,7 +26,7 @@ namespace AgentCore.Editor.Core
                 // 修复 #6: Agent 空闲时也需要保存当前会话到磁盘，
                 // 确保 Domain Reload 后 TryRestoreSession() 能恢复会话。
                 // 不保存中断状态（WasInterrupted 保持 false），只保存会话数据。
-                Debug.Log("[AgentCore] beforeAssemblyReload: Agent is idle, saving session before reload.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] beforeAssemblyReload: Agent is idle, saving session before reload.");
 
                 // Phase 4.5: 空闲状态也保存文件变更追踪数据
                 try
@@ -35,7 +35,7 @@ namespace AgentCore.Editor.Core
                     {
                         var fileChangesJson = _fileChangeTracker.SerializeToJson();
                         DomainReloadState.instance.SaveFileChangeRecords(fileChangesJson);
-                        Debug.Log($"[AgentCore] beforeAssemblyReload: File change records saved (idle, {_fileChangeTracker.RecordCount} records).");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] beforeAssemblyReload: File change records saved (idle, {_fileChangeTracker.RecordCount} records).");
                     }
                 }
                 catch (Exception ex)
@@ -183,7 +183,7 @@ namespace AgentCore.Editor.Core
                 {
                     var fileChangesJson = _fileChangeTracker.SerializeToJson();
                     DomainReloadState.instance.SaveFileChangeRecords(fileChangesJson);
-                    Debug.Log($"[AgentCore] beforeAssemblyReload: File change records saved ({_fileChangeTracker.RecordCount} records).");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] beforeAssemblyReload: File change records saved ({_fileChangeTracker.RecordCount} records).");
                 }
             }
             catch (Exception ex)
@@ -217,7 +217,7 @@ namespace AgentCore.Editor.Core
                     new List<ChatMessage>(_messages),
                     new List<ConversationTurn>(_conversationTurns),
                     _compressionMetrics);
-                Debug.Log("[AgentCore] beforeAssemblyReload: Session saved successfully.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] beforeAssemblyReload: Session saved successfully.");
             }
             catch (Exception ex)
             {
@@ -228,10 +228,10 @@ namespace AgentCore.Editor.Core
             if (_currentCts != null && !_currentCts.IsCancellationRequested)
             {
                 _currentCts.Cancel();
-                Debug.Log("[AgentCore] beforeAssemblyReload: Cancelled current operation.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] beforeAssemblyReload: Cancelled current operation.");
             }
 
-            Debug.Log($"[AgentCore] beforeAssemblyReload: Interruption saved — state={CurrentState}, phase={phase}, " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] beforeAssemblyReload: Interruption saved — state={CurrentState}, phase={phase}, " +
                       $"tool={lastToolName}, toolCallId={interruptedToolCallId}, " +
                       $"hasUserMsg={!string.IsNullOrEmpty(pendingUserMessage)}, " +
                       $"hasAssistantContent={!string.IsNullOrEmpty(lastAssistantContent)}");
@@ -256,7 +256,7 @@ namespace AgentCore.Editor.Core
             // 1. 检查是否有中断标记
             if (!reloadState.WasInterrupted)
             {
-                Debug.Log("[AgentCore] TryResumeAfterReload: No interruption detected, skipping.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] TryResumeAfterReload: No interruption detected, skipping.");
                 return false;
             }
 
@@ -296,7 +296,7 @@ namespace AgentCore.Editor.Core
             var compilationSucceeded = reloadState.CompilationSucceeded;
             var compilationErrors = reloadState.CompilationErrors;
 
-            Debug.Log($"[AgentCore] TryResumeAfterReload: Resuming from {phase} interruption " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] TryResumeAfterReload: Resuming from {phase} interruption " +
                       $"(tool={lastToolName}, compilationOK={compilationSucceeded})");
 
             // 5. 根据中断阶段构建恢复消息
@@ -335,7 +335,7 @@ namespace AgentCore.Editor.Core
             // 7. 清除中断标记
             reloadState.ClearInterruption();
 
-            Debug.Log("[AgentCore] TryResumeAfterReload: Recovery initiated successfully.");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] TryResumeAfterReload: Recovery initiated successfully.");
             return true;
         }
 
@@ -408,7 +408,7 @@ namespace AgentCore.Editor.Core
             string lastAssistantRawContent,
             VisiblePlanningTraceState lastAssistantPlanningTraceState)
         {
-            Debug.Log("[AgentCore] ResumeFromStreaming: Injecting recovery message and re-calling LLM.");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ResumeFromStreaming: Injecting recovery message and re-calling LLM.");
 
             var recoveredAssistantTurn = RestoreInterruptedAssistantTurn(
                 lastAssistantContent,
@@ -429,7 +429,7 @@ namespace AgentCore.Editor.Core
                 if (!alreadyHasAssistant)
                 {
                     _messages.Add(ChatMessage.Assistant(cleanContent));
-                    Debug.Log($"[AgentCore] ResumeFromStreaming: Added sanitized partial assistant content ({cleanContent.Length} chars).");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromStreaming: Added sanitized partial assistant content ({cleanContent.Length} chars).");
                 }
             }
 
@@ -499,7 +499,7 @@ namespace AgentCore.Editor.Core
         /// <param name="lastToolName">最后执行的工具名</param>
         private void ResumeFromExecutingTool(string recoveryMessage, string interruptedToolCallId, string lastToolName)
         {
-            Debug.Log($"[AgentCore] ResumeFromExecutingTool: Tool '{lastToolName}' was interrupted (callId={interruptedToolCallId}).");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromExecutingTool: Tool '{lastToolName}' was interrupted (callId={interruptedToolCallId}).");
 
             // 如果有未完成的 tool_call，需要补充一个 tool response 以保持消息格式合法
             if (!string.IsNullOrEmpty(interruptedToolCallId))
@@ -524,7 +524,7 @@ namespace AgentCore.Editor.Core
                         $"[Tool execution interrupted by Domain Reload] The tool '{lastToolName}' was interrupted " +
                         "because Unity triggered a code compilation and Domain Reload. " +
                         "The tool result is unknown. Please retry the operation if needed."));
-                    Debug.Log($"[AgentCore] ResumeFromExecutingTool: Added placeholder tool response for {interruptedToolCallId}.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromExecutingTool: Added placeholder tool response for {interruptedToolCallId}.");
                 }
             }
 
@@ -548,7 +548,7 @@ namespace AgentCore.Editor.Core
             bool compilationSucceeded,
             string compilationErrors)
         {
-            Debug.Log($"[AgentCore] ResumeFromWaitingCompilation: Compilation {(compilationSucceeded ? "succeeded" : "failed")}.");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromWaitingCompilation: Compilation {(compilationSucceeded ? "succeeded" : "failed")}.");
 
             // 如果有未完成的 tool_call，补充编译结果作为 tool response
             if (!string.IsNullOrEmpty(interruptedToolCallId))
@@ -581,7 +581,7 @@ namespace AgentCore.Editor.Core
                     }
 
                     _messages.Add(ChatMessage.Tool(interruptedToolCallId, compilationResult));
-                    Debug.Log($"[AgentCore] ResumeFromWaitingCompilation: Added compilation result as tool response.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromWaitingCompilation: Added compilation result as tool response.");
                 }
             }
 
@@ -598,7 +598,7 @@ namespace AgentCore.Editor.Core
         /// </summary>
         private void TriggerResumeLLMCall()
         {
-            Debug.Log("[AgentCore] TriggerResumeLLMCall: Starting resumed LLM call...");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] TriggerResumeLLMCall: Starting resumed LLM call...");
 
             // 修复 #7: 在发送 LLM 请求前，清理消息历史中不完整的 tool_use/tool_result 配对
             // Resume 方法可能只修复了单个 interruptedToolCallId，但 assistant 消息可能有多个 tool_calls
@@ -636,7 +636,7 @@ namespace AgentCore.Editor.Core
                     }
                     catch (OperationCanceledException)
                     {
-                        Debug.Log("[AgentCore] Resume LLM call was cancelled.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Resume LLM call was cancelled.");
                         assistantTurn.IsStreaming = false;
                         SetState(AgentState.Idle);
                     }

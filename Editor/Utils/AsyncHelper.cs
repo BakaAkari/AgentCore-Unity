@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -44,7 +44,7 @@ namespace AgentCore.Editor.Utils
             catch (OperationCanceledException)
             {
                 // 取消操作是正常流程，不记录错误
-                Debug.Log("[AgentCore] Async operation cancelled.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Async operation cancelled.");
             }
             catch (Exception ex)
             {
@@ -65,7 +65,7 @@ namespace AgentCore.Editor.Utils
             }
             catch (OperationCanceledException)
             {
-                Debug.Log("[AgentCore] Async operation cancelled.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Async operation cancelled.");
             }
             catch (Exception ex)
             {

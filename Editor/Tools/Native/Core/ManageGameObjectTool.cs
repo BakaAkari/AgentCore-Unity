@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -254,7 +254,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 EditorUtility.SetDirty(go);
                 MarkSceneDirty(go);
 
-                Debug.Log($"[AgentCore] Created GameObject '{go.name}' (type={primitiveTypeStr})");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Created GameObject '{go.name}' (type={primitiveTypeStr})");
                 return ToolResponse.OkWithData(
                     ToolHelpers.SerializeGameObject(go, includeComponents: true, includeChildren: false),
                     $"GameObject '{go.name}' created successfully.");
@@ -280,7 +280,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 Undo.DestroyObjectImmediate(go);
 
-                Debug.Log($"[AgentCore] Deleted GameObject '{name}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Deleted GameObject '{name}'");
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["deletedName"] = name,
@@ -342,7 +342,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 EditorUtility.SetDirty(go);
                 MarkSceneDirty(go);
 
-                Debug.Log($"[AgentCore] Modified GameObject '{go.name}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Modified GameObject '{go.name}'");
                 return ToolResponse.OkWithData(
                     ToolHelpers.SerializeGameObject(go),
                     $"GameObject '{go.name}' modified.");
@@ -370,7 +370,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 EditorUtility.SetDirty(go);
                 MarkSceneDirty(go);
 
-                Debug.Log($"[AgentCore] Set transform on '{go.name}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Set transform on '{go.name}'");
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["name"] = go.name,
@@ -421,7 +421,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 MarkSceneDirty(go);
 
                 var parentName = go.transform.parent != null ? go.transform.parent.name : "(root)";
-                Debug.Log($"[AgentCore] Set parent of '{go.name}' to '{parentName}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Set parent of '{go.name}' to '{parentName}'");
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["name"] = go.name,
@@ -455,7 +455,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 EditorUtility.SetDirty(duplicate);
                 MarkSceneDirty(duplicate);
 
-                Debug.Log($"[AgentCore] Duplicated '{go.name}' as '{duplicate.name}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Duplicated '{go.name}' as '{duplicate.name}'");
                 return ToolResponse.OkWithData(
                     ToolHelpers.SerializeGameObject(duplicate),
                     $"GameObject '{go.name}' duplicated as '{duplicate.name}'.");

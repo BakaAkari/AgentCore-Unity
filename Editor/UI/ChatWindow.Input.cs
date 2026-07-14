@@ -1,4 +1,4 @@
-using AgentCore.Editor.Core;
+﻿using AgentCore.Editor.Core;
 using AgentCore.Editor.Utils;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -69,7 +69,7 @@ namespace AgentCore.Editor.UI
         private void OnCancelClicked()
         {
             _agentLoop?.Cancel();
-            Debug.Log("[AgentCore] User cancelled current operation.");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] User cancelled current operation.");
         }
 
         /// <summary>

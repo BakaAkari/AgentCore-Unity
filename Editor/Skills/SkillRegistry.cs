@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -110,7 +110,7 @@ namespace AgentCore.Editor.Skills
                     ScanDirectory(dir);
                 }
 
-                Debug.Log($"[AgentCore][Skills] Registry scan complete: {_skills.Count} skill(s) found.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][Skills] Registry scan complete: {_skills.Count} skill(s) found.");
             }
             catch (Exception ex)
             {

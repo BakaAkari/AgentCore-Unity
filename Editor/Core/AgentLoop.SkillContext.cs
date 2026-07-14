@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.LLM;
@@ -64,7 +64,7 @@ namespace AgentCore.Editor.Core
         /// </remarks>
         private void HandleSkillMutation(string skillName, string action)
         {
-            Debug.Log($"[AgentCore][Skills] Skill mutation: {action} '{skillName}' (will apply on next turn).");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][Skills] Skill mutation: {action} '{skillName}' (will apply on next turn).");
         }
 
         /// <summary>
@@ -148,7 +148,7 @@ namespace AgentCore.Editor.Core
 
                 var messageText = SkillContentBuilder.Build(skillName, content);
                 _messages.Insert(insertIndex, ChatMessage.System(messageText));
-                Debug.Log($"[AgentCore][Skills] Injected skill '{skillName}' at index {insertIndex} (~{messageText.Length / 3} tokens).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][Skills] Injected skill '{skillName}' at index {insertIndex} (~{messageText.Length / 3} tokens).");
                 // insertIndex 位置不递增：新消息插入后其他 skill 依然在其前面（保持顺序稳定）
                 // 但索引可能因插入而位移，下一次插入会重新查找
                 insertIndex = FindLastUserMessageIndex();

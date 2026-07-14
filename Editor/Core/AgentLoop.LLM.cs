@@ -52,7 +52,7 @@ namespace AgentCore.Editor.Core
                         bool compressed = await _conversationCompressor.CompressIfNeededAsync(_messages, maxTokens, ct);
                         if (compressed)
                         {
-                            Debug.Log("[AgentCore] Conversation compression completed successfully.");
+                            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Conversation compression completed successfully.");
                         }
                     }
                     catch (System.Exception ex)
@@ -127,7 +127,7 @@ namespace AgentCore.Editor.Core
                 case StreamChunkType.Done:
                     CompleteReasoningIfNeeded(assistantTurn);
                     // 流式完成，由 SendMessageAsync 的后续逻辑处理
-                    Debug.Log($"[AgentCore] Stream completed. Finish reason: {chunk.FinishReason}");
+                    AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] Stream completed. Finish reason: {chunk.FinishReason}");
                     break;
 
                 case StreamChunkType.Error:
@@ -141,7 +141,7 @@ namespace AgentCore.Editor.Core
                     // Phase 2：ToolCallDelta 由 OpenAICompatibleClient 内部累积，
                     // 最终通过 Done 事件返回完整的 tool_calls 列表。
                     // 此处仅记录日志用于调试。
-                    Debug.Log($"[AgentCore] Received ToolCallDelta: {chunk.ToolCallDelta?.Function?.Name ?? "(accumulating)"}");
+                    AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] Received ToolCallDelta: {chunk.ToolCallDelta?.Function?.Name ?? "(accumulating)"}");
                     break;
             }
         }

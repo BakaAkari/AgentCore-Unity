@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -138,7 +138,7 @@ namespace AgentCore.Editor.Core
                 _currentSelfChallengeData.NodeATriggered = false;
                 _currentSelfChallengeData.NodeASkipReason = "模型具备原生推理";
                 _nodeAEnabledThisTurn = false;
-                Debug.Log($"[AgentCore][SelfChallenge] Node A escaped: model '{settings.llmModel}' has native reasoning.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] Node A escaped: model '{settings.llmModel}' has native reasoning.");
                 return _currentSelfChallengeData;
             }
 
@@ -281,7 +281,7 @@ namespace AgentCore.Editor.Core
 
             if (parseResult.TopicChangeDetected)
             {
-                Debug.Log("[AgentCore][SelfChallenge] Continuation: [TOPIC CHANGE DETECTED], will fall back to full Node A next turn.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore][SelfChallenge] Continuation: [TOPIC CHANGE DETECTED], will fall back to full Node A next turn.");
                 // 清空 WaitingForClarification 上下文, 恢复 Idle 状态; 由上层完成状态清理
                 _pendingClarificationPreviousBlock = null;
                 _pendingClarificationPreviousUserMessage = null;
@@ -344,7 +344,7 @@ namespace AgentCore.Editor.Core
             {
                 if (ct.IsCancellationRequested) return false;
 
-                Debug.Log($"[AgentCore][SelfChallenge] Node A correction retry attempt {attempt}/{maxRetries}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] Node A correction retry attempt {attempt}/{maxRetries}");
 
                 // 独立小会话: 只包含 [原始 user query, 上一次 Node A 输出, correction 指令]
                 var retryMessages = new List<ChatMessage>
@@ -385,7 +385,7 @@ namespace AgentCore.Editor.Core
 
                     if (parseResult.Success)
                     {
-                        Debug.Log($"[AgentCore][SelfChallenge] Node A retry attempt {attempt} succeeded.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] Node A retry attempt {attempt} succeeded.");
                         if (assistantTurn != null) assistantTurn.SelfChallenge = _currentSelfChallengeData;
                         EmitEvent(AgentEvent.IntentChallengeCompleted(_currentSelfChallengeData, _currentSelfChallengeTurnId ?? assistantTurn?.Id));
                         return true;
@@ -448,7 +448,7 @@ namespace AgentCore.Editor.Core
             // 进入 WaitingForClarification 状态
             SetState(AgentState.WaitingForClarification);
 
-            Debug.Log("[AgentCore][SelfChallenge] Entered WaitingForClarification state. Waiting for user reply.");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore][SelfChallenge] Entered WaitingForClarification state. Waiting for user reply.");
             return true;
         }
 

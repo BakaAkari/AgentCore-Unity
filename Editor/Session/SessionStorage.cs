@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -74,7 +74,7 @@ namespace AgentCore.Editor.Session
                 var json = JsonConvert.SerializeObject(session, JsonSettings);
                 File.WriteAllText(filePath, json);
 
-                Debug.Log($"{LogPrefix}Session saved: {session.Id} ({session.Title})");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session saved: {session.Id} ({session.Title})");
             }
             catch (Exception ex)
             {
@@ -114,7 +114,7 @@ namespace AgentCore.Editor.Session
                     return null;
                 }
 
-                Debug.Log($"{LogPrefix}Session loaded: {sessionId} ({session.Title}, {session.MessageCount} messages)");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded: {sessionId} ({session.Title}, {session.MessageCount} messages)");
                 return session;
             }
             catch (Exception ex)
@@ -199,7 +199,7 @@ namespace AgentCore.Editor.Session
                 if (File.Exists(filePath))
                 {
                     File.Delete(filePath);
-                    Debug.Log($"{LogPrefix}Session deleted: {sessionId}");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session deleted: {sessionId}");
                 }
                 else
                 {
@@ -225,7 +225,7 @@ namespace AgentCore.Editor.Session
             if (!Directory.Exists(directory))
             {
                 Directory.CreateDirectory(directory);
-                Debug.Log($"{LogPrefix}Created session directory: {directory}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Created session directory: {directory}");
             }
         }
 

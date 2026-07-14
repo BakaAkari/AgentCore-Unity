@@ -25,7 +25,7 @@ namespace AgentCore.Editor.UI.Components
         #region UI Elements
         private readonly VisualElement _header;
         private readonly Label _headerLabel;
-        private readonly Button _toggleButton;
+        private readonly Label _toggleIndicator;
         private readonly VisualElement _content;
         private readonly VisualElement _progressBar;
         private readonly VisualElement _progressFill;
@@ -54,15 +54,18 @@ namespace AgentCore.Editor.UI.Components
         {
             AddToClassList(UssClassName);
 
-            // Header
+            // Header (整个 header 都可点击展开/收起,cursor + hover 由 USS 定义)
             _header = new VisualElement();
             _header.AddToClassList(HeaderClassName);
+            _header.RegisterCallback<ClickEvent>(_ => ToggleCollapse());
 
             _headerLabel = new Label("上下文使用情况");
             _header.Add(_headerLabel);
 
-            _toggleButton = new Button(ToggleCollapse) { text = "v" };
-            _header.Add(_toggleButton);
+            // 展开/收起指示符 (只是视觉指示,不再是可独立点击的 Button)
+            _toggleIndicator = new Label("v");
+            _toggleIndicator.AddToClassList("context-usage-panel__toggle-indicator");
+            _header.Add(_toggleIndicator);
 
             Add(_header);
 
@@ -173,13 +176,13 @@ namespace AgentCore.Editor.UI.Components
             if (_isCollapsed)
             {
                 AddToClassList(CollapsedClassName);
-                _toggleButton.text = ">";
+                _toggleIndicator.text = ">";
                 _content.style.display = DisplayStyle.None;
             }
             else
             {
                 RemoveFromClassList(CollapsedClassName);
-                _toggleButton.text = "v";
+                _toggleIndicator.text = "v";
                 _content.style.display = DisplayStyle.Flex;
             }
         }

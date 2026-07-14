@@ -46,8 +46,8 @@ namespace AgentCore.Editor.LLM
 
             var json = RequestEnrichment.BuildEnrichedJson(request, settings);
             var url = settings.GetChatCompletionsUrl();
+AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model={settings.llmModel} messages={messages.Count}");
 
-            Debug.Log($"[AgentCore] LLM request: {url} model={settings.llmModel} messages={messages.Count}");
 
             var client = HttpClientFactory.GetClient();
             using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
@@ -70,7 +70,7 @@ namespace AgentCore.Editor.LLM
 
             if (result.Usage != null)
             {
-                Debug.Log($"[AgentCore] LLM usage: prompt={result.Usage.PromptTokens} completion={result.Usage.CompletionTokens} total={result.Usage.TotalTokens}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM usage: prompt={result.Usage.PromptTokens} completion={result.Usage.CompletionTokens} total={result.Usage.TotalTokens}");
             }
 
             return result;
@@ -104,8 +104,8 @@ namespace AgentCore.Editor.LLM
 
             var json = RequestEnrichment.BuildEnrichedJson(request, settings);
             var url = settings.GetChatCompletionsUrl();
+AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url} model={settings.llmModel} messages={messages.Count}");
 
-            Debug.Log($"[AgentCore] LLM stream request: {url} model={settings.llmModel} messages={messages.Count}");
 
             var client = HttpClientFactory.GetClient();
             using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
@@ -260,7 +260,7 @@ namespace AgentCore.Editor.LLM
             catch (Exception ex)
             {
                 // 需要修复 — 记录原始错误信息用于调试
-                Debug.Log($"[AgentCore] Tool arguments JSON invalid, attempting repair: {ex.Message}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] Tool arguments JSON invalid, attempting repair: {ex.Message}");
             }
 
             // 策略 1：逐字符扫描修复无效转义序列
@@ -268,7 +268,7 @@ namespace AgentCore.Editor.LLM
             try
             {
                 JToken.Parse(repaired);
-                Debug.Log("[AgentCore] Tool arguments repaired successfully (escape fix).");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug("[AgentCore] Tool arguments repaired successfully (escape fix).");
                 return repaired;
             }
             catch
@@ -285,7 +285,7 @@ namespace AgentCore.Editor.LLM
                 if (rebuilt != null)
                 {
                     JToken.Parse(rebuilt);
-                    Debug.Log("[AgentCore] Tool arguments repaired successfully (rebuild).");
+                    AgentCore.Editor.Utils.AgentCoreLog.Debug("[AgentCore] Tool arguments repaired successfully (rebuild).");
                     return rebuilt;
                 }
             }

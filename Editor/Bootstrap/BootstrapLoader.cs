@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -39,7 +39,7 @@ namespace AgentCore.Editor.Bootstrap
 
             if (!settings.bootstrapEnabled)
             {
-                Debug.Log("[AgentCore] Bootstrap Files disabled, using minimal system prompt.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Bootstrap Files disabled, using minimal system prompt.");
                 context.Soul = "你是一个 Unity 开发助手。请用中文回复。";
                 return context;
             }
@@ -56,7 +56,7 @@ namespace AgentCore.Editor.Bootstrap
             context.SoulExtension = LoadUserFile("SOUL.ext.md");
             if (!string.IsNullOrEmpty(context.SoulExtension))
             {
-                Debug.Log($"[AgentCore] Loaded SOUL.ext.md ({context.SoulExtension.Length} chars)");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded SOUL.ext.md ({context.SoulExtension.Length} chars)");
             }
 
             // 2. TOOLS — 拆分为 Core（永驻 system prompt）和 Deferred（首轮注入）
@@ -80,12 +80,12 @@ namespace AgentCore.Editor.Bootstrap
             context.Workspace = LoadUserFile("PROJECT.md");
             if (!string.IsNullOrEmpty(context.Workspace))
             {
-                Debug.Log($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
             }
 
             var coreTokens = context.EstimateTokenCount();
             var deferredTokens = context.EstimateDeferredTokenCount();
-            Debug.Log($"[AgentCore] Bootstrap loaded: core ~{coreTokens} tokens, deferred ~{deferredTokens} tokens " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Bootstrap loaded: core ~{coreTokens} tokens, deferred ~{deferredTokens} tokens " +
                       $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
                       $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
                       $"TOOLS.core={!string.IsNullOrEmpty(context.Tools)}, " +
@@ -260,7 +260,7 @@ namespace AgentCore.Editor.Bootstrap
 
             if (allMetadata == null || allMetadata.Count == 0)
             {
-                Debug.Log("[AgentCore] ToolRegistry is empty, using fallback tools list placeholder.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ToolRegistry is empty, using fallback tools list placeholder.");
                 return "> 暂无已注册的可用工具。工具将在系统完全初始化后可用。";
             }
 
@@ -308,7 +308,7 @@ namespace AgentCore.Editor.Bootstrap
                 sb.AppendLine($"*共 {totalCount} 个可用工具*");
             }
 
-            Debug.Log($"[AgentCore] Generated active tools list: {totalCount} tools in {grouped.Count()} categories" +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Generated active tools list: {totalCount} tools in {grouped.Count()} categories" +
                       (disabledCount > 0 ? $" ({disabledCount} disabled)" : ""));
 
             return sb.ToString().TrimEnd();

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using AgentCore.Editor.LLM;
 using UnityEngine;
 
@@ -66,7 +66,7 @@ namespace AgentCore.Editor.Core
                         insertedInThisGroup++;
                         fixedCount++;
 
-                        Debug.Log($"[AgentCore] SanitizeMessageHistory: Added placeholder tool_result for " +
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] SanitizeMessageHistory: Added placeholder tool_result for " +
                                   $"tool_call '{toolCall.Id}' (tool: {toolName}).");
                     }
                 }
@@ -74,7 +74,7 @@ namespace AgentCore.Editor.Core
 
             if (fixedCount > 0)
             {
-                Debug.Log($"[AgentCore] SanitizeMessageHistory: Fixed {fixedCount} missing tool_result(s).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] SanitizeMessageHistory: Fixed {fixedCount} missing tool_result(s).");
             }
 
             return fixedCount;

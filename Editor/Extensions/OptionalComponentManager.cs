@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -151,7 +151,7 @@ namespace AgentCore.Editor.Extensions
                 if (IsVcsEnabled())
                 {
                     EditorPrefs.SetBool(checkedKey, true);
-                    Debug.Log($"[AgentCore] VCS auto-enabled for this project (project key: {projectKey})");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] VCS auto-enabled for this project (project key: {projectKey})");
                 }
                 else
                 {

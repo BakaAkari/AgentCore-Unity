@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
@@ -250,7 +250,7 @@ namespace AgentCore.Editor.UI
                 // 4. 刷新会话列表（更新高亮）
                 RefreshSessionList();
 
-                Debug.Log($"[AgentCore] Switched to session: {sessionId}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Switched to session: {sessionId}");
             }
             catch (Exception ex)
             {
@@ -280,7 +280,7 @@ namespace AgentCore.Editor.UI
                 // 2. 刷新会话列表
                 RefreshSessionList();
 
-                Debug.Log("[AgentCore] New session created.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] New session created.");
             }
             catch (Exception ex)
             {
@@ -448,7 +448,7 @@ namespace AgentCore.Editor.UI
             }
 
             RefreshSessionList();
-            Debug.Log($"[AgentCore] Session deleted: {sessionId}");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Session deleted: {sessionId}");
         }
 
         /// <summary>
@@ -532,7 +532,7 @@ namespace AgentCore.Editor.UI
                     return; // 用户取消
 
                 SessionExporter.ExportToFile(session, path, format);
-                Debug.Log($"[AgentCore] Session exported to: {path}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Session exported to: {path}");
                 EditorUtility.RevealInFinder(path);
             }
             catch (Exception ex)

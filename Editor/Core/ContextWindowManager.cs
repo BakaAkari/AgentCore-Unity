@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using AgentCore.Editor.LLM;
 using UnityEngine;
@@ -190,7 +190,7 @@ namespace AgentCore.Editor.Core
             // 6. 输出日志
             int afterTokens = TokenCounter.EstimateConversationTokens(result);
             int removedCount = messages.Count - result.Count;
-            Debug.Log($"[AgentCore] Context window trimmed: removed {removedCount} messages, {beforeTokens} → {afterTokens} tokens");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Context window trimmed: removed {removedCount} messages, {beforeTokens} → {afterTokens} tokens");
 
             return result;
         }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace AgentCore.Editor.Core
@@ -27,7 +27,7 @@ namespace AgentCore.Editor.Core
                 int restoredCount = _fileChangeTracker.RestoreFromJson(json);
                 if (restoredCount > 0)
                 {
-                    Debug.Log($"[AgentCore] FileChangeTracker restored {restoredCount} records from DomainReloadState.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] FileChangeTracker restored {restoredCount} records from DomainReloadState.");
                 }
 
                 // 清除已恢复的数据，避免下次 LoadSession 重复恢复

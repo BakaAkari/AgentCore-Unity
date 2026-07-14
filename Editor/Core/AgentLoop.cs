@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using AgentCore.Editor.Tools.Safety;
 using System.Collections.Generic;
 using System.Threading;
@@ -212,7 +212,7 @@ namespace AgentCore.Editor.Core
             try
             {
                 ToolAutoDiscovery.DiscoverAndRegisterAll();
-                Debug.Log($"[AgentCore] ToolAutoDiscovery completed, {ToolRegistry.Instance.Count} tools registered.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ToolAutoDiscovery completed, {ToolRegistry.Instance.Count} tools registered.");
             }
             catch (Exception ex)
             {
@@ -240,7 +240,7 @@ namespace AgentCore.Editor.Core
                     var deferredInfo = _deferredContext != null
                         ? $", deferred ~{context.EstimateDeferredTokenCount()} tokens"
                         : "";
-                    Debug.Log($"[AgentCore] AgentLoop initialized with Bootstrap system prompt (~{context.EstimateTokenCount()} tokens{deferredInfo}).");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] AgentLoop initialized with Bootstrap system prompt (~{context.EstimateTokenCount()} tokens{deferredInfo}).");
                 }
             }
             catch (Exception ex)
@@ -290,7 +290,7 @@ namespace AgentCore.Editor.Core
                         toolResultTokensSaved,
                         conversationTokensSaved
                     );
-                    Debug.Log($"[AgentCore] Compression metrics restored from DomainReloadState: " +
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Compression metrics restored from DomainReloadState: " +
                               $"{reloadState.TotalTokensSaved} tokens saved.");
                 }
             }
@@ -314,7 +314,7 @@ namespace AgentCore.Editor.Core
             // 无法恢复原会话。现在统一由 TryRestoreSession() → EnsureSessionExists() 负责。
             if (string.IsNullOrEmpty(SessionManager.Instance.CurrentSessionId))
             {
-                Debug.Log("[AgentCore] No active session in Initialize(), deferring to TryRestoreSession().");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] No active session in Initialize(), deferring to TryRestoreSession().");
             }
 
             // Domain Reload Resilience: 注册 beforeAssemblyReload 事件
@@ -401,7 +401,7 @@ namespace AgentCore.Editor.Core
                 if (!string.IsNullOrEmpty(nodeAInstruction))
                 {
                     _messages.Add(ChatMessage.System(nodeAInstruction));
-                    Debug.Log($"[AgentCore][SelfChallenge] Node A instruction injected (~{nodeAInstruction.Length / 3} tokens estimated).");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] Node A instruction injected (~{nodeAInstruction.Length / 3} tokens estimated).");
                 }
 
                 // 5.5 自动记忆召回：搜索与用户消息相关的记忆并注入上下文
@@ -419,12 +419,12 @@ namespace AgentCore.Editor.Core
                             if (!string.IsNullOrEmpty(memoryContext))
                             {
                                 InjectMemoryContext(memoryContext);
-                                Debug.Log($"[AgentCore] Memory recall: injected {memories.Count} memories into context.");
+                                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Memory recall: injected {memories.Count} memories into context.");
                             }
                         }
                         else
                         {
-                            Debug.Log("[AgentCore] Memory recall: no relevant memories found.");
+                            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Memory recall: no relevant memories found.");
                         }
                     }
                     catch (Exception ex)
@@ -446,7 +446,7 @@ namespace AgentCore.Editor.Core
                     if (!string.IsNullOrEmpty(_deferredContext))
                     {
                         _messages.Insert(_messages.Count - 1, ChatMessage.System(_deferredContext));
-                        Debug.Log($"[AgentCore] Deferred context injected for first message (~{_deferredContext.Length / 3} tokens).");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Deferred context injected for first message (~{_deferredContext.Length / 3} tokens).");
                         _deferredContext = null; // 注入后释放，避免重复注入
                     }
 
@@ -457,7 +457,7 @@ namespace AgentCore.Editor.Core
                         if (!string.IsNullOrEmpty(snapshot))
                         {
                             _messages.Insert(_messages.Count - 1, ChatMessage.System(snapshot));
-                            Debug.Log("[AgentCore] Cold-start snapshot injected for first message.");
+                            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Cold-start snapshot injected for first message.");
                         }
                     }
                     catch (Exception ex)
@@ -496,7 +496,7 @@ namespace AgentCore.Editor.Core
             }
             catch (OperationCanceledException)
             {
-                Debug.Log("[AgentCore] SendMessageAsync was cancelled.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] SendMessageAsync was cancelled.");
                 assistantTurn.IsStreaming = false;
                 SetState(AgentState.Idle);
             }
@@ -530,7 +530,7 @@ namespace AgentCore.Editor.Core
         {
             if (_currentCts != null && !_currentCts.IsCancellationRequested)
             {
-                Debug.Log("[AgentCore] Cancelling current operation...");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Cancelling current operation...");
                 _currentCts.Cancel();
             }
 
@@ -546,7 +546,7 @@ namespace AgentCore.Editor.Core
         /// </summary>
         public void ResetConversation()
         {
-            Debug.Log("[AgentCore] Resetting conversation...");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Resetting conversation...");
 
             // 1. 取消当前操作
             Cancel();
@@ -648,7 +648,7 @@ namespace AgentCore.Editor.Core
             if (session.CompressionMetrics != null)
             {
                 session.CompressionMetrics.RestoreToCompressionMetrics(_compressionMetrics);
-                Debug.Log($"[AgentCore] Restored compression metrics: {_compressionMetrics.TotalCompressionCount} compressions, {_compressionMetrics.TotalTokensSaved} tokens saved");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Restored compression metrics: {_compressionMetrics.TotalCompressionCount} compressions, {_compressionMetrics.TotalTokensSaved} tokens saved");
             }
             else
             {
@@ -666,7 +666,7 @@ namespace AgentCore.Editor.Core
                 _isInitialized = true;
             }
 
-            Debug.Log($"[AgentCore] Session loaded: {sessionId} ({restoredMessages.Count} messages, {restoredTurns.Count} turns)");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Session loaded: {sessionId} ({restoredMessages.Count} messages, {restoredTurns.Count} turns)");
 
             // Phase 4.5: 恢复文件变更追踪数据
             TryRestoreFileChangeTracker();
@@ -800,7 +800,7 @@ namespace AgentCore.Editor.Core
                 _currentCts = null;
             }
 
-            Debug.Log("[AgentCore] AgentLoop disposed.");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] AgentLoop disposed.");
         }
 
         #endregion

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -47,7 +47,7 @@ namespace AgentCore.Editor.Config
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
         [SerializeField] private bool vcsDefaultEnabled = false;
-        private const int CurrentVersion = 18;
+        private const int CurrentVersion = 19;
 
         // ═══════════════════════════════════════════════════════════════
         // 用户 UI 可见字段 (共 ~10 个, 极简哲学: 只保留必要)
@@ -65,7 +65,7 @@ namespace AgentCore.Editor.Config
         public float temperature = 0.7f;
 
         [Tooltip("Max output tokens")]
-        public int maxTokens = 65536;
+        public int maxTokens = 8192;
 
         // --- Self-Challenge (ADR-17: single toggle) ---
         [Tooltip("Enable Self-Challenge — Node A challenges intent + Node B reviews draft; +10~50% tokens per turn")]
@@ -94,6 +94,10 @@ namespace AgentCore.Editor.Config
         // --- Compression (UI exposes toggle only) ---
         [Tooltip("Enable context compression")]
         public bool compressionEnabled = true;
+
+        // --- Log Level (v1.6.5+, control Debug.Log verbosity) ---
+        [Tooltip("Log verbosity — Silent: 无任何输出; Error: 仅错误; Warning: 错误+警告; Info: 默认,含关键业务事件; Debug: 包含高频细节 (流式 token、每 event)")]
+        public AgentCore.Editor.Utils.LogLevel logLevel = AgentCore.Editor.Utils.LogLevel.Info;
 
         // ═══════════════════════════════════════════════════════════════
         // 内部字段 [HideInInspector] — 用户不可见, 由工程侧写死最优值
@@ -199,10 +203,10 @@ namespace AgentCore.Editor.Config
         public bool enableReasoningOutput = true;  // GLM-5.2 适配:逃逸 Self-Challenge 后依赖 native reasoning,注入空 reasoning:{} 触发 reasoning_content 返回
 
         [HideInInspector]
-        public string reasoningEffort = "";
+        public string reasoningEffort = "low";
 
         [HideInInspector]
-        public int reasoningMaxTokens = 0;
+        public int reasoningMaxTokens = 2048;
 
         [HideInInspector]
         public string extraRequestBody = "";
@@ -300,7 +304,7 @@ namespace AgentCore.Editor.Config
             if (settingsVersion < 1 && mem0Endpoint == "http://localhost:18910")
             {
                 mem0Endpoint = "http://localhost:8765";
-                Debug.Log("[AgentCore] Settings migrated v0→v1: mem0Endpoint updated");
+                UnityEngine.Debug.Log("[AgentCore] Settings migrated v0→v1: mem0Endpoint updated");
             }
 
             // v1-v16: 历史迁移(逻辑保留但精简日志)
@@ -324,7 +328,16 @@ namespace AgentCore.Editor.Config
             // v18: ADR-17 极简即开即用 — 清理已删除字段的孤儿数据
             if (settingsVersion < 18)
             {
-                Debug.Log("[AgentCore] Settings migrated v17→v18: ADR-17 minimalism refactor — 9 fields removed, 25+ fields hidden. selfChallengeEnabled remains as unified control.");
+                UnityEngine.Debug.Log("[AgentCore] Settings migrated v17→v18: ADR-17 minimalism refactor — 9 fields removed, 25+ fields hidden. selfChallengeEnabled remains as unified control.");
+            }
+
+            // v19: GLM-5.2 reasoning optimization — limit thinking chain to prevent 370s+ response times
+            if (settingsVersion < 19)
+            {
+                maxTokens = 8192;
+                reasoningEffort = "low";
+                reasoningMaxTokens = 2048;
+                UnityEngine.Debug.Log("[AgentCore] Settings migrated v18→v19: reasoning optimization (maxTokens=8192, reasoningEffort=low, reasoningMaxTokens=2048)");
             }
 
             settingsVersion = CurrentVersion;
@@ -347,7 +360,7 @@ namespace AgentCore.Editor.Config
                 if (!OptionalComponentManager.IsVcsEnabled())
                 {
                     OptionalComponentManager.SetVcsEnabled(true);
-                    Debug.Log("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
+                    UnityEngine.Debug.Log("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
                 }
                 settings.vcsDefaultEnabled = true;
                 settings.SafeSave(true);
@@ -388,7 +401,7 @@ namespace AgentCore.Editor.Config
                     {
                         llmModel = firstModel;
                         SafeSave(true);
-                        Debug.Log($"[AgentCore] Fetched models, set default to: {firstModel}");
+                        UnityEngine.Debug.Log($"[AgentCore] Fetched models, set default to: {firstModel}");
                     }
                 }
                 else
@@ -410,7 +423,7 @@ namespace AgentCore.Editor.Config
             llmEndpoint = "http://172.16.248.60:8000/v1";
             llmModel = "glm-5.2";
             temperature = 0.7f;
-            maxTokens = 65536;
+            maxTokens = 8192;
             selfChallengeEnabled = true;
             selfChallengeEscapeEnabled = true;  // ADR: model-tier escape 默认开启
             mem0Enabled = false;
@@ -448,8 +461,8 @@ namespace AgentCore.Editor.Config
             workspaceAutoDetectEnabled = true;
             workspaceConfigVersion = 0;
             enableReasoningOutput = true;  // GLM-5.2 适配:逃逸 Self-Challenge 后依赖 native reasoning
-            reasoningEffort = "";
-            reasoningMaxTokens = 0;
+            reasoningEffort = "low";
+            reasoningMaxTokens = 2048;
             extraRequestBody = "";
             streamingEnabled = true;
             showToolCallDetails = true;

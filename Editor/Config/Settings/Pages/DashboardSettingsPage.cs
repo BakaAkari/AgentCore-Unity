@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using AgentCore.Editor.Extensions;
@@ -40,6 +40,35 @@ namespace AgentCore.Editor.Config.Settings.Pages
             DrawSetupStatusCard(context);
             EditorGUILayout.Space(8);
             DrawQuickActionsCard(context);
+            EditorGUILayout.Space(8);
+            DrawLogVerbosityCard(context);
+        }
+
+        /// <summary>
+        /// v1.6.5+: 日志详细程度下拉菜单。
+        /// </summary>
+        private static void DrawLogVerbosityCard(AgentCoreSettingsContext context)
+        {
+            context.Ui.DrawCard(
+                "Log Verbosity",
+                "控制 [AgentCore] 前缀日志的详细程度,回复阶段狂刷 log 卡编辑器时切到 Warning 或 Error 即可。",
+                () =>
+                {
+                    var settings = context.Settings;
+                    var current = settings.logLevel;
+                    var newLevel = (AgentCore.Editor.Utils.LogLevel)EditorGUILayout.EnumPopup(
+                        new GUIContent(
+                            "Log Level",
+                            "Silent: 完全静默(慎用) · Error: 仅错误 · Warning: 警告+错误 · Info: 默认,关键业务事件 · Debug: 全部,含流式 token/每 event 高频日志"),
+                        current);
+                    if (newLevel != current)
+                    {
+                        settings.logLevel = newLevel;
+                        settings.SaveSettings();
+                        AgentCore.Editor.Utils.AgentCoreLog.Invalidate();
+                        UnityEngine.Debug.Log($"[AgentCore] Log level changed: {current} -> {newLevel}");
+                    }
+                });
         }
 
         private static void DrawSetupStatusCard(AgentCoreSettingsContext context)
@@ -155,7 +184,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 if (GUILayout.Button("Refresh Tool Registry", GUILayout.Width(150)))
                 {
                     AgentCore.Editor.Tools.Infrastructure.ToolAutoDiscovery.DiscoverAndRegisterAll();
-                    Debug.Log("[AgentCore] Tool registry refreshed.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Tool registry refreshed.");
                 }
 
                 GUILayout.FlexibleSpace();
@@ -185,7 +214,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         "Cancel"))
                     {
                         context.Settings.ResetToDefaults();
-                        Debug.Log("[AgentCore] Settings reset to defaults.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Settings reset to defaults.");
                     }
                 }
 
@@ -203,7 +232,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         "Cancel"))
                     {
                         SecureKeyStorage.ClearAll();
-                        Debug.Log("[AgentCore] All secure keys cleared.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] All secure keys cleared.");
                     }
                 }
 

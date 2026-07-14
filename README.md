@@ -7,11 +7,12 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ## 当前状态
 
 - **Package**: `com.agentcore.unity`
-- **Version**: `1.5.0-alpha2`
+- **Version**: `1.6.5`
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
-- **Status**: Phase 6 已验收；治理层 G.1~G.3 已完成；Phase 7 §3.1/§3.2 后台增量索引 + ThinkingDrawer / reasoning 可观测性 + Request Enrichment 已完成；v1.5.0-alpha1/alpha2 Phase 9 Self-Challenge（Node A/B 双节点 prompt 层幻觉护栏）已上线；ADR-17 极简即开即用哲学全面落地（Settings 精简 25+ 字段隐藏 + 9 字段删除）；Code Indexing 标记为实验性，默认不自动启用；后续重点为 v1.5.0 GA 4 周 kill criteria 实测 + Phase 8 MCP Server 对外互操作 + 产品化分发
+- **Code Scale**: 288 个 .cs 文件，约 97K 行代码，51 个原生工具
+- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge alpha 上线；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight；后续重点为 Phase 8 MCP Server + 产品化分发
 
 ## 核心能力
 
@@ -33,8 +34,23 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 - `ToolRiskPolicy` / `ToolCapability` / `ToolExecutionRisk` / `ToolPolicyDecision` 风险基础设施
 - `ToolPathRiskResolver` + `WorkspacePathPolicy`：根据目标路径所属 Workspace Root 评估风险
 - `ToolCallDispatcher` 已在工具执行前接入路径风险与策略决策
+- `PlayModePreflight`：Play Mode 中禁止 write 类工具调用
 - 当前策略是 VCS-friendly 宽松默认：Blocked workspace root 会阻断；delete/remove/destroy 类 action 需要确认；其他非删除操作默认放行
 - `execute_code` 默认降权为 Restricted 工具
+
+### Tool Confirmation Trust Scope
+
+- YOLO 模式：3 按钮布局（Deny / Trust Low-Med for Session / YOLO All）
+- 信任 scope 通过 `UnityEditor.SessionState` 持久化，跨 Domain Reload 保留
+- `SessionLowMediumRisk`：本会话内所有 ReadOnly/Low/Medium 风险工具直通
+- `SessionAll`：本会话内所有工具无条件直通（真正 YOLO）
+
+### Context Ingest
+
+- 全局快捷键 `Ctrl+Shift+X` 作为通用查询入口
+- 任意 Unity 窗口聚焦时都可触发，自动采集相关上下文注入 ChatWindow 输入框
+- 路由优先级：Console → Project asset → Hierarchy/Scene GO → 任意 EditorWindow（反射 + UI Toolkit Pick）
+- 分级采样策略：单选/多选/大 Scene 自动降级，token 硬上限 15000 字符
 
 ### Lazy Tool Discovery / ActiveToolScope
 
@@ -68,10 +84,24 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ### Reasoning Observability
 
 - `ThinkingDrawer`：assistant turn 的 reasoning / planning trace 抽屉，默认折叠
-- `AssistantTurnView`：固定 assistant turn 布局为 ThinkingDrawer → ToolCallGroup → MessageBubble
+- `AssistantTurnView`：多轮 assistant turn 布局，每轮独立 ThinkingDrawer + ToolCallGroup + 分隔线
 - 双来源 reasoning 抽取：provider structured reasoning 字段 + `---THINKING---` / `---ACTION---` visible planning trace
 - reasoning / raw assistant content 仅持久化到 UI/session/archive，不进入后续 LLM `_messages`
 - `RequestEnrichment` 在 JSON 请求层注入 `stream_options`、`reasoning` 与用户自定义 `extraRequestBody`，用于触发 OpenRouter 等代理返回 reasoning content
+
+### Chat UX
+
+- `PendingIndicator`：点击发送后消息流内显示占位气泡 + 3 点动画，覆盖 LLM 首响应前空窗期
+- 折叠面板活跃度指示器：ThinkingDrawer 尾部 60 字符实时预览 + ToolCallGroup running 工具名 + active-pulse 边框
+- 流式回复时用户可上翻 + "跳到最新"浮动按钮
+- 输入框内容过多可滚动（max-height 260px）
+- `MessageReferenceBar`：assistant 消息中的资源/GameObject 引用渲染为 chip 按钮可点击跳转
+- SSE Yield 策略：按时间预算（200ms）让步主线程，避免 Hold on 对话框同时不损失吐字速度
+
+### Logging
+
+- `AgentCoreLog` 静态封装，5 档日志级别：Silent / Error / Warning / Info / Debug
+- 默认 Info 级（关键业务事件可见，高频热点跳过），用户可在 Settings 中热切换到 Debug 级排查问题
 
 ## 架构概览
 
@@ -121,11 +151,14 @@ com.agentcore.unity/
 - Phase 7 §3.1：后台静默 + 增量索引
 - Phase 7 §3.2：Chat UI / ThinkingDrawer reasoning 可观测性
 - v1.2.1：Request Enrichment 修复 reasoning 触发
+- Phase 9 alpha：Self-Challenge 双节点 prompt 层幻觉护栏 + ADR-17 极简哲学
+- v1.6.x：Context Ingest（Ctrl+Shift+X）、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、ThinkingDrawer 独立展开按钮、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配
 
 后续重点：
 
-- Phase 7 §3.4：产品化与分发（UPM 发布流程、文档站、示例项目、Asset Store）
+- Phase 9 GA：4 周 kill criteria 实测窗口 + alpha3 兜底完善
 - Phase 8：MCP Server 对外互操作（McpServerHost / McpToolBridge / 风险分级 / Settings UI / 多 IDE 配置）
+- Phase 7 §3.4：产品化与分发（UPM 发布流程、文档站、示例项目、Asset Store）
 
 详细方向以 [`plans/ROADMAP.md`](plans/ROADMAP.md) 为准；设计约束见 [`plans/llm-agent-architecture-remediation-plan.md`](plans/llm-agent-architecture-remediation-plan.md)。
 

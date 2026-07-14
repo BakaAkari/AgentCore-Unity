@@ -18,7 +18,7 @@ namespace AgentCore.Editor.Core
 
             var previousState = CurrentState;
             CurrentState = newState;
-            Debug.Log($"[AgentCore] State: {previousState} -> {newState}");
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] State: {previousState} -> {newState}");
             EmitEvent(AgentEvent.StateChanged(newState));
         }
 

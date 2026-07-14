@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
@@ -119,7 +119,7 @@ namespace AgentCore.Editor.Tools
                 _tools[name] = tool;
             }
 
-            Debug.Log($"{LogPrefix}Registered tool '{name}' (category: {tool.Metadata.Category})");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Registered tool '{name}' (category: {tool.Metadata.Category})");
 
             // 事件在锁外触发，避免死锁
             OnToolRegistered?.Invoke(tool);
@@ -159,7 +159,7 @@ namespace AgentCore.Editor.Tools
 
             if (removed)
             {
-                Debug.Log($"{LogPrefix}Unregistered tool '{toolName}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Unregistered tool '{toolName}'");
                 OnToolUnregistered?.Invoke(toolName);
             }
             else
@@ -304,7 +304,7 @@ namespace AgentCore.Editor.Tools
                 _tools.Clear();
             }
 
-            Debug.Log($"{LogPrefix}Cleared all tools ({removedNames.Count} removed)");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Cleared all tools ({removedNames.Count} removed)");
 
             // 逐个触发注销事件
             foreach (var name in removedNames)

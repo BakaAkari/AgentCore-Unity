@@ -252,7 +252,7 @@ namespace AgentCore.Editor.Cloud
                     payload["metadata"] = metaObj;
                 }
 
-                Debug.Log($"[AgentCore] AddMemoryAsync: user_id={uid}, content_length={content?.Length ?? 0}, app=agentcore");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] AddMemoryAsync: user_id={uid}, content_length={content?.Length ?? 0}, app=agentcore");
                 var responseBody = await PostRawAsync($"{ApiPrefix}/memories/", payload, ct);
 
                 // 检测 null 或空响应 — OpenMemory REST API 已知问题：
@@ -277,7 +277,7 @@ namespace AgentCore.Editor.Cloud
                     var response = JsonConvert.DeserializeObject<Mem0AddResponse>(responseBody);
                     if (response?.Results != null && response.Results.Count > 0)
                     {
-                        Debug.Log($"[AgentCore] AddMemoryAsync: success, id={response.Results[0].Id}");
+                        AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] AddMemoryAsync: success, id={response.Results[0].Id}");
                         return new Mem0AddResult
                         {
                             Id = response.Results[0].Id,
@@ -380,11 +380,11 @@ namespace AgentCore.Editor.Cloud
                     ["size"] = limit
                 };
 
-                Debug.Log($"[AgentCore] ListMemoriesAsync: POST {ApiPrefix}/memories/filter body={payload.ToString(Formatting.None)}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] ListMemoriesAsync: POST {ApiPrefix}/memories/filter body={payload.ToString(Formatting.None)}");
                 var response = await PostAsync<OpenMemoryPageResponse>(
                     $"{ApiPrefix}/memories/filter", payload, ct);
                 var items = response?.Items ?? new List<Mem0Memory>();
-                Debug.Log($"[AgentCore] ListMemoriesAsync: returned {items.Count} items (total={response?.Total ?? 0})");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] ListMemoriesAsync: returned {items.Count} items (total={response?.Total ?? 0})");
                 return items;
             }
             catch (Exception ex)
@@ -514,10 +514,10 @@ namespace AgentCore.Editor.Cloud
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromSeconds(ConnectionTestTimeoutSeconds));
 
-                Debug.Log($"[AgentCore] CheckUserExistsAsync: POST {url} body={json}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] CheckUserExistsAsync: POST {url} body={json}");
                 var response = await client.SendAsync(request, cts.Token);
                 var responseBody = await response.Content.ReadAsStringAsync();
-                Debug.Log($"[AgentCore] CheckUserExistsAsync: HTTP {(int)response.StatusCode} body={responseBody}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] CheckUserExistsAsync: HTTP {(int)response.StatusCode} body={responseBody}");
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -600,7 +600,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.Log($"[AgentCore] REST user creation failed, trying MCP SSE fallback: {ex.Message}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] REST user creation failed, trying MCP SSE fallback: {ex.Message}");
             }
 
             // 方式 2: 回退到 MCP SSE 方式
@@ -656,7 +656,7 @@ namespace AgentCore.Editor.Cloud
                     return (false, "无法建立 MCP SSE 连接（未获取到 session_id）");
                 }
 
-                Debug.Log($"[AgentCore] MCP SSE connected, session_id: {sessionId}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] MCP SSE connected, session_id: {sessionId}");
 
                 var messagesUrl = $"{_baseUrl}/mcp/messages/?session_id={sessionId}";
 
@@ -829,7 +829,7 @@ namespace AgentCore.Editor.Cloud
                         var respId = jsonResp["id"]?.Value<int>();
                         if (respId == expectedId)
                         {
-                            Debug.Log($"[AgentCore] MCP SSE received response for id={expectedId}");
+                            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] MCP SSE received response for id={expectedId}");
                             return data;
                         }
                     }
@@ -929,7 +929,7 @@ namespace AgentCore.Editor.Cloud
             var json = payload.ToString(Formatting.None);
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            Debug.Log($"[AgentCore] POST {url} body={TruncateForLog(json, 500)}");
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] POST {url} body={TruncateForLog(json, 500)}");
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
@@ -937,7 +937,7 @@ namespace AgentCore.Editor.Cloud
             var response = await client.SendAsync(request, cts.Token);
             var responseBody = await response.Content.ReadAsStringAsync();
 
-            Debug.Log($"[AgentCore] POST {path} → HTTP {(int)response.StatusCode} body={TruncateForLog(responseBody, 500)}");
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] POST {path} → HTTP {(int)response.StatusCode} body={TruncateForLog(responseBody, 500)}");
 
             if (!response.IsSuccessStatusCode)
             {

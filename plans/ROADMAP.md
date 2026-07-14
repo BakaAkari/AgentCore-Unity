@@ -1,7 +1,7 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.5.0-alpha2 | **更新日期**: 2026-07-09 | **状态**:
-> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复（工具循环刹车 / 跨平台 define / 索引保守默认值 / 工具主线程超时 / 工具结果不截断且可复制）；v1.4.0 索引 Scope 层次化；v1.4.1 补齐 package.json 元数据；v1.4.2 Settings UI 密度优化；v1.4.3–v1.4.7 VCS 组件自启用修复链 + Optional Component 编译触发修复；v1.4.8 工具卡片详情不截断且可复制；**v1.4.9 Phase 9 Self-Challenge 骨架**（SelfChallengeData / SkipRules / Config + Settings 字段骨架 + 22 单元测试 + v16→v17 迁移）；**v1.5.0-alpha1 Phase 9 完整交付**（Node A Intent Self-Challenge + Node B Answer Self-Challenge 双节点 prompt 层幻觉护栏 + Correction retry + WaitingForClarification 状态机 + Continuation 模式 + SelfChallengeCard UI + 主对话历史清理，~2300 行新增） + **ADR-17 极简即开即用哲学全面落地**（Settings 精简：删除 9 字段 / 隐藏 25+ 字段 / 页面简化 5 处 / SelfChallengeConfig 4 常量替代用户配置；推翻上游 v0.10 §3.4/§5/§7.1 用户可控可观测优先）；**v1.5.0-alpha2 修复 Self-Challenge 卡片会话恢复丢失**（`RebuildMessageBubbles` 接入 `EnsureSelfChallengeCard`）
+> **版本**: v1.6.5 | **更新日期**: 2026-07-14 | **状态**:
+> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -37,22 +37,28 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.3.6)
+### 0.4 当前项目快照 (v1.6.5)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.3.6 (2026-07-06) — Round 1 稳定性补丁：跨平台 define、迁移健壮性、Indexing 保守默认值、工具主线程超时 |
+| **版本** | 1.6.5 (2026-07-14) — v1.6.x 系列产品化体验冲刺：Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配 |
+| **代码规模** | 288 个 .cs 文件，约 97K 行代码，51 个原生工具 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
-| **UI 框架** | UI Toolkit 动态 Hub 架构；Chat 使用 AssistantTurnView 固定 assistant 轮次布局（ThinkingDrawer → ToolCallGroup → MessageBubble）；Project Settings 使用 Dashboard + 6 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
+| **UI 框架** | UI Toolkit 动态 Hub 架构；Chat 使用 AssistantTurnView 多轮布局（每轮独立 ThinkingDrawer → ToolCallGroup → 分隔线 → 下一轮 → SelfChallengeCard → MessageBubble）；Project Settings 使用 Dashboard + 5 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
+| **Chat UX** | PendingIndicator 占位气泡 + 折叠面板活跃度指示器（ThinkingDrawer 预览 + ToolCallGroup running 工具名 + active-pulse）+ 流式上翻 + "跳到最新"浮动按钮 + 输入框滚动 + MessageReferenceBar chip 引用栏 + SSE yield 时间预算优化 |
+| **Context Ingest** | 全局快捷键 Ctrl+Shift+X 通用查询入口；6 个 Collector（Selection/Asset/Console/Scene/FocusedWindow/MouseTracker）；路由优先级：Console → Project → Hierarchy/Scene → 任意 EditorWindow；分级采样 + 15000 字符截断 |
+| **工具确认** | YOLO 模式 3 按钮布局（Deny / Trust Low-Med / YOLO All）；SessionState 持久化跨 Domain Reload；PlayModePreflight Play Mode 禁止 write 类工具 |
+| **日志分级** | AgentCoreLog 5 档（Silent/Error/Warning/Info/Debug）；默认 Info 级，Debug 级 30 处热点被跳过；Settings 中可热切换 |
 | **云端服务** | Mem0 + LightRAG 基础连接 — 可用（OnDemand 可见性） |
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪 |
-| **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；Full Index 已验证（298 files, 6453 symbols）；SOUL.md §14 主动调用规则已就绪；**v1.3.5 起不再默认启用，标记为实验性，需手动在 Extensions 设置中开启** |
+| **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；后台静默 + 增量索引；per-root 状态层次化；**标记为实验性，需手动在 Extensions 设置中开启** |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
-| **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 128K（适配现代大 context LLM） |
+| **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 1M context（适配 GLM-5.2 等 long-context LLM）；对话压缩 70% 阈值；工具结果压缩 >2000 tokens 触发 |
+| **Reasoning 参数** | maxTokens=8192, reasoningMaxTokens=2048, reasoningEffort="low"（GLM-5.2 适配）；reasoning native 不可关闭但可通过参数限制思考量 |
 | **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
-| **Reasoning 可观测性** | ThinkingDrawer 默认折叠；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 可见规划 trace 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages`；Request Enrichment 自动注入 `reasoning` 参数触发代理返回 reasoning_content |
+| **Reasoning 可观测性** | ThinkingDrawer 默认折叠 + 尾部 60 字符预览；多轮独立思考窗口；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages`；Request Enrichment 自动注入 `reasoning` 参数 |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
 | **Phase 6 验收** | 完成 — 见 ADR-11 |
 | **治理层进度** | G.1~G.3 全面完成（v1.1.0）；G.4~G.6 已归档（经分析评估为非必要，见 §2.x 说明） |
@@ -89,7 +95,7 @@
 | **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery | G.1~G.3 完成；G.4~G.6 归档（经评估非必要） | [x] 核心完成 |
 | **Phase 7** | 1.0.x ~ 1.x | 索引体验深化、Chat 可观测性与产品化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Chat UI / ThinkingDrawer（v1.2.0）、Request Enrichment（v1.2.1）、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + reasoning 可审计 + 可分发产品 | [>] §3.1/§3.2 完成，§3.4 产品化待启动 |
 | **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中（治理前置 G.1~G.3 已满足） |
-| **Phase 9** | 1.5.x | Prompt 层幻觉护栏（**质量加固**） | Self-Challenge 双节点机制：Node A（读需求时挑战对用户意图的理解）+ Node B（输出前独立 reviewer 审视 draft）；带 §5.4 kill criteria 4 周实测窗口，异常即回滚；**ADR-17 推翻 §5 Statistics 面板 / §5.5 首周引导 tooltip** | v1.5.0-alpha1 核心机制上线；v1.5.0-alpha2 Session UI 恢复修复；v1.5.0 GA 待 4 周 kill criteria 验证 | [>] 核心已发布，GA 待观察窗口 |
+| **Phase 9** | 1.5.x | Prompt 层幻觉护栏（**质量加固**） | Self-Challenge 双节点机制：Node A（读需求时挑战对用户意图的理解）+ Node B（输出前独立 reviewer 审视 draft）；带 §5.4 kill criteria 4 周实测窗口，异常即回滚；**ADR-17 推翻 §5 Statistics 面板 / §5.5 首周引导 tooltip** | v1.5.0-alpha1~alpha5 核心+escape+GLM适配；v1.6.x 产品化体验冲刺完成；GA 待 alpha3 兜底 + 4 周 kill criteria 验证 | [>] 核心已发布，GA 待观察窗口 |
 
 ---
 
@@ -313,6 +319,10 @@ v1.4.9        — Self-Challenge 骨架（SelfChallengeData / SkipRules / Config
 v1.5.0-alpha1 — 完整核心机制（Node A + Node B + Waiting for Clarification + Continuation + UI Card）
               + ADR-17 极简即开即用哲学全面落地（Settings 精简 25+ 字段隐藏 + 9 字段删除）
 v1.5.0-alpha2 — Session 反序列化后 SelfChallengeCard UI 恢复修复
+v1.5.0-alpha4 — model-tier escape (L1-L4-B1) — 高级模型逃逸 Node B
+v1.5.0-alpha5 — Settings 分页精简(6→5) + GLM-5.2 全链路适配
+v1.5.6~v1.5.7 — 稳定性修复（PreferencesFolder Save hang + offline uninstall）
+v1.6.0~v1.6.5 — 产品化体验冲刺（详见 §3.z）
 v1.5.0-alpha3 (未定期) — Domain Reload 兜底完整实施 / BLOCK verdict 回 tool loop 完整实施 / Node A/B 单元测试
 v1.5.0-beta   — pre-GA 稳定性冲刺 + P1-11 PROJECT.md 模板按钮 + P2-12 AGENTS.md 极简规则沉淀
 v1.5.0 GA     — 4 周 kill criteria 实测窗口开启
@@ -322,6 +332,30 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 **实际工作量**: v1.4.9 骨架 ~1.5 人日 + v1.5.0-alpha1 全量核心 ~15 人日 + alpha2 修复 ~0.5 人日 ≈ **17 人日**（与 v0.10 §0.7 估算 17-20 人日一致）
 
 **Kill switch**: `selfChallengeEnabled = false` 一键回到 v1.4.9 骨架前行为。
+
+---
+
+## 3.z v1.6.x — 产品化体验冲刺 (v1.6.0 ~ v1.6.5)
+
+**主题**: 在 Phase 9 alpha 稳定运行的基础上，集中解决用户实战反馈的 UX 感知、工具确认效率、日志噪声和 LLM 适配问题。这一系列不属于任何特定 Phase，是独立的产品化体验冲刺。
+
+**触发原因**: 用户在使用 GLM-5.2 + AgentCore 进行真实 Unity 开发时，反馈了一系列体验问题：点击发送后 UI 无反应、思考过程不可见、工具确认流程繁琐、日志狂刷导致卡顿、流式吐字速度变慢、消息引用无法跳转等。
+
+| # | 版本 | 任务 | 说明 | 状态 |
+|---|------|------|------|------|
+| Z.1 | v1.6.2 | **PendingIndicator 占位气泡** | 点击发送后消息流内显示灰色气泡 + 3 点动画，覆盖 LLM 首响应前 5-30s 空窗期 | [x] |
+| Z.2 | v1.6.2 | **折叠面板活跃度指示器** | ThinkingDrawer 尾部 60 字符实时预览 + ToolCallGroup running 工具名 + active-pulse 蓝色边框 | [x] |
+| Z.3 | v1.6.3 | **SSE Yield 时间预算优化** | 从"每 N chunk yield"改为"每 200ms yield"，消除 Hold on 对话框同时不损失吐字速度 | [x] |
+| Z.4 | v1.6.4 | **Context Ingest (Ctrl+Shift+X)** | 全局快捷键通用查询入口；6 个 Collector + 路由优先级 + 分级采样 + 15000 字符截断 | [x] |
+| Z.5 | v1.6.4 | **ThinkingDrawer 独立展开按钮** | 静态 Arrow Label → 独立 Button（▶/▼），不受 header 拖拽干扰 | [x] |
+| Z.6 | v1.6.4 | **输入框滚动 + 流式上翻 + 跳到最新** | 输入框 max-height 260px + ScrollView；流式回复时可上翻 + 右下角浮动按钮 | [x] |
+| Z.7 | v1.6.4 | **MessageReferenceBar** | assistant 消息中 `` `Assets/Foo.cs:42` `` 和 `[GameObject: Cube]` 渲染为 chip 按钮可点击跳转 | [x] |
+| Z.8 | v1.6.4 | **PlayModePreflight** | Play Mode 中禁止 write 类工具调用（ToolCapability 位标志判定） | [x] |
+| Z.9 | v1.6.5 | **日志分级 (AgentCoreLog)** | 5 档 LogLevel + AgentCoreLog 静态封装；默认 Info 级跳过 30 处 Debug 热点；Settings 中可热切换 | [x] |
+| Z.10 | v1.6.5 | **YOLO 信任模式** | 3 按钮（Deny / Trust Low-Med / YOLO All）；SessionState 持久化跨 Domain Reload；破坏性移除 Once/SessionExactTarget | [x] |
+| Z.11 | v1.6.5+ | **多轮思考窗口** | AssistantTurnView 重写为多轮架构，每轮独立 ThinkingDrawer + 分隔线；HandleLoopRoundStarted 第 2 轮起调 BeginNewRound | [x] |
+| Z.12 | v1.6.5+ | **文件删除视觉反馈** | FileChangeSummaryPanel 删除文件路径变红 + "(已删除)" 后缀；PingFileInProject 不再 warn | [x] |
+| Z.13 | v1.6.5+ | **GLM-5.2 reasoning 参数适配** | AgentCoreSettings: maxTokens 65536→8192, reasoningEffort→"low", reasoningMaxTokens 0→2048; settingsVersion 18→19 迁移 | [x] |
 
 ---
 

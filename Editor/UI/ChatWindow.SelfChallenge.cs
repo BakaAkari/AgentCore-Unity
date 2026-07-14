@@ -30,7 +30,7 @@ namespace AgentCore.Editor.UI
             card.SetData(evt.SelfChallenge);
 
             // 简要 debug 日志便于验证
-            Debug.Log($"[AgentCore.UI][SelfChallenge] {evt.Type} — turn={evt.TurnId}  " +
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI][SelfChallenge] {evt.Type} — turn={evt.TurnId}  " +
                       $"NodeA={evt.SelfChallenge.NodeATriggered}, NodeB={evt.SelfChallenge.NodeBTriggered}, " +
                       $"Verdict={evt.SelfChallenge.NodeBVerdict?.ToString() ?? "n/a"}, " +
                       $"clarify={evt.SelfChallenge.TriggeredClarification}");

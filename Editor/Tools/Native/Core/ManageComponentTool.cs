@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -200,7 +200,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 EditorUtility.SetDirty(go);
                 MarkSceneDirty(go);
 
-                Debug.Log($"[AgentCore] Added component '{componentTypeName}' to '{go.name}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Added component '{componentTypeName}' to '{go.name}'");
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["gameObject"] = go.name,
@@ -238,7 +238,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 EditorUtility.SetDirty(go);
                 MarkSceneDirty(go);
 
-                Debug.Log($"[AgentCore] Removed component '{componentTypeName}' from '{go.name}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Removed component '{componentTypeName}' from '{go.name}'");
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["gameObject"] = go.name,
@@ -368,7 +368,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     }, $"Modified '{componentTypeName}' on '{go.name}' with {errors.Count} error(s).");
                 }
 
-                Debug.Log($"[AgentCore] Modified component '{componentTypeName}' on '{go.name}'");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Modified component '{componentTypeName}' on '{go.name}'");
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["gameObject"] = go.name,
@@ -430,7 +430,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     EditorUtility.SetDirty(component);
                     MarkSceneDirty(go);
 
-                    Debug.Log($"[AgentCore] Set '{componentTypeName}' enabled={enabled} on '{go.name}'");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Set '{componentTypeName}' enabled={enabled} on '{go.name}'");
                     return ToolResponse.OkWithData(new JObject
                     {
                         ["gameObject"] = go.name,

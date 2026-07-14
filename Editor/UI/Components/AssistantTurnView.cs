@@ -1,22 +1,59 @@
+using System.Collections.Generic;
 using AgentCore.Editor.Core;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
 {
     /// <summary>
-    /// 单个 assistant turn 的固定布局容器：ThinkingDrawer -> ToolCallGroup -> MessageBubble。
+    /// 单个 assistant turn 的固定布局容器。
+    /// <para>
+    /// 支持多轮 LLM 调用：每轮拥有独立的 ThinkingDrawer 和 ToolCallGroup，
+    /// 通过 <see cref="BeginNewRound"/> 创建新轮次区域。
+    /// 布局：[Round1(Thinking+Tools)] [Separator] [Round2(Thinking+Tools)] ... [SelfChallenge] [Bubble]
+    /// </para>
     /// </summary>
     public class AssistantTurnView : VisualElement
     {
-        private readonly VisualElement _thinkingSlot;
-        private readonly VisualElement _selfChallengeSlot;
-        private readonly VisualElement _toolSlot;
-        private readonly VisualElement _bubbleSlot;
+        #region 轮次区域
 
         /// <summary>
-        /// 当前 ThinkingDrawer。
+        /// 单轮区域：独立的 ThinkingDrawer + ToolSlot。
+        /// 每轮 LLM 调用创建一个新区域，使后续轮次的 reasoning 拥有独立窗口。
         /// </summary>
-        public ThinkingDrawer ThinkingDrawer { get; }
+        private class RoundSection
+        {
+            public ThinkingDrawer ThinkingDrawer { get; }
+            public VisualElement ToolSlot { get; }
+            public ToolCallGroup ToolGroup { get; set; }
+
+            public RoundSection()
+            {
+                ThinkingDrawer = new ThinkingDrawer();
+                ToolSlot = new VisualElement();
+                ToolSlot.style.flexDirection = FlexDirection.Column;
+            }
+        }
+
+        #endregion
+
+        #region 字段
+
+        private readonly List<RoundSection> _rounds = new List<RoundSection>();
+        private readonly VisualElement _roundsContainer;
+        private readonly VisualElement _selfChallengeSlot;
+        private readonly VisualElement _bubbleSlot;
+
+        #endregion
+
+        #region 属性
+
+        /// <summary>
+        /// 当前（最新）轮次的 ThinkingDrawer。
+        /// reasoning token 追加到此 drawer。
+        /// </summary>
+        public ThinkingDrawer ThinkingDrawer => _rounds.Count > 0
+            ? _rounds[_rounds.Count - 1].ThinkingDrawer
+            : null;
 
         /// <summary>
         /// 当前 SelfChallengeCard (Phase 9); 默认 null, 通过 <see cref="EnsureSelfChallengeCard"/> 创建。
@@ -29,9 +66,20 @@ namespace AgentCore.Editor.UI.Components
         public MessageBubble Bubble { get; private set; }
 
         /// <summary>
-        /// 当前工具调用分组。
+        /// 当前（最新）轮次的工具调用分组。
         /// </summary>
-        public ToolCallGroup ToolGroup { get; private set; }
+        public ToolCallGroup ToolGroup => _rounds.Count > 0
+            ? _rounds[_rounds.Count - 1].ToolGroup
+            : null;
+
+        /// <summary>当前轮次区域。</summary>
+        private RoundSection CurrentRound => _rounds.Count > 0
+            ? _rounds[_rounds.Count - 1]
+            : null;
+
+        #endregion
+
+        #region 构造函数
 
         /// <summary>
         /// 创建 assistant turn 容器。
@@ -44,26 +92,57 @@ namespace AgentCore.Editor.UI.Components
             style.marginTop = 2;
             style.marginBottom = 2;
 
-            _thinkingSlot = new VisualElement { name = $"thinking-slot-{messageId}" };
-            _thinkingSlot.style.flexDirection = FlexDirection.Column;
-            Add(_thinkingSlot);
+            _roundsContainer = new VisualElement { name = $"rounds-container-{messageId}" };
+            _roundsContainer.style.flexDirection = FlexDirection.Column;
+            Add(_roundsContainer);
 
-            // Phase 9: Self-Challenge Card 挂载点(位于 ThinkingDrawer 之下、ToolCallGroup 之上)
+            // Phase 9: Self-Challenge Card 挂载点(位于所有轮次之下、Bubble 之上)
             _selfChallengeSlot = new VisualElement { name = $"self-challenge-slot-{messageId}" };
             _selfChallengeSlot.style.flexDirection = FlexDirection.Column;
             Add(_selfChallengeSlot);
-
-            _toolSlot = new VisualElement { name = $"tool-slot-{messageId}" };
-            _toolSlot.style.flexDirection = FlexDirection.Column;
-            Add(_toolSlot);
 
             _bubbleSlot = new VisualElement { name = $"bubble-slot-{messageId}" };
             _bubbleSlot.style.flexDirection = FlexDirection.Column;
             Add(_bubbleSlot);
 
-            ThinkingDrawer = new ThinkingDrawer();
-            _thinkingSlot.Add(ThinkingDrawer);
+            // 自动创建第一轮区域
+            BeginNewRound();
         }
+
+        #endregion
+
+        #region 轮次管理
+
+        /// <summary>
+        /// 创建新轮次区域（包含独立的 ThinkingDrawer 和 ToolSlot）。
+        /// 在 LoopRoundStarted 事件（第 2 轮起）调用，使后续 reasoning 拥有独立窗口。
+        /// </summary>
+        public void BeginNewRound()
+        {
+            var section = new RoundSection();
+
+            var sectionContainer = new VisualElement();
+            sectionContainer.style.flexDirection = FlexDirection.Column;
+            sectionContainer.Add(section.ThinkingDrawer);
+            sectionContainer.Add(section.ToolSlot);
+
+            _rounds.Add(section);
+            _roundsContainer.Add(sectionContainer);
+        }
+
+        /// <summary>
+        /// 在轮次容器中添加分隔线（位于新轮次区域之前）。
+        /// </summary>
+        /// <param name="separator">分隔线 VisualElement。</param>
+        public void AddRoundSeparator(VisualElement separator)
+        {
+            if (separator == null) return;
+            _roundsContainer.Add(separator);
+        }
+
+        #endregion
+
+        #region Self-Challenge
 
         /// <summary>
         /// 确保 SelfChallengeCard 存在; 若已存在直接返回。
@@ -78,6 +157,10 @@ namespace AgentCore.Editor.UI.Components
             _selfChallengeSlot.Add(SelfChallengeCard);
             return SelfChallengeCard;
         }
+
+        #endregion
+
+        #region 消息气泡
 
         /// <summary>
         /// 确保消息气泡存在。
@@ -95,40 +178,66 @@ namespace AgentCore.Editor.UI.Components
             return Bubble;
         }
 
+        #endregion
+
+        #region 工具调用分组
+
         /// <summary>
-        /// 确保工具调用分组存在。
+        /// 确保当前轮次的工具调用分组存在。
         /// </summary>
-        /// <returns>工具调用分组。</returns>
+        /// <returns>当前轮次的工具调用分组。</returns>
         public ToolCallGroup EnsureToolGroup()
         {
-            if (ToolGroup != null) return ToolGroup;
-
-            ToolGroup = new ToolCallGroup();
-            _toolSlot.Add(ToolGroup);
-            return ToolGroup;
+            var section = CurrentRound;
+            if (section == null)
+            {
+                BeginNewRound();
+                section = CurrentRound;
+            }
+            if (section.ToolGroup == null)
+            {
+                section.ToolGroup = new ToolCallGroup();
+                section.ToolSlot.Add(section.ToolGroup);
+            }
+            return section.ToolGroup;
         }
 
         /// <summary>
-        /// 恢复已有工具调用分组。
+        /// 恢复已有工具调用分组到当前轮次。
         /// </summary>
         /// <param name="group">工具调用分组。</param>
         public void SetToolGroup(ToolCallGroup group)
         {
             if (group == null) return;
-
-            ToolGroup = group;
-            _toolSlot.Clear();
-            _toolSlot.Add(group);
+            var section = CurrentRound;
+            if (section == null)
+            {
+                BeginNewRound();
+                section = CurrentRound;
+            }
+            section.ToolSlot.Clear();
+            section.ToolGroup = group;
+            section.ToolSlot.Add(group);
         }
 
+        #endregion
+
+        #region 恢复
+
         /// <summary>
-        /// 恢复 ThinkingDrawer 内容。
+        /// 恢复 ThinkingDrawer 内容（会话恢复时调用）。
+        /// 将所有 reasoning 放入第一轮的 ThinkingDrawer。
         /// </summary>
         /// <param name="turn">assistant turn。</param>
         public void RestoreThinking(ConversationTurn turn)
         {
             if (turn == null || string.IsNullOrEmpty(turn.Reasoning)) return;
-            ThinkingDrawer.SetReasoning(turn.Reasoning, turn.ReasoningSource, turn.ReasoningDurationMs);
+            if (_rounds.Count > 0)
+            {
+                _rounds[0].ThinkingDrawer.SetReasoning(turn.Reasoning, turn.ReasoningSource, turn.ReasoningDurationMs);
+            }
         }
+
+        #endregion
     }
 }

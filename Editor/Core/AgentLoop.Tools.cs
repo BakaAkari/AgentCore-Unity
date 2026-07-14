@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
@@ -37,11 +37,11 @@ namespace AgentCore.Editor.Core
 
                 if (definitions == null || definitions.Count == 0)
                 {
-                    Debug.Log("[AgentCore] No tools available, LLM will run in pure chat mode.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] No tools available, LLM will run in pure chat mode.");
                     return null;
                 }
 
-                Debug.Log($"[AgentCore] Built {definitions.Count} tool definitions for LLM (scope-resolved).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Built {definitions.Count} tool definitions for LLM (scope-resolved).");
                 return definitions;
             }
             catch (Exception ex)
@@ -139,7 +139,7 @@ namespace AgentCore.Editor.Core
             ErrorReport compilationReport = null;
             if (hasCompileRelated)
             {
-                Debug.Log("[AgentCore] Compile-related tool detected, checking compilation status...");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Compile-related tool detected, checking compilation status...");
                 try
                 {
                     // 先短暂等待让 Unity 检测到文件变化并开始编译
@@ -148,7 +148,7 @@ namespace AgentCore.Editor.Core
                     if (EditorApplication.isCompiling)
                     {
                         // Unity 已经在编译中，等待编译完成
-                        Debug.Log("[AgentCore] Compilation detected, waiting for completion...");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Compilation detected, waiting for completion...");
                         compilationReport = await _compilationWatcher.RefreshAndWaitAsync();
                     }
                     else
@@ -157,18 +157,18 @@ namespace AgentCore.Editor.Core
                         // 使用较短的超时，因为如果文件确实被修改了，编译应该很快开始
                         var originalTimeout = _compilationWatcher.CompilationTimeoutSeconds;
                         _compilationWatcher.CompilationTimeoutSeconds = 15f;
-                        Debug.Log("[AgentCore] No compilation in progress, triggering refresh with short timeout...");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] No compilation in progress, triggering refresh with short timeout...");
                         compilationReport = await _compilationWatcher.RefreshAndWaitAsync();
                         _compilationWatcher.CompilationTimeoutSeconds = originalTimeout;
                     }
 
                     if (compilationReport != null && compilationReport.HasErrors)
                     {
-                        Debug.Log($"[AgentCore] Compilation report: {compilationReport.Errors.Count} issue(s) found.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Compilation report: {compilationReport.Errors.Count} issue(s) found.");
                     }
                     else
                     {
-                        Debug.Log("[AgentCore] Compilation completed with no errors.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Compilation completed with no errors.");
                     }
                 }
                 catch (Exception ex)
@@ -254,7 +254,7 @@ namespace AgentCore.Editor.Core
             var toolMessages = await BuildToolMessagesWithCompressionAsync(results, consoleErrors, compilationReport, ct);
             _messages.AddRange(toolMessages);
 
-            Debug.Log($"[AgentCore] Executed {results.Count} tool call(s), " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Executed {results.Count} tool call(s), " +
                       $"added {toolMessages.Count} tool message(s) to history.");
         }
 

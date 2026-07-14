@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -78,7 +78,7 @@ namespace AgentCore.Editor.Core
 
         private void OnCompilationStarted(object context)
         {
-            Debug.Log("[AgentCore] Compilation started, watching for errors...");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Compilation started, watching for errors...");
         }
 
         private void OnAssemblyCompilationFinished(string assemblyPath, CompilerMessage[] messages)
@@ -91,7 +91,7 @@ namespace AgentCore.Editor.Core
 
         private void OnCompilationFinished(object context)
         {
-            Debug.Log("[AgentCore] Compilation finished, generating error report...");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Compilation finished, generating error report...");
 
             Cleanup();
 

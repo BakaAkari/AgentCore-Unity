@@ -598,6 +598,16 @@
     background-color: #5f9054;
 }
 
+/* v1.6.5: YOLO 按钮 (会话内全部风险直通),暖橙色系,强调警示与"激进"属性 */
+.tool-confirmation-button--yolo {
+    background-color: #b8621b;
+    color: #ffffff;
+}
+
+.tool-confirmation-button--yolo:hover {
+    background-color: #d0771f;
+}
+
 /* ============================================================
  * Knowledge 面板样式（Phase Hub-2）
  * ============================================================ */

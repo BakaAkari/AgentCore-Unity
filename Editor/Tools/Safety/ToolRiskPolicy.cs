@@ -26,7 +26,8 @@ namespace AgentCore.Editor.Tools.Safety
     /// <c>RequiresConfirmation</c> 字段，但从未真正使用它做决策，导致
     /// <c>[AgentTool(RequiresConfirmation = true)]</c> 声明形同虚设（例如 ExecuteCodeTool /
     /// ManageBuildTool / ManagePackageTool）。现在声明会真正触发用户确认，
-    /// 并且 UI 端 <c>SessionExactTarget</c> 信任缓存会让用户"批准一次，本会话内不再问"。
+    /// 并且 UI 端提供 <c>SessionLowMediumRisk</c> / <c>SessionAll</c> (YOLO) 两档会话级信任,
+    /// 用户可选择"本会话内 Low/Medium 直通"或"本会话全部直通"。
     /// </para>
     /// </summary>
     public static class ToolRiskPolicy
@@ -135,11 +136,9 @@ namespace AgentCore.Editor.Tools.Safety
                 return ToolPolicyDecision.Block(risk, reasons);
             }
 
-            // v1.4.5: metadata.RequiresConfirmation 现在真正生效。工具通过
-            // [AgentTool(RequiresConfirmation = true)] 显式声明"我需要用户批准"，
-            // 例如 ExecuteCodeTool、ManageBuildTool、ManagePackageTool、ManageScriptTool 的写入 action、
-            // ManageFileTool 的写入 action 等。UI 端支持 SessionExactTarget 信任缓存，
-            // 用户勾选"信任本会话相同目标"后，同一 tool+action+targets 的后续调用会直通。
+            // v1.6.5: UI 端信任粒度改为 SessionLowMediumRisk / SessionAll (YOLO)。
+            // 工具通过 [AgentTool(RequiresConfirmation = true)] 显式声明需要审批;
+            // 用户可选择"本会话内 Low/Medium 直通"或"本会话全部直通 (YOLO)"。
             if (metadata.RequiresConfirmation)
             {
                 reasons.Add("Tool declared RequiresConfirmation=true; explicit user approval required.");
@@ -269,9 +268,16 @@ namespace AgentCore.Editor.Tools.Safety
                 ? $"Confirm execution of tool '{toolName}'."
                 : metadata.Description;
 
+            // v1.6.5: 会话级信任提供两档 (Low/Med + All);allowSessionTrust=false 时仅允许 Deny/Approve 单次 (退化到无信任)。
+            // 注意: 由于 UI 已不再提供 Approve Once,allowSessionTrust=false 意味着用户只能 Deny。
+            // 目前所有走到 BuildConfirmationRequest 的路径都传 true,保留参数以兼容未来"强制单次审批"的场景。
             var trustScopes = allowSessionTrust
-                ? new[] { ToolConfirmationTrustScope.Once, ToolConfirmationTrustScope.SessionExactTarget }
-                : new[] { ToolConfirmationTrustScope.Once };
+                ? new[]
+                {
+                    ToolConfirmationTrustScope.SessionLowMediumRisk,
+                    ToolConfirmationTrustScope.SessionAll
+                }
+                : Array.Empty<ToolConfirmationTrustScope>();
 
             return new ToolConfirmationRequest(
                 toolName: toolName ?? metadata.Name,

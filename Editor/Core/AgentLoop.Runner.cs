@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -72,7 +72,7 @@ namespace AgentCore.Editor.Core
 
                 if (ct.IsCancellationRequested)
                 {
-                    Debug.Log($"[AgentCore]{logPrefix} Cancelled before round {currentRound}.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore]{logPrefix} Cancelled before round {currentRound}.");
                     break;
                 }
 
@@ -84,7 +84,7 @@ namespace AgentCore.Editor.Core
 
                 if (ct.IsCancellationRequested)
                 {
-                    Debug.Log($"[AgentCore]{logPrefix} Cancelled during LLM call.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore]{logPrefix} Cancelled during LLM call.");
                     break;
                 }
 
@@ -110,7 +110,7 @@ namespace AgentCore.Editor.Core
                 }
 
                 // 有 tool_calls — 执行工具。写入 LLM 历史前必须清洗可见规划 trace，避免 thinking 泄漏到上下文。
-                Debug.Log($"[AgentCore]{logPrefix} Round {currentRound}: LLM returned {assistantMessage.ToolCalls.Count} tool call(s).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore]{logPrefix} Round {currentRound}: LLM returned {assistantMessage.ToolCalls.Count} tool call(s).");
                 PrepareAssistantMessageForHistory(assistantMessage, assistantTurn);
 
                 // Token Budget: 记录本轮 LLM 输出 token（assistant message）
@@ -130,7 +130,7 @@ namespace AgentCore.Editor.Core
 
                 if (ct.IsCancellationRequested)
                 {
-                    Debug.Log($"[AgentCore]{logPrefix} Cancelled during tool execution.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore]{logPrefix} Cancelled during tool execution.");
                     break;
                 }
 
@@ -474,7 +474,7 @@ namespace AgentCore.Editor.Core
                 var feedback = AnswerChallengePromptBuilder.BuildDraftRegenerationFeedback(reviseIssues);
                 _messages.Add(ChatMessage.System(feedback));
 
-                Debug.Log($"[AgentCore][SelfChallenge] REVISE: regenerating draft with {reviseIssues.Count} issue(s).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] REVISE: regenerating draft with {reviseIssues.Count} issue(s).");
 
                 assistantTurn.IsStreaming = true;
                 SetState(AgentState.Thinking);

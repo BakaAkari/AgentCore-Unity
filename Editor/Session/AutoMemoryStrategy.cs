@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -79,7 +79,7 @@ namespace AgentCore.Editor.Session
                 // 1. 检查是否满足触发条件
                 if (!ShouldTrigger(session))
                 {
-                    Debug.Log($"{LogPrefix}Skipped — trigger conditions not met.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Skipped — trigger conditions not met.");
                     return;
                 }
 
@@ -87,7 +87,7 @@ namespace AgentCore.Editor.Session
                 var conversationSummary = BuildConversationSummary(session);
                 if (string.IsNullOrWhiteSpace(conversationSummary))
                 {
-                    Debug.Log($"{LogPrefix}Skipped — conversation summary is empty.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Skipped — conversation summary is empty.");
                     return;
                 }
 
@@ -95,7 +95,7 @@ namespace AgentCore.Editor.Session
                 var memories = await ExtractMemoriesFromLLMAsync(llmClient, conversationSummary, ct);
                 if (memories == null || memories.Count == 0)
                 {
-                    Debug.Log($"{LogPrefix}No memories extracted from conversation.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}No memories extracted from conversation.");
                     return;
                 }
 
@@ -129,11 +129,11 @@ namespace AgentCore.Editor.Session
                     }
                 }
 
-                Debug.Log($"{LogPrefix}Stored {storedCount}/{memories.Count} memories for session '{session.Title}'.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Stored {storedCount}/{memories.Count} memories for session '{session.Title}'.");
             }
             catch (OperationCanceledException)
             {
-                Debug.Log($"{LogPrefix}Extraction cancelled.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Extraction cancelled.");
             }
             catch (Exception ex)
             {
@@ -271,7 +271,7 @@ namespace AgentCore.Editor.Session
             }
             catch (OperationCanceledException)
             {
-                Debug.Log($"{LogPrefix}LLM extraction timed out or was cancelled.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}LLM extraction timed out or was cancelled.");
                 return new List<string>();
             }
             catch (Exception ex)

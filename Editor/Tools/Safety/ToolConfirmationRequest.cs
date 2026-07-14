@@ -72,7 +72,13 @@ namespace AgentCore.Editor.Tools.Safety
             Reasons = reasons ?? Array.Empty<string>();
             ParameterSummary = parameterSummary ?? new Dictionary<string, string>();
             Targets = targets ?? Array.Empty<string>();
-            AllowedTrustScopes = allowedTrustScopes ?? new[] { ToolConfirmationTrustScope.Once };
+            // v1.6.5: 默认允许 Low/Med + All (YOLO) 两档会话级信任。
+            // 如需限制某个工具不允许 YOLO,构造时显式传入过滤后的数组。
+            AllowedTrustScopes = allowedTrustScopes ?? new[]
+            {
+                ToolConfirmationTrustScope.SessionLowMediumRisk,
+                ToolConfirmationTrustScope.SessionAll
+            };
         }
     }
 }

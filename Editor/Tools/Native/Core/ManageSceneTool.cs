@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -303,7 +303,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 if (saved)
                 {
                     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-                    Debug.Log($"[AgentCore] Created scene at '{scenePath}'");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Created scene at '{scenePath}'");
                     return ToolResponse.OkWithData(new JObject
                     {
                         ["path"] = scenePath,
@@ -340,7 +340,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 var mode = additive ? OpenSceneMode.Additive : OpenSceneMode.Single;
                 var scene = EditorSceneManager.OpenScene(scenePath, mode);
 
-                Debug.Log($"[AgentCore] Opened scene '{scenePath}' (additive={additive})");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Opened scene '{scenePath}' (additive={additive})");
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["path"] = scene.path,
@@ -390,7 +390,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 if (saved)
                 {
                     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-                    Debug.Log($"[AgentCore] Saved scene to '{finalPath}'");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Saved scene to '{finalPath}'");
                     return ToolResponse.OkWithData(new JObject
                     {
                         ["path"] = finalPath,
@@ -422,7 +422,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                             return ToolResponse.Fail($"Scene '{sceneName}' is not loaded.");
 
                         SceneManager.SetActiveScene(scene);
-                        Debug.Log($"[AgentCore] Set active scene to '{scene.name}'");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Set active scene to '{scene.name}'");
                         return ToolResponse.OkWithData(new JObject
                         {
                             ["name"] = scene.name,

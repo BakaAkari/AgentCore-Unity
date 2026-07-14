@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.Session;
 using UnityEditor;
@@ -27,7 +27,7 @@ namespace AgentCore.Editor.UI
                 var session = SessionManager.Instance.TryRestoreLastSession();
                 if (session == null || session.Turns == null || session.Turns.Count == 0)
                 {
-                    Debug.Log("[AgentCore] No previous session to restore, starting fresh.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] No previous session to restore, starting fresh.");
                     // 即使没有会话可恢复，也要清除可能残留的中断标记
                     DomainReloadState.instance.ClearInterruption();
                     // 修复 #5: Domain Reload 路径中延迟了会话创建，如果恢复失败则在此补创建
@@ -51,13 +51,13 @@ namespace AgentCore.Editor.UI
                 // Phase 4.5: 恢复文件变更面板（Domain Reload 后 FileChangeTracker 数据已在 LoadSession 中恢复）
                 _agentLoop.EmitFileChangesUpdatedEvent();
 
-                Debug.Log($"[AgentCore] Session restored: {session.Id} ({session.Title}, {session.Turns.Count} turns)");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Session restored: {session.Id} ({session.Title}, {session.Turns.Count} turns)");
 
                 // Domain Reload Resilience Phase 2 & 3: 检查是否有中断标记并自动恢复
                 var reloadState = DomainReloadState.instance;
                 if (reloadState.WasInterrupted)
                 {
-                    Debug.Log($"[AgentCore] Domain Reload detected: session {reloadState.InterruptedSessionId} " +
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Domain Reload detected: session {reloadState.InterruptedSessionId} " +
                               $"was interrupted during {reloadState.InterruptPhase}" +
                               (string.IsNullOrEmpty(reloadState.LastToolName) ? "" : $" (tool: {reloadState.LastToolName})") +
                               (reloadState.HadPendingToolCalls ? " [had pending tool calls]" : "") +
@@ -70,7 +70,7 @@ namespace AgentCore.Editor.UI
                     string compilationErrors = compilationSucceeded
                         ? null
                         : "编译失败，请检查 Unity Console 中的错误信息";
-                    Debug.Log($"[AgentCore] Post-reload compilation check: succeeded={compilationSucceeded}");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Post-reload compilation check: succeeded={compilationSucceeded}");
 
                     reloadState.SetCompilationResult(compilationSucceeded, compilationErrors);
 
@@ -87,12 +87,12 @@ namespace AgentCore.Editor.UI
                     // Phase 3: 根据恢复结果更新通知卡片状态
                     if (resumed)
                     {
-                        Debug.Log("[AgentCore] Domain Reload recovery initiated successfully.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Domain Reload recovery initiated successfully.");
                         UpdateDomainReloadNotificationStatus(notificationCard, success: true);
                     }
                     else
                     {
-                        Debug.Log("[AgentCore] Domain Reload recovery skipped or failed, continuing normally.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Domain Reload recovery skipped or failed, continuing normally.");
                         UpdateDomainReloadNotificationStatus(notificationCard, success: false,
                             errorMessage: "恢复未执行，可能是中断阶段不支持自动恢复");
                     }
@@ -118,7 +118,7 @@ namespace AgentCore.Editor.UI
         {
             if (string.IsNullOrEmpty(SessionManager.Instance.CurrentSessionId))
             {
-                Debug.Log("[AgentCore] No active session after restore attempt, creating new session.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] No active session after restore attempt, creating new session.");
                 SessionManager.Instance.CreateNewSession();
             }
         }

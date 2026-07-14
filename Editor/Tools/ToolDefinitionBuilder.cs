@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.Config;
@@ -112,7 +112,7 @@ namespace AgentCore.Editor.Tools
                 }
             }
 
-            Debug.Log($"{LogPrefix}Built {definitions.Count} tool definitions from ToolRegistry");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Built {definitions.Count} tool definitions from ToolRegistry");
             return definitions;
         }
 
@@ -161,11 +161,11 @@ namespace AgentCore.Editor.Tools
 
             if (skippedCount > 0)
             {
-                Debug.Log($"{LogPrefix}Built {definitions.Count} tool definitions ({skippedCount} disabled tools skipped)");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Built {definitions.Count} tool definitions ({skippedCount} disabled tools skipped)");
             }
             else
             {
-                Debug.Log($"{LogPrefix}Built {definitions.Count} tool definitions from ToolRegistry");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Built {definitions.Count} tool definitions from ToolRegistry");
             }
 
             return definitions;
@@ -202,7 +202,7 @@ namespace AgentCore.Editor.Tools
                 }
             }
 
-            Debug.Log($"{LogPrefix}Built {definitions.Count} tool definitions for category '{category}'");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Built {definitions.Count} tool definitions for category '{category}'");
             return definitions;
         }
 
@@ -255,7 +255,7 @@ namespace AgentCore.Editor.Tools
                 Debug.LogWarning($"{LogPrefix}Tools not found in registry: {string.Join(", ", missingNames)}");
             }
 
-            Debug.Log($"{LogPrefix}Built {definitions.Count}/{nameList.Count} tool definitions by name whitelist");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Built {definitions.Count}/{nameList.Count} tool definitions by name whitelist");
             return definitions;
         }
 

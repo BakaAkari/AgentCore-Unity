@@ -10,12 +10,19 @@
     flex-shrink: 0;
 }
 
+/* v1.6.5: 整个 header 都是可点击展开/收起的热区,不再依赖右侧按钮 */
 .context-usage-panel__header {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
     cursor: link;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.context-usage-panel__header:hover {
+    background-color: rgba(255, 255, 255, 0.06);
 }
 
 .context-usage-panel__header Label {
@@ -24,19 +31,13 @@
     color: rgba(255, 255, 255, 0.9);
 }
 
-.context-usage-panel__header Button {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    margin: 0;
-    background-color: transparent;
-    border-width: 0;
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.context-usage-panel__header Button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+/* 展开/收起指示符 (纯视觉,不可独立点击) */
+.context-usage-panel__toggle-indicator {
+    font-size: 11px;
+    -unity-font-style: normal;
+    color: rgba(255, 255, 255, 0.6);
+    min-width: 12px;
+    -unity-text-align: middle-right;
 }
 
 .context-usage-panel__content {

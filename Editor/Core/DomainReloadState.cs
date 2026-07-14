@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using AgentCore.Editor.Config;
 using UnityEditor;
 using UnityEngine;
@@ -248,7 +248,7 @@ namespace AgentCore.Editor.Core
             // ScriptableSingleton 需要显式标记脏以确保序列化
             SafeSave(true);
 
-            Debug.Log($"[AgentCore] DomainReloadState: Marked interrupted — session={sessionId}, phase={phase}, " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] DomainReloadState: Marked interrupted — session={sessionId}, phase={phase}, " +
                       $"tool={lastToolName}, pendingToolCalls={hadPendingToolCalls}, " +
                       $"hasUserMsg={!string.IsNullOrEmpty(pendingUserMessage)}, " +
                       $"hasAssistantContent={!string.IsNullOrEmpty(lastAssistantContent)}, " +
@@ -267,7 +267,7 @@ namespace AgentCore.Editor.Core
             _compilationErrors = errors ?? string.Empty;
             SafeSave(true);
 
-            Debug.Log($"[AgentCore] DomainReloadState: Compilation result set — succeeded={succeeded}, " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] DomainReloadState: Compilation result set — succeeded={succeeded}, " +
                       $"errors={(!string.IsNullOrEmpty(errors) ? errors.Substring(0, Math.Min(errors.Length, 200)) : "(none)")}");
         }
 
@@ -317,7 +317,7 @@ namespace AgentCore.Editor.Core
             _conversationOriginalTokens = conversationOriginalTokens;
             SafeSave(true);
 
-            Debug.Log($"[AgentCore] DomainReloadState: Compression metrics saved — " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] DomainReloadState: Compression metrics saved — " +
                       $"toolResults={toolResultSuccessCount}, conversations={conversationSuccessCount}, " +
                       $"tokensSaved={totalTokensSaved}");
         }
@@ -369,7 +369,7 @@ namespace AgentCore.Editor.Core
 
             if (wasInterrupted)
             {
-                Debug.Log($"[AgentCore] DomainReloadState: Interruption cleared for session {sessionId}.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] DomainReloadState: Interruption cleared for session {sessionId}.");
             }
         }
 

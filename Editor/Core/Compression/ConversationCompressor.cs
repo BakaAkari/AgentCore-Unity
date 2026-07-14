@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -94,7 +94,7 @@ namespace AgentCore.Editor.Core.Compression
                 return false;
             }
 
-            Debug.Log($"[AgentCore] Context usage {usageRatio:P0} exceeds trigger threshold " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Context usage {usageRatio:P0} exceeds trigger threshold " +
                       $"{settings.conversationCompressionTrigger:P0} ({currentTokens}/{maxContextTokens} tokens). " +
                       $"Starting conversation compression...");
 
@@ -102,7 +102,7 @@ namespace AgentCore.Editor.Core.Compression
             var compressRange = DetermineCompressRange(messages);
             if (compressRange.count <= 0)
             {
-                Debug.Log("[AgentCore] No messages eligible for compression (all are recent or protected).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] No messages eligible for compression (all are recent or protected).");
                 return false;
             }
 
@@ -128,7 +128,7 @@ namespace AgentCore.Editor.Core.Compression
                     _metrics.RecordConversationCompression(originalTokens, summaryTokens, compressRange.count);
 
                     int newTotalTokens = TokenCounter.EstimateConversationTokens(messages);
-                    Debug.Log($"[AgentCore] Conversation compressed: removed {compressRange.count} messages, " +
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Conversation compressed: removed {compressRange.count} messages, " +
                               $"{originalTokens} → {summaryTokens} tokens (summary). " +
                               $"Total context: {currentTokens} → {newTotalTokens} tokens.");
 

@@ -1,4 +1,4 @@
-using AgentCore.Editor.Config;
+﻿using AgentCore.Editor.Config;
 using UnityEngine;
 
 namespace AgentCore.Editor.Workspace.Resolution
@@ -44,7 +44,7 @@ namespace AgentCore.Editor.Workspace.Resolution
             }
 
             // 优先级 4：回退到 UnityRoot
-            Debug.Log("[AgentCore] WorkspaceRootResolver: no SVN working copy found, falling back to UnityRoot.");
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] WorkspaceRootResolver: no SVN working copy found, falling back to UnityRoot.");
             var fallbackVcs = new WorkspaceVcsInfo
             {
                 Type = WorkspaceVcsType.None,

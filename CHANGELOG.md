@@ -5,6 +5,125 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-07-13
+
+### Added — 日志分级基础设施 (LogLevel + AgentCoreLog)
+
+**用户诉求**:回复阶段 [AgentCore] 前缀日志狂刷导致 Editor 卡顿 (千次级/回复)。
+
+**变更内容**:
+
+#### 新增 [`AgentCoreLog`](Editor/Utils/AgentCoreLog.cs) 静态封装
+- `LogLevel` 枚举 5 档: `Silent` / `Error` / `Warning` / `Info` / `Debug`
+- API: `AgentCoreLog.Debug/Info/Warning/Error(msg)` + `Error(msg, ex)`
+- 首次访问时从 `AgentCoreSettings.instance.logLevel` 读取并缓存,通过 `Invalidate()` 支持热切换
+- `RefreshCache` 使用 try/catch 兜底防 bootstrap 阶段崩溃
+
+#### AgentCoreSettings 新增 `logLevel` 字段
+- 默认 `LogLevel.Info` (关键业务事件默认可见,不含高频细节)
+- 位于 [`AgentCoreSettings.cs`](Editor/Config/AgentCoreSettings.cs) `compressionEnabled` 之后
+
+#### DashboardSettingsPage 新增 "Log Verbosity" 卡片
+- 下拉菜单 (EnumPopup) 供用户选择级别
+- 切换后立即调用 `AgentCoreLog.Invalidate()` 生效
+- 使用 `UnityEngine.Debug.Log` (不走 AgentCoreLog) 打印切换通知,避免死循环
+
+#### 迁移策略 (分类)
+- **Debug 级** (30 处): 高频热点 — 每 token/event/chunk
+  - `AgentLoop.Events.cs` State 切换 (每状态一次)
+  - `AgentLoop.LLM.cs` `Stream completed` / `Received ToolCallDelta` (逐 chunk)
+  - `OpenAICompatibleClient.cs` LLM request/usage/repair (每次 API 调用)
+  - `Mem0Client.cs` 全部 API 详情日志 (11 处)
+  - `ChatWindow.Events.cs` HandleAgentEvent (逐 event,千次级)
+  - `ChatWindow.Tools.cs` tool card 生命周期钩子 (6 处)
+  - `ChatWindow.Messages.cs` RebuildMessageBubbles 循环内详情 (2 处)
+  - `ChatWindow.SelfChallenge.cs` 每 SelfChallenge 事件
+- **Info 级** (135 处): 会话/turn/session 级事件 — 通过 PowerShell 批处理迁移
+  - 保留原样默认可见,不影响卡顿
+  - 涵盖 bootstrap、tool registry、session lifecycle、compression 结果、domain reload recovery、compilation status 等
+- **例外**: [`AgentCoreSettings.cs`](Editor/Config/AgentCoreSettings.cs) 4 处 Migrate/Bootstrap 日志改回原生 `UnityEngine.Debug.Log`,避免 static ctor 期访问 `AgentCoreLog.RefreshCache` 反向依赖 Settings 造成 bootstrap 循环
+
+### 影响面 & 破坏性
+
+- **性能**: 默认 Info 级别下,Debug 级 30 处热点被完全跳过 (仅 `CurrentLevel >= LogLevel.Debug` 判断,零字符串拼接),解决"回复阶段狂刷 log 卡顿"
+- **UX**: 用户可在 `Project Settings > AgentCore > Dashboard > Log Verbosity` 切换,Debug 模式仍可看到全部日志用于问题定位
+- **兼容**: 除 `AgentCoreSettings.cs` bootstrap 保留原生 Debug.Log 外,插件内其他 165 处 `Debug.Log` 全部迁移至 `AgentCoreLog.Info/Debug`
+- **保留**: `Debug.LogWarning` / `Debug.LogError` 未迁移 (它们是重要提示,不会造成刷屏)
+
+### 测试重点
+
+- [ ] 默认 Info 级:回复过程无 `State:`、`HandleAgentEvent`、`ToolCallDelta`、`LLM request` 日志
+- [ ] 切到 Debug 级:上述日志全部可见
+- [ ] 切到 Warning 级:仅看到 `Debug.LogWarning/LogError` (相当于 v1.6.4 之前的默认行为)
+- [ ] 切到 Silent 级:Console 完全静默 (慎用)
+- [ ] `Log Verbosity` 卡片切换后立即生效,无需重启
+
+---
+
+### Changed — 工具确认信任语义重构:引入 YOLO 模式(破坏性变更)
+
+**用户诉求**:原有"Trust Session"按钮语义模糊 — 用户误以为是"本会话所有风险操作放行",实际是"精确目标 + 同工具 + 同 action + 同 risk 才复用"。用户明确希望改成 Kimi `/yolo` 风格的会话级信任。
+
+**变更内容**:
+
+#### `ToolConfirmationTrustScope` 枚举重构 (破坏性)
+- **移除** `Once` — UI 不再提供"仅此一次允许"选项
+- **移除** `SessionExactTarget` — 精确目标粒度实用价值低,弃用
+- **新增** `SessionLowMediumRisk` = 0 — 本会话内所有 ReadOnly/Low/Medium 风险工具直通
+- **新增** `SessionAll` = 1 — 本会话内所有工具无条件直通 (真正 YOLO,含 High/Destructive/External/CodeExecution)
+
+#### 提示卡 UI:3 按钮布局
+- `[Deny]` — 拒绝当前调用
+- `[Trust Low/Med for Session]` — 蓝色,激活 `SessionLowMediumRisk` 信任
+- `[YOLO (All)]` — 暖橙色警示,激活 `SessionAll` 信任
+- 不再有 `Approve Once` — 任何非 Deny 均建立会话级信任
+- 每个按钮均带 tooltip 提示覆盖范围
+
+#### 信任判定改为 scope-based
+- [`ChatWindow.Confirmation.cs`](Editor/UI/ChatWindow.Confirmation.cs): `_trustedToolConfirmations` (HashSet<string>) → `_sessionTrustScopes` (HashSet<ToolConfirmationTrustScope>)
+- 删除 `BuildTrustKey` / `NormalizeTrustPart` / `CanTrustForSession` 内部方法
+- 新增 `IsLowOrMediumRisk` / `IsScopeAllowed` 判定逻辑
+- `IsToolConfirmationTrusted`:先检查 `SessionAll` (YOLO 全放行),再检查 `SessionLowMediumRisk` + `ToolRiskLevel` 覆盖
+
+#### 通过 SessionState 持久化 (跨 Domain Reload)
+- 用 `UnityEditor.SessionState` 存储信任 scope 集合,避免 Unity 编译脚本/进入 Play Mode 导致的 YOLO 状态丢失
+- SessionState 是 Unity 内置"跨 Domain Reload 但不跨 Editor 完全重启"的存储 — 精准匹配"会话级"信任语义
+- **初始化时机**:`_sessionTrustScopes` 字段声明为空 `HashSet<>`(纯 CLR,零 Unity API);
+  真正的 `LoadSessionTrustScopesFromState()` 由 `CreateGUI` 显式调用(在 `InitializeToolConfirmationPanel` 之前)。
+  这是 Unity 硬要求 — ScriptableObject/EditorWindow 的字段初始化器 (等价于构造器上下文)
+  严禁调用 `SessionState`/`EditorPrefs`/`AssetDatabase` 等 Unity API,否则抛
+  `UnityException: GetString is not allowed to be called from a ScriptableObject constructor`,
+  连带导致所有其他字段初始化器 (`_hubPanels`、`_messageBubbles` 等 readonly Dictionary) 未初始化,ChatWindow 完全崩溃。
+- `SaveSessionTrustScopes` 在 scope 变更/清空时写入 (加空守卫防半初始化)
+- `ClearPendingToolConfirmations` 里 `_sessionTrustScopes?.Clear()` 加空守卫兜底
+- 场景:开 YOLO 后修改脚本触发编译 → Reload → 提示卡下次弹出时仍自动直通(不会丢 YOLO 状态)
+
+#### 底层默认值调整
+- [`ToolRiskPolicy.cs`](Editor/Tools/Safety/ToolRiskPolicy.cs): `BuildConfirmationRequest` 提供的默认 scopes 从 `[Once, SessionExactTarget]` 改为 `[SessionLowMediumRisk, SessionAll]`
+- [`ToolConfirmationRequest.cs`](Editor/Tools/Safety/ToolConfirmationRequest.cs): 构造函数默认 `AllowedTrustScopes` 同步更新
+
+#### 样式补充
+- [`ChatWindow.uss`](Editor/UI/ChatWindow.uss): 新增 `.tool-confirmation-button--yolo` (背景 `#b8621b` 暖橙,hover `#d0771f`)
+- 保留 `.tool-confirmation-button--approve` 兼容其他潜在调用
+
+### 影响面 & 破坏性
+
+- **API 破坏**:`ToolConfirmationTrustScope.Once` / `SessionExactTarget` 被删除。任何 downstream 代码若引用这两个枚举值将编译失败(经全量搜索,包内无残留引用)。
+- **UX 破坏**:用户不再有"允许这一次"选项。首次点击 `Trust Low/Med` 后,本会话内所有低/中风险工具默认放行;点击 `YOLO` 后,所有工具放行。
+- **安全权衡**:纯 YOLO 模式**不设 Critical 硬顶**,delete/vcs_push/build_player 等操作也会被直通。这是用户明确要求的设计,用户完全自担风险。建议开 YOLO 前 commit 干净的 VCS 状态。
+- **信任状态生命周期**:纯内存 (HashSet),ChatWindow 会话切换/清空时通过 `ClearPendingToolConfirmations` 自动清除;插件重启后状态归零。
+
+### 测试重点
+
+- [ ] 单个 tool call:提示卡显示 3 按钮 (`Deny` / `Trust Low/Med` / `YOLO`),各带 tooltip
+- [ ] 点 `Trust Low/Med` 后,同会话内下一个 Medium 风险 tool 不再弹卡
+- [ ] 点 `Trust Low/Med` 后,同会话内 High/Destructive 风险 tool **仍**弹卡
+- [ ] 点 `YOLO` 后,同会话内任意风险 tool 均直通(含 delete/vcs)
+- [ ] 会话清除 / ChatWindow 关闭重开后,信任状态归零,重新弹卡
+- [ ] YOLO 按钮的暖橙色视觉与 Deny (红)/Trust (蓝) 明显区分
+
+---
+
 ## [1.6.4] - 2026-07-13
 
 ### 附加 UI 修复 & D2/D3 实施（本次追加，与 D1 一起发布）

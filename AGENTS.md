@@ -77,13 +77,17 @@ com.agentcore.unity/
 │   │   ├── Cloud/                  #   云端工具（HTTP API）
 │   │   └── FileSystem/             #   文件系统工具
 │   ├── UI/                         # 用户界面
-│   │   └── Components/             #   UI 组件
+│   │   ├── Components/             #   UI 组件 (ThinkingDrawer, MessageBubble, ToolCallGroup, AssistantTurnView, PendingIndicator, MessageReferenceBar, FileChangeSummaryPanel, SelfChallengeCard 等)
+│   │   ├── Context/               #   Context Ingest 模块 (Ctrl+Shift+X 通用查询入口)
+│   │   ├── ChatWindow.*.cs         #   ChatWindow partial 文件 (Events/Messages/Tools/Input/Confirmation/Sessions/Restore/SelfChallenge/ContextIngest/DomainReload/PendingIndicator)
+│   │   ├── ChatWindow.cs/.uxml/.uss #   主窗口 + 样式
+│   │   └── Hub/                   #   Hub 面板
 │   ├── VCS/                        # 内置可选 VCS 组件（受 AGENTCORE_VCS 控制）
 │   ├── Workspace/                  # Workspace 基础设施（v0.9.0）
 │   │   ├── Config/                 #   WorkspaceConfig / WorkspaceConfigStorage
 │   │   ├── Resolution/             #   WorkspaceRootResolver / ScopeRootResolver 等
 │   │   └── Safety/                 #   WorkspacePathPolicy / WorkspaceOperationRisk
-│   └── Utils/                      # 通用工具
+│   └── Utils/                      # 通用工具 (AgentCoreLog, JsonHelper, HttpClientFactory, AsyncHelper 等)
 └── plans/                          # 设计文档（仅参考）
 ```
 
@@ -502,6 +506,50 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 
 > 修改前先阅读 `Editor/Session/` 下的所有文件了解当前数据模型。
 
+### 6.5 v1.6.x 架构模式补充
+
+#### AssistantTurnView 多轮布局
+
+`AssistantTurnView` 不再是固定的 `ThinkingDrawer → ToolCallGroup → MessageBubble` 布局，而是支持多轮 section：
+
+```
+[RoundsContainer]
+  ├── RoundSection 1 (ThinkingDrawer + ToolSlot)
+  ├── Separator (第 2 轮起)
+  ├── RoundSection 2 (ThinkingDrawer + ToolSlot)
+  ├── ...
+[SelfChallengeSlot]
+[BubbleSlot]
+```
+
+- `BeginNewRound()` 创建新轮次区域（独立 ThinkingDrawer + ToolSlot）
+- `ThinkingDrawer` 属性返回最新轮次的 drawer
+- `HandleLoopRoundStarted` 在 `evt.CurrentRound > 1` 时调用 `BeginNewRound()`
+- 会话恢复 (`RestoreThinking`) 把所有 reasoning 放入第一轮 drawer
+
+#### AgentCoreLog 日志规范
+
+- 所有流程日志使用 `AgentCoreLog.Info(msg)` 或 `AgentCoreLog.Debug(msg)`
+- `AgentCoreLog` 从 `AgentCoreSettings.instance.logLevel` 读取级别
+- Debug 级用于高频热点（每 token/event/chunk），Info 级用于会话/turn 级事件
+- 唯一例外：`AgentCoreSettings.cs` 的 bootstrap 日志使用原生 `Debug.Log`（避免 static ctor 期反向依赖）
+
+#### Tool Confirmation Trust Scope
+
+工具确认已从 per-call 确认改为 session-level 信任 scope：
+
+- `SessionLowMediumRisk`：本会话内所有 ReadOnly/Low/Medium 风险工具直通
+- `SessionAll`（YOLO）：本会话内所有工具无条件直通
+- 信任 scope 通过 `UnityEditor.SessionState` 持久化，跨 Domain Reload 保留
+- ChatWindow 的 `_sessionTrustScopes` 字段初始化必须在 `CreateGUI` 中显式调用 `LoadSessionTrustScopesFromState()`（Unity 硬要求：ScriptableObject 构造器中不得调用 SessionState API）
+
+#### Context Ingest
+
+- 全局快捷键 `Ctrl+Shift+X` 触发 `ContextIngestRouter`
+- 路由优先级：Console → Project asset → Hierarchy/Scene GO → 任意 EditorWindow
+- 6 个 Collector 位于 `Editor/UI/Context/`，各自负责特定上下文源
+- 注入内容追加到 ChatWindow 输入框（不清空已有输入）
+
 ---
 
 ## 7. 编码硬规则
@@ -512,7 +560,7 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - **禁止** 在工具的 `ExecuteAsync` 中使用 `Thread.Sleep` 或同步阻塞
 - **禁止** 在 `RequiresMainThread = true` 的工具中启动新线程
 - **禁止** 硬编码 API Key、URL 或用户特定路径
-- **禁止** 使用 `Debug.Log` 进行正常流程日志（仅用于错误和警告）
+- **禁止** 使用 `Debug.Log` 进行正常流程日志（使用 `AgentCoreLog.Info/Debug` 替代；仅 `Debug.LogWarning` / `Debug.LogError` 保留用于错误和警告）
 - **禁止** 修改 `ToolAutoDiscovery` 的扫描逻辑来手动注册工具
 - **禁止** 在工具中直接访问 `ChatWindow` 或其他 UI 组件
 

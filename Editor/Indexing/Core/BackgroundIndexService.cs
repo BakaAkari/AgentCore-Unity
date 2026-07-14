@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -103,7 +103,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
             if (settings.VerboseLogging)
             {
-                Debug.Log($"[AgentCore] {_burstReason}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] {_burstReason}");
             }
 
             PublishPending(IndexingDirtyTracker.Count);
@@ -237,7 +237,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                     if (settings.VerboseLogging && skippedOnDemand > 0)
                     {
-                        Debug.Log($"[AgentCore] Skipped {skippedOnDemand} dirty paths belonging to OnDemand roots.");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Skipped {skippedOnDemand} dirty paths belonging to OnDemand roots.");
                     }
 
                     if (filteredChanged.Count == 0 && filteredDeleted.Count == 0)
@@ -310,7 +310,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 if (settings.VerboseLogging)
                 {
-                    Debug.Log($"[AgentCore] Background indexed {snapshot.Count} files.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Background indexed {snapshot.Count} files.");
                 }
 
                 if (IndexingDirtyTracker.HasDirtyPaths)

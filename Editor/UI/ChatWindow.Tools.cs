@@ -26,13 +26,13 @@ namespace AgentCore.Editor.UI
                 {
                     var turnView = EnsureAssistantTurnView(_currentAssistantTurnId);
                     _currentToolCallGroup = turnView?.EnsureToolGroup();
-                    Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 新建 ToolCallGroup, 添加到 AssistantTurnView");
+                    AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] EnsureToolCallGroup: 新建 ToolCallGroup, 添加到 AssistantTurnView");
                 }
                 else
                 {
                     _currentToolCallGroup = new ToolCallGroup();
                     _messageListManager?.AddItem(_currentToolCallGroup);
-                    Debug.Log($"[AgentCore.UI] EnsureToolCallGroup: 无 assistant turn，降级添加到 MessageListManager");
+                    AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] EnsureToolCallGroup: 无 assistant turn，降级添加到 MessageListManager");
                 }
             }
             return _currentToolCallGroup;
@@ -83,7 +83,7 @@ namespace AgentCore.Editor.UI
         /// <param name="evt">工具调用开始事件</param>
         private void HandleToolCallStarted(AgentEvent evt)
         {
-            Debug.Log($"[AgentCore.UI] HandleToolCallStarted: tool={evt.ToolName}, toolCallId={evt.ToolCallId ?? "(null)"}, messageId={evt.MessageId ?? "(null)"}");
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] HandleToolCallStarted: tool={evt.ToolName}, toolCallId={evt.ToolCallId ?? "(null)"}, messageId={evt.MessageId ?? "(null)"}");
 
             var group = EnsureToolCallGroup();
 
@@ -94,7 +94,7 @@ namespace AgentCore.Editor.UI
             // 用 ToolCallId 作为 key（支持同名工具多次调用）
             var key = GetToolCallKey(evt);
             _activeToolCards[key] = card;
-            Debug.Log($"[AgentCore.UI] HandleToolCallStarted: card 已添加, key={key}, _activeToolCards.Count={_activeToolCards.Count}");
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] HandleToolCallStarted: card 已添加, key={key}, _activeToolCards.Count={_activeToolCards.Count}");
             ScrollToBottom(force: true); // 新工具调用卡片添加，强制滚动到底部
         }
 
@@ -105,7 +105,7 @@ namespace AgentCore.Editor.UI
         private void HandleToolCallCompleted(AgentEvent evt)
         {
             var key = FindToolCardKey(evt);
-            Debug.Log($"[AgentCore.UI] HandleToolCallCompleted: tool={evt.ToolName}, key={key ?? "(no match)"}, found={key != null}");
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] HandleToolCallCompleted: tool={evt.ToolName}, key={key ?? "(no match)"}, found={key != null}");
 
             if (key != null && _activeToolCards.TryGetValue(key, out var card))
             {
@@ -140,7 +140,7 @@ namespace AgentCore.Editor.UI
         private void HandleToolCallFailed(AgentEvent evt)
         {
             var key = FindToolCardKey(evt);
-            Debug.Log($"[AgentCore.UI] HandleToolCallFailed: tool={evt.ToolName}, key={key ?? "(no match)"}, found={key != null}");
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] HandleToolCallFailed: tool={evt.ToolName}, key={key ?? "(no match)"}, found={key != null}");
 
             if (key != null && _activeToolCards.TryGetValue(key, out var card))
             {
@@ -163,19 +163,48 @@ namespace AgentCore.Editor.UI
         }
 
         /// <summary>
-        /// 处理循环轮次开始事件：更新分组容器的轮次信息，并在容器内添加轮次分隔线。
+        /// 处理循环轮次开始事件：创建新轮次区域（独立 ThinkingDrawer）、添加轮次分隔线、更新分组信息。
+        /// <para>
+        /// 第 1 轮：AssistantTurnView 构造时已自动创建首个 RoundSection，此处仅更新分组信息。
+        /// 第 2+ 轮：调用 BeginNewRound 创建新区域（含独立 ThinkingDrawer），使后续 reasoning
+        /// 显示在新窗口而非追加到旧窗口。分隔线添加到轮次容器中，位于新区域之前。
+        /// </para>
         /// </summary>
         /// <param name="evt">循环轮次开始事件</param>
         private void HandleLoopRoundStarted(AgentEvent evt)
         {
-            var group = EnsureToolCallGroup();
+            // 第 1 轮：AssistantTurnView 构造时已创建首个 RoundSection，无需新建
+            if (evt.CurrentRound > 1)
+            {
+                // 第 2+ 轮：在 AssistantTurnView 中创建新轮次区域（独立 ThinkingDrawer）
+                if (!string.IsNullOrEmpty(_currentAssistantTurnId))
+                {
+                    var turnView = EnsureAssistantTurnView(_currentAssistantTurnId);
 
-            // 更新分组容器的轮次信息（含 token 消耗）
+                    // 先添加轮次分隔线到轮次容器
+                    var separator = CreateRoundSeparator(evt);
+                    turnView?.AddRoundSeparator(separator);
+
+                    // 创建新轮次区域（独立 ThinkingDrawer + ToolSlot）
+                    turnView?.BeginNewRound();
+
+                    // 重置当前工具调用分组引用，使后续工具卡片添加到新轮次的 ToolGroup
+                    _currentToolCallGroup = null;
+                }
+            }
+
+            // 确保当前轮次有 ToolCallGroup 并更新轮次信息
+            var group = EnsureToolCallGroup();
             group.UpdateRoundInfo(evt.CurrentRound, evt.MaxRounds, evt.TokensUsed);
 
-            // 第 1 轮不显示分隔线（避免冗余）
-            if (evt.CurrentRound <= 1) return;
+            ScrollToBottom(force: true);
+        }
 
+        /// <summary>
+        /// 创建轮次分隔线 VisualElement。
+        /// </summary>
+        private static VisualElement CreateRoundSeparator(AgentEvent evt)
+        {
             var separator = new VisualElement();
             separator.style.flexDirection = FlexDirection.Row;
             separator.style.alignItems = Align.Center;
@@ -206,9 +235,7 @@ namespace AgentCore.Editor.UI
             rightLine.style.backgroundColor = new Color(0.3f, 0.3f, 0.3f);
             separator.Add(rightLine);
 
-            // 分隔线添加到分组容器内部
-            group.AddSeparator(separator);
-            ScrollToBottom(force: true); // 新轮次分隔线添加，强制滚动到底部
+            return separator;
         }
 
         /// <summary>

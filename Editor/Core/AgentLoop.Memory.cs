@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -24,7 +24,7 @@ namespace AgentCore.Editor.Core
                     _messages[i].Content.StartsWith(MemoryMessagePrefix))
                 {
                     _messages.RemoveAt(i);
-                    Debug.Log("[AgentCore] Removed old memory injection message.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Removed old memory injection message.");
                 }
             }
         }

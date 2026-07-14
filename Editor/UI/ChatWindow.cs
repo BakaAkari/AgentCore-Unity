@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Core;
@@ -334,6 +334,9 @@ namespace AgentCore.Editor.UI
                 }
 
                 // 6.75 创建内嵌工具确认面板，避免系统弹窗依赖 Unity 前台窗口。
+                // v1.6.5: 从 SessionState 恢复 YOLO 会话信任状态 (跨 Domain Reload)
+                // 必须在此处(CreateGUI 生命周期内)调用,不能在字段初始化器/构造器中调用
+                LoadSessionTrustScopesFromState();
                 InitializeToolConfirmationPanel(chatArea, inputArea);
 
                 // 6.8 Phase 6.0.4: 创建上下文使用情况面板并插入到 input-area 之前（在文件变更面板之后）
@@ -436,7 +439,7 @@ namespace AgentCore.Editor.UI
                 // 初始化（加载 Bootstrap 上下文）
                 _agentLoop.Initialize();
 
-                Debug.Log("[AgentCore] ChatWindow initialized successfully.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ChatWindow initialized successfully.");
             }
             catch (Exception ex)
             {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net.Http;
 using System.Collections.Generic;
 using System.Threading;
@@ -67,7 +67,7 @@ namespace AgentCore.Editor.Core
                     if (attempt > 0)
                     {
                         onStatusUpdate?.Invoke($"Retry attempt {attempt}/{MaxRetries}...");
-                        Debug.Log($"[AgentCore] Retry attempt {attempt}/{MaxRetries}");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Retry attempt {attempt}/{MaxRetries}");
                         await Task.Delay(RetryDelayMs * attempt, ct); // 递增延迟
                     }
 
@@ -134,7 +134,7 @@ namespace AgentCore.Editor.Core
                     if (attempt > 0)
                     {
                         onStatusUpdate?.Invoke($"Retry attempt {attempt}/{MaxRetries}...");
-                        Debug.Log($"[AgentCore] Retry attempt {attempt}/{MaxRetries}");
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Retry attempt {attempt}/{MaxRetries}");
                         await Task.Delay(RetryDelayMs * attempt, ct);
                     }
 

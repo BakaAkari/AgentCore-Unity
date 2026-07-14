@@ -108,7 +108,7 @@ namespace AgentCore.Editor.UI
             _messageListManager?.AddItem(card);
             ScrollToBottom(force: true); // Domain Reload 通知添加，强制滚动到底部
 
-            Debug.Log($"[AgentCore] Domain Reload notification added: phase={phase}, tool={toolName}, " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Domain Reload notification added: phase={phase}, tool={toolName}, " +
                       $"compilationOk={compilationSucceeded}");
 
             return card;
@@ -176,7 +176,7 @@ namespace AgentCore.Editor.UI
                 if (statusText != null) statusText.text = failText;
             }
 
-            Debug.Log($"[AgentCore] Domain Reload notification status updated: success={success}" +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Domain Reload notification status updated: success={success}" +
                       (string.IsNullOrEmpty(errorMessage) ? "" : $", error={errorMessage}"));
         }
 

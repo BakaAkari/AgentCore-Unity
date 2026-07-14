@@ -22,7 +22,7 @@ namespace AgentCore.Editor.UI
                 evt.Type == AgentEventType.LoopRoundStarted ||
                 evt.Type == AgentEventType.LoopCompleted)
             {
-                Debug.Log($"[AgentCore.UI] HandleAgentEvent 收到事件: {evt.Type}, tool={evt.ToolName ?? "(none)"}, toolCallId={evt.ToolCallId ?? "(none)"}");
+                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] HandleAgentEvent 收到事件: {evt.Type}, tool={evt.ToolName ?? "(none)"}, toolCallId={evt.ToolCallId ?? "(none)"}");
             }
 
             switch (evt.Type)

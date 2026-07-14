@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace AgentCore.Editor.Components.VCS.Tools
@@ -112,7 +112,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return false;
                 }
 
-                Debug.Log($"[Version Control] Launched {displayName}: {fileName} {arguments}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[Version Control] Launched {displayName}: {fileName} {arguments}");
                 reason = displayName;
                 return true;
             }

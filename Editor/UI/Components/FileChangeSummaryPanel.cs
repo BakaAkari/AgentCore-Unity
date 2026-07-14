@@ -272,12 +272,24 @@ namespace AgentCore.Editor.UI.Components
             var displayPath = FormatDisplayPath(summary.FilePath);
             var pathLabel = new Label(displayPath);
             pathLabel.style.fontSize = 11;
-            pathLabel.style.color = TextPrimary;
             pathLabel.style.flexGrow = 1;
             pathLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
             pathLabel.style.overflow = Overflow.Hidden;
             pathLabel.style.textOverflow = TextOverflow.Ellipsis;
             pathLabel.tooltip = summary.FilePath; // 完整路径作为 tooltip
+
+            // 删除文件特殊样式：红色文字 + "(已删除)" 后缀
+            // UIElements Label 不支持 text-decoration:line-through，用颜色+后缀传达删除状态
+            if (summary.ChangeType == FileChangeType.Deleted)
+            {
+                pathLabel.style.color = ColorDeleted;
+                pathLabel.text = $"{displayPath}  (已删除)";
+            }
+            else
+            {
+                pathLabel.style.color = TextPrimary;
+            }
+
             row.Add(pathLabel);
 
             // 增减行数
@@ -369,7 +381,7 @@ namespace AgentCore.Editor.UI.Components
             }
             else
             {
-                Debug.LogWarning($"[AgentCore] Cannot locate file in Project: {filePath}");
+                // 文件可能已被删除，不输出警告（删除文件点击时属于正常行为）
             }
         }
 

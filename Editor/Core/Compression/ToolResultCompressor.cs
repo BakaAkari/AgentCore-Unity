@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -87,7 +87,7 @@ namespace AgentCore.Editor.Core.Compression
                 return content;
             }
 
-            Debug.Log($"[AgentCore] Tool result from '{toolName}' exceeds threshold " +
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Tool result from '{toolName}' exceeds threshold " +
                       $"({tokenCount} > {settings.toolResultCompressionThreshold} tokens), compressing...");
 
             // 尝试 LLM 压缩
@@ -100,7 +100,7 @@ namespace AgentCore.Editor.Core.Compression
                     int compressedTokens = TokenCounter.EstimateTokens(compressed);
                     _metrics.RecordToolResultCompression(tokenCount, compressedTokens);
 
-                    Debug.Log($"[AgentCore] Tool result compressed: {tokenCount} → {compressedTokens} tokens " +
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Tool result compressed: {tokenCount} → {compressedTokens} tokens " +
                               $"(saved {tokenCount - compressedTokens}, ratio: {(float)compressedTokens / tokenCount:P0})");
 
                     return CompressionPrompts.CompressedToolResultPrefix + compressed;

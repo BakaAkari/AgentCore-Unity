@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -938,7 +938,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 $"Root: {VcsDetector.GetVcsRootPath()}"
             };
 
-            Debug.Log($"[Version Control][{_currentVcsType}][File Info]\n{string.Join("\n", details)}");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[Version Control][{_currentVcsType}][File Info]\n{string.Join("\n", details)}");
             ShowMessage($"File info for '{file.FilePath}' logged to Console.", false);
         }
 
@@ -996,7 +996,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
                 if (result.Success)
                 {
-                    Debug.Log($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\n{output}");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\n{output}");
                     ShowMessage($"{operation} for '{filePath}' logged to Console.", false);
                     if (refreshAfterSuccess)
                         await RefreshAllData();
@@ -1816,7 +1816,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 }
                 else
                 {
-                    Debug.Log($"[Version Control] Diff Output{(string.IsNullOrEmpty(filePath) ? string.Empty : $" ({filePath})")}:\n{diff}");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[Version Control] Diff Output{(string.IsNullOrEmpty(filePath) ? string.Empty : $" ({filePath})")}:\n{diff}");
                     ShowMessage(string.IsNullOrEmpty(filePath) ? "Diff output logged to Console." : $"Diff for '{filePath}' logged to Console.", false);
                 }
             }
@@ -1853,7 +1853,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private void LogVcsOperation(string operation, string message)
         {
-            Debug.Log($"[Version Control][{_currentVcsType}][{operation}] {message}");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[Version Control][{_currentVcsType}][{operation}] {message}");
         }
 
         private void LogVcsResult(string operation, VcsOperationResult result)
@@ -1893,7 +1893,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             var logText = $"[Version Control][{_currentVcsType}][{operation}]\n{string.Join("\n", details)}";
             if (result.Success)
-                Debug.Log(logText);
+                AgentCore.Editor.Utils.AgentCoreLog.Info(logText);
             else
                 Debug.LogWarning(logText);
         }

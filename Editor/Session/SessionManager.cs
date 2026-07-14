@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
@@ -108,7 +108,7 @@ namespace AgentCore.Editor.Session
             // 记录当前活动会话 ID
             SaveLastSessionId(sessionId);
 
-            Debug.Log($"{LogPrefix}New session created: {sessionId}");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}New session created: {sessionId}");
         }
 
         /// <summary>
@@ -182,7 +182,7 @@ namespace AgentCore.Editor.Session
                 _currentSession = session;
                 _isDirty = false; // 刚加载的会话没有未保存的变更
                 SaveLastSessionId(sessionId);
-                Debug.Log($"{LogPrefix}Session loaded and set as active: {sessionId}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded and set as active: {sessionId}");
             }
 
             return session;
@@ -237,7 +237,7 @@ namespace AgentCore.Editor.Session
                     _currentSession.Title = session.Title;
                 }
 
-                Debug.Log($"{LogPrefix}Session renamed: {sessionId} -> \"{newTitle}\"");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session renamed: {sessionId} -> \"{newTitle}\"");
                 return true;
             }
             catch (Exception ex)
@@ -268,7 +268,7 @@ namespace AgentCore.Editor.Session
                 CurrentSessionId = null;
                 _currentSession = null;
                 _isDirty = false;
-                Debug.Log($"{LogPrefix}Active session was deleted, cleared current session state.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Active session was deleted, cleared current session state.");
             }
         }
 
@@ -294,7 +294,7 @@ namespace AgentCore.Editor.Session
             }
 
             SaveCurrentSession(messages, turns, compressionMetrics);
-            Debug.Log($"{LogPrefix}Auto-saved session: {CurrentSessionId}");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Auto-saved session: {CurrentSessionId}");
         }
 
         /// <summary>
@@ -315,7 +315,7 @@ namespace AgentCore.Editor.Session
             bool hasUserMessages = messages != null && messages.Exists(m => m.Role == "user");
             if (!hasUserMessages)
             {
-                Debug.Log($"{LogPrefix} ForceSave skipped: no user messages in session {CurrentSessionId}");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix} ForceSave skipped: no user messages in session {CurrentSessionId}");
                 return;
             }
 
@@ -342,18 +342,18 @@ namespace AgentCore.Editor.Session
             var lastId = GetLastSessionId();
             if (string.IsNullOrEmpty(lastId))
             {
-                Debug.Log($"{LogPrefix}No previous session to restore.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}No previous session to restore.");
                 return null;
             }
 
             var session = LoadSession(lastId);
             if (session != null)
             {
-                Debug.Log($"{LogPrefix}Restored last session: {lastId} ({session.Title})");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Restored last session: {lastId} ({session.Title})");
             }
             else
             {
-                Debug.Log($"{LogPrefix}Failed to restore last session: {lastId}, file may have been deleted.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Failed to restore last session: {lastId}, file may have been deleted.");
             }
 
             return session;

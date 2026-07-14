@@ -11,6 +11,11 @@ namespace AgentCore.Editor.UI
 {
     /// <summary>
     /// ChatWindow embedded tool confirmation UI.
+    /// <para>
+    /// v1.6.5: Trust 语义从"精确目标 key"改为"会话级 scope 枚举":
+    /// - <see cref="ToolConfirmationTrustScope.SessionLowMediumRisk"/>: 本会话内 ReadOnly/Low/Medium 直通
+    /// - <see cref="ToolConfirmationTrustScope.SessionAll"/>: 本会话内所有工具直通 (YOLO)
+    /// </para>
     /// </summary>
     public partial class ChatWindow
     {
@@ -18,7 +23,64 @@ namespace AgentCore.Editor.UI
         private const int MaxConfirmationItems = 6;
         private const int MaxConfirmationValueLength = 180;
 
-        private readonly HashSet<string> _trustedToolConfirmations = new HashSet<string>(StringComparer.Ordinal);
+        /// <summary>
+        /// 本会话已激活的信任 scope 集合。
+        /// <para>
+        /// v1.6.5:通过 <see cref="UnityEditor.SessionState"/> 持久化,
+        /// 跨 Domain Reload 保留,Editor 完全重启时归零。
+        /// </para>
+        /// <para>
+        /// <b>初始化规则</b>:字段声明为空集合(纯 CLR,零 Unity API);
+        /// 真正的加载在 <see cref="LoadSessionTrustScopesFromState"/> 里,
+        /// 由 <c>CreateGUI</c> 生命周期方法显式触发。
+        /// 这是 Unity 的硬要求 — ScriptableObject/EditorWindow 的字段初始化器 (等价于构造器上下文)
+        /// 严禁调用 SessionState/EditorPrefs/AssetDatabase 等 Unity API。
+        /// </para>
+        /// </summary>
+        private readonly HashSet<ToolConfirmationTrustScope> _sessionTrustScopes = new HashSet<ToolConfirmationTrustScope>();
+
+        /// <summary>SessionState 键,存储 YOLO 会话信任状态 (跨 Domain Reload 但不跨 Editor 重启)。</summary>
+        private const string SessionTrustStateKey = "AgentCore.SessionTrustScopes";
+
+        /// <summary>
+        /// 从 SessionState 恢复本会话已激活的信任 scope。
+        /// <para>
+        /// 必须在 <c>CreateGUI</c> 等生命周期方法中调用,不能在字段初始化器/构造器中调用
+        /// (Unity 会抛 UnityException: GetString is not allowed to be called from a ScriptableObject constructor)。
+        /// </para>
+        /// </summary>
+        private void LoadSessionTrustScopesFromState()
+        {
+            _sessionTrustScopes.Clear();
+            var raw = SessionState.GetString(SessionTrustStateKey, string.Empty);
+            if (string.IsNullOrEmpty(raw)) return;
+
+            foreach (var token in raw.Split(','))
+            {
+                if (Enum.TryParse<ToolConfirmationTrustScope>(token.Trim(), out var scope))
+                {
+                    _sessionTrustScopes.Add(scope);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 将当前信任 scope 序列化写入 SessionState,以便 Domain Reload 后自动恢复。
+        /// <para>
+        /// 空守卫:<see cref="_sessionTrustScopes"/> 若为 null(极端情况下的半初始化状态),直接返回不写入。
+        /// </para>
+        /// </summary>
+        private void SaveSessionTrustScopes()
+        {
+            if (_sessionTrustScopes == null) return;
+
+            if (_sessionTrustScopes.Count == 0)
+            {
+                SessionState.EraseString(SessionTrustStateKey);
+                return;
+            }
+            SessionState.SetString(SessionTrustStateKey, string.Join(",", _sessionTrustScopes));
+        }
 
         private sealed class PendingToolConfirmation
         {
@@ -175,23 +237,36 @@ namespace AgentCore.Editor.UI
             var buttons = new VisualElement();
             buttons.AddToClassList("tool-confirmation-buttons");
 
-            var reject = new Button(() => ResolvePendingToolConfirmation(pending, false)) { text = "Reject" };
+            var reject = new Button(() => ResolvePendingToolConfirmation(pending, false)) { text = "Deny" };
             reject.AddToClassList("tool-confirmation-button");
             reject.AddToClassList("tool-confirmation-button--reject");
             buttons.Add(reject);
 
-            if (CanTrustForSession(request))
+            // v1.6.5: 3 按钮布局 = Deny / Trust Low-Med / YOLO (All)
+            // 不再提供"仅此一次允许"选项,任何非 Deny 都会开启会话级信任。
+            if (IsScopeAllowed(request, ToolConfirmationTrustScope.SessionLowMediumRisk))
             {
-                var trust = new Button(() => ResolvePendingToolConfirmationWithTrust(pending)) { text = "Trust Session" };
-                trust.AddToClassList("tool-confirmation-button");
-                trust.AddToClassList("tool-confirmation-button--trust");
-                buttons.Add(trust);
+                var trustLowMed = new Button(() => ResolvePendingToolConfirmationWithTrust(pending, ToolConfirmationTrustScope.SessionLowMediumRisk))
+                {
+                    text = "Trust Low/Med for Session"
+                };
+                trustLowMed.tooltip = "本会话内所有 ReadOnly/Low/Medium 风险工具直通,High/破坏性操作仍会弹窗";
+                trustLowMed.AddToClassList("tool-confirmation-button");
+                trustLowMed.AddToClassList("tool-confirmation-button--trust");
+                buttons.Add(trustLowMed);
             }
 
-            var approve = new Button(() => ResolvePendingToolConfirmation(pending, true)) { text = "Approve" };
-            approve.AddToClassList("tool-confirmation-button");
-            approve.AddToClassList("tool-confirmation-button--approve");
-            buttons.Add(approve);
+            if (IsScopeAllowed(request, ToolConfirmationTrustScope.SessionAll))
+            {
+                var yolo = new Button(() => ResolvePendingToolConfirmationWithTrust(pending, ToolConfirmationTrustScope.SessionAll))
+                {
+                    text = "YOLO (All)"
+                };
+                yolo.tooltip = "本会话内所有工具直通,含删除/推送/编译等破坏性操作,慎用";
+                yolo.AddToClassList("tool-confirmation-button");
+                yolo.AddToClassList("tool-confirmation-button--yolo");
+                buttons.Add(yolo);
+            }
 
             footer.Add(buttons);
             _toolConfirmationPanel.Add(footer);
@@ -269,13 +344,13 @@ namespace AgentCore.Editor.UI
             CompletePendingToolConfirmation(pending, approved, updateUi: true);
         }
 
-        private void ResolvePendingToolConfirmationWithTrust(PendingToolConfirmation pending)
+        /// <summary>
+        /// 用户点击"Trust Low/Med"或"YOLO"时,激活对应 scope 并批准当前请求。
+        /// </summary>
+        private void ResolvePendingToolConfirmationWithTrust(PendingToolConfirmation pending, ToolConfirmationTrustScope scope)
         {
-            if (pending?.Request != null)
-            {
-                _trustedToolConfirmations.Add(BuildTrustKey(pending.Request));
-            }
-
+            _sessionTrustScopes.Add(scope);
+            SaveSessionTrustScopes();
             CompletePendingToolConfirmation(pending, true, updateUi: true);
         }
 
@@ -346,51 +421,64 @@ namespace AgentCore.Editor.UI
                 CompletePendingToolConfirmation(_pendingToolConfirmations.Dequeue(), false, updateUi: false);
             }
 
-            _trustedToolConfirmations.Clear();
+            // 空守卫:_sessionTrustScopes 可能因半初始化处于 null 状态 (v1.6.5 已修复初始化顺序,但保留兜底)
+            _sessionTrustScopes?.Clear();
+            SaveSessionTrustScopes();
             HideToolConfirmationPanel();
         }
 
+        /// <summary>
+        /// 判定当前请求是否已被本会话某个已激活的 scope 直通。
+        /// </summary>
         private bool IsToolConfirmationTrusted(ToolConfirmationRequest request)
         {
-            return request != null && _trustedToolConfirmations.Contains(BuildTrustKey(request));
+            if (request == null || _sessionTrustScopes.Count == 0)
+            {
+                return false;
+            }
+
+            // YOLO: 所有工具直通
+            if (_sessionTrustScopes.Contains(ToolConfirmationTrustScope.SessionAll))
+            {
+                return true;
+            }
+
+            // Low-Med: 仅 ReadOnly/Low/Medium 直通
+            if (_sessionTrustScopes.Contains(ToolConfirmationTrustScope.SessionLowMediumRisk)
+                && IsLowOrMediumRisk(request.Risk.ToolRisk))
+            {
+                return true;
+            }
+
+            return false;
         }
 
-        private static bool CanTrustForSession(ToolConfirmationRequest request)
+        private static bool IsLowOrMediumRisk(ToolRiskLevel level)
+        {
+            return level == ToolRiskLevel.ReadOnly
+                || level == ToolRiskLevel.Low
+                || level == ToolRiskLevel.Medium;
+        }
+
+        /// <summary>
+        /// 判定某个 scope 是否被 request 允许提供 (由 tool 层通过 AllowedTrustScopes 决定)。
+        /// </summary>
+        private static bool IsScopeAllowed(ToolConfirmationRequest request, ToolConfirmationTrustScope scope)
         {
             if (request?.AllowedTrustScopes == null)
             {
                 return false;
             }
 
-            foreach (var scope in request.AllowedTrustScopes)
+            foreach (var s in request.AllowedTrustScopes)
             {
-                if (scope == ToolConfirmationTrustScope.SessionExactTarget)
+                if (s == scope)
                 {
                     return true;
                 }
             }
 
             return false;
-        }
-
-        private static string BuildTrustKey(ToolConfirmationRequest request)
-        {
-            var sb = new StringBuilder();
-            sb.Append(NormalizeTrustPart(request.ToolName));
-            sb.Append('|').Append(NormalizeTrustPart(request.Action));
-            sb.Append('|').Append(request.Risk.ToolRisk);
-            sb.Append('|').Append(request.Risk.PathRisk);
-            sb.Append('|').Append(request.Risk.Capabilities);
-
-            if (request.Targets != null)
-            {
-                foreach (var target in request.Targets)
-                {
-                    sb.Append('|').Append(NormalizeTrustPart(target));
-                }
-            }
-
-            return sb.ToString();
         }
 
         private static string BuildRiskText(ToolConfirmationRequest request)
@@ -407,13 +495,6 @@ namespace AgentCore.Editor.UI
             sb.Append(" · Path: ").Append(risk.PathRisk);
             sb.Append(" · Capabilities: ").Append(risk.Capabilities);
             return sb.ToString();
-        }
-
-        private static string NormalizeTrustPart(string value)
-        {
-            return string.IsNullOrWhiteSpace(value)
-                ? string.Empty
-                : value.Trim().Replace('\\', '/').ToLowerInvariant();
         }
 
         private static string Truncate(string value, int maxLength)

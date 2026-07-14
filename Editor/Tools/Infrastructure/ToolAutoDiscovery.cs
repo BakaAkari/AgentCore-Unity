@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,11 +33,11 @@ namespace AgentCore.Editor.Tools.Infrastructure
             {
                 if (_initialized)
                 {
-                    Debug.Log("[AgentCore] ToolAutoDiscovery: Already initialized, skipping redundant discovery.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ToolAutoDiscovery: Already initialized, skipping redundant discovery.");
                     return;
                 }
 
-                Debug.Log("[AgentCore] ToolAutoDiscovery: Rebuilding tool registry...");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ToolAutoDiscovery: Rebuilding tool registry...");
 
                 ToolRegistry.Instance.Clear();
 
@@ -84,7 +84,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
                 DiscoveredCount = registered;
                 _initialized = true;
 
-                Debug.Log($"[AgentCore] ToolAutoDiscovery: Registered {registered} tools ({errors} errors).");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ToolAutoDiscovery: Registered {registered} tools ({errors} errors).");
             }
         }
 
@@ -118,7 +118,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
             // 注册到 ToolRegistry
             ToolRegistry.Instance.Register(enriched);
 
-            Debug.Log($"[AgentCore] Registered native tool: {attr.Name} [{attr.Category}] risk={attr.RiskLevel}");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Registered native tool: {attr.Name} [{attr.Category}] risk={attr.RiskLevel}");
         }
 
         /// <summary>

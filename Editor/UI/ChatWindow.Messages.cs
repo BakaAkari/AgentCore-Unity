@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
@@ -267,7 +267,7 @@ namespace AgentCore.Editor.UI
             _activeToolCards.Clear();
 
             var history = _agentLoop.ConversationHistory;
-            Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: 历史记录共 {history?.Count ?? 0} 条");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore.UI] RebuildMessageBubbles: 历史记录共 {history?.Count ?? 0} 条");
             ToolCallGroup restoreGroup = null;
 
             for (int i = 0; i < history.Count; i++)
@@ -303,7 +303,7 @@ namespace AgentCore.Editor.UI
                     // 恢复工具调用卡片（统一放入分组容器）
                     if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
                     {
-                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: 恢复 {turn.ToolCalls.Count} 个工具调用 (turn={turn.Id})");
+                        AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] RebuildMessageBubbles: 恢复 {turn.ToolCalls.Count} 个工具调用 (turn={turn.Id})");
                         restoreGroup = new ToolCallGroup();
 
                         foreach (var tc in turn.ToolCalls)
@@ -328,7 +328,7 @@ namespace AgentCore.Editor.UI
                         // 历史工具调用全部完成，通知分组更新统计并折叠
                         restoreGroup.NotifyToolStatusChanged();
                         turnView.SetToolGroup(restoreGroup);
-                        Debug.Log($"[AgentCore.UI] RebuildMessageBubbles: ToolCallGroup 已恢复到 AssistantTurnView");
+                        AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] RebuildMessageBubbles: ToolCallGroup 已恢复到 AssistantTurnView");
 
                         // 助手消息后结束分组
                         restoreGroup = null;

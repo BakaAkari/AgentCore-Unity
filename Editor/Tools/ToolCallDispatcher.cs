@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -301,7 +301,7 @@ namespace AgentCore.Editor.Tools
                         {
                             stopwatch.Stop();
                             var rejectMsg = $"Tool '{toolName}' rejected by user.{BlockedSuffix}";
-                            Debug.Log($"{LogPrefix}{rejectMsg}");
+                            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}{rejectMsg}");
                             return new ToolCallResult(
                                 toolCall,
                                 ToolResult.Fail(rejectMsg, stopwatch.Elapsed.TotalMilliseconds),
@@ -321,7 +321,7 @@ namespace AgentCore.Editor.Tools
                 }
 
                 // 5. 执行工具
-                Debug.Log($"{LogPrefix}Executing tool '{toolName}' (mainThread={tool.Metadata.RequiresMainThread})");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Executing tool '{toolName}' (mainThread={tool.Metadata.RequiresMainThread})");
 
                 ToolResult result;
                 if (tool.Metadata.RequiresMainThread)
@@ -335,7 +335,7 @@ namespace AgentCore.Editor.Tools
 
                 stopwatch.Stop();
 
-                Debug.Log($"{LogPrefix}Tool '{toolName}' completed: {(result.Success ? "OK" : "FAIL")} ({stopwatch.Elapsed.TotalMilliseconds:F1}ms)");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Tool '{toolName}' completed: {(result.Success ? "OK" : "FAIL")} ({stopwatch.Elapsed.TotalMilliseconds:F1}ms)");
 
                 return new ToolCallResult(
                     toolCall,
@@ -348,7 +348,7 @@ namespace AgentCore.Editor.Tools
             catch (OperationCanceledException)
             {
                 stopwatch.Stop();
-                Debug.Log($"{LogPrefix}Tool '{toolName}' was cancelled");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Tool '{toolName}' was cancelled");
                 return new ToolCallResult(
                     toolCall,
                     ToolResult.Fail($"Tool '{toolName}' was cancelled", stopwatch.Elapsed.TotalMilliseconds),
@@ -402,7 +402,7 @@ namespace AgentCore.Editor.Tools
 
             var successCount = CountSuccessful(results);
             var failCount = CountFailed(results);
-            Debug.Log($"{LogPrefix}Batch dispatch completed: {toolCalls.Count} calls, {successCount} success, {failCount} failed");
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Batch dispatch completed: {toolCalls.Count} calls, {successCount} success, {failCount} failed");
 
             return results;
         }
