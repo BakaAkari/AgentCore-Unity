@@ -3,18 +3,15 @@ using UnityEditor;
 namespace AgentCore.Editor.Components.VCS.Config
 {
     /// <summary>
-    /// Stores editor preferences for the optional Version Control component.
+    /// Stores editor preferences and internal constants for the optional Version Control component.
+    /// Only user-facing toggles remain as EditorPrefs; operational defaults are internal constants.
     /// </summary>
     public static class VcsSettings
     {
         private const string AutoRefreshKey = "AgentCore.VCS.AutoRefresh";
         private const string MaxCommitEntriesKey = "AgentCore.VCS.MaxCommitEntries";
-        private const string CheckRemoteStatusOnRefreshKey = "AgentCore.VCS.CheckRemoteStatusOnRefresh";
-        private const string SceneViewUpdateBannerEnabledKey = "AgentCore.VCS.SceneViewUpdateBannerEnabled";
-        private const string PeriodicRemoteStatusCheckEnabledKey = "AgentCore.VCS.PeriodicRemoteStatusCheckEnabled";
-        private const string RemoteStatusCheckIntervalMinutesKey = "AgentCore.VCS.RemoteStatusCheckIntervalMinutes";
-        private const string AutoRefreshCommitListEnabledKey = "AgentCore.VCS.AutoRefreshCommitListEnabled";
-        private const string CommitListRefreshIntervalSecondsKey = "AgentCore.VCS.CommitListRefreshIntervalSeconds";
+
+        // ── User-facing preferences (EditorPrefs) ──
 
         /// <summary>
         /// Gets or sets whether the Version Control panel should refresh when opened.
@@ -34,60 +31,24 @@ namespace AgentCore.Editor.Components.VCS.Config
             set => EditorPrefs.SetInt(MaxCommitEntriesKey, value < 1 ? 1 : value);
         }
 
-        /// <summary>
-        /// Gets or sets whether refresh operations should also check remote update status.
-        /// </summary>
-        public static bool CheckRemoteStatusOnRefresh
-        {
-            get => EditorPrefs.GetBool(CheckRemoteStatusOnRefreshKey, true);
-            set => EditorPrefs.SetBool(CheckRemoteStatusOnRefreshKey, value);
-        }
+        // ── Internal constants (no user-facing settings) ──
 
-        /// <summary>
-        /// Gets or sets whether SceneView should show a top banner when remote updates are available.
-        /// </summary>
-        public static bool SceneViewUpdateBannerEnabled
-        {
-            get => EditorPrefs.GetBool(SceneViewUpdateBannerEnabledKey, true);
-            set => EditorPrefs.SetBool(SceneViewUpdateBannerEnabledKey, value);
-        }
+        /// <summary>Whether refresh operations should also check remote update status.</summary>
+        public const bool CheckRemoteStatusOnRefresh = true;
 
-        /// <summary>
-        /// Gets or sets whether remote status should be checked periodically in the editor.
-        /// </summary>
-        public static bool PeriodicRemoteStatusCheckEnabled
-        {
-            get => EditorPrefs.GetBool(PeriodicRemoteStatusCheckEnabledKey, true);
-            set => EditorPrefs.SetBool(PeriodicRemoteStatusCheckEnabledKey, value);
-        }
+        /// <summary>Whether SceneView should show a top banner when remote updates are available.</summary>
+        public const bool SceneViewUpdateBannerEnabled = true;
 
-        /// <summary>
-        /// Gets or sets the interval in minutes for periodic remote status checks.
-        /// </summary>
-        public static int RemoteStatusCheckIntervalMinutes
-        {
-            get => EditorPrefs.GetInt(RemoteStatusCheckIntervalMinutesKey, 15);
-            set => EditorPrefs.SetInt(RemoteStatusCheckIntervalMinutesKey, value < 1 ? 1 : value);
-        }
+        /// <summary>Whether remote status should be checked periodically in the editor.</summary>
+        public const bool PeriodicRemoteStatusCheckEnabled = true;
 
-        /// <summary>
-        /// Gets or sets whether the commit list should be refreshed automatically in the background.
-        /// When enabled, the panel silently polls for new commits without interrupting the user.
-        /// </summary>
-        public static bool AutoRefreshCommitListEnabled
-        {
-            get => EditorPrefs.GetBool(AutoRefreshCommitListEnabledKey, true);
-            set => EditorPrefs.SetBool(AutoRefreshCommitListEnabledKey, value);
-        }
+        /// <summary>The interval in minutes for periodic remote status checks.</summary>
+        public const int RemoteStatusCheckIntervalMinutes = 15;
 
-        /// <summary>
-        /// Gets or sets the interval in seconds for automatic commit list refresh.
-        /// Default is 30 seconds. Minimum is 10 seconds to avoid excessive VCS queries.
-        /// </summary>
-        public static int CommitListRefreshIntervalSeconds
-        {
-            get => EditorPrefs.GetInt(CommitListRefreshIntervalSecondsKey, 30);
-            set => EditorPrefs.SetInt(CommitListRefreshIntervalSecondsKey, value < 10 ? 10 : value);
-        }
+        /// <summary>Whether the commit list should be refreshed automatically in the background.</summary>
+        public const bool AutoRefreshCommitListEnabled = true;
+
+        /// <summary>The interval in seconds for automatic commit list refresh.</summary>
+        public const int CommitListRefreshIntervalSeconds = 30;
     }
 }

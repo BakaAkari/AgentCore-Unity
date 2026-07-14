@@ -142,7 +142,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 if (command == null)
                     return false;
 
-                var process = new System.Diagnostics.Process
+                using var process = new System.Diagnostics.Process
                 {
                     StartInfo = new System.Diagnostics.ProcessStartInfo
                     {

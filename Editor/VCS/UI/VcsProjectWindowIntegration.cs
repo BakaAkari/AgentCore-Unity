@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -7,85 +6,44 @@ using AgentCore.Editor.Components.VCS.Tools;
 namespace AgentCore.Editor.Components.VCS.UI
 {
     /// <summary>
-    /// Unity Project 窗口的 VCS 集成 - 为目录和文件添加右键菜单
+    /// Unity Project window VCS integration — right-click context menus for common operations.
+    /// Supports Git, SVN, and Perforce via VcsExternalToolLauncher (no hardcoded tool paths).
     /// </summary>
     public static class VcsProjectWindowIntegration
     {
         private const string MenuRoot = "Assets/Version Control/";
         private const int MenuPriority = 2000;
 
-        #region Validation Methods
+        #region Validation
 
-        // 单独的验证方法 - 每个菜单项一个
         [MenuItem(MenuRoot + "Commit", true, MenuPriority)]
-        private static bool ValidateCommit()
-        {
-            return ValidateVcsOperation("Commit");
-        }
+        private static bool ValidateCommit() => IsVcsActive();
 
         [MenuItem(MenuRoot + "Update", true, MenuPriority + 1)]
-        private static bool ValidateUpdate()
-        {
-            return ValidateVcsOperation("Update");
-        }
+        private static bool ValidateUpdate() => IsVcsActive();
 
         [MenuItem(MenuRoot + "Show Log", true, MenuPriority + 2)]
-        private static bool ValidateShowLog()
-        {
-            return ValidateVcsOperation("Show Log");
-        }
+        private static bool ValidateShowLog() => IsVcsActive();
 
         [MenuItem(MenuRoot + "Show Diff", true, MenuPriority + 3)]
-        private static bool ValidateShowDiff()
-        {
-            return ValidateVcsOperation("Show Diff");
-        }
+        private static bool ValidateShowDiff() => IsVcsActive();
 
         [MenuItem(MenuRoot + "Revert Changes", true, MenuPriority + 4)]
-        private static bool ValidateRevertChanges()
-        {
-            return ValidateVcsOperation("Revert Changes");
-        }
+        private static bool ValidateRevertChanges() => IsVcsActive();
 
         [MenuItem(MenuRoot + "Cleanup", true, MenuPriority + 5)]
-        private static bool ValidateCleanup()
-        {
-            return ValidateVcsOperation("Cleanup");
-        }
+        private static bool ValidateCleanup() => IsVcsActive();
 
-        private static bool ValidateVcsOperation(string operation)
+        private static bool IsVcsActive()
         {
-            // 检查是否在 VCS 项目中
-            var vcsType = VcsDetector.DetectVcs();
-            UnityEngine.Debug.Log($"[VCS Menu] ValidateVcsOperation({operation}) - VcsType: {vcsType}");
-            
-            if (vcsType == VcsType.None)
-            {
-                UnityEngine.Debug.Log($"[VCS Menu] {operation}: No VCS detected, menu disabled");
-                return false;
-            }
-
-            // 检查是否选中了资源
             if (Selection.activeObject == null)
-            {
-                UnityEngine.Debug.Log($"[VCS Menu] {operation}: No selection, menu disabled");
                 return false;
-            }
 
-            // 获取选中资源的路径
             var path = AssetDatabase.GetAssetPath(Selection.activeObject);
-            UnityEngine.Debug.Log($"[VCS Menu] {operation}: Selected path: {path}");
-            
             if (string.IsNullOrEmpty(path))
-            {
-                UnityEngine.Debug.Log($"[VCS Menu] {operation}: Empty path, menu disabled");
                 return false;
-            }
 
-            // 目前只支持 SVN
-            var isSupported = vcsType == VcsType.Svn;
-            UnityEngine.Debug.Log($"[VCS Menu] {operation}: Menu {(isSupported ? "enabled" : "disabled")} (SVN only)");
-            return isSupported;
+            return VcsDetector.DetectVcs() != VcsType.None;
         }
 
         #endregion
@@ -93,115 +51,102 @@ namespace AgentCore.Editor.Components.VCS.UI
         #region Menu Items
 
         [MenuItem(MenuRoot + "Commit", false, MenuPriority)]
-        private static void CommitSelected()
-        {
-            var path = GetSelectedAssetPath();
-            if (string.IsNullOrEmpty(path))
-                return;
-
-            var absolutePath = Path.GetFullPath(path);
-            TryStartTortoiseSVN("commit", absolutePath, "Commit");
-        }
+        private static void CommitSelected() => LaunchExternal("commit", "Commit");
 
         [MenuItem(MenuRoot + "Update", false, MenuPriority + 1)]
-        private static void UpdateSelected()
-        {
-            var path = GetSelectedAssetPath();
-            if (string.IsNullOrEmpty(path))
-                return;
-
-            var absolutePath = Path.GetFullPath(path);
-            TryStartTortoiseSVN("update", absolutePath, "Update");
-        }
+        private static void UpdateSelected() => LaunchExternal("update", "Update");
 
         [MenuItem(MenuRoot + "Show Log", false, MenuPriority + 2)]
-        private static void ShowLogSelected()
-        {
-            var path = GetSelectedAssetPath();
-            if (string.IsNullOrEmpty(path))
-                return;
-
-            var absolutePath = Path.GetFullPath(path);
-            TryStartTortoiseSVN("log", absolutePath, "Log");
-        }
+        private static void ShowLogSelected() => LaunchExternal("log", "Log");
 
         [MenuItem(MenuRoot + "Show Diff", false, MenuPriority + 3)]
-        private static void ShowDiffSelected()
-        {
-            var path = GetSelectedAssetPath();
-            if (string.IsNullOrEmpty(path))
-                return;
-
-            var absolutePath = Path.GetFullPath(path);
-            TryStartTortoiseSVN("diff", absolutePath, "Diff");
-        }
+        private static void ShowDiffSelected() => LaunchExternal("diff", "Diff");
 
         [MenuItem(MenuRoot + "Revert Changes", false, MenuPriority + 4)]
-        private static void RevertSelected()
-        {
-            var path = GetSelectedAssetPath();
-            if (string.IsNullOrEmpty(path))
-                return;
-
-            var absolutePath = Path.GetFullPath(path);
-            TryStartTortoiseSVN("revert", absolutePath, "Revert");
-        }
+        private static void RevertSelected() => LaunchExternal("revert", "Revert");
 
         [MenuItem(MenuRoot + "Cleanup", false, MenuPriority + 5)]
-        private static void CleanupSelected()
-        {
-            var path = GetSelectedAssetPath();
-            if (string.IsNullOrEmpty(path))
-                return;
-
-            var absolutePath = Path.GetFullPath(path);
-            TryStartTortoiseSVN("cleanup", absolutePath, "Cleanup");
-        }
+        private static void CleanupSelected() => LaunchExternal("cleanup", "Cleanup");
 
         #endregion
 
-        #region Helper Methods
+        #region Helpers
 
-        private static string GetSelectedAssetPath()
+        /// <summary>
+        /// Launches the appropriate external VCS GUI tool for the detected VCS type.
+        /// Falls back to an inline CLI command when no GUI tool is available.
+        /// </summary>
+        private static void LaunchExternal(string operation, string displayName)
         {
-            if (Selection.activeObject == null)
-                return null;
+            var vcsType = VcsDetector.DetectVcs();
+            if (vcsType == VcsType.None)
+            {
+                Debug.LogWarning($"[VCS] No version control system detected for {displayName}.");
+                return;
+            }
 
-            return AssetDatabase.GetAssetPath(Selection.activeObject);
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var selectedPath = GetSelectedAssetAbsolutePath();
+
+            if (!TryLaunchExternalTool(vcsType, operation, selectedPath, rootPath, out var reason))
+            {
+                Debug.LogWarning($"[VCS] {displayName}: {reason}");
+            }
         }
 
-        private static bool TryStartTortoiseSVN(string command, string path, string displayName)
+        private static string GetSelectedAssetAbsolutePath()
         {
-            var rootPath = VcsDetector.GetVcsRootPath();
-            if (string.IsNullOrEmpty(rootPath))
-            {
-                UnityEngine.Debug.LogWarning($"[VCS] Cannot find VCS root path for {displayName} operation.");
-                return false;
-            }
+            var assetPath = AssetDatabase.GetAssetPath(Selection.activeObject);
+            if (string.IsNullOrEmpty(assetPath))
+                return VcsDetector.GetVcsRootPath();
 
-            var arguments = $"/command:{command} /path:\"{path}\"";
+            return Path.GetFullPath(assetPath);
+        }
 
-            try
+        /// <summary>
+        /// Dispatches to the appropriate external GUI tool based on VCS type.
+        /// Uses VcsExternalToolLauncher for shell-based PATH resolution.
+        /// </summary>
+        private static bool TryLaunchExternalTool(VcsType vcsType, string operation, string targetPath, string rootPath, out string reason)
+        {
+            var (fileName, arguments) = vcsType switch
             {
-                var startInfo = new ProcessStartInfo
+                VcsType.Svn => ("TortoiseProc.exe", $"/command:{operation} /path:\"{targetPath}\""),
+                VcsType.Git => operation switch
                 {
-                    FileName = "TortoiseProc.exe",
-                    Arguments = arguments,
-                    UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WorkingDirectory = rootPath
-                };
+                    "commit" => ("git", $"gui"),
+                    "update" => ("git", $"pull"),
+                    "log" => ("git", $"log --oneline -20"),
+                    "diff" => ("git", $"difftool"),
+                    "revert" => ("git", $"checkout -- \"{targetPath}\""),
+                    "cleanup" => ("git", "gc --auto"),
+                    _ => (null, null)
+                },
+                VcsType.Perforce => operation switch
+                {
+                    "commit" => ("p4v", $"-cmd \"submit\" \"{rootPath}\""),
+                    "update" => ("p4v", $"-cmd \"sync //...\" \"{rootPath}\""),
+                    "log" => ("p4v", $"-cmd \"history\" \"{targetPath}\""),
+                    "diff" => ("p4v", $"-cmd \"diff\" \"{targetPath}\""),
+                    "revert" => ("p4v", $"-cmd \"revert\" \"{targetPath}\""),
+                    "cleanup" => ("p4v", null),
+                    _ => (null, null)
+                },
+                _ => (null, null)
+            };
 
-                Process.Start(startInfo);
-                UnityEngine.Debug.Log($"[VCS] Opened TortoiseSVN {displayName} window for: {path}");
-                return true;
-            }
-            catch (System.Exception ex)
+            if (fileName == null)
             {
-                UnityEngine.Debug.LogError($"[VCS] Failed to start TortoiseSVN {displayName}: {ex.Message}\n" +
-                    $"Make sure TortoiseSVN is installed and TortoiseProc.exe is in your PATH.");
+                reason = $"Operation '{operation}' is not supported for {vcsType}.";
                 return false;
             }
+
+            return VcsExternalToolLauncher.TryStartProcess(
+                fileName,
+                arguments ?? string.Empty,
+                rootPath,
+                $"{vcsType} {operation}",
+                out reason);
         }
 
         #endregion

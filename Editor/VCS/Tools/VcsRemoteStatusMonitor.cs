@@ -195,7 +195,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             EditorApplication.delayCall += () =>
             {
                 StatusChanged?.Invoke(status);
-                SceneView.RepaintAll();
             };
         }
     }

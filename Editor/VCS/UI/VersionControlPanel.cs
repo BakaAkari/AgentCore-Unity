@@ -82,6 +82,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             AddToClassList(UssClassName);
             VcsRemoteStatusMonitor.StatusChanged += UpdateSyncStatusBanner;
             EditorApplication.update += OnEditorUpdatePollCommits;
+            RegisterCallback<DetachFromPanelEvent>(_ => Dispose());
             _isPanelActive = true;
             BuildUI();
             if (VcsSettings.AutoRefreshOnOpen)
