@@ -77,6 +77,7 @@ _archive/**/*.blend
 # (upload as asset on the vX.Y.Z tag), not via git. This keeps the repo lightweight.
 # The extracted 'package/' directory is also a build artifact.
 /*.tgz
+/Archive/
 package/
 package.meta
 
