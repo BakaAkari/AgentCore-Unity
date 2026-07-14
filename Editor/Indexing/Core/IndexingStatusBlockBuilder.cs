@@ -29,7 +29,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
     /// <para>
     /// Per-root live state (Ready / Stale / Failed with counts) requires <c>IIndexStore</c>
     /// access, which is async. LLM must call <c>search_code::status</c> or
-    /// <c>search_code::diagnose</c> to fetch that (pull model, documented in SOUL.md §4).
+    /// <c>search_code::diagnose</c> to fetch that (pull model, documented in SOUL.md §5).
     /// </para>
     /// </summary>
     [InitializeOnLoad]
