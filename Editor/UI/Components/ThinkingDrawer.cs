@@ -1,4 +1,5 @@
 using AgentCore.Editor.Core;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UIElements;
 
