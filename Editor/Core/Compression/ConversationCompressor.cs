@@ -284,6 +284,54 @@ namespace AgentCore.Editor.Core.Compression
             int originalTokens = TokenCounter.EstimateTokens(conversationText.ToString());
             int targetTokens = Math.Max(100, originalTokens / 4); // 压缩到 25%
 
+            // v1.6.5+: 防御 — 压缩请求自身不能超过模型上下文限制
+            // 压缩请求 = system prompt + user(conversationText)
+            // 预留 reasoning 预算 + content 预算后，剩余空间才是 conversationText 的上限
+            var settings = AgentCoreSettings.instance;
+            int modelMaxTokens = ContextWindowManager.GetModelMaxTokens(settings.llmModel);
+            int compressionBudget = modelMaxTokens
+                - settings.GetEffectiveMaxTokens(CompressionLLMClientFactory.CompressionMaxTokens)
+                - TokenCounter.EstimateTokens(CompressionPrompts.ConversationCompressionSystem)
+                - 200; // 安全边际
+
+            if (compressionBudget <= 0)
+            {
+                // 模型上下文太小，无法安全压缩
+                AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                    $"[AgentCore] Compression budget insufficient (modelMax={modelMaxTokens}, " +
+                    $"effective={settings.GetEffectiveMaxTokens(CompressionLLMClientFactory.CompressionMaxTokens)}). " +
+                    "Skipping LLM compression, falling back to TrimToFit.");
+                return null;
+            }
+
+            int conversationTextTokens = TokenCounter.EstimateTokens(conversationText.ToString());
+            if (conversationTextTokens > compressionBudget)
+            {
+                // 压缩文本本身超限，截断到预算的 80%（留 20% 给 system prompt 和格式开销）
+                int charBudget = (int)(compressionBudget * 0.8 * 4); // 1 token ≈ 4 chars
+                if (conversationText.Length > charBudget)
+                {
+                    int headLen = (int)(charBudget * 0.7);
+                    int tailLen = (int)(charBudget * 0.2);
+                    string head = conversationText.ToString(0, headLen);
+                    string tail = conversationText.ToString(conversationText.Length - tailLen, tailLen);
+                    int omittedChars = conversationText.Length - headLen - tailLen;
+
+                    AgentCore.Editor.Utils.AgentCoreLog.Info(
+                        $"[AgentCore] Compression text ({conversationTextTokens} tokens) exceeds budget " +
+                        $"({compressionBudget} tokens), truncating to {charBudget} chars.");
+
+                    conversationText.Clear();
+                    conversationText.Append(head);
+                    conversationText.Append($"\n\n... [{omittedChars} chars omitted for compression] ...\n\n");
+                    conversationText.Append(tail);
+
+                    // 重新计算目标
+                    originalTokens = TokenCounter.EstimateTokens(conversationText.ToString());
+                    targetTokens = Math.Max(100, originalTokens / 4);
+                }
+            }
+
             // 选择客户端（v1.6.5+: 统一管道，compressionClient 和 mainClient 都是 OpenAICompatibleClient）
             var client = _compressionClient ?? _mainClient;
 
