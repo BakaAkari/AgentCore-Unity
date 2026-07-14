@@ -73,14 +73,9 @@ namespace AgentCore.Editor.Core
 
                     var result = await client.ChatCompletionStreamAsync(messages, onChunk, tools, ct);
 
-                    // v1.6.5+: 空内容检测 — GLM-5.2 reasoning 吃光 maxTokens 时 content 为空
-                    // 不直接返回空内容，而是抛异常触发重试
-                    if (result != null && string.IsNullOrEmpty(result.Content))
-                    {
-                        throw new InvalidOperationException(
-                            "LLM returned empty content (reasoning may have consumed the entire max_tokens budget).");
-                    }
-
+                    // v1.6.5+: 流式路径不做空内容重试
+                    // 原因：reasoning chunks 已通过 onChunk 发送到 UI，重试会导致重复输出
+                    // 空内容检测由 CallLLMStreamAsync 返回后处理
                     LastError = null;
                     return result;
                 }

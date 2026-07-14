@@ -101,12 +101,14 @@ namespace AgentCore.Editor.Core
             }
 
             // v1.6.5+: 空内容检测 — GLM-5.2 reasoning 吃光 maxTokens 时 content 为空
-            // FallbackRouter 已在流式路径中重试，但如果重试后仍为空，需要抛异常让上层知道
+            // 流式路径不能在 FallbackRouter 中重试（reasoning chunks 已发送到 UI）
+            // 这里检测空内容并记录警告，上层 HandleFinalResponse 会显示 fallback 消息
             if (assistantMessage != null && string.IsNullOrEmpty(assistantMessage.Content))
             {
                 AgentCore.Editor.Utils.AgentCoreLog.Warning(
-                    "[AgentCore] LLM returned empty content after all retries. " +
-                    "This typically means reasoning consumed the entire max_tokens budget.");
+                    "[AgentCore] LLM returned empty content. " +
+                    "Reasoning may have consumed the entire max_tokens budget. " +
+                    "Consider increasing maxTokens or reducing reasoningMaxTokens.");
             }
 
             return assistantMessage;
