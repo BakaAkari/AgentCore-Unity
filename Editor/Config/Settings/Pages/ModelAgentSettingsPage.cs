@@ -104,9 +104,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     if (!string.IsNullOrEmpty(probeModel))
                         EditorGUILayout.LabelField("Detected Model", probeModel);
 
-                    // 显示自适应计算结果
+                    // 显示自适应计算结果 — 显示 effective 值 (content + reasoning)
                     var s = AgentCoreSettings.instance;
-                    EditorGUILayout.LabelField("Max Output Tokens", $"{s.maxTokens:N0}");
+                    EditorGUILayout.LabelField("Max Output Tokens", $"{s.GetEffectiveMaxTokens():N0}");
+                    if (s.enableReasoningOutput && s.reasoningMaxTokens > 0)
+                    {
+                        EditorGUILayout.LabelField("  Content", $"{s.maxTokens:N0}", EditorStyles.miniLabel);
+                        EditorGUILayout.LabelField("  Reasoning", $"{s.reasoningMaxTokens:N0}", EditorStyles.miniLabel);
+                    }
                     EditorGUILayout.LabelField("Reserve Tokens", $"{s.reserveResponseTokens:N0}");
                 }
                 else if (probeReady)
@@ -124,8 +129,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUILayout.Space(8);
 
             // ADR-17: Removed Agent Runtime and Self Correction cards
-            //   - Max Tool Rounds / Token Budget / Fallback Routing → internal constants (maxToolCallRounds=200, maxTokenBudget=0, fallbackRoutingEnabled=true)
-            //   - Auto Compile Check / Auto Console Capture / Max Consecutive Errors → enabled by default, users don't need to manage
+            //   - Max Tool Rounds / Token Budget → internal constants (maxToolCallRounds=200, maxTokenBudget=0)
+            //   - Self-correction thresholds → internal constants with optimal defaults
 
             // ── Self-Challenge ──
             // v1.5.0-alpha minimalism: one toggle controls the whole dual-node mechanism; internal policies use best defaults.

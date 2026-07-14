@@ -175,20 +175,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     context.Ui.DrawStatusLabel($"Refresh failed: {_refreshError}", SettingsStatusLevel.Error, miniLabel: true);
                 }
 
-                EditorGUILayout.Space(4);
-
-                // Auto-detect toggle
-                var settings = context.Settings;
-                EditorGUI.BeginChangeCheck();
-                var autoDetect = EditorGUILayout.Toggle(
-                    new GUIContent("Auto-Detect on Startup",
-                        "Automatically resolve workspace context when the Editor starts."),
-                    settings.workspaceAutoDetectEnabled);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    settings.workspaceAutoDetectEnabled = autoDetect;
-                    settings.SaveSettings();
-                }
             });
         }
 

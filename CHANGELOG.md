@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-14
+
+### Changed — 统一 LLM 管道 + Settings 极简化重构
+
+#### 统一 LLM 调用管道 (6588bb1)
+- 删除 `CompressionLLMClient`，所有 LLM 调用（主循环/压缩/SelfChallenge）统一走 `OpenAICompatibleClient` → `RequestEnrichment`
+- 消除管道碎片化，减少维护面
+
+#### GLM-5.2 Reasoning 适配 (e37f5bc)
+- 修复 GLM-5.2 native reasoning 吃满 `maxTokens` 导致内容为空
+- `GetEffectiveMaxTokens()` = `maxTokens` + `reasoningMaxTokens`，reasoning 预算独立计算
+- `enableReasoningOutput` + `reasoningEffort="low"` + `reasoningMaxTokens=2048` 作为默认值
+
+#### Settings v20: 死字段清理
+- 删除 12 个零引用的 `[HideInInspector]` 字段：`streamingEnabled`、`showToolCallDetails`、`fallbackRoutingEnabled`、`autoCompileCheck`、`autoConsoleCapture`、`maxConsecutiveErrors`、`workspaceAutoDetectEnabled`、`workspaceConfigVersion`、`vcsDefaultEnabled`、`useSeparateCompressionLLM`、`compressionLLMEndpoint`、`compressionLLMModel`
+- 删除 `SecureKeyStorage` 中 Compression LLM API Key 的 4 个方法/常量
+- `disabledTools` 默认值从 `{"execute_code"}` 改为空列表（指向不存在的工具）
+- Settings version 19→20 + migration block
+- 净删 75 行代码
+
+#### UI 修复
+- Workspace 页面删除 "Auto-Detect on Startup" toggle（用户可见但不控制行为的假开关）
+- Model Info 卡片显示 `GetEffectiveMaxTokens()` 实际值而非 `maxTokens`，reasoning 启用时分两行显示 Content/Reasoning 明细
+- Dashboard "Clear Secure Keys" 对话框文案移除已删功能的 "Compression LLM" 提及
+
+#### 性能优化 (5045adc, 451fce9, b9b17a0)
+- 流式文本窗口 StringBuilder 优化长输出
+- ConcurrentQueue 批量主线程回调 + 滚动节流
+- 帧节流流式 token UI 更新，消除逐 token relayout
+
+#### UI 修复 (0e91cbd, d34d82b, 117935b)
+- 气泡溢出修复：文本/chips 超出边界 + 长输出后空白
+- 文件变更面板默认折叠 + 状态行更突出
+- ThinkingDrawer 缺失 `using System.Text` 修复
+
+#### 其他
+- `4038f35` 防护压缩请求超出 context window
+- `a940e52` 移除流式空内容重试，避免重复 reasoning 输出
+- `1550493` SOUL.md 重构：补充一致性与诚实原则章节
+
 ## [1.6.5] - 2026-07-13
 
 ### Added — 日志分级基础设施 (LogLevel + AgentCoreLog)

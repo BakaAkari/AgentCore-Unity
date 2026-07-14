@@ -12,7 +12,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
     /// Context &amp; Memory settings page — context sources, budget, compression, memory, and knowledge base.
     /// </summary>
     /// <remarks>
-    /// v1.4.2: Memory Service, Knowledge Base and Separate Compression LLM all render as
+    /// v1.4.2: Memory Service and Knowledge Base render as
     /// unified "service cards" (see <see cref="AgentCoreSettingsUi.DrawServiceCard"/>).
     /// When the service is disabled, only the title + status badge + Enable toggle are shown;
     /// configuration fields (endpoint, API key, auto-memory, model name) render only after
@@ -60,7 +60,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EnsureApiKeyDisplays(context);
 
             // ADR-17 极简: 只保留 Compression 总开关 + PROJECT.md/SOUL.ext.md 文件行 + 可选服务
-            // 已删除: Context Sources (Bootstrap Files/Auto Project Context) / Context Budget / Compression 内部参数 / Compression LLM
+            // 已删除: Context Sources (Bootstrap Files/Auto Project Context) / Context Budget / Compression 内部参数
             DrawProjectFilesCard(context);
             EditorGUILayout.Space(8);
 
@@ -117,8 +117,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     }
                 });
         }
-
-        // ADR-17 极简: DrawCompressionLlmCard 已删除 (useSeparateCompressionLLM 内部化, 极小众功能)
 
         private static void DrawMemoryServiceCard(AgentCoreSettingsContext context)
         {

@@ -47,8 +47,7 @@ namespace AgentCore.Editor.Config
 
         // --- 版本迁移 ---
         [SerializeField] private int settingsVersion = 0;
-        [SerializeField] private bool vcsDefaultEnabled = false;
-        private const int CurrentVersion = 19;
+        private const int CurrentVersion = 20;
 
         // ═══════════════════════════════════════════════════════════════
         // 用户 UI 可见字段 (共 ~10 个, 极简哲学: 只保留必要)
@@ -113,9 +112,6 @@ namespace AgentCore.Editor.Config
         [HideInInspector]
         public int maxTokenBudget = 0;
 
-        [HideInInspector]
-        public bool fallbackRoutingEnabled = true;
-
         // --- Context Budget (原 Context & Memory 页面 Context Budget 卡片) ---
         [HideInInspector]
         public int maxContextTokens = 0;
@@ -130,15 +126,6 @@ namespace AgentCore.Editor.Config
         private const int ReserveMax = 65536;
 
         // --- Self-Correction (原 Self Correction 卡片) ---
-        [HideInInspector]
-        public bool autoCompileCheck = true;
-
-        [HideInInspector]
-        public bool autoConsoleCapture = true;
-
-        [HideInInspector]
-        public int maxConsecutiveErrors = 5;
-
         [HideInInspector]
         public int toolFailWarningThreshold = 3;
 
@@ -174,21 +161,12 @@ namespace AgentCore.Editor.Config
         public List<string> disabledToolCategories = new List<string>();
 
         [HideInInspector]
-        public List<string> disabledTools = new List<string> { "execute_code" };
+        public List<string> disabledTools = new List<string>();
 
         [HideInInspector]
         public bool toolScopingEnabled = true;
 
         // --- 上下文压缩内部参数 (原 Compression 卡片) ---
-        [HideInInspector]
-        public bool useSeparateCompressionLLM = false;
-
-        [HideInInspector]
-        public string compressionLLMEndpoint = "";
-
-        [HideInInspector]
-        public string compressionLLMModel = "claude-3-haiku-20240307";
-
         [HideInInspector]
         public int toolResultCompressionThreshold = 2000;
 
@@ -198,13 +176,6 @@ namespace AgentCore.Editor.Config
         [HideInInspector]
         [Range(0.3f, 0.95f)]
         public float conversationCompressionTrigger = 0.7f;
-
-        // --- Workspace (auto-detect 保持内部化, override 字段已删除) ---
-        [HideInInspector]
-        public bool workspaceAutoDetectEnabled = true;
-
-        [HideInInspector]
-        public int workspaceConfigVersion = 0;
 
         // --- Request Enrichment ---
         [HideInInspector]
@@ -218,13 +189,6 @@ namespace AgentCore.Editor.Config
 
         [HideInInspector]
         public string extraRequestBody = "";
-
-        // --- UI 偏好 (原 Chat UI 卡片) ---
-        [HideInInspector]
-        public bool streamingEnabled = true;
-
-        [HideInInspector]
-        public bool showToolCallDetails = true;
 
         // ═══════════════════════════════════════════════════════════════
         // 已删除的字段 (v18 迁移会 discard 旧数据):
@@ -327,7 +291,7 @@ namespace AgentCore.Editor.Config
                 EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(this, retry: true);
             }
             if (settingsVersion < 14 && maxToolCallRounds <= 50) maxToolCallRounds = 200;
-            if (settingsVersion < 16 && !vcsDefaultEnabled)
+            if (settingsVersion < 16)
             {
                 EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(this, retry: true);
             }
@@ -346,6 +310,12 @@ namespace AgentCore.Editor.Config
                 reasoningEffort = "low";
                 reasoningMaxTokens = 2048;
                 UnityEngine.Debug.Log("[AgentCore] Settings migrated v18→v19: reasoning optimization (maxTokens=8192, reasoningEffort=low, reasoningMaxTokens=2048)");
+            }
+
+            // v20: 清理死字段 — 删除 12 个无引用的 HideInInspector 字段 + Compression LLM 残留
+            if (settingsVersion < 20)
+            {
+                UnityEngine.Debug.Log("[AgentCore] Settings migrated v19→v20: dead field cleanup (12 fields removed, disabledTools default cleared)");
             }
 
             settingsVersion = CurrentVersion;
@@ -370,7 +340,6 @@ namespace AgentCore.Editor.Config
                     OptionalComponentManager.SetVcsEnabled(true);
                     UnityEngine.Debug.Log("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
                 }
-                settings.vcsDefaultEnabled = true;
                 settings.SafeSave(true);
             }
             catch (Exception ex)
@@ -443,12 +412,8 @@ namespace AgentCore.Editor.Config
             // 隐藏字段: 恢复最优默认值
             maxToolCallRounds = 200;
             maxTokenBudget = 0;
-            fallbackRoutingEnabled = true;
             maxContextTokens = 0;
             reserveResponseTokens = 32000;
-            autoCompileCheck = true;
-            autoConsoleCapture = true;
-            maxConsecutiveErrors = 5;
             toolFailWarningThreshold = 3;
             toolFailBlockThreshold = 6;
             allToolsFailBlockThreshold = 4;
@@ -458,22 +423,15 @@ namespace AgentCore.Editor.Config
             autoMemoryEnabled = false;
             autoMemoryMinTurns = 3;
             disabledToolCategories = new List<string>();
-            disabledTools = new List<string> { "execute_code" };
+            disabledTools = new List<string>();
             toolScopingEnabled = true;
-            useSeparateCompressionLLM = false;
-            compressionLLMEndpoint = "";
-            compressionLLMModel = "claude-3-haiku-20240307";
             toolResultCompressionThreshold = 2000;
             toolResultTargetTokens = 500;
             conversationCompressionTrigger = 0.7f;
-            workspaceAutoDetectEnabled = true;
-            workspaceConfigVersion = 0;
             enableReasoningOutput = true;  // GLM-5.2 适配:逃逸 Self-Challenge 后依赖 native reasoning
             reasoningEffort = "low";
             reasoningMaxTokens = 2048;
             extraRequestBody = "";
-            streamingEnabled = true;
-            showToolCallDetails = true;
             settingsVersion = CurrentVersion;
             SafeSave(true);
         }

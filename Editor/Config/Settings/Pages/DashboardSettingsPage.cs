@@ -227,7 +227,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     if (EditorUtility.DisplayDialog(
                         "Clear Secure Keys",
-                        "This will clear all stored API keys (LLM, mem0, LightRAG, Compression LLM).\n\nThis action cannot be undone.",
+                        "This will clear all stored API keys (LLM, mem0, LightRAG).\n\nThis action cannot be undone.",
                         "Clear",
                         "Cancel"))
                     {

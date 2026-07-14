@@ -9,7 +9,6 @@ namespace AgentCore.Editor.Config
     public static class SecureKeyStorage
     {
         private const string LLM_API_KEY = "AgentCore_LLM_ApiKey";
-        private const string COMPRESSION_LLM_API_KEY = "AgentCore_CompressionLLM_ApiKey";
         private const string MEM0_API_KEY = "AgentCore_Mem0_ApiKey";
         private const string LIGHTRAG_API_KEY = "AgentCore_LightRAG_ApiKey";
 
@@ -32,26 +31,6 @@ namespace AgentCore.Editor.Config
         /// </summary>
         public static bool HasLLMApiKey()
             => !string.IsNullOrEmpty(GetLLMApiKey());
-
-        // --- Compression LLM API Key ---
-
-        /// <summary>
-        /// 设置压缩 LLM API Key。
-        /// </summary>
-        public static void SetCompressionLLMApiKey(string key)
-            => EditorPrefs.SetString(COMPRESSION_LLM_API_KEY, key ?? "");
-
-        /// <summary>
-        /// 获取压缩 LLM API Key。
-        /// </summary>
-        public static string GetCompressionLLMApiKey()
-            => EditorPrefs.GetString(COMPRESSION_LLM_API_KEY, "");
-
-        /// <summary>
-        /// 检查是否已设置压缩 LLM API Key。
-        /// </summary>
-        public static bool HasCompressionLLMApiKey()
-            => !string.IsNullOrEmpty(GetCompressionLLMApiKey());
 
         // --- mem0 API Key（Phase 3 使用）---
 
@@ -99,7 +78,6 @@ namespace AgentCore.Editor.Config
         public static void ClearAll()
         {
             EditorPrefs.DeleteKey(LLM_API_KEY);
-            EditorPrefs.DeleteKey(COMPRESSION_LLM_API_KEY);
             EditorPrefs.DeleteKey(MEM0_API_KEY);
             EditorPrefs.DeleteKey(LIGHTRAG_API_KEY);
         }

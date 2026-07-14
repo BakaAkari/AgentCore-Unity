@@ -91,7 +91,7 @@ namespace AgentCore.Editor.Config.Settings
 
         // ─────────────────────────────────────────────────────────────────────
         // Service Card — unified pattern for optional cloud services
-        // (mem0 / LightRAG / Compression LLM).
+        // (mem0 / LightRAG).
         //
         // Layout invariants:
         //   1. Header row always visible: [Bold Title] [Status Badge]
