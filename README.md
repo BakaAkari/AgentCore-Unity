@@ -12,7 +12,7 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
 - **Code Scale**: 288 个 .cs 文件，约 97K 行代码，51 个原生工具
-- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge alpha 上线；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight；后续重点为 Phase 8 MCP Server + 产品化分发
+- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge alpha 上线；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化；后续重点为 Phase 8 MCP Server + 产品化分发
 
 ## 核心能力
 
@@ -152,7 +152,7 @@ com.agentcore.unity/
 - Phase 7 §3.2：Chat UI / ThinkingDrawer reasoning 可观测性
 - v1.2.1：Request Enrichment 修复 reasoning 触发
 - Phase 9 alpha：Self-Challenge 双节点 prompt 层幻觉护栏 + ADR-17 极简哲学
-- v1.6.x：Context Ingest（Ctrl+Shift+X）、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、ThinkingDrawer 独立展开按钮、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配
+- v1.6.x：Context Ingest（Ctrl+Shift+X）、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、ThinkingDrawer 独立展开按钮、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配、自适应 LLM 配置（ModelCapabilityProbe）、统一 LLM 管道（消灭 CompressionLLMClient）、气泡溢出修复（flex-shrink + overflow + 双向 height sync）、流式 UI 性能优化（三层帧节流 + ConcurrentQueue + 4000 字符窗口）
 
 后续重点：
 

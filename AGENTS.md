@@ -550,6 +550,37 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - 6 个 Collector 位于 `Editor/UI/Context/`，各自负责特定上下文源
 - 注入内容追加到 ChatWindow 输入框（不清空已有输入）
 
+#### 自适应 LLM 配置
+
+- `ModelCapabilityProbe`：启动时异步调用 `/v1/models` 探测 `max_model_len`，内存缓存不持久化，失败 fallback 到 `ContextWindowManager.ModelPrefixMap`
+- `ApplyAdaptiveDefaults()`：`reserveResponseTokens = max_model_len × 4%`（clamp 4096~65536）；`maxTokens clamped to reserveResponseTokens`
+- `GetEffectiveMaxTokens(contentMaxTokens?)`：reasoning 启用时返回 `maxTokens + reasoningMaxTokens`；压缩器可传 `contentMaxTokens` 获得独立 content 预算
+- `temperature` / `maxTokens` 标记 `[HideInInspector]`，Settings 面板 Generation 卡片替换为 Model Info 卡片
+
+#### 统一 LLM 管道
+
+- 所有 LLM 调用（主循环、对话压缩、工具结果压缩、SelfChallenge、AutoMemory）走同一条管道：`OpenAICompatibleClient` → `RequestEnrichment` → `GetEffectiveMaxTokens`
+- `CompressionLLMClient` 已删除，`CompressionLLMClientFactory` 返回 `OpenAICompatibleClient` 实例
+- 压缩器传 `contentMaxTokens: 512` 获得独立 content 预算（不与主循环共享 maxTokens）
+- `FallbackRouter`：非流式路径检测空内容并重试；流式路径不重试（reasoning chunks 已发送到 UI，重试会重复输出）
+- 压缩请求预算守卫：`budget = modelMaxTokens - effectiveMaxTokens(512) - systemPromptTokens - 200`；预算 ≤0 跳过压缩；文本超预算截断到 80%
+
+#### 流式 UI 性能优化
+
+流式输出时每个 token 都会触发 UI 更新，高频 token（~50/sec）会淹没主线程。三层帧节流：
+
+1. **AsyncHelper 批处理**：`EditorApplication.delayCall`（每 token 一个闭包）替换为 `ConcurrentQueue<Action>` + `EditorApplication.update` 每帧 drain（max 256/frame），零闭包分配
+2. **StreamingTextElement / ThinkingDrawer 16ms flush**：token 累积到 `StringBuilder`，每帧只跑一次 `FilterStreaming + Label.text` 赋值，不每 token 触发 UI relayout
+3. **流式文本窗口**：流式阶段 `Label.text` 只显示尾部 4000 字符（`...\n` 前缀），避免超长文本 O(n) layout；最终化时 `SetFinalText` 切到 block 模式渲染全量内容
+4. **StringBuilder 替代字符串拼接**：`MessageBubble._lastFullContent` 从 `string +=` 改为 `StringBuilder.Append`
+5. **ScrollToBottom 节流**：从 per-token 路径移除，改为 `ThrottledScrollToBottom`（flag-gated 100ms schedule）
+
+#### 气泡溢出修复
+
+- `#content-label`：`flex-shrink:0` → `flex-shrink:1 + overflow:hidden`，长连续字符不再溢出气泡背景
+- `MessageReferenceBar` chip：`flex-shrink:0 + NoWrap` → `flex-shrink:1 + maxWidth:100% + whiteSpace:Normal + textOverflow:Ellipsis`，长文件名自动截断
+- `SyncBubbleContentHeight`：从单向（只增不减）改为双向（`Mathf.Abs(diff) > 1`），block 模式重新排版后 minHeight 跟随实际高度收缩
+
 ---
 
 ## 7. 编码硬规则

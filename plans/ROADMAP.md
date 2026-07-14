@@ -1,7 +1,7 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
 > **版本**: v1.6.5 | **更新日期**: 2026-07-14 | **状态**:
-> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配）
+> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -41,13 +41,13 @@
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.6.5 (2026-07-14) — v1.6.x 系列产品化体验冲刺：Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配 |
+| **版本** | 1.6.5 (2026-07-14) — v1.6.x 系列产品化体验冲刺：Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化 |
 | **代码规模** | 288 个 .cs 文件，约 97K 行代码，51 个原生工具 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
 | **Workspace Config** | `manage_workspace_config` 工具 — Agent 可在 Chat 中读写 PROJECT.md / SOUL.ext.md |
 | **UI 框架** | UI Toolkit 动态 Hub 架构；Chat 使用 AssistantTurnView 多轮布局（每轮独立 ThinkingDrawer → ToolCallGroup → 分隔线 → 下一轮 → SelfChallengeCard → MessageBubble）；Project Settings 使用 Dashboard + 5 Pages 顶部 Tab 导航；Tools & Extensions 页采用 Per-Component 自包含卡片布局 |
-| **Chat UX** | PendingIndicator 占位气泡 + 折叠面板活跃度指示器（ThinkingDrawer 预览 + ToolCallGroup running 工具名 + active-pulse）+ 流式上翻 + "跳到最新"浮动按钮 + 输入框滚动 + MessageReferenceBar chip 引用栏 + SSE yield 时间预算优化 |
+| **Chat UX** | PendingIndicator 占位气泡 + 折叠面板活跃度指示器（ThinkingDrawer 预览 + ToolCallGroup running 工具名 + active-pulse）+ 流式上翻 + "跳到最新"浮动按钮 + 输入框滚动 + MessageReferenceBar chip 引用栏（flex-shrink + ellipsis 防溢出）+ SSE yield 时间预算优化 + 气泡溢出修复（content-label overflow:hidden + 双向 SyncBubbleContentHeight）+ 流式 UI 帧节流（16ms flush + ConcurrentQueue 批处理 + 4000 字符窗口） |
 | **Context Ingest** | 全局快捷键 Ctrl+Shift+X 通用查询入口；6 个 Collector（Selection/Asset/Console/Scene/FocusedWindow/MouseTracker）；路由优先级：Console → Project → Hierarchy/Scene → 任意 EditorWindow；分级采样 + 15000 字符截断 |
 | **工具确认** | YOLO 模式 3 按钮布局（Deny / Trust Low-Med / YOLO All）；SessionState 持久化跨 Domain Reload；PlayModePreflight Play Mode 禁止 write 类工具 |
 | **日志分级** | AgentCoreLog 5 档（Silent/Error/Warning/Info/Debug）；默认 Info 级，Debug 级 30 处热点被跳过；Settings 中可热切换 |
@@ -55,8 +55,9 @@
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪 |
 | **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；后台静默 + 增量索引；per-root 状态层次化；**标记为实验性，需手动在 Extensions 设置中开启** |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
-| **上下文参数** | reserveResponseTokens=32K、ContextWindowManager GLM-5.2 映射=200K（匹配部署版 max_model_len）；对话压缩 70% 阈值；工具结果压缩 >2000 tokens 触发 |
-| **Reasoning 参数** | maxTokens=8192, reasoningMaxTokens=2048, reasoningEffort="low"（GLM-5.2 适配）；reasoning native 不可关闭但可通过参数限制思考量 |
+| **上下文参数** | reserveResponseTokens 由 ApplyAdaptiveDefaults 动态计算（max_model_len × 4%, clamp 4096~65536）；ContextWindowManager GLM-5.2 映射=200K（ModelCapabilityProbe 启动时探测）；对话压缩 70% 阈值；工具结果压缩 >2000 tokens 触发；压缩请求预算守卫（budget = modelMax - effectiveMax - systemPrompt - 200） |
+| **LLM 管道** | 统一管道：所有 LLM 调用走 OpenAICompatibleClient → RequestEnrichment → GetEffectiveMaxTokens(contentMaxTokens?)；CompressionLLMClient 已删除；压缩器传 contentMaxTokens:512 独立预算；FallbackRouter 非流式空内容重试，流式 warning-only |
+| **Reasoning 参数** | maxTokens=8192(HiddenInInspector), reasoningMaxTokens=2048, reasoningEffort="low"（GLM-5.2 适配）；reasoning native 不可关闭；GetEffectiveMaxTokens() = maxTokens + reasoningMaxTokens |
 | **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
 | **Reasoning 可观测性** | ThinkingDrawer 默认折叠 + 尾部 60 字符预览；多轮独立思考窗口；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages`；Request Enrichment 自动注入 `reasoning` 参数 |
 | **测试覆盖** | 5 个测试文件 / 90+ test cases + 用户使用过程的实战验收（见 ADR-11） |
@@ -356,6 +357,10 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 | Z.11 | v1.6.5+ | **多轮思考窗口** | AssistantTurnView 重写为多轮架构，每轮独立 ThinkingDrawer + 分隔线；HandleLoopRoundStarted 第 2 轮起调 BeginNewRound | [x] |
 | Z.12 | v1.6.5+ | **文件删除视觉反馈** | FileChangeSummaryPanel 删除文件路径变红 + "(已删除)" 后缀；PingFileInProject 不再 warn | [x] |
 | Z.13 | v1.6.5+ | **GLM-5.2 reasoning 参数适配** | AgentCoreSettings: maxTokens 65536→8192, reasoningEffort→"low", reasoningMaxTokens 0→2048; settingsVersion 18→19 迁移 | [x] |
+| Z.14 | v1.6.5+ | **自适应 LLM 配置** | ModelCapabilityProbe 启动时探测 /v1/models max_model_len；ApplyAdaptiveDefaults 动态计算 reserveResponseTokens；temperature/maxTokens 标记 HideInInspector；Settings 面板 Generation 卡片替换为 Model Info | [x] |
+| Z.15 | v1.6.5+ | **统一 LLM 管道** | 消灭 CompressionLLMClient 割裂管道，所有 LLM 调用走 OpenAICompatibleClient → RequestEnrichment → GetEffectiveMaxTokens；压缩器传 contentMaxTokens:512 独立预算 | [x] |
+| Z.16 | v1.6.5+ | **气泡溢出修复** | content-label flex-shrink:0→1 + overflow:hidden；MessageReferenceBar chip flex-shrink:0→1 + textOverflow:Ellipsis；SyncBubbleContentHeight 单向→双向 | [x] |
+| Z.17 | v1.6.5+ | **流式 UI 性能优化** | 三层帧节流：StreamingTextElement/ThinkingDrawer 16ms flush + AsyncHelper ConcurrentQueue 批处理替代 delayCall + 流式文本窗口 4000 字符 + StringBuilder 替代字符串拼接 + ScrollToBottom 100ms flag-gated | [x] |
 
 ---
 
