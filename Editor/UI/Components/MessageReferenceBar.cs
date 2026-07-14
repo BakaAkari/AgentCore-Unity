@@ -74,8 +74,9 @@ namespace AgentCore.Editor.UI.Components
             // 尺寸：足够点击 + 显示文本，避免被 Unity Button 默认 min-height 挤压成一条
             chip.style.minHeight = 22;
             chip.style.height = 22;
-            chip.style.flexShrink = 0;
+            chip.style.flexShrink = 1;
             chip.style.flexGrow = 0;
+            chip.style.maxWidth = new Length(100, LengthUnit.Percent);
 
             // 内边距 + margin
             chip.style.marginRight = 6;
@@ -91,7 +92,9 @@ namespace AgentCore.Editor.UI.Components
             chip.style.fontSize = 11;
             chip.style.color = ChipText;
             chip.style.unityTextAlign = TextAnchor.MiddleCenter;
-            chip.style.whiteSpace = WhiteSpace.NoWrap;
+            chip.style.whiteSpace = WhiteSpace.Normal;
+            chip.style.overflow = Overflow.Hidden;
+            chip.style.textOverflow = TextOverflow.Ellipsis;
 
             // 背景 + 圆角
             chip.style.backgroundColor = ChipBg;

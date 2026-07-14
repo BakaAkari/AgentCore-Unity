@@ -288,9 +288,17 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
-        /// v1.4.0 — Read the streaming element's resolved height and, if larger than the
-        /// current bubble-content height, forcibly apply it as an inline style. This is
-        /// the workaround for Unity 2022.3's layout cache issue.
+        /// v1.6.5 — Read the streaming element's resolved height and sync it to
+        /// bubble-content's minHeight. Bidirectional: grows AND shrinks.
+        /// <para>
+        /// v1.4.0 only grew (streamHeight > current → set minHeight). When block mode
+        /// re-rendered content more compactly than the streaming peak, minHeight stayed
+        /// stuck at the peak → large empty space at bubble bottom.
+        /// </para>
+        /// <para>
+        /// Now: always set minHeight to match streamHeight (clear previous inline value
+        /// when streamHeight is smaller). Uses a small tolerance to avoid feedback loops.
+        /// </para>
         /// </summary>
         private void SyncBubbleContentHeight()
         {
@@ -301,8 +309,8 @@ namespace AgentCore.Editor.UI.Components
 
             float currentBubbleContentHeight = _bubbleContent.resolvedStyle.height;
 
-            // Only apply if there's a discrepancy — otherwise it's a no-op.
-            if (streamHeight > currentBubbleContentHeight + 1f)
+            float diff = Mathf.Abs(streamHeight - currentBubbleContentHeight);
+            if (diff > 1f)
             {
                 _bubbleContent.style.minHeight = streamHeight;
                 _bubbleContent.MarkDirtyRepaint();

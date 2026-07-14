@@ -161,10 +161,12 @@
     font-size: 13px;
     white-space: normal;
     -unity-text-align: upper-left;
-    /* v1.4.0 fix: 移除 overflow: hidden — 它会阻止 Label 请求高度增长，
-       导致长文本被裁剪，用户后续消息气泡叠在 LLM 溢出文本之上。
-       flex-shrink: 0 已在 .message-bubble 上生效，父容器不会挤压高度。 */
-    flex-shrink: 0;
+    /* v1.6.5 fix: flex-shrink:1 让 Label 被压缩到气泡宽度内，
+       配合 overflow:hidden(仅 x 方向) 防止长连续字符溢出气泡背景。
+       高度方向不裁剪 — flex-shrink:0 在 .message-bubble 上保证高度随内容增长。 */
+    flex-shrink: 1;
+    flex-grow: 1;
+    overflow: hidden;
 }
 
 /* --- 流式光标 --- */
