@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
@@ -80,6 +81,7 @@ namespace AgentCore.Editor.UI.Components
         /// 无法反向抠出 markdown，因此本地缓存原始文本是最可靠的做法。
         /// </summary>
         private string _lastFullContent = string.Empty;
+        private StringBuilder _lastFullContentBuilder;
 
         /// <summary>复制按钮引用（如果 UXML 中存在）</summary>
         private Button _copyButton;
@@ -97,7 +99,7 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>
         /// 当前气泡显示的完整原始文本内容（供外部读取或复制使用）。
         /// </summary>
-        public string RawContent => _lastFullContent ?? string.Empty;
+        public string RawContent => _lastFullContentBuilder?.ToString() ?? _lastFullContent ?? string.Empty;
 
         #endregion
 
@@ -199,7 +201,9 @@ namespace AgentCore.Editor.UI.Components
         {
             if (!_isStreaming || _streamingText == null) return;
             _streamingText.AppendText(token);
-            _lastFullContent += token ?? string.Empty;
+            // v1.6.5: 用 StringBuilder 避免 O(n) 字符串拼接
+            _lastFullContentBuilder ??= new StringBuilder();
+            _lastFullContentBuilder.Append(token ?? string.Empty);
         }
 
         /// <summary>
@@ -211,6 +215,8 @@ namespace AgentCore.Editor.UI.Components
         {
             var content = fullContent ?? "";
             _lastFullContent = content;
+            _lastFullContentBuilder?.Clear();
+            _lastFullContentBuilder = null;
 
             if (_streamingText != null)
             {

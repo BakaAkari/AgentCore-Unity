@@ -902,6 +902,10 @@ namespace AgentCore.Editor.UI.Components
         private bool _flushScheduled;
         private const int FlushIntervalMs = 16; // ~1 帧
 
+        // v1.6.5: 流式阶段文本窗口 — 只显示尾部 N 字符，避免超长文本 Label.text 触发 O(n) layout
+        // 最终化时 SetFinalText 会渲染全部内容（block 模式），流式阶段只看尾部足够
+        private const int StreamingTextWindow = 4000; // ~4000 字符，足够看到当前生成进度
+
         #endregion
 
         #region 构造函数
@@ -985,15 +989,24 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>
         /// 将 _pendingBuffer 中的累积文本一次性写入 Label。
         /// 跑一次 FilterStreaming（全量），赋值一次 Label.text — 每 16ms 最多一次。
+        /// v1.6.5: 流式阶段只渲染尾部 StreamingTextWindow 字符，避免超长文本 O(n) layout。
         /// </summary>
         private void FlushPending()
         {
             _flushScheduled = false;
             if (_pendingBuffer.Length == 0) return;
 
-            // 合并到主 builder 的快照，跑一次过滤
+            // 全量文本（用于最终化）
             var fullText = _currentTextBuilder?.ToString() ?? "";
-            _textLabel.text = ContentFilter.FilterStreaming(fullText);
+
+            // 流式阶段：只显示尾部窗口，避免 Label 对几万字做 O(n) layout
+            string displayText = fullText;
+            if (fullText.Length > StreamingTextWindow)
+            {
+                displayText = "...\n" + fullText.Substring(fullText.Length - StreamingTextWindow);
+            }
+
+            _textLabel.text = ContentFilter.FilterStreaming(displayText);
 
             // 清空 pending buffer（已合并到 Label）
             _pendingBuffer.Clear();
