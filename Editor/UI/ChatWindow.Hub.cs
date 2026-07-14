@@ -117,7 +117,7 @@ namespace AgentCore.Editor.UI
             if (toolbar == null)
                 return;
 
-            var insertIndex = _statusLabel != null ? toolbar.IndexOf(_statusLabel) : toolbar.childCount;
+            var insertIndex = toolbar.childCount;
             foreach (var contribution in AgentCoreExtensionRegistry.Statuses)
             {
                 if (contribution == null)

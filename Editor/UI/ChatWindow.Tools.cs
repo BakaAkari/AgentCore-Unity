@@ -95,6 +95,10 @@ namespace AgentCore.Editor.UI
             var key = GetToolCallKey(evt);
             _activeToolCards[key] = card;
             AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] HandleToolCallStarted: card 已添加, key={key}, _activeToolCards.Count={_activeToolCards.Count}");
+
+            // 更新状态行：显示当前执行的工具名
+            UpdateStatusLabel($"执行工具: {evt.ToolName}");
+
             ScrollToBottom(force: true); // 新工具调用卡片添加，强制滚动到底部
         }
 

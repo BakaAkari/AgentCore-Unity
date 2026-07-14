@@ -152,20 +152,21 @@ namespace AgentCore.Editor.UI.Components
             // 头部点击折叠/展开
             _header.RegisterCallback<ClickEvent>(OnHeaderClicked);
 
-            // === 内容区域（可滚动） ===
+            // === 内容区域 ===
             _content = new VisualElement();
             _content.style.backgroundColor = ContentBg;
             _content.style.paddingLeft = 4;
             _content.style.paddingRight = 4;
             _content.style.paddingTop = 2;
             _content.style.paddingBottom = 2;
-            _content.style.maxHeight = 200; // 最大高度，超出滚动
-            _content.style.overflow = Overflow.Visible;
+            _content.style.maxHeight = 100; // 高度减半，内部列表滚动
             Add(_content);
 
-            // 文件列表容器
-            _fileListContainer = new VisualElement();
+            // 文件列表容器（ScrollView，支持上下滚动）
+            _fileListContainer = new ScrollView(ScrollViewMode.Vertical);
             _fileListContainer.style.flexDirection = FlexDirection.Column;
+            _fileListContainer.style.flexGrow = 1;
+            _fileListContainer.style.overflow = Overflow.Hidden;
             _content.Add(_fileListContainer);
         }
 

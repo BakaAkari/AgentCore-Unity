@@ -55,7 +55,7 @@
 | **VCS 组件** | Working Copy Status 扁平列表 + 多选右键菜单；Chat 工具 `version_control` 支持 Git/SVN/Perforce（`AGENTCORE_VCS` 控制，OnDemand 可见性）；SOUL.md §15 主动调用规则已就绪 |
 | **Indexing 组件** | Roslyn 符号索引（JSONL 默认，可选 SQLite）+ `search_code` 工具 15 个 action（`AGENTCORE_INDEXING` 控制，OnDemand 可见性）；后台静默 + 增量索引；per-root 状态层次化；**标记为实验性，需手动在 Extensions 设置中开启** |
 | **Agent 主动性** | SOUL.md §13（Workspace Config）+ §14（代码索引）+ §15（VCS）主动调用规则全部就绪 |
-| **上下文参数** | reserveResponseTokens=32K、ContextWindowManager 默认 1M context（适配 GLM-5.2 等 long-context LLM）；对话压缩 70% 阈值；工具结果压缩 >2000 tokens 触发 |
+| **上下文参数** | reserveResponseTokens=32K、ContextWindowManager GLM-5.2 映射=200K（匹配部署版 max_model_len）；对话压缩 70% 阈值；工具结果压缩 >2000 tokens 触发 |
 | **Reasoning 参数** | maxTokens=8192, reasoningMaxTokens=2048, reasoningEffort="low"（GLM-5.2 适配）；reasoning native 不可关闭但可通过参数限制思考量 |
 | **工具暴露策略** | ActiveToolScope 三级可见性：核心工具 AlwaysVisible（~15 个）、按需工具 OnDemand（~27 个）、受限工具 Restricted（1 个）；LLM 通过 `request_tools` 元工具按需激活 |
 | **Reasoning 可观测性** | ThinkingDrawer 默认折叠 + 尾部 60 字符预览；多轮独立思考窗口；provider 结构化 reasoning 与 `---THINKING---` / `---ACTION---` 双来源抽取；`RawAssistantContent` 仅持久化到 UI/session/archive，不进入 `_messages`；Request Enrichment 自动注入 `reasoning` 参数 |

@@ -118,8 +118,8 @@ namespace AgentCore.Editor.UI
         /// <summary>取消按钮</summary>
         private Button _cancelButton;
 
-        /// <summary>状态标签</summary>
-        private Label _statusLabel;
+        /// <summary>Agent 状态行（消息流底部，文件变更面板上方）</summary>
+        private AgentStatusLine _agentStatusLine;
 
         /// <summary>工具栏扩展状态元素。</summary>
         private readonly List<VisualElement> _toolbarStatusElements = new List<VisualElement>();
@@ -265,7 +265,6 @@ namespace AgentCore.Editor.UI
             _sendButton = rootVisualElement.Q<Button>("send-button");
             _cancelButton = rootVisualElement.Q<Button>("cancel-button");
             _scrollToBottomButton = rootVisualElement.Q<Button>("scroll-to-bottom-button");
-            _statusLabel = rootVisualElement.Q<Label>("status-label");
 
             // 3.5 查询 Hub 导航与面板 UI 元素引用
             _contextSidebar = rootVisualElement.Q<VisualElement>("context-sidebar");
@@ -322,6 +321,8 @@ namespace AgentCore.Editor.UI
             SwitchToModule(_hubRail.ActiveModuleId);
 
             // 6.7 Phase 4.5: 创建文件变更汇总面板并插入到 input-area 之前
+            // 先创建 AgentStatusLine，插入到文件变更面板之前（即消息流底部）
+            _agentStatusLine = new AgentStatusLine();
             _fileChangeSummaryPanel = new FileChangeSummaryPanel();
             var chatArea = rootVisualElement.Q<VisualElement>("chat-area");
             var inputArea = rootVisualElement.Q<VisualElement>("input-area");
@@ -330,7 +331,9 @@ namespace AgentCore.Editor.UI
                 var inputIndex = chatArea.IndexOf(inputArea);
                 if (inputIndex >= 0)
                 {
+                    // 插入顺序：statusLine → fileChangePanel → inputArea
                     chatArea.Insert(inputIndex, _fileChangeSummaryPanel);
+                    chatArea.Insert(inputIndex, _agentStatusLine);
                 }
 
                 // 6.75 创建内嵌工具确认面板，避免系统弹窗依赖 Unity 前台窗口。

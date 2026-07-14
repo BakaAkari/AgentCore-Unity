@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using AgentCore.Editor.Core;
 using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
 using Newtonsoft.Json.Linq;
@@ -60,11 +61,12 @@ namespace AgentCore.Editor.Config
         [Tooltip("LLM model name")]
         public string llmModel = "glm-5.2";
 
-        [Tooltip("Sampling temperature (0.0-2.0)")]
-        [Range(0f, 2f)]
+        // v1.6.5+: temperature 和 maxTokens 已自适应化，不再暴露给用户
+        // temperature 默认 0.7，maxTokens 由 ModelCapabilityProbe 探测的 max_model_len 自动计算
+        [HideInInspector]
         public float temperature = 0.7f;
 
-        [Tooltip("Max output tokens")]
+        [HideInInspector]
         public int maxTokens = 8192;
 
         // --- Self-Challenge (ADR-17: single toggle) ---
@@ -119,7 +121,13 @@ namespace AgentCore.Editor.Config
         public int maxContextTokens = 0;
 
         [HideInInspector]
-        public int reserveResponseTokens = 32000;
+        public int reserveResponseTokens = 32000; // v1.6.5+: 由 ApplyAdaptiveDefaults 动态覆盖
+
+        // v1.6.5+: reserveResponseTokens 占 max_model_len 的比例
+        // 200K context → 8K reserve；1M context → 32K reserve
+        private const float ReserveRatio = 0.04f;
+        private const int ReserveMin = 4096;
+        private const int ReserveMax = 65536;
 
         // --- Self-Correction (原 Self Correction 卡片) ---
         [HideInInspector]
@@ -515,6 +523,26 @@ namespace AgentCore.Editor.Config
         {
             var baseUrl = llmEndpoint.TrimEnd('/');
             return $"{baseUrl}/chat/completions";
+        }
+
+        /// <summary>
+        /// v1.6.5+: 根据模型实际能力参数自适应调整配置。
+        /// 在每次 LLM 调用前由 AgentLoop 调用，确保 maxTokens / reserveResponseTokens
+        /// 与 ModelCapabilityProbe 探测到的 max_model_len 匹配。
+        /// </summary>
+        public void ApplyAdaptiveDefaults()
+        {
+            int maxModelLen = ModelCapabilityProbe.GetMaxModelLen(llmModel);
+
+            // reserveResponseTokens = max_model_len * 4%，clamp [4096, 65536]
+            int adaptiveReserve = Mathf.RoundToInt(maxModelLen * ReserveRatio);
+            adaptiveReserve = Mathf.Clamp(adaptiveReserve, ReserveMin, ReserveMax);
+            reserveResponseTokens = adaptiveReserve;
+
+            // maxTokens 不超过 reserveResponseTokens（completion 不能比预留还大）
+            // 保留用户/迁移设置的 maxTokens 值，但如果超过 reserve 则限制
+            if (maxTokens > reserveResponseTokens)
+                maxTokens = reserveResponseTokens;
         }
     }
 }

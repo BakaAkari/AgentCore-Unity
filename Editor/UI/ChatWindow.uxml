@@ -4,7 +4,6 @@
     <ui:VisualElement name="toolbar">
       <ui:Label name="title-label" text="AgentCore" />
       <ui:VisualElement name="toolbar-spacer" />
-      <ui:Label name="status-label" text="就绪" />
     </ui:VisualElement>
 
     <!-- 主体区域（Hub Rail + Context Sidebar + Main Content） -->

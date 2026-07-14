@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config.Settings;
+using AgentCore.Editor.Core;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -90,23 +91,33 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.Space(8);
 
-            // ── Generation ──
-            context.Ui.DrawCard("Generation", null, () =>
+            // ── Model Info (v1.6.5+: 自适应，不再暴露 temperature/maxTokens) ──
+            context.Ui.DrawCard("Model Info", null, () =>
             {
-                EditorGUI.BeginChangeCheck();
+                var probeReady = ModelCapabilityProbe.IsProbeCompleted;
+                var maxLen = ModelCapabilityProbe.CachedMaxModelLen;
+                var probeModel = ModelCapabilityProbe.CachedModelId;
 
-                settings.temperature = EditorGUILayout.Slider(
-                    new GUIContent("Temperature", "Sampling temperature (0.0–2.0)"),
-                    settings.temperature, 0f, 2f);
-
-                settings.maxTokens = EditorGUILayout.IntField(
-                    new GUIContent("Max Tokens", "Maximum output tokens per response"),
-                    settings.maxTokens);
-                settings.maxTokens = Mathf.Clamp(settings.maxTokens, 1, 128000);
-
-                if (EditorGUI.EndChangeCheck())
+                if (probeReady && maxLen > 0)
                 {
-                    settings.SaveSettings();
+                    EditorGUILayout.LabelField("Context Window", $"{maxLen:N0} tokens");
+                    if (!string.IsNullOrEmpty(probeModel))
+                        EditorGUILayout.LabelField("Detected Model", probeModel);
+
+                    // 显示自适应计算结果
+                    var s = AgentCoreSettings.instance;
+                    EditorGUILayout.LabelField("Max Output Tokens", $"{s.maxTokens:N0}");
+                    EditorGUILayout.LabelField("Reserve Tokens", $"{s.reserveResponseTokens:N0}");
+                }
+                else if (probeReady)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Model capability probe completed but server did not return max_model_len. Using fallback values from model prefix table.",
+                        MessageType.Info);
+                }
+                else
+                {
+                    EditorGUILayout.LabelField("Context Window", "Detecting...");
                 }
             });
 

@@ -32,6 +32,10 @@ namespace AgentCore.Editor.Core
             // Phase 3: 上下文窗口截断
             // 创建 _messages 的浅拷贝，对拷贝进行截断，不修改原始列表（保留完整历史用于 UI 显示）
             var settings = AgentCoreSettings.instance;
+
+            // v1.6.5+: 每次 LLM 调用前自适应调整参数（确保与 ModelCapabilityProbe 探测值同步）
+            settings.ApplyAdaptiveDefaults();
+
             int maxTokens = settings.maxContextTokens > 0
                 ? settings.maxContextTokens
                 : ContextWindowManager.GetModelMaxTokens(settings.llmModel);

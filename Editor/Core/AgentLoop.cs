@@ -308,6 +308,11 @@ namespace AgentCore.Editor.Core
 
             _isInitialized = true;
 
+            // v1.6.5+: 异步探测模型能力（/v1/models → max_model_len），覆盖 ContextWindowManager 硬编码
+            _ = ModelCapabilityProbe.ProbeAsync(
+                AgentCoreSettings.instance.llmEndpoint,
+                SecureKeyStorage.GetLLMApiKey());
+
             // Phase 3: 会话创建始终延迟到 TryRestoreSession() 中处理。
             // 修复 #6: 之前在 WasInterrupted == false 时会立即创建新会话，
             // 这会覆盖 EditorPrefs 中保存的上一次会话 ID，导致 TryRestoreSession()
