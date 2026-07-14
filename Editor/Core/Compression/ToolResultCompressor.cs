@@ -130,7 +130,7 @@ namespace AgentCore.Editor.Core.Compression
         /// <returns>压缩后的文本，失败时返回 null</returns>
         private async Task<string> CompressWithLLMAsync(string toolName, string content, int targetTokens, CancellationToken ct)
         {
-            // 选择客户端：优先使用压缩专用客户端
+            // 选择客户端（v1.6.5+: 统一管道）
             var client = _compressionClient ?? _mainClient;
 
             // 构建压缩请求消息
@@ -144,8 +144,10 @@ namespace AgentCore.Editor.Core.Compression
                     content))
             };
 
-            // 调用 LLM（非流式）
-            var response = await client.ChatCompletionAsync(messages, null, ct);
+            // 调用 LLM（非流式，传入 contentMaxTokens 控制输出预算）
+            var response = await client.ChatCompletionAsync(
+                messages, null, ct,
+                contentMaxTokens: CompressionLLMClientFactory.CompressionMaxTokens);
 
             if (response?.Choices != null && response.Choices.Count > 0)
             {

@@ -26,7 +26,8 @@ namespace AgentCore.Editor.LLM
         public async Task<ChatCompletionResponse> ChatCompletionAsync(
             List<ChatMessage> messages,
             List<ToolDefinition> tools = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            int? contentMaxTokens = null)
         {
             var settings = AgentCoreSettings.instance;
             var apiKey = SecureKeyStorage.GetLLMApiKey();
@@ -41,7 +42,9 @@ namespace AgentCore.Editor.LLM
                 Tools = tools?.Count > 0 ? tools : null,
                 Stream = false,
                 Temperature = settings.temperature,
-                MaxTokens = settings.GetEffectiveMaxTokens()
+                MaxTokens = contentMaxTokens.HasValue
+                    ? settings.GetEffectiveMaxTokens(contentMaxTokens.Value)
+                    : settings.GetEffectiveMaxTokens()
             };
 
             var json = RequestEnrichment.BuildEnrichedJson(request, settings);
@@ -84,7 +87,8 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model
             List<ChatMessage> messages,
             Action<StreamChunk> onChunk,
             List<ToolDefinition> tools = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            int? contentMaxTokens = null)
         {
             var settings = AgentCoreSettings.instance;
             var apiKey = SecureKeyStorage.GetLLMApiKey();
@@ -99,7 +103,9 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model
                 Tools = tools?.Count > 0 ? tools : null,
                 Stream = true,
                 Temperature = settings.temperature,
-                MaxTokens = settings.GetEffectiveMaxTokens()
+                MaxTokens = contentMaxTokens.HasValue
+                    ? settings.GetEffectiveMaxTokens(contentMaxTokens.Value)
+                    : settings.GetEffectiveMaxTokens()
             };
 
             var json = RequestEnrichment.BuildEnrichedJson(request, settings);

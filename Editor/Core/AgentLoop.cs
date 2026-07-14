@@ -308,7 +308,10 @@ namespace AgentCore.Editor.Core
 
             _isInitialized = true;
 
-            // v1.6.5+: 异步探测模型能力（/v1/models → max_model_len），覆盖 ContextWindowManager 硬编码
+            // v1.6.5+: 自适应参数调整 + 异步探测模型能力
+            // ApplyAdaptiveDefaults 在初始化时调用一次，确保 reserveResponseTokens 与模型能力匹配
+            // ProbeAsync 异步探测 /v1/models → max_model_len，覆盖 ContextWindowManager 硬编码
+            AgentCoreSettings.instance.ApplyAdaptiveDefaults();
             _ = ModelCapabilityProbe.ProbeAsync(
                 AgentCoreSettings.instance.llmEndpoint,
                 SecureKeyStorage.GetLLMApiKey());

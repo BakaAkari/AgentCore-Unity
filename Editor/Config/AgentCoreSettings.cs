@@ -553,5 +553,18 @@ namespace AgentCore.Editor.Config
                 return maxTokens + reasoningMaxTokens;
             return maxTokens;
         }
+
+        /// <summary>
+        /// v1.6.5+: 计算指定 content 预算下的 effective max_tokens。
+        /// 用于压缩等需要较小 content 输出的场景：传入 contentMaxTokens 替代 settings.maxTokens。
+        /// reasoning 预算仍从 settings.reasoningMaxTokens 获取。
+        /// </summary>
+        /// <param name="contentMaxTokens">content 部分的 token 预算</param>
+        public int GetEffectiveMaxTokens(int contentMaxTokens)
+        {
+            if (enableReasoningOutput && reasoningMaxTokens > 0)
+                return contentMaxTokens + reasoningMaxTokens;
+            return contentMaxTokens;
+        }
     }
 }

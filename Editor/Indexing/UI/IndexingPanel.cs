@@ -200,7 +200,10 @@ namespace AgentCore.Editor.Components.Indexing.UI
             content.Add(CreateLabelRow("Endpoint",    endpointConfigured ? settings.llmEndpoint : "(not configured)"));
             content.Add(CreateLabelRow("Model",       modelConfigured    ? settings.llmModel    : "(not configured)"));
             content.Add(CreateLabelRow("Temperature", settings.temperature.ToString("F2")));
-            content.Add(CreateLabelRow("Max Tokens",  settings.maxTokens.ToString()));
+            content.Add(CreateLabelRow("Max Output Tokens", settings.GetEffectiveMaxTokens().ToString("N0")));
+            if (settings.enableReasoningOutput && settings.reasoningMaxTokens > 0)
+                content.Add(CreateLabelRow("  └ Content", $"{settings.maxTokens:N0}"));
+            content.Add(CreateLabelRow("  └ Reasoning", settings.enableReasoningOutput ? settings.reasoningMaxTokens.ToString("N0") : "(disabled)"));
 
             var helpText = new Label(endpointConfigured && modelConfigured
                 ? "LLM is configured. The indexer itself does not call the LLM."

@@ -100,6 +100,15 @@ namespace AgentCore.Editor.Core
                 await TryNodeACorrectionRetryAsync(lastUser, assistantTurn, issuesSnapshot, ct);
             }
 
+            // v1.6.5+: 空内容检测 — GLM-5.2 reasoning 吃光 maxTokens 时 content 为空
+            // FallbackRouter 已在流式路径中重试，但如果重试后仍为空，需要抛异常让上层知道
+            if (assistantMessage != null && string.IsNullOrEmpty(assistantMessage.Content))
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                    "[AgentCore] LLM returned empty content after all retries. " +
+                    "This typically means reasoning consumed the entire max_tokens budget.");
+            }
+
             return assistantMessage;
         }
 

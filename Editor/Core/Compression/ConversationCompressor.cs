@@ -284,7 +284,7 @@ namespace AgentCore.Editor.Core.Compression
             int originalTokens = TokenCounter.EstimateTokens(conversationText.ToString());
             int targetTokens = Math.Max(100, originalTokens / 4); // 压缩到 25%
 
-            // 选择客户端
+            // 选择客户端（v1.6.5+: 统一管道，compressionClient 和 mainClient 都是 OpenAICompatibleClient）
             var client = _compressionClient ?? _mainClient;
 
             // 构建压缩请求
@@ -297,8 +297,10 @@ namespace AgentCore.Editor.Core.Compression
                     conversationText.ToString()))
             };
 
-            // 调用 LLM
-            var response = await client.ChatCompletionAsync(compressionMessages, null, ct);
+            // 调用 LLM（传入 contentMaxTokens=512，让 GetEffectiveMaxTokens 正确计算 reasoning+content 预算）
+            var response = await client.ChatCompletionAsync(
+                compressionMessages, null, ct,
+                contentMaxTokens: CompressionLLMClientFactory.CompressionMaxTokens);
 
             if (response?.Choices != null && response.Choices.Count > 0)
             {

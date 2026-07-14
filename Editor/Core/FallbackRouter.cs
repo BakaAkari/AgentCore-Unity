@@ -72,6 +72,15 @@ namespace AgentCore.Editor.Core
                     }
 
                     var result = await client.ChatCompletionStreamAsync(messages, onChunk, tools, ct);
+
+                    // v1.6.5+: 空内容检测 — GLM-5.2 reasoning 吃光 maxTokens 时 content 为空
+                    // 不直接返回空内容，而是抛异常触发重试
+                    if (result != null && string.IsNullOrEmpty(result.Content))
+                    {
+                        throw new InvalidOperationException(
+                            "LLM returned empty content (reasoning may have consumed the entire max_tokens budget).");
+                    }
+
                     LastError = null;
                     return result;
                 }
@@ -138,7 +147,17 @@ namespace AgentCore.Editor.Core
                         await Task.Delay(RetryDelayMs * attempt, ct);
                     }
 
-                    return await client.ChatCompletionAsync(messages, tools, ct);
+                    var response = await client.ChatCompletionAsync(messages, tools, ct);
+
+                    // v1.6.5+: 空内容检测
+                    var msg = response?.GetMessage();
+                    if (msg == null || string.IsNullOrEmpty(msg.Content))
+                    {
+                        throw new InvalidOperationException(
+                            "LLM returned empty content (reasoning may have consumed the entire max_tokens budget).");
+                    }
+
+                    return response;
                 }
                 catch (TaskCanceledException)
                 {
@@ -169,6 +188,7 @@ namespace AgentCore.Editor.Core
         /// <summary>
         /// 判断错误是否可重试。
         /// 优先通过异常类型判断，再回退到消息字符串匹配。
+        /// v1.6.5+: 覆盖空内容响应（HTTP 200 但 content 为空）和 JSON 解析失败。
         /// </summary>
         private bool IsRetryableError(Exception ex)
         {
@@ -182,6 +202,11 @@ namespace AgentCore.Editor.Core
                 // HttpRequestException 需要进一步检查内容
                 case HttpRequestException httpEx:
                     return IsRetryableHttpError(httpEx);
+
+                // v1.6.5+: JSON 解析失败（InvalidOperationException）-> 可重试
+                // 服务端可能返回不完整 JSON（网络抖动、SGLang 内部错误）
+                case InvalidOperationException _:
+                    return true;
             }
 
             // 2. 回退到消息字符串匹配（处理非标准异常包装）
@@ -197,6 +222,11 @@ namespace AgentCore.Editor.Core
             if (message.Contains("502") || message.Contains("503") || message.Contains("504"))
                 return true;
             if (message.Contains("rate limit") || message.Contains("429"))
+                return true;
+
+            // v1.6.5+: 空内容响应 -> 可重试
+            // GLM-5.2 reasoning 吃光 maxTokens 时返回空 content + finish_reason=length
+            if (message.Contains("empty") || message.Contains("no content") || message.Contains("未返回任何内容"))
                 return true;
 
             // 认证错误、参数错误 -> 不可重试
