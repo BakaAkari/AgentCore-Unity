@@ -1,5 +1,6 @@
 using System;
 using AgentCore.Editor.Config;
+using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
 
@@ -48,7 +49,11 @@ namespace AgentCore.Editor.Components.Indexing.Config
         /// </summary>
         internal void SafeSave(bool saveAsText)
         {
-            PreferencesFolderPathHelper.EnsureAgentCoreDirectory();
+            if (!PreferencesFolderPathHelper.EnsureAgentCoreDirectory())
+            {
+                AgentCoreLog.Warning("[AgentCore] Skipping IndexingSettings.Save — preferences directory not available.");
+                return;
+            }
             try
             {
                 Save(saveAsText);

@@ -39,12 +39,14 @@ namespace AgentCore.Editor.Config
         public const string AgentCoreSubdirectory = "AgentCore";
 
         private static string _cachedPreferencesFolder;
-        private static bool _cachedDirEnsured;
 
         static PreferencesFolderPathHelper()
         {
             EnsureAgentCoreDirectory();
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+            // Re-ensure after first frame — covers the gap between assembly load
+            // and the first ScriptableSingleton save (which fires via delayCall).
+            EditorApplication.delayCall += () => EnsureAgentCoreDirectory();
         }
 
         /// <summary>
@@ -54,19 +56,17 @@ namespace AgentCore.Editor.Config
         /// </summary>
         private static void OnBeforeAssemblyReload()
         {
-            _cachedDirEnsured = false;
             EnsureAgentCoreDirectory();
         }
 
         /// <summary>
         /// Ensures that <c>{PreferencesFolder}/AgentCore/</c> exists on disk.
-        /// Safe to call repeatedly; result is cached after first successful creation.
+        /// Safe to call repeatedly. Always checks <see cref="Directory.Exists"/>
+        /// — no caching, because the directory can be deleted by Unity's own
+        /// cleanup, antivirus software, or external processes between calls.
         /// </summary>
         public static bool EnsureAgentCoreDirectory()
         {
-            if (_cachedDirEnsured)
-                return true;
-
             try
             {
                 var prefRoot = GetPreferencesFolder();
@@ -83,7 +83,6 @@ namespace AgentCore.Editor.Config
                     AgentCoreLog.Info($"[PreferencesFolderPathHelper] Created directory: {target}");
                 }
 
-                _cachedDirEnsured = true;
                 return true;
             }
             catch (Exception ex)
@@ -175,9 +174,9 @@ namespace AgentCore.Editor.Config
         /// <summary>
         /// Scans the Unity preferences root directory (<c>%APPDATA%/Unity/</c> on Windows,
         /// <c>~/Library/Preferences/Unity/</c> on macOS) for existing <c>Editor-*.x</c>
-        /// folders and uses the most recently modified one. This avoids guessing the
-        /// version number — Unity uses an internal version (e.g. <c>Editor-5.x</c> for
-        /// Unity 2021) that does NOT match the marketing version.
+        /// folders. Prefers the folder matching the current Unity version's internal
+        /// number (5 for Unity 5-2022, 6 for Unity 6+); falls back to the most recently
+        /// modified folder if the expected one is not found.
         /// </summary>
         private static string ResolveByDirectoryScan()
         {
@@ -185,13 +184,36 @@ namespace AgentCore.Editor.Config
             if (string.IsNullOrEmpty(unityRoot) || !Directory.Exists(unityRoot))
                 return null;
 
+            // Determine the current Unity version's internal preferences folder number.
+            // Unity 5 through 2022 → "5", Unity 6 (6000+) → "6".
+            int major;
+            if (!int.TryParse(Application.unityVersion.Split('.')[0], out major))
+                major = 5;
+            string expectedEditorDir = major >= 6000 ? "Editor-6.x" : "Editor-5.x";
+
             DirectoryInfo selected = null;
             try
             {
-                foreach (var dir in new DirectoryInfo(unityRoot).GetDirectories("Editor-*.x"))
+                var dirs = new DirectoryInfo(unityRoot).GetDirectories("Editor-*.x");
+
+                // Prefer the directory matching the current Unity version.
+                foreach (var dir in dirs)
                 {
-                    if (selected == null || dir.LastWriteTimeUtc > selected.LastWriteTimeUtc)
+                    if (dir.Name == expectedEditorDir)
+                    {
                         selected = dir;
+                        break;
+                    }
+                }
+
+                // Fall back to most recently modified (covers unusual Unity versions).
+                if (selected == null)
+                {
+                    foreach (var dir in dirs)
+                    {
+                        if (selected == null || dir.LastWriteTimeUtc > selected.LastWriteTimeUtc)
+                            selected = dir;
+                    }
                 }
             }
             catch
@@ -203,7 +225,7 @@ namespace AgentCore.Editor.Config
                 return null;
 
             var result = Path.Combine(selected.FullName, "Preferences");
-            AgentCoreLog.Info($"[PreferencesFolderPathHelper] Resolved via directory scan: {result}");
+            AgentCoreLog.Info($"[PreferencesFolderPathHelper] Resolved via directory scan ({selected.Name}): {result}");
             return result;
         }
 

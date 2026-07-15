@@ -7,7 +7,7 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ## 当前状态
 
 - **Package**: `com.agentcore.unity`
-- **Version**: `1.7.6`
+- **Version**: `1.7.7`
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package

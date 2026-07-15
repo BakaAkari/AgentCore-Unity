@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.7] - 2026-07-15
+
+### Fixed — Preferences 目录 Move 弹窗根因修复（v1.7.1~v1.7.6 的第五层）
+
+v1.7.6 仍复现该 bug。用户测试发现：报错时目录已存在，手动删除后点 Cancel，Unity 能顺利重建。根因有三：
+
+1. **`_cachedDirEnsured` 缓存导致失效后不重建** — 首次创建成功后缓存为 `true`，后续调用直接返回 `true` 不检查 `Directory.Exists()`。目录被任何外部因素删除后（Unity 清理、杀毒软件、用户操作），`SafeSave()` 不再重建目录，`Save()` 的 Move 操作目标路径不存在 → 弹窗。修复：删除缓存，每次都检查 `Directory.Exists()`。
+
+2. **`ResolveByDirectoryScan()` 可能选错 `Editor-*.x`** — 用户装多个 Unity 版本时（如 2021 + Unity 6），扫描选"最近修改"的目录可能选到错误版本。目录创建在 `Editor-6.x`，Unity 实际保存到 `Editor-5.x` → 路径不匹配。修复：优先选当前 Unity 版本对应的 `Editor-*.x`，找不到才回退到最近修改。
+
+3. **`SafeSave()` 忽略 `EnsureAgentCoreDirectory()` 返回值** — 三处 `SafeSave()`（AgentCoreSettings / DomainReloadState / IndexingSettings）不检查返回值，目录创建失败仍继续 `Save()`。修复：检查返回值，失败则跳过保存并记录警告。
+
+4. 新增 `EditorApplication.delayCall` 在首帧后再次确保目录——覆盖 assembly load 到首次 ScriptableSingleton save 之间的时序间隙。
+
+5. `IndexingSettings.cs` 补充 `using AgentCore.Editor.Utils;`（新增 `AgentCoreLog` 引用需要）。
+
 ## [1.7.6] - 2026-07-15
 
 ### Fixed — v1.7.5 编译错误修复

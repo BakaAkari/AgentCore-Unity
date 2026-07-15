@@ -380,7 +380,11 @@ namespace AgentCore.Editor.Core
         /// </summary>
         internal void SafeSave(bool saveAsText)
         {
-            PreferencesFolderPathHelper.EnsureAgentCoreDirectory();
+            if (!PreferencesFolderPathHelper.EnsureAgentCoreDirectory())
+            {
+                AgentCoreLog.Warning("[AgentCore] Skipping DomainReloadState.Save — preferences directory not available.");
+                return;
+            }
             try
             {
                 Save(saveAsText);

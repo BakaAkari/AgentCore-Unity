@@ -463,7 +463,11 @@ namespace AgentCore.Editor.Config
         /// </remarks>
         internal void SafeSave(bool saveAsText)
         {
-            PreferencesFolderPathHelper.EnsureAgentCoreDirectory();
+            if (!PreferencesFolderPathHelper.EnsureAgentCoreDirectory())
+            {
+                AgentCoreLog.Warning("[AgentCore] Skipping AgentCoreSettings.Save — preferences directory not available.");
+                return;
+            }
             try
             {
                 Save(saveAsText);
