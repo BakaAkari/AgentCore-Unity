@@ -621,6 +621,16 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - 3 个 `const true` 死守卫删除（`SceneViewUpdateBannerEnabled` / `PeriodicRemoteStatusCheckEnabled` / `AutoRefreshCommitListEnabled`）及其对应 const 声明
 - `SessionStorage.Load` 的 "Session file not found" 从 `LogWarning` 降级为 `AgentCoreLog.Info`（新装无历史 session 是正常状态）
 
+### 6.8 v1.7.3 架构模式补充
+
+#### 老项目升级安装 Preferences 目录 Move 弹窗修复
+
+- `PreferencesFolderPathHelper` 静态构造函数新增 `AssemblyReloadEvents.beforeAssemblyReload` 回调注册
+- `OnBeforeAssemblyReload`：重置 `_cachedDirEnsured = false` → 重新 `EnsureAgentCoreDirectory()`
+- 修复根因：v1.7.1 的 `[InitializeOnLoad]` 在 assembly load 时创建目录（覆盖新装场景），但老项目升级时旧版遗留的 pending `ScriptableSingleton` auto-save 在 Domain Unload 尾声触发 `Move temp → target`，此时目录可能尚不存在
+- `beforeAssemblyReload` 在 Unity auto-save **之前**执行，确保目录已创建
+- 3 个受影响 singleton：`AgentCoreSettings` / `DomainReloadState` / `IndexingSettings`，均用 `FilePathAttribute.Location.PreferencesFolder`
+
 ## 7. 编码硬规则
 
 ### 7.1 禁止事项

@@ -51,8 +51,31 @@ namespace AgentCore.Editor.Config
         /// can trigger a Save. This closes the race window where Unity's internal
         /// auto-save fires before our <c>SafeSave</c> wrapper runs.
         /// </summary>
+        /// <remarks>
+        /// Additionally registers an <c>AssemblyReloadEvents.beforeAssemblyReload</c>
+        /// callback so the directory is re-ensured at the **start** of Domain Unload —
+        /// before Unity's internal <c>ScriptableSingleton</c> auto-save fires its
+        /// <c>Move temp → target</c> step. This covers the upgrade scenario where an
+        /// older AgentCore version (without this helper) left a pending save that
+        /// fires during the first Domain Unload after install.
+        /// </remarks>
         static PreferencesFolderPathHelper()
         {
+            EnsureAgentCoreDirectory();
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+        }
+
+        /// <summary>
+        /// Called at the start of Domain Unload, before Unity's internal
+        /// ScriptableSingleton auto-save. Re-checks the directory in case it
+        /// was deleted externally or never existed (upgrade scenario).
+        /// </summary>
+        private static void OnBeforeAssemblyReload()
+        {
+            // Reset cache — the directory might have been removed externally
+            // since the last check, or this might be the very first reload
+            // after an upgrade install where the directory didn't exist yet.
+            _cachedDirEnsured = false;
             EnsureAgentCoreDirectory();
         }
 

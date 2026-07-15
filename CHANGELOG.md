@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3] - 2026-07-15
+
+### Fixed — 老项目升级安装时 Preferences 目录 Move 弹窗
+
+- `PreferencesFolderPathHelper` 新增 `AssemblyReloadEvents.beforeAssemblyReload` 回调，在 Domain Unload **开始**时重置缓存并重新确保 `AgentCore/` 目录存在
+- 修复根因：v1.7.1 的 `[InitializeOnLoad]` 静态构造函数在 assembly load 时创建目录，但**老项目升级**场景下，旧版 AgentCore（无此 helper）遗留的 pending `ScriptableSingleton` auto-save 在 Domain Unload 尾声触发 `Move temp → target`，此时目录可能尚不存在 → Unity 弹 "Moving file failed" 弹窗
+- `beforeAssemblyReload` 回调在 Unity auto-save **之前**执行，确保目录已创建，覆盖升级场景的一次性竞态
+
 ## [1.7.2] - 2026-07-15
 
 ### Documentation — minimalism / self-challenge 历史文档整理归档

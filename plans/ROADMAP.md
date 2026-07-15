@@ -1,7 +1,7 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.7.2 | **更新日期**: 2026-07-15 | **状态**:
-> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）；**v1.7.0 Settings v20 死字段清理 + VCS 模块修复**（12 字段删除 / 进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持）；**v1.7.1 新装路径 + VCS 开机触发 + CS0162 修复**；**v1.7.2 文档整理归档（无代码变化）**；**Phase 9 Self-Challenge 收尾**（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）
+> **版本**: v1.7.3 | **更新日期**: 2026-07-15 | **状态**:
+> Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）；**v1.7.0 Settings v20 死字段清理 + VCS 模块修复**（12 字段删除 / 进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持）；**v1.7.1 新装路径 + VCS 开机触发 + CS0162 修复**；**v1.7.2 文档整理归档（无代码变化）**；**v1.7.3 老项目升级安装 Preferences 目录 Move 弹窗修复（beforeAssemblyReload 回调）**；**Phase 9 Self-Challenge 收尾**（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
 ---
@@ -37,11 +37,11 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.7.2)
+### 0.4 当前项目快照 (v1.7.3)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.7.2 (2026-07-15) — v1.7.2: minimalism / self-challenge 历史文档整理归档（无代码变化，仅 `plans/README.md` 索引 + AGENTS.md / ROADMAP.md / README.md 版本引用同步）；v1.7.1: 修复新装路径不存在（[InitializeOnLoad] 静态构造函数）+ VCS 远端检查开机触发（_lastCheckedUtc 初始化为 UtcNow）+ 3 个 CS0162 编译警告清理 + SessionStorage 日志降级；v1.7.0: Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens）+ VCS 模块修复（进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持 / Perforce ignore 标注） |
+| **版本** | 1.7.3 (2026-07-15) — v1.7.3: 修复老项目升级安装 Preferences 目录 Move 弹窗（`AssemblyReloadEvents.beforeAssemblyReload` 回调在 Domain Unload 开始时确保目录存在，覆盖旧版遗留 pending auto-save 竞态）；v1.7.2: minimalism / self-challenge 历史文档整理归档（无代码变化）；v1.7.1: 修复新装路径不存在（[InitializeOnLoad] 静态构造函数）+ VCS 远端检查开机触发（_lastCheckedUtc 初始化为 UtcNow）+ 3 个 CS0162 编译警告清理 + SessionStorage 日志降级；v1.7.0: Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens）+ VCS 模块修复（进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持 / Perforce ignore 标注） |
 | **代码规模** | 288 个 .cs 文件，约 97K 行代码，51 个原生工具 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
@@ -328,7 +328,7 @@ v1.6.0~v1.6.5 — 产品化体验冲刺（详见 §3.z）
 v1.7.0        — Settings v20 死字段清理 + VCS 模块修复（详见 §3.z Z.18/Z.19）
 v1.7.1        — 修复新装用户 Preferences 目录不存在导致 Editor 卡死 + VCS 远端检查开机触发修复 + CS0162 编译警告清理
 v1.7.2        — minimalism / self-challenge 历史文档整理归档（无代码变化）
-v1.7.3 (待定) — 修复老项目升级安装时 Preferences 目录 Move 失败弹窗（1.7.1 的 [InitializeOnLoad] 只覆盖新装 fresh Editor 场景，未覆盖上一次 Domain Unload 尾声 pending 的 ScriptableSingleton auto-save）
+v1.7.3        — 修复老项目升级安装 Preferences 目录 Move 弹窗（beforeAssemblyReload 回调）
 ~~v1.5.0-alpha3~~ — ~~Domain Reload 兜底 / BLOCK verdict 回 tool loop / Node A/B 单元测试~~ **[收尾] GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口，Self-Challenge 机制不再需要**
 ~~v1.5.0-beta~~   — ~~pre-GA 稳定性冲刺~~ **[收尾] 同上**
 ~~v1.5.0 GA~~     — ~~4 周 kill criteria 实测窗口~~ **[收尾] 同上**
@@ -659,11 +659,10 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ## 7. 下一步行动建议
 
-> v1.7.2 已发布（文档整理归档，无代码变化）。下一个补丁 v1.7.3 已明确修复目标：老项目升级安装场景的 Preferences 目录 Move 弹窗。Self-Challenge 机制标记收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）。后续开发方向按优先级排列如下。
+> v1.7.3 已发布（修复老项目升级安装 Preferences 目录 Move 弹窗）。Self-Challenge 机制标记收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）。后续开发方向按优先级排列如下。
 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|
-| **v1.7.3 P0** | **修复老项目升级安装 Preferences 目录 Move 弹窗** | 现象：老项目安装 AgentCore 后第一次脚本编译结束，Unity 弹 "Moving file failed: %APPDATA%/Unity/Editor-*.x/Preferences/AgentCore/Settings.asset — 系统找不到指定的路径"。用户需手动创建 AgentCore 目录 + Try Again 才能通过。根因：Move 发生在**上一次 Domain Unload 尾声**的 ScriptableSingleton auto-save，此时 assembly 已在卸载，1.7.1 的 `[InitializeOnLoad]` 静态构造函数已经跑完但保护不了"上次遗留的 pending save"。修复方向候选：A（改用 `[InitializeOnLoadMethod]` 提前建目录 + 覆盖 4 个 PreferencesFolder singleton）/ B（改 FilePath 到 ProjectFolder 完全避开 preferences 竞态，代价是破坏跨项目共享设置的 ADR 语义）/ D（README 记录"遇到弹窗按 Cancel 而非 Try Again"的应急指引） |
 | **P0** | **自演化知识系统 Tier 0 — 自动事实积累（Memory）** | agent 在正常对话中自然积累跨 session 事实，零手动触发：用户纠正 → 更新认知；发现项目特征（URP/HDRP/命名规范/Odin）→ 记录。存储 `MEMORY.md` 始终注入，硬 cap ~500 字符，agent 用 add/replace/remove 工具维护。零外部依赖（纯文件，替代废弃的 mem0 方案） |
 | **P0** | **自演化知识系统 Tier 1 — 全量项目扫描（Init Project）** | 解决 Tier 0 覆盖不了的全局视野：agent 正常对话不会遍历整个项目结构。首次检测到 `MEMORY.md` 不存在时自动触发一次全量扫描，之后用户手动 re-init 更新。生成 `PROJECT.tools.md` / `PROJECT.architecture.md` 等拆分文档，索引注入 + 按需 read_file。不绑定版本号，v1.7.3 修复完成后排期 |
 | **P1** | **自演化知识系统 Tier 2 — 流程复用 + 生命周期维护（Skills + Curator）** | **Skills**：复杂任务完成后 agent 主动询问"要保存这个流程吗"——用户确认是必要的质量控制（agent 自主判断"什么值得沉淀"不可靠）。项目级 `.agentcore/skills/`，Bootstrap 链加载。**Curator**：低频后台检查（每小时，纯文件系统检查不开 LLM）skill 引用的文件路径是否仍存在，标记过期不删除。和 Skills 互补：Skills 积累"怎么用"，Curator 检查"还对吗" |
