@@ -2043,9 +2043,6 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (!_isPanelActive)
                 return;
 
-            if (!VcsSettings.AutoRefreshCommitListEnabled)
-                return;
-
             if (_adapter == null || _currentVcsType == VcsType.None)
                 return;
 

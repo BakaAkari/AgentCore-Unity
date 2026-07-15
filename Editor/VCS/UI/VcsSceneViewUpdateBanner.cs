@@ -22,9 +22,6 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private static void OnSceneGui(SceneView sceneView)
         {
-            if (!VcsSettings.SceneViewUpdateBannerEnabled)
-                return;
-
             var status = VcsRemoteStatusMonitor.LastStatus;
             if (status == null || !status.Success || !status.HasRemoteChanges)
                 return;

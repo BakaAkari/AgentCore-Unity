@@ -36,17 +36,8 @@ namespace AgentCore.Editor.Components.VCS.Config
         /// <summary>Whether refresh operations should also check remote update status.</summary>
         public const bool CheckRemoteStatusOnRefresh = true;
 
-        /// <summary>Whether SceneView should show a top banner when remote updates are available.</summary>
-        public const bool SceneViewUpdateBannerEnabled = true;
-
-        /// <summary>Whether remote status should be checked periodically in the editor.</summary>
-        public const bool PeriodicRemoteStatusCheckEnabled = true;
-
         /// <summary>The interval in minutes for periodic remote status checks.</summary>
         public const int RemoteStatusCheckIntervalMinutes = 15;
-
-        /// <summary>Whether the commit list should be refreshed automatically in the background.</summary>
-        public const bool AutoRefreshCommitListEnabled = true;
 
         /// <summary>The interval in seconds for automatic commit list refresh.</summary>
         public const int CommitListRefreshIntervalSeconds = 30;

@@ -101,7 +101,7 @@ namespace AgentCore.Editor.Session
 
                 if (!File.Exists(filePath))
                 {
-                    Debug.LogWarning($"{LogPrefix}Session file not found: {filePath}");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session file not found: {filePath}");
                     return null;
                 }
 

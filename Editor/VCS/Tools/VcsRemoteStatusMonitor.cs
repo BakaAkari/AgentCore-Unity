@@ -151,9 +151,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         private static void OnEditorUpdate()
         {
-            if (!VcsSettings.PeriodicRemoteStatusCheckEnabled)
-                return;
-
             if (!ShouldRunPeriodicCheck())
                 return;
 
