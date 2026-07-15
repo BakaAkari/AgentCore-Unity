@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.5] - 2026-07-15
+
+### Fixed — Preferences 路径三级兜底 + ScriptingDefineSymbols 版本兼容
+
+- 新增 `ResolveByHardcodedFallback()`：当反射和目录扫描均失败时（极端新装场景），按 Unity 内部版本号规则回退（Unity 5-2022 → `Editor-5.x`，Unity 6+ → `Editor-6.x`）
+- 新增 `ScriptingDefineHelper`：集中封装 `GetScriptingDefineSymbolsForGroup` / `SetScriptingDefineSymbolsForGroup` 的版本兼容切换
+  - Unity 2023.1+ 标记旧 `ForGroup` API 为 `[Obsolete]`，Unity 6000.5 已确认生成废弃警告，未来版本可能移除
+  - `#if UNITY_2023_1_OR_NEWER` 分支使用 `NamedBuildTarget.FromBuildTargetGroup` + 新 API
+  - 旧分支保留 `ForGroup` API 兼容 Unity 2021.3-2022.3
+  - 所有 4 个调用点（OptionalComponentManager × 2 + ReadConsoleTool × 2）统一走 helper
+
 ## [1.7.4] - 2026-07-15
 
 ### Fixed — Preferences 目录路径解析根因修复（v1.7.3 的补丁）

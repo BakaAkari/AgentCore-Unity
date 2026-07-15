@@ -631,17 +631,22 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - `beforeAssemblyReload` 在 Unity auto-save **之前**执行，确保目录已创建
 - 3 个受影响 singleton：`AgentCoreSettings` / `DomainReloadState` / `IndexingSettings`，均用 `FilePathAttribute.Location.PreferencesFolder`
 
-### 6.9 v1.7.4 架构模式补充
+### 6.9 v1.7.5 架构模式补充
 
-#### Preferences 目录路径解析根因修复
+#### Preferences 目录路径解析 — 三级兜底
 
-- **根因**：Unity preferences 目录用内部版本号命名（Unity 2021 = `Editor-5.x`），旧 fallback 用 `Application.unityVersion` 提取营销版本号（`2021`），算出 `Editor-2021.x`，路径不匹配
-- **修复**：重写 `PreferencesFolderPathHelper`，三级路径解析：
-  1. 反射（primary）— 扩展为 property + method，多个候选名称
-  2. 目录扫描（fallback）— 扫描 `%APPDATA%/Unity/` 下 `Editor-*.x` 目录，取最近修改的
-  3. 空回退 + Warning 日志
-- 删除 `ExtractMajorVersion` 和 `BuildFallbackPreferencesFolder`
-- 新增 `AgentCoreLog.Info` 诊断日志记录解析方式和最终路径
+- **根因**：Unity preferences 目录用内部版本号命名（Unity 2021/2022 = `Editor-5.x`），旧 fallback 用 `Application.unityVersion` 提取营销版本号（`2021`），算出 `Editor-2021.x`，路径不匹配
+- **三级解析**：① 反射 `InternalEditorUtility.unityPreferencesFolder`（property + method 多签名）→ ② 目录扫描 `%APPDATA%/Unity/Editor-*.x`（取最近修改）→ ③ 硬编码兜底（major ≥ 6000 → `Editor-6.x`，否则 `Editor-5.x`）
+- **时机保护**：`AssemblyReloadEvents.beforeAssemblyReload` 回调在 Domain Unload 开始时重置缓存 + 重新确保目录
+
+#### ScriptingDefineSymbols 版本兼容
+
+- **问题**：`PlayerSettings.GetScriptingDefineSymbolsForGroup` / `SetScriptingDefineSymbolsForGroup` 在 Unity 2023.1+ 标记 `[Obsolete]`，Unity 6000.5 已确认生成废弃警告，未来版本可能移除
+- **修复**：`ScriptingDefineHelper` 集中封装版本切换
+  - `#if UNITY_2023_1_OR_NEWER` → `NamedBuildTarget.FromBuildTargetGroup` + 新 API
+  - `#else` → 保留 `ForGroup` API 兼容 Unity 2021.3-2022.3
+  - 4 个调用点（OptionalComponentManager × 2 + ReadConsoleTool × 2）统一走 helper
+- **旧 fallback 清理**：删除 `ExtractMajorVersion` 和 `BuildFallbackPreferencesFolder`；新增 `AgentCoreLog.Info` 诊断日志记录解析方式和最终路径
 
 ## 7. 编码硬规则
 

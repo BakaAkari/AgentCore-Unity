@@ -107,6 +107,7 @@ namespace AgentCore.Editor.Config
 
             _cachedPreferencesFolder = ResolveByReflection()
                 ?? ResolveByDirectoryScan()
+                ?? ResolveByHardcodedFallback()
                 ?? string.Empty;
 
             if (string.IsNullOrEmpty(_cachedPreferencesFolder))
@@ -220,6 +221,40 @@ namespace AgentCore.Editor.Config
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             return string.IsNullOrEmpty(home) ? null : Path.Combine(home, ".config", "unity3d");
 #endif
+        }
+
+        /// <summary>
+        /// Final fallback when reflection and directory scan both fail (e.g. fresh Unity install
+        /// where <c>Editor-*.x</c> has not been created yet). Unity uses a fixed internal version
+        /// number for the preferences folder that does NOT match the marketing version:
+        /// <list type="bullet">
+        /// <item> Unity 5.x through 2022.x → <c>Editor-5.x</c> </item>
+        /// <item> Unity 6.x (6000+) → <c>Editor-6.x</c> </item>
+        /// </list>
+        /// We determine the internal number via <see cref="Application.unityVersion"/> major version:
+        /// versions ≥ 6000 use <c>6</c>; otherwise <c>5</c>. This is empirical knowledge derived
+        /// from Unity's own <c>FilePathAttribute</c> source and verified against installed versions.
+        /// </summary>
+        private static string ResolveByHardcodedFallback()
+        {
+            string unityRoot = GetUnityPreferencesRoot();
+            if (string.IsNullOrEmpty(unityRoot))
+                return null;
+
+            // Application.unityVersion reports the marketing version (e.g. "2022.3.50f1", "6000.0.10f1").
+            // Unity's internal preferences folder version number:
+            //   2022.x and earlier → "5"   (Editor-5.x)
+            //   6000.x and later   → "6"   (Editor-6.x)
+            int major;
+            if (!int.TryParse(Application.unityVersion.Split('.')[0], out major))
+                major = 5;  // safe default — covers all versions through 2022
+
+            string editorVersion = major >= 6000 ? "6" : "5";
+            string editorDir = $"Editor-{editorVersion}.x";
+
+            var result = Path.Combine(unityRoot, editorDir, "Preferences");
+            AgentCoreLog.Info($"[PreferencesFolderPathHelper] Resolved via hardcoded fallback: {result}");
+            return result;
         }
     }
 }

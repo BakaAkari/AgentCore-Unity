@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
@@ -403,7 +404,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             string buildTargetName = ToolHelpers.GetOptionalString(parameters, "build_target");
             var targetGroup = ResolveTargetGroup(buildTargetName, out string resolvedName);
 
-            string definesStr = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
+            string definesStr = ScriptingDefineHelper.GetDefines(targetGroup);
             var defines = string.IsNullOrEmpty(definesStr)
                 ? new string[0]
                 : definesStr.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
@@ -444,7 +445,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     return ToolResponse.Fail($"Invalid define symbol '{define}': only letters, digits, and underscores are allowed.");
             }
 
-            string currentDefinesStr = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
+            string currentDefinesStr = ScriptingDefineHelper.GetDefines(targetGroup);
             var currentDefines = new HashSet<string>(
                 string.IsNullOrEmpty(currentDefinesStr)
                     ? new string[0]
@@ -469,7 +470,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             }
 
             string newDefinesStr = string.Join(";", currentDefines.OrderBy(d => d));
-            PlayerSettings.SetScriptingDefineSymbolsForGroup(targetGroup, newDefinesStr);
+            ScriptingDefineHelper.SetDefines(targetGroup, newDefinesStr);
 
             string action = enabled ? "Added" : "Removed";
             return ToolResponse.OkWithData(new

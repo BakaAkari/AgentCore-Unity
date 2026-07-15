@@ -242,7 +242,7 @@ namespace AgentCore.Editor.Extensions
 
                 try
                 {
-                    PlayerSettings.SetScriptingDefineSymbolsForGroup(group, string.Join(";", defines));
+                    ScriptingDefineHelper.SetDefines(group, string.Join(";", defines));
                     anyChanged = true;
                 }
                 catch (Exception ex)
@@ -306,7 +306,7 @@ namespace AgentCore.Editor.Extensions
         {
             try
             {
-                var raw = PlayerSettings.GetScriptingDefineSymbolsForGroup(group);
+                var raw = ScriptingDefineHelper.GetDefines(group);
                 return new HashSet<string>(
                     raw.Split(';')
                         .Select(value => value.Trim())
