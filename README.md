@@ -7,12 +7,12 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ## 当前状态
 
 - **Package**: `com.agentcore.unity`
-- **Version**: `1.7.3`
+- **Version**: `1.7.4`
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
 - **Code Scale**: 288 个 .cs 文件，约 97K 行代码，51 个原生工具
-- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge 收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化；v1.7.0 Settings v20 死字段清理 + VCS 模块修复（进程泄漏/事件泄漏/日志风暴/设置极简化/多 VCS 支持）；v1.7.1 修复新装路径不存在 + VCS 远端检查开机触发 + CS0162 编译警告；v1.7.2 minimalism / self-challenge 历史文档整理归档（无代码变化）；v1.7.3 修复老项目升级安装 Preferences 目录 Move 弹窗（beforeAssemblyReload 回调）；后续重点为自演化知识系统 + Phase 8 MCP Server + 产品化分发
+- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge 收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化；v1.7.0 Settings v20 死字段清理 + VCS 模块修复（进程泄漏/事件泄漏/日志风暴/设置极简化/多 VCS 支持）；v1.7.1 修复新装路径不存在 + VCS 远端检查开机触发 + CS0162 编译警告；v1.7.2 minimalism / self-challenge 历史文档整理归档（无代码变化）；v1.7.3 修复 beforeAssemblyReload 回调（时机层面）；v1.7.4 修复路径解析根因（Unity 内部版本号 vs 营销版本号不匹配，三级路径解析）；后续重点为自演化知识系统 + Phase 8 MCP Server + 产品化分发
 
 ## 核心能力
 
@@ -155,8 +155,9 @@ com.agentcore.unity/
 - v1.6.x：Context Ingest（Ctrl+Shift+X）、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、ThinkingDrawer 独立展开按钮、多轮思考窗口、文件删除视觉反馈、GLM-5.2 reasoning 参数适配、自适应 LLM 配置（ModelCapabilityProbe）、统一 LLM 管道（消灭 CompressionLLMClient）、气泡溢出修复（flex-shrink + overflow + 双向 height sync）、流式 UI 性能优化（三层帧节流 + ConcurrentQueue + 4000 字符窗口）
 - v1.7.1：修复新装路径不存在（`[InitializeOnLoad]` 静态构造函数）+ VCS 远端检查开机触发（`_lastCheckedUtc` 初始化为 `UtcNow`）+ 3 个 CS0162 编译警告清理（`const true` 死守卫）+ SessionStorage 日志降级
 - v1.7.0：Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens + SecureKeyStorage Compression LLM 死方法删除 + workspaceAutoDetectEnabled 假 toggle 删除）、VCS 模块修复（VcsDetector Process using 防泄漏 + VersionControlPanel DetachFromPanelEvent 防事件泄漏 + VcsProjectWindowIntegration 全量重写删 Debug.Log 风暴 + 多 VCS 支持 + VcsSettings 8→2 极简化 + VcsRemoteStatusMonitor 删重复 RepaintAll）
-- v1.7.3：修复老项目升级安装 Preferences 目录 Move 弹窗（`AssemblyReloadEvents.beforeAssemblyReload` 回调在 Domain Unload 开始时确保目录存在，覆盖旧版遗留 pending auto-save 竞态）
-- v1.7.2：minimalism-audit / self-challenge 历史文档整理归档（`plans/README.md` 索引更新、AGENTS.md / ROADMAP.md / README.md 版本引用同步），无代码变化
+- v1.7.4：修复 Preferences 目录路径解析根因（Unity 内部版本号 `Editor-5.x` vs 营销版本号 `2021` 不匹配 → 三级路径解析：反射 + 目录扫描 + 空回退）
+- v1.7.3：修复 beforeAssemblyReload 回调（时机层面，Domain Unload 开始时确保目录存在）
+- v1.7.2：minimalism / self-challenge 历史文档整理归档（`plan...[truncated]
 
 后续重点：
 

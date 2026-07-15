@@ -631,6 +631,18 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - `beforeAssemblyReload` 在 Unity auto-save **之前**执行，确保目录已创建
 - 3 个受影响 singleton：`AgentCoreSettings` / `DomainReloadState` / `IndexingSettings`，均用 `FilePathAttribute.Location.PreferencesFolder`
 
+### 6.9 v1.7.4 架构模式补充
+
+#### Preferences 目录路径解析根因修复
+
+- **根因**：Unity preferences 目录用内部版本号命名（Unity 2021 = `Editor-5.x`），旧 fallback 用 `Application.unityVersion` 提取营销版本号（`2021`），算出 `Editor-2021.x`，路径不匹配
+- **修复**：重写 `PreferencesFolderPathHelper`，三级路径解析：
+  1. 反射（primary）— 扩展为 property + method，多个候选名称
+  2. 目录扫描（fallback）— 扫描 `%APPDATA%/Unity/` 下 `Editor-*.x` 目录，取最近修改的
+  3. 空回退 + Warning 日志
+- 删除 `ExtractMajorVersion` 和 `BuildFallbackPreferencesFolder`
+- 新增 `AgentCoreLog.Info` 诊断日志记录解析方式和最终路径
+
 ## 7. 编码硬规则
 
 ### 7.1 禁止事项

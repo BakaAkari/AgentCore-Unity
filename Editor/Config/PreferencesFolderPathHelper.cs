@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEditorInternal;
@@ -14,22 +15,16 @@ namespace AgentCore.Editor.Config
     /// <remarks>
     /// <para>
     /// Unity's <c>SaveToSerializedFileAndForget</c> internally performs a "Move temp → target"
-    /// operation. When the target file's parent directory (e.g. <c>%APPDATA%/Unity/Editor-5.x/Preferences/AgentCore/</c>)
-    /// does not exist, the Move fails with "系统找不到指定的路径 / The system cannot find the path specified",
-    /// which leaves the Editor stuck and the user forced to Force Quit. This has been observed on
-    /// fresh installs where no plugin has ever written into the shared Preferences folder.
+    /// operation. When the target file's parent directory does not exist, the Move fails with
+    /// "系统找不到指定的路径 / The system cannot find the path specified", leaving the Editor
+    /// stuck behind a popup that reappears even after clicking "Try Again".
     /// </para>
     /// <para>
-    /// This helper resolves the preferences folder using (in order of preference):
-    /// <list type="number">
-    ///   <item><c>UnityEditorInternal.InternalEditorUtility.unityPreferencesFolder</c> via reflection (internal API)</item>
-    ///   <item>Fallback: <c>%APPDATA%/Unity/Editor-{unityMajorVersion}.x/Preferences</c> on Windows</item>
-    ///   <item>Fallback: <c>~/Library/Preferences/Unity/Editor-{unityMajorVersion}.x/Preferences</c> on macOS</item>
-    ///   <item>Fallback: <c>~/.config/unity3d/Preferences</c> on Linux</item>
-    /// </list>
-    /// Failure to create the directory is logged as a warning but not thrown; callers should
-    /// still wrap the subsequent <c>Save</c> in try/catch so a corrupt preferences root cannot
-    /// prevent the Editor from running.
+    /// <b>Path resolution</b> — Unity uses an <b>internal</b> version number for the preferences
+    /// folder (e.g. <c>Editor-5.x</c> for Unity 5 through Unity 2021, <c>Editor-6.x</c> for
+    /// Unity 6+). This is <b>not</b> the marketing version — <c>Application.unityVersion</c>
+    /// reports <c>2021.3</c> but the folder is <c>Editor-5.x</c>. The helper resolves the path
+    /// via reflection (primary) and a directory scan fallback that never guesses the version.
     /// </para>
     /// </remarks>
     [InitializeOnLoad]
@@ -45,20 +40,6 @@ namespace AgentCore.Editor.Config
         private static string _cachedPreferencesFolder;
         private static bool _cachedDirEnsured;
 
-        /// <summary>
-        /// Static constructor runs at assembly load time via <c>[InitializeOnLoad]</c>,
-        /// ensuring the preferences directory exists before any ScriptableSingleton
-        /// can trigger a Save. This closes the race window where Unity's internal
-        /// auto-save fires before our <c>SafeSave</c> wrapper runs.
-        /// </summary>
-        /// <remarks>
-        /// Additionally registers an <c>AssemblyReloadEvents.beforeAssemblyReload</c>
-        /// callback so the directory is re-ensured at the **start** of Domain Unload —
-        /// before Unity's internal <c>ScriptableSingleton</c> auto-save fires its
-        /// <c>Move temp → target</c> step. This covers the upgrade scenario where an
-        /// older AgentCore version (without this helper) left a pending save that
-        /// fires during the first Domain Unload after install.
-        /// </remarks>
         static PreferencesFolderPathHelper()
         {
             EnsureAgentCoreDirectory();
@@ -72,9 +53,6 @@ namespace AgentCore.Editor.Config
         /// </summary>
         private static void OnBeforeAssemblyReload()
         {
-            // Reset cache — the directory might have been removed externally
-            // since the last check, or this might be the very first reload
-            // after an upgrade install where the directory didn't exist yet.
             _cachedDirEnsured = false;
             EnsureAgentCoreDirectory();
         }
@@ -83,19 +61,17 @@ namespace AgentCore.Editor.Config
         /// Ensures that <c>{PreferencesFolder}/AgentCore/</c> exists on disk.
         /// Safe to call repeatedly; result is cached after first successful creation.
         /// </summary>
-        /// <returns><c>true</c> when the directory exists (either already or after creation); <c>false</c> when it could not be created.</returns>
         public static bool EnsureAgentCoreDirectory()
         {
             if (_cachedDirEnsured)
-            {
                 return true;
-            }
 
             try
             {
                 var prefRoot = GetPreferencesFolder();
                 if (string.IsNullOrEmpty(prefRoot))
                 {
+                    AgentCoreLog.Warning("[PreferencesFolderPathHelper] Could not resolve preferences folder.");
                     return false;
                 }
 
@@ -103,6 +79,7 @@ namespace AgentCore.Editor.Config
                 if (!Directory.Exists(target))
                 {
                     Directory.CreateDirectory(target);
+                    AgentCoreLog.Info($"[PreferencesFolderPathHelper] Created directory: {target}");
                 }
 
                 _cachedDirEnsured = true;
@@ -110,78 +87,139 @@ namespace AgentCore.Editor.Config
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to ensure preferences folder for AgentCore singletons: {ex.Message}");
+                AgentCoreLog.Warning($"[PreferencesFolderPathHelper] Failed to ensure directory: {ex.Message}");
                 return false;
             }
         }
 
+        // ──────────────────────────────────────────────
+        //  Path resolution
+        // ──────────────────────────────────────────────
+
         /// <summary>
         /// Resolves Unity's Editor preferences folder path (the parent of the AgentCore subdirectory).
+        /// Tries reflection first, then scans the Unity preferences root for existing Editor-*.x folders.
         /// </summary>
         private static string GetPreferencesFolder()
         {
             if (!string.IsNullOrEmpty(_cachedPreferencesFolder))
-            {
                 return _cachedPreferencesFolder;
+
+            _cachedPreferencesFolder = ResolveByReflection()
+                ?? ResolveByDirectoryScan()
+                ?? string.Empty;
+
+            if (string.IsNullOrEmpty(_cachedPreferencesFolder))
+            {
+                AgentCoreLog.Warning("[PreferencesFolderPathHelper] All path resolution methods failed.");
             }
 
-            // Preferred: reflection into UnityEditorInternal.InternalEditorUtility.unityPreferencesFolder.
-            // This mirrors the internal path Unity uses to compose ScriptableSingleton files with
-            // PreferencesFolder location, guaranteeing we ensure the exact directory Unity will Move into.
-            try
+            return _cachedPreferencesFolder;
+        }
+
+        /// <summary>
+        /// Reflection into <c>UnityEditorInternal.InternalEditorUtility</c> — the same API
+        /// Unity's <c>FilePathAttribute</c> uses internally. Tries multiple member signatures
+        /// to cover different Unity versions.
+        /// </summary>
+        private static string ResolveByReflection()
+        {
+            const BindingFlags flags =
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+
+            var type = typeof(InternalEditorUtility);
+
+            // Try as static property (most common).
+            foreach (var name in new[] { "unityPreferencesFolder", "preferencesFolder" })
             {
-                var prop = typeof(InternalEditorUtility).GetProperty(
-                    "unityPreferencesFolder",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                var prop = type.GetProperty(name, flags);
                 if (prop != null)
                 {
-                    var value = prop.GetValue(null) as string;
-                    if (!string.IsNullOrEmpty(value))
+                    try
                     {
-                        _cachedPreferencesFolder = value;
-                        return _cachedPreferencesFolder;
+                        var value = prop.GetValue(null) as string;
+                        if (!string.IsNullOrEmpty(value))
+                        {
+                            AgentCoreLog.Info($"[PreferencesFolderPathHelper] Resolved via reflection ({name}): {value}");
+                            return value;
+                        }
                     }
+                    catch { /* try next */ }
+                }
+            }
+
+            // Try as static method (some Unity versions expose it as a method).
+            foreach (var name in new[] { "unityPreferencesFolder", "preferencesFolder", "GetPreferencesFolder" })
+            {
+                var method = type.GetMethod(name, flags);
+                if (method != null && method.GetParameters().Length == 0)
+                {
+                    try
+                    {
+                        var value = method.Invoke(null, null) as string;
+                        if (!string.IsNullOrEmpty(value))
+                        {
+                            AgentCoreLog.Info($"[PreferencesFolderPathHelper] Resolved via reflection method ({name}): {value}");
+                            return value;
+                        }
+                    }
+                    catch { /* try next */ }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Scans the Unity preferences root directory (<c>%APPDATA%/Unity/</c> on Windows,
+        /// <c>~/Library/Preferences/Unity/</c> on macOS) for existing <c>Editor-*.x</c>
+        /// folders and uses the most recently modified one. This avoids guessing the
+        /// version number — Unity uses an internal version (e.g. <c>Editor-5.x</c> for
+        /// Unity 2021) that does NOT match the marketing version.
+        /// </summary>
+        private static string ResolveByDirectoryScan()
+        {
+            string unityRoot = GetUnityPreferencesRoot();
+            if (string.IsNullOrEmpty(unityRoot) || !Directory.Exists(unityRoot))
+                return null;
+
+            DirectoryInfo selected = null;
+            try
+            {
+                foreach (var dir in new DirectoryInfo(unityRoot).GetDirectories("Editor-*.x"))
+                {
+                    if (selected == null || dir.LastWriteTimeUtc > selected.LastWriteTimeUtc)
+                        selected = dir;
                 }
             }
             catch
             {
-                // fall through to platform fallback
+                return null;
             }
 
-            _cachedPreferencesFolder = BuildFallbackPreferencesFolder();
-            return _cachedPreferencesFolder;
-        }
+            if (selected == null)
+                return null;
 
-        private static string BuildFallbackPreferencesFolder()
-        {
-            var majorVersion = ExtractMajorVersion(Application.unityVersion);
-            var editorSegment = $"Editor-{majorVersion}.x";
-
-#if UNITY_EDITOR_WIN
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (string.IsNullOrEmpty(appData)) return string.Empty;
-            return Path.Combine(appData, "Unity", editorSegment, "Preferences");
-#elif UNITY_EDITOR_OSX
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (string.IsNullOrEmpty(home)) return string.Empty;
-            return Path.Combine(home, "Library", "Preferences", "Unity", editorSegment, "Preferences");
-#else
-            // Linux
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (string.IsNullOrEmpty(home)) return string.Empty;
-            return Path.Combine(home, ".config", "unity3d", "Preferences");
-#endif
+            var result = Path.Combine(selected.FullName, "Preferences");
+            AgentCoreLog.Info($"[PreferencesFolderPathHelper] Resolved via directory scan: {result}");
+            return result;
         }
 
         /// <summary>
-        /// Extracts the major version component from a Unity version string (e.g. "2022.3.15f1" → "2022",
-        /// "6000.0.10f1" → "6000"). Falls back to "unknown" when parsing fails.
+        /// Returns the Unity preferences root (the directory containing <c>Editor-*.x</c> folders).
         /// </summary>
-        private static string ExtractMajorVersion(string unityVersion)
+        private static string GetUnityPreferencesRoot()
         {
-            if (string.IsNullOrEmpty(unityVersion)) return "unknown";
-            var dotIndex = unityVersion.IndexOf('.');
-            return dotIndex > 0 ? unityVersion.Substring(0, dotIndex) : unityVersion;
+#if UNITY_EDITOR_WIN
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return string.IsNullOrEmpty(appData) ? null : Path.Combine(appData, "Unity");
+#elif UNITY_EDITOR_OSX
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return string.IsNullOrEmpty(home) ? null : Path.Combine(home, "Library", "Preferences", "Unity");
+#else
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return string.IsNullOrEmpty(home) ? null : Path.Combine(home, ".config", "unity3d");
+#endif
         }
     }
 }

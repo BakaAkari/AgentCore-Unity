@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.4] - 2026-07-15
+
+### Fixed — Preferences 目录路径解析根因修复（v1.7.3 的补丁）
+
+- v1.7.3 的 `beforeAssemblyReload` 回调只能保护新代码加载后的 Domain Reload，无法修复路径计算错误
+- **根因**：Unity 内部 preferences 目录用内部版本号命名（Unity 2021 = `Editor-5.x`），不是营销版本号。旧 fallback 用 `Application.unityVersion` 提取营销版本号（`2021`），算出 `Editor-2021.x`，与 Unity 实际路径 `Editor-5.x` 不匹配，导致目录创建在错误位置
+- **修复**：重写 `PreferencesFolderPathHelper`，三级路径解析：
+  1. **反射**（primary）— 扩展为尝试 property + method，多个候选名称（`unityPreferencesFolder` / `preferencesFolder` / `GetPreferencesFolder`），覆盖不同 Unity 版本的 API 差异
+  2. **目录扫描**（fallback）— 扫描 `%APPDATA%/Unity/` 下已有的 `Editor-*.x` 目录，取最近修改的，不再猜版本号
+  3. 如果都没有，返回空并 warning
+- 删除 `ExtractMajorVersion` 和 `BuildFallbackPreferencesFolder`（根本性错误的设计）
+- 新增诊断日志：Info 级别记录最终解析路径和解析方式（reflection / scan），方便排障
+
 ## [1.7.3] - 2026-07-15
 
 ### Fixed — 老项目升级安装时 Preferences 目录 Move 弹窗
