@@ -15,7 +15,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
     {
         private static readonly object _lock = new object();
         private static VcsSyncStatus _lastStatus;
-        private static DateTime _lastCheckedUtc = DateTime.MinValue;
+        private static DateTime _lastCheckedUtc = DateTime.UtcNow;
         private static bool _isChecking;
         private static bool _isSyncing;
         private static string _lastError;
