@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-07-15
+
+### Fixed — 新装用户路径不存在导致 Editor 卡死
+
+- `PreferencesFolderPathHelper` 加 `[InitializeOnLoad]` + 静态构造函数，assembly 加载时立即创建 `%APPDATA%/Unity/Editor-x.x/Preferences/AgentCore/` 目录
+- 修复根因：此前 `EnsureAgentCoreDirectory()` 只在 `SafeSave()` 内调用，被两层 `delayCall` 延迟；Unity 内部 `ScriptableSingleton` auto-save 在目录不存在时触发 `Move temp → target` 失败，导致"系统找不到指定的路径" + Editor 卡死
+
 ## [1.7.0] - 2026-07-14
 
 ### Changed — 统一 LLM 管道 + Settings 极简化重构

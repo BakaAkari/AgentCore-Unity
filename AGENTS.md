@@ -602,6 +602,15 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 
 ---
 
+### 6.7 v1.7.1 架构模式补充
+
+#### Preferences 目录竞态修复
+
+- `PreferencesFolderPathHelper` 加 `[InitializeOnLoad]` + 静态构造函数
+- Assembly 加载时立即创建 `%APPDATA%/Unity/Editor-x.x/Preferences/AgentCore/` 目录
+- 修复根因：此前 `EnsureAgentCoreDirectory()` 只在 `SafeSave()` 内调用，被两层 `delayCall` 延迟；Unity `ScriptableSingleton` auto-save 在目录不存在时触发 `Move temp → target` 失败，导致"系统找不到指定的路径" + Editor 卡死
+- 现在目录创建时机：assembly load → `[InitializeOnLoad]` static ctor → 立即创建 → 早于任何 ScriptableSingleton auto-save
+
 ## 7. 编码硬规则
 
 ### 7.1 禁止事项

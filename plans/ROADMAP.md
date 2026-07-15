@@ -1,6 +1,6 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.7.0 | **更新日期**: 2026-07-14 | **状态**:
+> **版本**: v1.7.1 | **更新日期**: 2026-07-15 | **状态**:
 > Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）；**v1.7.0 Settings v20 死字段清理 + VCS 模块修复**（12 字段删除 / 进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
@@ -37,11 +37,11 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.7.0)
+### 0.4 当前项目快照 (v1.7.1)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.7.0 (2026-07-14) — v1.7.0: Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens）+ VCS 模块修复（进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持 / Perforce ignore 标注） |
+| **版本** | 1.7.1 (2026-07-15) — v1.7.1: 修复新装用户 Preferences 目录不存在导致 Editor 卡死（[InitializeOnLoad] 静态构造函数）；v1.7.0: Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens）+ VCS 模块修复（进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持 / Perforce ignore 标注） |
 | **代码规模** | 288 个 .cs 文件，约 97K 行代码，51 个原生工具 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
@@ -326,6 +326,7 @@ v1.5.0-alpha5 — Settings 分页精简(6→5) + GLM-5.2 全链路适配
 v1.5.6~v1.5.7 — 稳定性修复（PreferencesFolder Save hang + offline uninstall）
 v1.6.0~v1.6.5 — 产品化体验冲刺（详见 §3.z）
 v1.7.0        — Settings v20 死字段清理 + VCS 模块修复（详见 §3.z Z.18/Z.19）
+v1.7.1        — 修复新装用户 Preferences 目录不存在导致 Editor 卡死
 v1.5.0-alpha3 (未定期) — Domain Reload 兜底完整实施 / BLOCK verdict 回 tool loop 完整实施 / Node A/B 单元测试
 v1.5.0-beta   — pre-GA 稳定性冲刺 + P1-11 PROJECT.md 模板按钮 + P2-12 AGENTS.md 极简规则沉淀
 v1.5.0 GA     — 4 周 kill criteria 实测窗口开启
@@ -655,7 +656,7 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ## 7. 下一步行动建议
 
-> v1.7.0 已发布。治理层核心（G.1~G.3）已完成，Phase 7 §3.1/§3.2 已交付，v1.7.0 代码质量修复完成。后续两个开发方向：MCP Server（Phase 8）和产品化分发（Phase 7 §3.4）。
+> v1.7.1 已发布。治理层核心（G.1~G.3）已完成，Phase 7 §3.1/§3.2 已交付，v1.7.0 代码质量修复完成，v1.7.1 新装路径 bug 修复。后续两个开发方向：MCP Server（Phase 8）和产品化分发（Phase 7 §3.4）。
 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|

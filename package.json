@@ -1,6 +1,6 @@
 {
   "name": "com.agentcore.unity",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "displayName": "AgentCore Unity",
   "description": "Unity Editor 内置 AI Agent 插件 — 通过自然语言对话驱动 Unity 开发工作流",
   "unity": "2021.3",
