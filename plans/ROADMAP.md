@@ -97,7 +97,7 @@
 | **治理层** | 1.0.x | LLM/Agent 架构安全收口（**前置约束**） | Tool Risk Policy、WorkspacePathPolicy 强制接入、ExecuteCodeTool 降权、Lazy Tool Discovery | G.1~G.3 完成；G.4~G.6 归档（经评估非必要） | [x] 核心完成 |
 | **Phase 7** | 1.0.x ~ 1.x | 索引体验深化、Chat 可观测性与产品化（**对内**） | 后台静默 + 增量索引（v1.1.0）、Chat UI / ThinkingDrawer（v1.2.0）、Request Enrichment（v1.2.1）、UPM 发布 / 文档站 / 示例项目 / Asset Store | 索引零感知 + reasoning 可审计 + 可分发产品 | [>] §3.1/§3.2 完成，§3.4 产品化待启动 |
 | **Phase 8** | 与 Phase 7 平行 | MCP 对外互操作（**对外**） | 通过 MCP 协议向外部 IDE / CLI / Agent 平台暴露 AgentCore 工具集，兼容用户既有开发习惯 | AgentCore MCP Server（stdio + HTTP）+ 安全策略 + 配套示例 | [-] 设计中（治理前置 G.1~G.3 已满足） |
-| **Phase 9** | 1.5.x | Prompt 层幻觉护栏（**质量加固**） | Self-Challenge 双节点机制：Node A（读需求时挑战对用户意图的理解）+ Node B（输出前独立 reviewer 审视 draft）；带 §5.4 kill criteria 4 周实测窗口，异常即回滚；**ADR-17 推翻 §5 Statistics 面板 / §5.5 首周引导 tooltip** | v1.5.0-alpha1~alpha5 核心+escape+GLM适配；v1.6.x 产品化体验冲刺完成；GA 待 alpha3 兜底 + 4 周 kill criteria 验证 | [>] 核心已发布，GA 待观察窗口 |
+| **Phase 9** | 1.5.x | Prompt 层幻觉护栏（**质量加固**） | Self-Challenge 双节点机制：Node A（读需求时挑战对用户意图的理解）+ Node B（输出前独立 reviewer 审视 draft）；带 §5.4 kill criteria 4 周实测窗口，异常即回滚；**ADR-17 推翻 §5 Statistics 面板 / §5.5 首周引导 tooltip** | v1.5.0-alpha1~alpha5 核心+escape+GLM适配；v1.6.x 产品化体验冲刺完成；**[收尾] GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口，机制不再需要** | [x] 收尾 |
 
 ---
 
@@ -326,10 +326,12 @@ v1.5.0-alpha5 — Settings 分页精简(6→5) + GLM-5.2 全链路适配
 v1.5.6~v1.5.7 — 稳定性修复（PreferencesFolder Save hang + offline uninstall）
 v1.6.0~v1.6.5 — 产品化体验冲刺（详见 §3.z）
 v1.7.0        — Settings v20 死字段清理 + VCS 模块修复（详见 §3.z Z.18/Z.19）
-v1.7.1        — 修复新装用户 Preferences 目录不存在导致 Editor 卡死
-v1.5.0-alpha3 (未定期) — Domain Reload 兜底完整实施 / BLOCK verdict 回 tool loop 完整实施 / Node A/B 单元测试
-v1.5.0-beta   — pre-GA 稳定性冲刺 + P1-11 PROJECT.md 模板按钮 + P2-12 AGENTS.md 极简规则沉淀
-v1.5.0 GA     — 4 周 kill criteria 实测窗口开启
+v1.7.1        — 修复新装用户 Preferences 目录不存在导致 Editor 卡死 + VCS 远端检查开机触发修复 + CS0162 编译警告清理
+v1.7.2 (未定期) — Init Project 功能（项目基础设施扫描 + 语义摘要注入 + 拆分文档）
+~~v1.5.0-alpha3~~ — ~~Domain Reload 兜底 / BLOCK verdict 回 tool loop / Node A/B 单元测试~~ **[收尾] GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口，Self-Challenge 机制不再需要**
+~~v1.5.0-beta~~   — ~~pre-GA 稳定性冲刺~~ **[收尾] 同上**
+~~v1.5.0 GA~~     — ~~4 周 kill criteria 实测窗口~~ **[收尾] 同上**
+~~§9.2.3~~        — ~~4 周 formal review~~ **[收尾] 同上**
 v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 ```
 
@@ -656,14 +658,14 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ## 7. 下一步行动建议
 
-> v1.7.1 已发布。治理层核心（G.1~G.3）已完成，Phase 7 §3.1/§3.2 已交付，v1.7.0 代码质量修复完成，v1.7.1 新装路径 bug 修复。后续两个开发方向：MCP Server（Phase 8）和产品化分发（Phase 7 §3.4）。
+> v1.7.1 已发布。Self-Challenge 机制标记收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）。后续两个开发方向：Init Project 功能和 MCP Server（Phase 8）+ 产品化分发（Phase 7 §3.4）。
 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|
-| P0 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作核心需求；治理前置 G.1/G.2/G.3 已满足，可直接启动设计与实现 |
-| P0 (待用户决策) | **Phase 9 §3.y Self-Challenge 核心机制（9.1.1 ~ 9.1.10）** | 设计文档 v0.10 已定稿；用户已登记进 ROADMAP。**开工前必须按 AGENTS.md §12.4 编码前对齐清单逐项确认**：分阶段交付方案 / 每阶段版本号 / 各阶段验收标准 / 首阶段 500 行代码上限拆分。不建议一次性推 17~20 人日 |
+| P0 | **Init Project — 项目基础设施扫描 + 语义摘要注入** | 扫描 editor tools / 架构骨架 / player 框架 / utility 层 / 目录结构，持久化为拆分文档，每轮注入轻量语义摘要，SOUL.md 一条通用规则驱动 agent 按需 read_file，避免重复造轮子 |
+| P1 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作核心需求；治理前置 G.1/G.2/G.3 已满足，可直接启动设计与实现 |
 | P1 | **Phase 8 §3.x MCP Server 传输与兼容性（8.1.5 ~ 8.1.7）** | stdio 稳定后扩展 HTTP/SSE 传输；覆盖 Claude Desktop / Cursor / Continue / CLI 四类客户端 |
-| P1 | **Phase 7 §3.4 产品化 — UPM 发布流程（7.4.1）** | v1.2.1 已是稳定产品，发布流程可沉淀为自动化脚本 |
+| P2 | **Phase 7 §3.4 产品化 — UPM 发布流程（7.4.1）** | v1.7.1 已是稳定产品，发布流程可沉淀为自动化脚本 |
 | P2 | **Phase 7 §3.4 产品化 — 文档站 + 示例项目（7.4.2 ~ 7.4.5）** | 降低新用户上手门槛；可与 MCP 开发并行推进 |
 
 ---
