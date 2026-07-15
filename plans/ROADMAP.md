@@ -658,16 +658,29 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ## 7. 下一步行动建议
 
-> v1.7.1 已发布。Self-Challenge 机制标记收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）。后续两个开发方向：Init Project 功能和 MCP Server（Phase 8）+ 产品化分发（Phase 7 §3.4）。
+> v1.7.1 已发布。Self-Challenge 机制标记收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）。后续开发方向按优先级排列如下。
 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|
 | P0 | **Init Project — 项目基础设施扫描 + 语义摘要注入** | 扫描 editor tools / 架构骨架 / player 框架 / utility 层 / 目录结构，持久化为拆分文档，每轮注入轻量语义摘要，SOUL.md 一条通用规则驱动 agent 按需 read_file，避免重复造轮子 |
-| P1 | **Phase 8 §3.x MCP Server 协议骨架（8.1.1 ~ 8.1.4）** | 对外互操作核心需求；治理前置 G.1/G.2/G.3 已满足，可直接启动设计与实现 |
-| P1 | **Phase 8 §3.x MCP Server 传输与兼容性（8.1.5 ~ 8.1.7）** | stdio 稳定后扩展 HTTP/SSE 传输；覆盖 Claude Desktop / Cursor / Continue / CLI 四类客户端 |
+| P1 | **Skills 自积累系统** | agent 从成功经验中提取可复用流程，存为项目级 skill 文档（`.agentcore/skills/`）；Bootstrap 链加载，agent 每轮能看到 skill 列表；和 Init Project 互补：Init 扫描"有什么"，skill 沉淀"怎么用"；触发：复杂任务完成后主动询问保存，或用户主动要求 |
+| P1 | **Curator 自维护系统** | 后台维护 skill 和 Init Project 文档新鲜度；定期检查 skill 引用的文件路径是否仍存在（Unity 项目重构频繁）；标记过期条目不删除；低频轮询（每小时），性能开销可忽略 |
+| P2 | **Goal 模式** | 跨轮持久化目标，agent 每轮记得当前大任务；session 级不跨 session；每轮注入 system prompt；agent 回复末尾附 goal 进度一行 |
+| P2 | **MCP Server — 协议骨架（8.1.1 ~ 8.1.4）** | JSON-RPC + stdio，对外互操作；治理前置 G.1/G.2/G.3 已满足 |
+| P2 | **MCP Server — 传输与兼容性（8.1.5 ~ 8.1.7）** | stdio 稳定后扩展 HTTP/SSE 传输；覆盖 Claude Desktop / Cursor / Continue / CLI 四类客户端 |
 | P2 | **视觉感知辅助诊断（Vision-Assisted Diagnostics）** | 让 agent 能"看到" Game View / Scene View 画面，辅助诊断依赖视觉表现的问题（穿模、材质颜色、布局错位）。可行性待模型条件具备后评估（当前 GLM-5.2-W4AFP8 不支持 image input，代理层剥离图片并注入 reminder）。技术路径：Game View 用 `ScreenCapture.CaptureScreenshotAsTexture`，Scene View 用 `SceneView.lastActiveSceneView.camera` → RenderTexture；两级调用（截图 → 辅助 vision 模型转文字描述 → 注入主对话）或等主模型支持 vision 后直接注入 |
 | P2 | **Phase 7 §3.4 产品化 — UPM 发布流程（7.4.1）** | v1.7.1 已是稳定产品，发布流程可沉淀为自动化脚本 |
 | P2 | **Phase 7 §3.4 产品化 — 文档站 + 示例项目（7.4.2 ~ 7.4.5）** | 降低新用户上手门槛；可与 MCP 开发并行推进 |
+
+**已排除方向（经评估不适配当前 Unity 约束）：**
+
+| 功能 | 排除理由 |
+|------|----------|
+| Session 搜索 | 不需要 |
+| Session 分支 | 新建 session 替代 |
+| 事件驱动触发 | 实时监控性能开销太大 |
+| 后台委派 Subagent | 子 agent 不能调 Editor API（Unity 主线程限制），只能文件读取，意义不大 |
+| Kanban | 不需要 |
 
 ---
 
