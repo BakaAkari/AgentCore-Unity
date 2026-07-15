@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-07-15
+
+### Documentation — minimalism / self-challenge 历史文档整理归档
+
+- 无代码变化（Editor/ 下所有 `.cs` 均维持 1.7.1 状态）
+- 文档层清理：`plans/adr-17-minimalism.md` 决策记录保留在活跃 plans/；`_archive/analysis/minimalism-audit-report.md` 与 `_archive/features/self-challenge-implementation-report.md` 作为历史依据固化在归档目录
+- `plans/README.md` 归档索引条目更新，`plans/ROADMAP.md` / `AGENTS.md` / `README.md` 版本号引用同步
+
+> 说明：本版本仅整理文档 + 归档旧 tarball，SemVer patch 递增用于产物版本对齐；没有 API / 行为变化，可从 1.7.1 直接覆盖升级，无需迁移。
+
 ## [1.7.1] - 2026-07-15
 
 ### Fixed — 新装用户路径不存在导致 Editor 卡死
