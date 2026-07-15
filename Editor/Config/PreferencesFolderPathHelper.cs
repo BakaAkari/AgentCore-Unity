@@ -32,6 +32,7 @@ namespace AgentCore.Editor.Config
     /// prevent the Editor from running.
     /// </para>
     /// </remarks>
+    [InitializeOnLoad]
     public static class PreferencesFolderPathHelper
     {
         /// <summary>
@@ -43,6 +44,17 @@ namespace AgentCore.Editor.Config
 
         private static string _cachedPreferencesFolder;
         private static bool _cachedDirEnsured;
+
+        /// <summary>
+        /// Static constructor runs at assembly load time via <c>[InitializeOnLoad]</c>,
+        /// ensuring the preferences directory exists before any ScriptableSingleton
+        /// can trigger a Save. This closes the race window where Unity's internal
+        /// auto-save fires before our <c>SafeSave</c> wrapper runs.
+        /// </summary>
+        static PreferencesFolderPathHelper()
+        {
+            EnsureAgentCoreDirectory();
+        }
 
         /// <summary>
         /// Ensures that <c>{PreferencesFolder}/AgentCore/</c> exists on disk.
