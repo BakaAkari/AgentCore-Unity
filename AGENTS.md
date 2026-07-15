@@ -611,6 +611,16 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - 修复根因：此前 `EnsureAgentCoreDirectory()` 只在 `SafeSave()` 内调用，被两层 `delayCall` 延迟；Unity `ScriptableSingleton` auto-save 在目录不存在时触发 `Move temp → target` 失败，导致"系统找不到指定的路径" + Editor 卡死
 - 现在目录创建时机：assembly load → `[InitializeOnLoad]` static ctor → 立即创建 → 早于任何 ScriptableSingleton auto-save
 
+#### VCS 远端检查开机触发修复
+
+- `VcsRemoteStatusMonitor._lastCheckedUtc` 从 `DateTime.MinValue` 改为 `DateTime.UtcNow`
+- 修复根因：MinValue 距今 ~2000 年，首个 `EditorApplication.update` tick 即通过 15 分钟间隔检查，导致打开项目时立即执行远端查询 + SceneView 横幅出现
+
+#### CS0162 编译警告清理 + SessionStorage 日志降级
+
+- 3 个 `const true` 死守卫删除（`SceneViewUpdateBannerEnabled` / `PeriodicRemoteStatusCheckEnabled` / `AutoRefreshCommitListEnabled`）及其对应 const 声明
+- `SessionStorage.Load` 的 "Session file not found" 从 `LogWarning` 降级为 `AgentCoreLog.Info`（新装无历史 session 是正常状态）
+
 ## 7. 编码硬规则
 
 ### 7.1 禁止事项

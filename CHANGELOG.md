@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PreferencesFolderPathHelper` 加 `[InitializeOnLoad]` + 静态构造函数，assembly 加载时立即创建 `%APPDATA%/Unity/Editor-x.x/Preferences/AgentCore/` 目录
 - 修复根因：此前 `EnsureAgentCoreDirectory()` 只在 `SafeSave()` 内调用，被两层 `delayCall` 延迟；Unity 内部 `ScriptableSingleton` auto-save 在目录不存在时触发 `Move temp → target` 失败，导致"系统找不到指定的路径" + Editor 卡死
 
+### Fixed — VCS 远端状态检查在打开项目时立即触发
+
+- `VcsRemoteStatusMonitor._lastCheckedUtc` 从 `DateTime.MinValue` 改为 `DateTime.UtcNow`
+- 修复根因：MinValue 距今 ~2000 年，首个 `EditorApplication.update` tick 即通过 15 分钟间隔检查，导致打开项目时立即执行远端查询 + SceneView 横幅出现
+
+### Fixed — 3 个 CS0162 编译警告 + SessionStorage 日志降级
+
+- 删除 3 个 `const true` 死守卫（`SceneViewUpdateBannerEnabled` / `PeriodicRemoteStatusCheckEnabled` / `AutoRefreshCommitListEnabled`）及其对应 const 声明
+- `SessionStorage.Load` 的 "Session file not found" 从 `LogWarning` 降级为 `AgentCoreLog.Info`（新装无历史 session 是正常状态）
+
 ## [1.7.0] - 2026-07-14
 
 ### Changed — 统一 LLM 管道 + Settings 极简化重构
