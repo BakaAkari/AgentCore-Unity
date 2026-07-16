@@ -1,6 +1,6 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.7.7 | **更新日期**: 2026-07-15 | **状态**:
+> **版本**: v1.7.8 | **更新日期**: 2026-07-15 | **状态**:
 > Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）；**v1.7.0 Settings v20 死字段清理 + VCS 模块修复**（12 字段删除 / 进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持）；**v1.7.1 新装路径 + VCS 开机触发 + CS0162 修复**；**v1.7.2 文档整理归档（无代码变化）**；**v1.7.3 老项目升级安装 Preferences 目录 Move 弹窗修复（beforeAssemblyReload 回调）**；**Phase 9 Self-Challenge 收尾**（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
