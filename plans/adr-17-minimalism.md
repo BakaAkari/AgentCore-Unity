@@ -3,7 +3,7 @@
 > **状态**: 已定稿(2026-07-09)
 > **决策人**: 项目 PO / 唯一用户
 > **触发**: Self-Challenge 极简化(6 字段 → 1 字段)后, 用户明确要求将此哲学贯彻到全产品
-> **影响文档**: 推翻 [`prompt-layer-hallucination-hardening-plan.md`](prompt-layer-hallucination-hardening-plan.md) v0.10 §3.4/§5/§7.1; 影响所有 Settings 相关设计文档
+> **影响文档**: 推翻 [`_archive/design/prompt-layer-hallucination-hardening-plan.md`](_archive/design/prompt-layer-hallucination-hardening-plan.md) v0.10 §3.4/§5/§7.1; 影响所有 Settings 相关设计文档
 
 ---
 
@@ -209,9 +209,9 @@
 
 ## 5. 参考
 
-- [`minimalism-audit-report.md`](minimalism-audit-report.md) — 触发本 ADR 的全产品审计
-- [`prompt-layer-hallucination-hardening-plan.md`](prompt-layer-hallucination-hardening-plan.md) — 被推翻的上游设计文档 v0.10
-- [`self-challenge-implementation-report.md`](self-challenge-implementation-report.md) — Self-Challenge 极简化实施记录
+- [`_archive/analysis/minimalism-audit-report.md`](_archive/analysis/minimalism-audit-report.md) — 触发本 ADR 的全产品审计
+- [`_archive/design/prompt-layer-hallucination-hardening-plan.md`](_archive/design/prompt-layer-hallucination-hardening-plan.md) — 被推翻的上游设计文档 v0.10（已归档）
+- [`_archive/features/self-challenge-implementation-report.md`](_archive/features/self-challenge-implementation-report.md) — Self-Challenge 极简化实施记录
 - [`ROADMAP.md`](ROADMAP.md) ADR-10 — 规则系统废弃案例, 类似哲学决策
 
 ---

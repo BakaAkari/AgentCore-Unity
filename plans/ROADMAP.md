@@ -31,7 +31,7 @@
 
 ### 0.3 企业级 Unity 项目适配基准
 
-自 2026-06-02 起，AgentCore 后续功能设计需按 `enterprise-unity-workflow-requirements.md` 中记录的大型商业 Unity 项目场景进行校准。已确认的基础设计规则是：
+自 2026-06-02 起，AgentCore 后续功能设计需按 `_archive/design/enterprise-unity-workflow-requirements.md` 中记录的大型商业 Unity 项目场景进行校准。已确认的基础设计规则是：
 
 > **SVN 工作副本根 = AgentCore WorkspaceRoot；Unity 工程目录 = WorkspaceRoot 下的 UnityRoot 子根；地图、模式、工具、资源、插件等目录 = WorkspaceRoot 下的 Scope Root。**
 
@@ -285,7 +285,7 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 **主题**: 通过在两个通用节点强制注入 self-challenge，激活 LLM 已有但被动的元认知能力，降低"结构漂亮但语义粒度不匹配"型幻觉。**质量加固而非新能力**——不涉及新工具、新协议、新对外暴露，纯 prompt + 输出解析 + UI 呈现。
 **触发原因**: 多模型（尤其 Qwen 3 VL 等 mid-tier LLM）在 Unity 工作流中反复出现"看似完整的部分答案"型幻觉（原案例："帮我获取选中 object 的 material" → 只返回第一个材质但用户可能期望全部）。SOUL.md 规则已到语义层限制，需要工程侧引入结构化 self-review 补充。
-**设计文档**: [`prompt-layer-hallucination-hardening-plan.md`](prompt-layer-hallucination-hardening-plan.md)（v0.10 定稿）
+**设计文档**: [`_archive/design/prompt-layer-hallucination-hardening-plan.md`](_archive/design/prompt-layer-hallucination-hardening-plan.md)（v0.10 定稿，已归档）
 **架构决策**: 详见 ADR-16（Self-Challenge 定位为独立 Phase + 带 kill criteria 实验性发布）
 **治理约束**: 不属于治理层 G 系列——Self-Challenge 是 prompt 输出结构化机制，不涉及工具风险策略、能力授权或 Workspace 边界。与 G.5（已归档）的区别在于 G.5 曾试图引入 Operation Journal 架构层组件，Phase 9 完全在现有 AgentLoop 内做增强，不新增架构层。
 
@@ -551,7 +551,7 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
   - §1 战略目标表新增 Phase 9 行
   - §3.y 新增 Phase 9 完整任务表（9.1.1 ~ 9.2.3）
   - §5 风险评估新增"Self-Challenge 对弱模型结构化输出合规能力依赖 / rubber-stamp / 用户感知变慢"三条风险
-  - §6 文档索引新增 `prompt-layer-hallucination-hardening-plan.md` 条目
+  - §6 文档索引更新 `prompt-layer-hallucination-hardening-plan.md` 条目（已归档至 `_archive/design/`）
   - §7 下一步行动优先级不受 Self-Challenge 影响（MCP 与产品化仍为 P0/P1，Self-Challenge 待用户决策是否进入 P0 队列）
 - **拒绝替代方案**:
   - "把 Self-Challenge 作为治理层 G.7" — 违背 G.4~G.6 归档时确立的"治理层不做 prompt 加固，只做架构级安全约束"边界
@@ -640,12 +640,12 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 |------|------|------|
 | [`README.md`](README.md) | 文档导航 | `plans/` 顶层 |
 | [`ROADMAP.md`](ROADMAP.md) | **主导方向文档** | `plans/` 顶层 |
-| [`enterprise-unity-workflow-requirements.md`](enterprise-unity-workflow-requirements.md) | 企业级 Unity 项目适配需求基准，后续任务上游依据 | `plans/` 顶层 |
+| [`_archive/design/enterprise-unity-workflow-requirements.md`](_archive/design/enterprise-unity-workflow-requirements.md) | 企业级 Unity 项目适配需求基准（已归档） | `_archive/design/` |
 | [`llm-agent-architecture-remediation-plan.md`](llm-agent-architecture-remediation-plan.md) | **治理层** LLM/Agent 架构安全收口最终准则；Phase 7/8 工具扩展与 MCP 前置约束 | `plans/` 顶层 |
 | [`indexing-background-incremental-design.md`](indexing-background-incremental-design.md) | **Phase 7 §3.1** 后台静默 + 增量索引详细设计（v1.1.0 上游依据） | `plans/` 顶层 |
 | [`indexing-scope-layered-and-status-awareness-design.md`](indexing-scope-layered-and-status-awareness-design.md) | **Phase 7 §3.1.1** Scope 层次化索引 + LLM 状态感知详细设计（v1.4.0 上游依据） | `plans/` 顶层 |
 | [`mcp-server-feasibility.md`](mcp-server-feasibility.md) | **Phase 8 §3.x** MCP 对外互操作可行性分析与初步设计；实现受治理层 G.1/G.2/G.3 约束 | `plans/` 顶层 |
-| [`prompt-layer-hallucination-hardening-plan.md`](prompt-layer-hallucination-hardening-plan.md) | **Phase 9 §3.y** Prompt 层幻觉护栏详细设计（v0.10 定稿，v1.5.0 上游依据）；带 §5.4 4 周 kill criteria 实测决定去留 | `plans/` 顶层 |
+| [`_archive/design/prompt-layer-hallucination-hardening-plan.md`](_archive/design/prompt-layer-hallucination-hardening-plan.md) | **Phase 9 §3.y** Prompt 层幻觉护栏详细设计（已归档；ADR-17 部分推翻） | `_archive/design/` |
 | [`vcs-treeview-refactor-plan.md`](_archive/features/vcs-treeview-refactor-plan.md) | ~~已废弃~~ — TreeView 方案废弃，改为扁平列表（v0.9.3 完成），已归档 | `_archive/features/` |
 | [`codebase-indexing-phase2-plan.md`](_archive/features/codebase-indexing-phase2-plan.md) | 已完成（v0.9.3）— SQLite 迁移 + 依赖图 + FTS5，已归档 | `_archive/features/` |
 | **其他已完成计划** | 历史归档 | [`_archive/features/`](_archive/features/) |
