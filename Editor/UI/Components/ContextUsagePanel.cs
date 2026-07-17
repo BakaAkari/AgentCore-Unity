@@ -129,21 +129,23 @@ namespace AgentCore.Editor.UI.Components
             _progressFill.style.width = Length.Percent(percentage * 100f);
 
             // Color coding based on usage
+            // v1.7.x: 统一引用 AgentCoreColors 单一真源，消除此前硬编码 Color(0.2,0.8,0.3) 等
+            // 与 USS/ToolCallCard 语义色不一致的问题（同一"成功绿"曾有三个不同值）。
             if (percentage < 0.5f)
             {
-                _progressFill.style.backgroundColor = new Color(0.2f, 0.8f, 0.3f); // Green
+                _progressFill.style.backgroundColor = AgentCore.Editor.UI.AgentCoreColors.Success; // 绿
             }
             else if (percentage < 0.7f)
             {
-                _progressFill.style.backgroundColor = new Color(1f, 0.8f, 0f); // Yellow
+                _progressFill.style.backgroundColor = AgentCore.Editor.UI.AgentCoreColors.Warning; // 黄
             }
             else if (percentage < 0.9f)
             {
-                _progressFill.style.backgroundColor = new Color(1f, 0.5f, 0f); // Orange
+                _progressFill.style.backgroundColor = AgentCore.Editor.UI.AgentCoreColors.Orange; // 橙
             }
             else
             {
-                _progressFill.style.backgroundColor = new Color(1f, 0.2f, 0.2f); // Red
+                _progressFill.style.backgroundColor = AgentCore.Editor.UI.AgentCoreColors.Danger; // 红
             }
 
             // Update usage label

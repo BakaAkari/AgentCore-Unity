@@ -7,12 +7,12 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ## 当前状态
 
 - **Package**: `com.agentcore.unity`
-- **Version**: `1.7.7`
+- **Version**: `1.7.9`
 - **Unity**: `2021.3+`
 - **Assembly**: `AgentCore.Editor`，Editor-only，主程序集不引用用户项目程序集
 - **Distribution**: UPM package
 - **Code Scale**: 288 个 .cs 文件，约 97K 行代码，51 个原生工具
-- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge 收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化；v1.7.0 Settings v20 死字段清理 + VCS 模块修复（进程泄漏/事件泄漏/日志风暴/设置极简化/多 VCS 支持）；v1.7.1 修复新装路径不存在 + VCS 远端检查开机触发 + CS0162 编译警告；v1.7.2 minimalism / self-challenge 历史文档整理归档（无代码变化）；v1.7.3 修复 beforeAssemblyReload 回调（时机层面）；v1.7.4 修复路径解析根因（Unity 内部版本号 vs 营销版本号不匹配，三级路径解析）；v1.7.5 补全硬编码兜底 + ScriptingDefineSymbols 版本兼容（Unity 2023+/6 的 ForGroup API 废弃迁移）；v1.7.6 修复 v1.7.5 遗漏的 using 指令（CS0103）；后续重点为自演化知识系统 + Phase 8 MCP Server + 产品化分发
+- **Status**: Phase 1~6 已验收；治理层 G.1~G.3 完成；Phase 7 §3.1/§3.2 完成；Phase 9 Self-Challenge 收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）；v1.6.x 系列交付 Context Ingest、YOLO 信任模式、日志分级、PendingIndicator、SSE yield 优化、消息引用栏、Play Mode preflight、自适应 LLM 配置、统一 LLM 管道、气泡溢出修复、流式 UI 性能优化；v1.7.0 Settings v20 死字段清理 + VCS 模块修复（进程泄漏/事件泄漏/日志风暴/设置极简化/多 VCS 支持）；v1.7.1 修复新装路径不存在 + VCS 远端检查开机触发 + CS0162 编译警告；v1.7.2 minimalism / self-challenge 历史文档整理归档（无代码变化）；v1.7.3 修复 beforeAssemblyReload 回调（时机层面）；v1.7.4 修复路径解析根因（Unity 内部版本号 vs 营销版本号不匹配，三级路径解析）；v1.7.5 补全硬编码兜底 + ScriptingDefineSymbols 版本兼容（Unity 2023+/6 的 ForGroup API 废弃迁移）；v1.7.6 修复 v1.7.5 遗漏的 using 指令（CS0103）；v1.7.7~1.7.8 Preferences 目录 Move 弹窗根因修复（第五层）+ CS0103 打包遗漏修正；v1.7.9 HelpBubble 浮窗根因修复 + 对话泡泡溢出/窗口缩窄卡死修复 + UI 交互视觉审查 P0/P1（IME Enter 误发送、GetContextBudget 高频遍历、流式视觉跳变方案C、ToolCallCard 超长结果性能、色板统一 AgentCoreColors）；后续重点为自演化知识系统 + Phase 8 MCP Server + 产品化分发
 
 ## 核心能力
 

@@ -4,6 +4,22 @@
  * 三列布局：Hub Rail + Context Sidebar + Main Content
  * ============================================================ */
 
+/* --- 统一色板参考（与 C# AgentCoreColors 单一真源镜像同步）---
+ * 约定：语义色改动必须同时改这里的注释、下方所有用到该色的规则、以及
+ * Editor/UI/AgentCoreColors.cs，三者取值一致。
+ * 注：Unity USS 的 var()/:root 自定义变量在本项目未启用（避免未验证的运行时依赖），
+ * 故此处仅作取值文档，实际规则中直接写十六进制字面值。
+ * 标准值（取自历史 USS 高频值）：
+ *   accent 主题蓝   #4a86c8   — 强调边框 / 进行中
+ *   success 成功绿  #5cb85c   — 成功 / 完成
+ *   danger 危险红   #d9534f   — 失败 / 错误
+ *   warning 警告黄  #f0ad4e
+ *   text-primary   #d4d4d4    text-secondary  #888888
+ *   card-bg        #2d2d2d    detail-bg       #272727
+ * 另：用户气泡填充蓝 #3a5f8a、按钮填充蓝 #3a6fa8 为有意的较深填充色，不并入 accent。
+ * error 气泡亮红文字 #ff7777、边框 #e05555 为有意的明暗层次，不并入 danger。
+ */
+
 /* --- 根容器 --- */
 #root-container {
     flex-grow: 1;
@@ -1224,7 +1240,7 @@
     border-width: 1px;
     border-color: #383838;
     border-left-width: 3px;
-    border-left-color: #4A90D9;
+    border-left-color: #4a86c8;
     overflow: hidden;
 }
 
@@ -1415,10 +1431,10 @@
  * 通过 AddToClassList("active-pulse") / RemoveFromClassList("active-pulse") 切换
  * ============================================================ */
 .active-pulse {
-    border-left-color: #4A90D9;
-    border-right-color: #4A90D9;
-    border-top-color: #4A90D9;
-    border-bottom-color: #4A90D9;
+    border-left-color: #4a86c8;
+    border-right-color: #4a86c8;
+    border-top-color: #4a86c8;
+    border-bottom-color: #4a86c8;
     transition-property: border-color;
     transition-duration: 0.5s;
     transition-timing-function: ease-in-out;
@@ -1472,8 +1488,19 @@
     color: #fff8e1;
 }
 
-/* --- 帮助窗口内容容器（独立 EditorWindow，不再需要 absolute 定位） --- */
+/* --- 浮动面板容器（absolute 定位，添加到宿主窗口 rootVisualElement） --- */
+.help-bubble__panel {
+    position: absolute;
+    background-color: #2e2e2e;
+    border-width: 1px;
+    border-color: #555555;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+/* --- 面板标题 --- */
 .help-bubble__panel-title {
+    flex-shrink: 0;
     font-size: 17px;
     -unity-font-style: bold;
     color: #fbc02d;
@@ -1485,23 +1512,21 @@
 
 /* --- 分区标题 --- */
 .help-bubble__section-header {
+    flex-shrink: 0;
     font-size: 13px;
     -unity-font-style: bold;
     color: #999999;
     margin-top: 14px;
     margin-bottom: 8px;
-    text-transform: uppercase;
     letter-spacing: 1px;
 }
 
-.help-bubble__section-header:first-of-type {
-    margin-top: 0;
-}
 
 /* --- 快捷键条目行 --- */
 .help-bubble__shortcut-row {
     flex-direction: row;
     align-items: flex-start;
+    flex-shrink: 0;
     margin-bottom: 10px;
     padding: 4px 0;
 }
@@ -1527,14 +1552,16 @@
 /* 快捷键说明文字 */
 .help-bubble__shortcut-desc {
     flex-grow: 1;
+    flex-shrink: 1;
     font-size: 13px;
     color: #c8c8c8;
     white-space: normal;
-    line-height: 18px;
+    overflow: hidden;
 }
 
 /* --- 纯文本技巧条目 --- */
 .help-bubble__tip-item {
+    flex-shrink: 0;
     font-size: 14px;
     -unity-font-style: bold;
     color: #d8d8d8;
@@ -1544,5 +1571,4 @@
     border-left-width: 2px;
     border-left-color: #fbc02d;
     white-space: normal;
-    line-height: 20px;
 }

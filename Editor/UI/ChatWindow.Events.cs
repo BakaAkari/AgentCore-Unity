@@ -96,8 +96,39 @@ namespace AgentCore.Editor.UI
                     break;
             }
 
-            // Phase 6.0.4: 每次事件后更新上下文使用情况面板
-            UpdateContextUsagePanel();
+            // Phase 6.0.4 / perf: 更新上下文使用情况面板。
+            // 仅在"可能改变已入历史 token 预算"的事件后刷新，而非每个事件都刷。
+            // StreamToken / ReasoningToken 是高频事件（AI 每吐一个字触发一次），
+            // 但流式吐字期间消息尚未入历史、预算不变，且 GetContextBudget() 每次调用会
+            // O(N) 遍历整个消息历史逐条估算 token —— 挂在 per-token 路径上会造成
+            // O(token 数 × 消息数) 的重复无效计算。故这里用白名单排除高频事件。
+            if (EventAffectsContextBudget(evt.Type))
+            {
+                UpdateContextUsagePanel();
+            }
+        }
+
+        /// <summary>
+        /// 判断某个 Agent 事件是否可能改变上下文 token 预算（即已进入消息历史的内容）。
+        /// <para>
+        /// 只有会向 ConversationHistory 增删内容、或触发压缩/状态切换的事件才影响预算。
+        /// 流式 token 事件（StreamToken/ReasoningToken/ReasoningCompleted）在吐字期间
+        /// 不改变已入历史的 token，排除在外，避免高频遍历。
+        /// </para>
+        /// </summary>
+        private static bool EventAffectsContextBudget(AgentEventType type)
+        {
+            switch (type)
+            {
+                case AgentEventType.StateChanged:        // 状态切换（含 Compressing→Idle，压缩后预算变化）
+                case AgentEventType.AssistantMessage:    // 助手回复入历史
+                case AgentEventType.ToolCallCompleted:   // 工具结果入历史
+                case AgentEventType.ToolCallFailed:      // 失败结果入历史
+                case AgentEventType.Error:               // 错误可能改变历史/状态
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         /// <summary>

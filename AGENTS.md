@@ -648,6 +648,37 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
   - 4 个调用点（OptionalComponentManager × 2 + ReadConsoleTool × 2）统一走 helper
 - **旧 fallback 清理**：删除 `ExtractMajorVersion` 和 `BuildFallbackPreferencesFolder`；新增 `AgentCoreLog.Info` 诊断日志记录解析方式和最终路径
 
+### 6.10 v1.7.9 架构模式补充 — UI 交互与视觉审查（P0/P1）
+
+#### IME 输入法 Enter 误发送守卫
+
+- **根因**：Unity UI Toolkit 的 `KeyDownEvent` 无法区分"IME 候选框确认选词的 Enter"与"提交消息的 Enter"。中文/日文/韩文输入法组字期间按 Enter 会被误判为发送，导致半句话被发出。
+- **修复**：`IsImeComposing()` 基于 `UnityEngine.Input.compositionString.Length > 0` 判断是否处于组字态；Enter 发送分支加此守卫，组字期间不发送。
+
+#### GetContextBudget 高频遍历移出流式路径
+
+- **根因**：`UpdateContextUsagePanel()` 挂在每个 AgentEvent（含 StreamToken/ReasoningToken 高频事件）末尾，且 `AgentLoop.GetContextBudget()` 每次 `foreach` 遍历整个消息历史估算 token。流式吐字时形成 O(N token × M 消息) 无谓重算（token 数在流式中根本不变）。
+- **修复**：新增 `EventAffectsContextBudget(eventType)`，仅在 AssistantMessage/StateChanged/ToolCallCompleted/ToolCallFailed/Error 后刷新面板。ContextUsagePanel.UpdateDisplay 本身只改 text/style 不重建 DOM，故瓶颈在遍历而非渲染。
+
+#### 流式视觉跳变根治 — 统一渲染路径（方案C）
+
+- **根因**：流式阶段用 `FilterStreaming` 显示纯文本（表格 `|a|b|`、代码块裸文本），`SetFinalText` 最终化瞬间切 block 富渲染 → 布局跳变。这是"流式纯文本 / 最终 block"二元硬切换的固有缺陷。
+- **修复**：流式与最终化统一走 `RenderTextAsBlocks()` 同一 block 渲染路径 —— 代码块/表格在流式阶段即为深色框/网格，最终化只是用全量文本重渲一次，无模式切换即无跳变。
+- **关键辅助**：`CloseDanglingCodeFence()` 检测围栏 ``` 奇偶，流式期为未闭合代码块补一个闭合围栏，使"正在输入的代码块"也能以深色框显示而非等闭合才突然出现。
+- **约束保留**：仍用 4000 字符尾部窗口 + 16ms 节流控制 DOM 规模；光标改挂 block 容器末尾（`_blockContainer.Clear()` 会移除光标，每帧重加回末尾）。
+- **权衡**：流式每帧重建尾部 block DOM，若尾部窗口含大表格可能比旧单 Label 略重；4000+16ms 约束下判定可接受，如实测掉帧可加"仅结构变化才重建"优化。
+
+#### 色板单一真源 — AgentCoreColors
+
+- **根因**：语义色散落 USS + 多组件 C# 硬编码，同一"成功绿"有三个值（USS #5cb85c / ToolCallCard #4CAF50 / ContextUsagePanel Color(0.2,0.8,0.3)）。
+- **修复**：新增 `Editor/UI/AgentCoreColors.cs` 作 C# 单一真源；ToolCallCard / ContextUsagePanel 引用之；ChatWindow.uss 强调蓝 #4A90D9 统一为 #4a86c8。
+- **注意**：Unity USS 的 `var()`/`:root` 自定义变量在本项目**未启用**（避免未验证的运行时依赖），USS 侧直接写十六进制字面值，靠注释约定与 C# 真源镜像同步。有意的层次色（气泡填充蓝 #3a5f8a、error 明暗红 #ff7777/#e05555）明确保留不并入语义色。
+
+#### ToolCallCard 超长结果显示截断
+
+- **根因**：只读 multiline TextField 非虚拟化，承载数万字符（读大文件/大 JSON）在展开时构建全量文本网格 → 卡顿。
+- **修复**：显示截断到 `DetailsDisplayLimit = 8000` 字符并追加提示，完整原文保留在 `_detailsRaw` 供"复制"按钮取用（复制不受影响）。
+
 ## 7. 编码硬规则
 
 ### 7.1 禁止事项

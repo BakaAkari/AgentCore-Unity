@@ -302,25 +302,51 @@ namespace AgentCore.Editor.UI.Components
         /// stuck at the peak → large empty space at bubble bottom.
         /// </para>
         /// <para>
-        /// Now: always set minHeight to match streamHeight (clear previous inline value
-        /// when streamHeight is smaller). Uses a small tolerance to avoid feedback loops.
+        /// v1.7.x FIX — 死循环根治：此方法在 GeometryChangedEvent 里反向写
+        /// minHeight，写样式又会触发 layout → 可能再次触发 GeometryChangedEvent。
+        /// 在极窄窗口宽度下，文本换行导致 streamHeight 在相邻两值间因亚像素舍入
+        /// 反复横跳（如 448↔450），旧的 1px 容差永远满足 → 无限回调 → 主线程卡死。
+        /// 修复：(1) 防重入 flag；(2) 容差放大到 8px 吸收亚像素/单行抖动；
+        /// (3) 只在"真正显著变化"时写入，且写入后短暂抑制再次响应。
         /// </para>
         /// </summary>
+        private bool _syncingHeight;
+        private float _lastSyncedHeight = -1f;
+
         private void SyncBubbleContentHeight()
         {
             if (_streamingText == null || _bubbleContent == null) return;
 
+            // 防重入：写 minHeight 引发的 layout 不应递归回到这里
+            if (_syncingHeight) return;
+
             float streamHeight = _streamingText.resolvedStyle.height;
             if (float.IsNaN(streamHeight) || streamHeight <= 0f) return;
 
-            float currentBubbleContentHeight = _bubbleContent.resolvedStyle.height;
+            // 与上次已写入的目标值比较（而不是当前 resolvedStyle），
+            // 避免"写入→resolvedStyle 更新→再次比较→再写"的自激振荡。
+            float reference = _lastSyncedHeight >= 0f
+                ? _lastSyncedHeight
+                : _bubbleContent.resolvedStyle.height;
 
-            float diff = Mathf.Abs(streamHeight - currentBubbleContentHeight);
-            if (diff > 1f)
+            float diff = Mathf.Abs(streamHeight - reference);
+
+            // 容差放大到 8px：吸收单行文本换行 / 亚像素舍入造成的高度抖动，
+            // 这是打破反馈循环的关键——低于此阈值的变化一律忽略。
+            const float tolerance = 8f;
+            if (diff <= tolerance) return;
+
+            _syncingHeight = true;
+            try
             {
                 _bubbleContent.style.minHeight = streamHeight;
+                _lastSyncedHeight = streamHeight;
                 _bubbleContent.MarkDirtyRepaint();
                 _bubbleRoot?.MarkDirtyRepaint();
+            }
+            finally
+            {
+                _syncingHeight = false;
             }
         }
 

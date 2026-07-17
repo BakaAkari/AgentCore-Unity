@@ -987,9 +987,9 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
-        /// 将 _pendingBuffer 中的累积文本一次性写入 Label。
-        /// 跑一次 FilterStreaming（全量），赋值一次 Label.text — 每 16ms 最多一次。
-        /// v1.6.5: 流式阶段只渲染尾部 StreamingTextWindow 字符，避免超长文本 O(n) layout。
+        /// 将 _pendingBuffer 中的累积文本增量渲染为 block（每 16ms 最多一次）。
+        /// v1.7.x 方案C：流式阶段用 block 渲染（与最终化统一路径），消除视觉跳变。
+        /// 仍只渲染尾部 StreamingTextWindow 字符，避免超长文本 O(n) layout。
         /// </summary>
         private void FlushPending()
         {
@@ -999,62 +999,40 @@ namespace AgentCore.Editor.UI.Components
             // 全量文本（用于最终化）
             var fullText = _currentTextBuilder?.ToString() ?? "";
 
-            // 流式阶段：只显示尾部窗口，避免 Label 对几万字做 O(n) layout
+            // v1.7.x 方案C：流式阶段也走 block 渲染，与最终化统一渲染路径 —— 根除
+            // "流式纯文本 → 最终富格式"的视觉跳变。代码块/表格在流式阶段就是深色框/网格。
+            // 为控制 DOM 规模，仍只渲染尾部窗口文本（超长时截断头部）；最终化 SetFinalText 渲染全量。
             string displayText = fullText;
             if (fullText.Length > StreamingTextWindow)
             {
-                displayText = "...\n" + fullText.Substring(fullText.Length - StreamingTextWindow);
+                displayText = "…\n" + fullText.Substring(fullText.Length - StreamingTextWindow);
             }
 
-            _textLabel.text = ContentFilter.FilterStreaming(displayText);
+            RenderTextAsBlocks(displayText, isStreaming: true);
 
-            // 清空 pending buffer（已合并到 Label）
+            // 清空 pending buffer（已合并渲染）
             _pendingBuffer.Clear();
         }
 
         /// <summary>
-        /// 设置最终完整文本。
-        /// 流式输出完成后调用，切换到 block 渲染模式并隐藏光标。
+        /// 将文本解析为 block 并渲染进 block 容器。流式与最终化共用同一渲染路径。
+        /// <para>
+        /// isStreaming=true 时会补齐末尾未闭合的代码块（流式中 ``` 只开未闭），
+        /// 使"正在输入的代码块"也能以深色框形态显示，而不是等闭合才突然出现。
+        /// </para>
         /// </summary>
-        /// <param name="text">完整的最终文本</param>
-        public void SetFinalText(string text)
+        private void RenderTextAsBlocks(string text, bool isStreaming)
         {
-            // v1.6.5: 切换到 block 模式前 flush 残留 token
-            if (_flushScheduled)
+            EnsureBlockContainer();
+            _blockContainer.Clear();
+
+            var source = text ?? "";
+            if (isStreaming)
             {
-                _flushScheduled = false;
-            }
-            _pendingBuffer.Clear();
-
-            _currentText = text ?? "";
-            HideCursor();
-
-            // 解析为 block 列表
-            var blocks = ContentFilter.FilterCompletedToBlocks(_currentText);
-
-            // 切换到 block 渲染模式
-            if (!_isBlockMode)
-            {
-                // 隐藏流式容器
-                _streamingContainer.style.display = DisplayStyle.None;
-
-                // 创建 block 容器
-                _blockContainer = new VisualElement();
-                _blockContainer.name = "block-container";
-                _blockContainer.style.flexDirection = FlexDirection.Column;
-                _blockContainer.style.flexGrow = 0;
-                _blockContainer.style.flexShrink = 0;
-                Add(_blockContainer);
-
-                _isBlockMode = true;
-            }
-            else
-            {
-                // 已在 block 模式，清空容器
-                _blockContainer.Clear();
+                source = CloseDanglingCodeFence(source);
             }
 
-            // 渲染 blocks
+            var blocks = ContentFilter.FilterCompletedToBlocks(source);
             foreach (var block in blocks)
             {
                 var element = CreateBlockElement(block);
@@ -1063,6 +1041,83 @@ namespace AgentCore.Editor.UI.Components
                     _blockContainer.Add(element);
                 }
             }
+
+            // 流式阶段：把光标追加到 block 容器末尾，保留"正在输出"的视觉反馈。
+            // 上面 _blockContainer.Clear() 已把光标移出（parent 变 null），这里重新加回末尾。
+            // （最终化 isStreaming=false 时不加，且 SetFinalText 会 HideCursor。）
+            if (isStreaming && _cursor != null)
+            {
+                _cursor.RemoveFromHierarchy();
+                _blockContainer.Add(_cursor);
+            }
+        }
+
+        /// <summary>
+        /// 若文本中代码围栏 ``` 的数量为奇数（末尾有未闭合的代码块），
+        /// 在末尾补一个 ``` 使其闭合，便于流式阶段渲染"正在输入的代码块"。
+        /// </summary>
+        private static string CloseDanglingCodeFence(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            int fenceCount = 0;
+            int idx = 0;
+            while ((idx = text.IndexOf("```", idx, System.StringComparison.Ordinal)) >= 0)
+            {
+                fenceCount++;
+                idx += 3;
+            }
+
+            // 奇数个围栏 = 末尾有未闭合代码块，补一个闭合围栏
+            if (fenceCount % 2 == 1)
+            {
+                return text + "\n```";
+            }
+            return text;
+        }
+
+        /// <summary>
+        /// 确保 block 容器已创建并处于显示状态，隐藏旧的流式纯文本容器。
+        /// </summary>
+        private void EnsureBlockContainer()
+        {
+            if (_blockContainer == null)
+            {
+                _blockContainer = new VisualElement();
+                _blockContainer.name = "block-container";
+                _blockContainer.style.flexDirection = FlexDirection.Column;
+                _blockContainer.style.flexGrow = 0;
+                _blockContainer.style.flexShrink = 0;
+                Add(_blockContainer);
+            }
+
+            // 隐藏旧的流式纯文本 Label 容器（方案C 下不再使用它显示正文，仅保留光标）
+            if (_streamingContainer.style.display != DisplayStyle.None)
+            {
+                _streamingContainer.style.display = DisplayStyle.None;
+            }
+
+            _isBlockMode = true;
+        }
+
+        /// <summary>
+        /// 设置最终完整文本。
+        /// 流式输出完成后调用，用全量文本做最终 block 渲染并隐藏光标。
+        /// v1.7.x 方案C：流式阶段已是 block 渲染，此处只是用全量文本重渲一次 + 收光标，
+        /// 不再有"纯文本→block"的模式切换，因此不产生视觉跳变。
+        /// </summary>
+        /// <param name="text">完整的最终文本</param>
+        public void SetFinalText(string text)
+        {
+            // 切换前 flush 残留 token 状态
+            _flushScheduled = false;
+            _pendingBuffer.Clear();
+
+            _currentText = text ?? "";
+            HideCursor();
+
+            // 用全量文本做最终渲染（非流式：不补围栏——最终文本理应已闭合）
+            RenderTextAsBlocks(_currentText, isStreaming: false);
         }
 
         /// <summary>

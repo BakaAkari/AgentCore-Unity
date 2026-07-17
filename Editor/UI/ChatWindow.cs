@@ -34,8 +34,15 @@ namespace AgentCore.Editor.UI
         /// <summary>ChatWindow USS 样式在包内的路径</summary>
         private const string UssPath = "Packages/com.agentcore.unity/Editor/UI/ChatWindow.uss";
 
-        /// <summary>窗口最小尺寸</summary>
-        private static readonly Vector2 MinWindowSize = new(360, 480);
+        /// <summary>窗口最小尺寸
+        /// <para>
+        /// 宽度下限 420（原 360）：过窄会让消息气泡内文本频繁换行，
+        /// 触发 layout 高度抖动。虽然 MessageBubble.SyncBubbleContentHeight
+        /// 已加防重入 + 8px 容差根治了反馈循环，此处再抬高下限作为纵深防御，
+        /// 保证正常内容不会逼近换行抖动的临界宽度。
+        /// </para>
+        /// </summary>
+        private static readonly Vector2 MinWindowSize = new(420, 480);
 
         /// <summary>EditorPrefs key：侧边栏展开状态</summary>
         private const string SidebarExpandedKey = "AgentCore_SidebarExpanded";

@@ -52,17 +52,19 @@ namespace AgentCore.Editor.UI.Components
         #region 常量
 
         // 颜色常量
-        private static readonly Color BackgroundColor = new Color(0.176f, 0.176f, 0.176f); // #2D2D2D
-        private static readonly Color BorderBlue = new Color(0.290f, 0.565f, 0.851f);      // #4A90D9
-        private static readonly Color BorderGreen = new Color(0.298f, 0.686f, 0.314f);     // #4CAF50
-        private static readonly Color BorderRed = new Color(0.957f, 0.263f, 0.212f);       // #F44336
-        private static readonly Color TextPrimary = new Color(0.831f, 0.831f, 0.831f);     // #D4D4D4
-        private static readonly Color TextSecondary = new Color(0.533f, 0.533f, 0.533f);   // #888888
-        private static readonly Color DetailsBg = new Color(0.153f, 0.153f, 0.153f);       // #272727
+        // v1.7.x: 语义色（蓝/绿/红）统一引用 AgentCoreColors 单一真源，
+        // 消除此前 ToolCallCard 自带的 #4A90D9/#4CAF50/#F44336 与 USS(#4a86c8/#5cb85c/#d9534f) 不一致问题。
+        private static readonly Color BackgroundColor = UI.AgentCoreColors.CardBackground;   // #2D2D2D
+        private static readonly Color BorderBlue = UI.AgentCoreColors.Accent;                // #4a86c8（统一）
+        private static readonly Color BorderGreen = UI.AgentCoreColors.Success;              // #5cb85c（统一）
+        private static readonly Color BorderRed = UI.AgentCoreColors.Danger;                 // #d9534f（统一）
+        private static readonly Color TextPrimary = UI.AgentCoreColors.TextPrimary;          // #D4D4D4
+        private static readonly Color TextSecondary = UI.AgentCoreColors.TextSecondary;      // #888888
+        private static readonly Color DetailsBg = UI.AgentCoreColors.DetailBackground;       // #272727
         private static readonly Color ToggleArrowColor = new Color(0.45f, 0.45f, 0.45f);   // #737373
         private static readonly Color CopyButtonBg = new Color(0.24f, 0.24f, 0.24f);       // #3D3D3D
         private static readonly Color CopyButtonBgHover = new Color(0.30f, 0.30f, 0.30f);  // #4D4D4D
-        private static readonly Color CopyButtonBgFlash = new Color(0.298f, 0.686f, 0.314f); // green flash (与 BorderGreen 一致)
+        private static readonly Color CopyButtonBgFlash = UI.AgentCoreColors.Success; // green flash（与 BorderGreen 一致）
 
         // 状态图标（纯文本字符，不使用 emoji）
         private const string IconPending = "[.]";
@@ -78,6 +80,12 @@ namespace AgentCore.Editor.UI.Components
         // v1.4.8：从"maxHeight+Hidden 裁剪"改为"maxHeight+ScrollView"。
         // 值保守选择 240px：一般 6~8 行可见，足以直观查看常见结果；超出则滚动。
         private const float DetailsMaxHeight = 240f;
+
+        // v1.7.x 性能：TextField 显示内容的字符上限。
+        // 只读 multiline TextField 会为全部文本构建文本网格，非虚拟化控件；
+        // 读大文件 / 大 JSON 等工具结果可达数万字符，全量塞入会在展开时造成明显卡顿。
+        // 策略：显示截断到此上限并追加提示，完整原文始终保留在 _detailsRaw 供"复制"按钮取用。
+        private const int DetailsDisplayLimit = 8000;
 
         #endregion
 
@@ -342,7 +350,19 @@ namespace AgentCore.Editor.UI.Components
         private void SetDetailsInternal(string details)
         {
             _detailsRaw = details ?? string.Empty;
-            _detailsField.SetValueWithoutNotify(_detailsRaw);
+
+            // v1.7.x 性能：只把前 DetailsDisplayLimit 字符送入 TextField 显示，
+            // 避免超长文本（数万字符）构建全量文本网格导致展开卡顿。
+            // 完整原文保留在 _detailsRaw，复制按钮取的是完整内容。
+            string displayValue = _detailsRaw;
+            if (_detailsRaw.Length > DetailsDisplayLimit)
+            {
+                var omitted = _detailsRaw.Length - DetailsDisplayLimit;
+                displayValue = _detailsRaw.Substring(0, DetailsDisplayLimit)
+                    + $"\n\n… [已截断 {omitted:N0} 字符，仅影响此处显示。点击右上角\"复制\"可获取完整内容] …";
+            }
+
+            _detailsField.SetValueWithoutNotify(displayValue);
             _copyButton.style.display = string.IsNullOrEmpty(_detailsRaw)
                 ? DisplayStyle.None
                 : DisplayStyle.Flex;

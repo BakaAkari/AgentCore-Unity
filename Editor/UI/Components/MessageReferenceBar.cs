@@ -31,6 +31,11 @@ namespace AgentCore.Editor.UI.Components
             style.paddingTop = 4;
             style.borderTopWidth = 1;
             style.borderTopColor = new Color(0.30f, 0.30f, 0.30f);
+            // 关键：引用栏本身不得超出父气泡宽度。flexShrink=1 + maxWidth=100%
+            // 让整条栏在窄气泡里收缩到容器内，chip 靠 flexWrap 换行而非溢出。
+            style.flexShrink = 1;
+            style.maxWidth = new Length(100, LengthUnit.Percent);
+            style.overflow = Overflow.Hidden;
         }
 
         /// <summary>
@@ -54,6 +59,7 @@ namespace AgentCore.Editor.UI.Components
             prefix.style.fontSize = 10;
             prefix.style.marginRight = 6;
             prefix.style.alignSelf = Align.Center;
+            prefix.style.flexShrink = 0;   // 短标签固定，不参与收缩
             Add(prefix);
 
             foreach (var r in refs)
@@ -77,7 +83,6 @@ namespace AgentCore.Editor.UI.Components
             chip.style.flexShrink = 1;
             chip.style.flexGrow = 0;
             chip.style.maxWidth = new Length(100, LengthUnit.Percent);
-
             // 内边距 + margin
             chip.style.marginRight = 6;
             chip.style.marginBottom = 4;
@@ -92,7 +97,9 @@ namespace AgentCore.Editor.UI.Components
             chip.style.fontSize = 11;
             chip.style.color = ChipText;
             chip.style.unityTextAlign = TextAnchor.MiddleCenter;
-            chip.style.whiteSpace = WhiteSpace.Normal;
+            // NoWrap + Ellipsis：长文件路径在窄气泡里截断为省略号，
+            // 而不是换行把 chip 撑高/撑出气泡（配合固定 height:22 与 overflow:hidden）。
+            chip.style.whiteSpace = WhiteSpace.NoWrap;
             chip.style.overflow = Overflow.Hidden;
             chip.style.textOverflow = TextOverflow.Ellipsis;
 

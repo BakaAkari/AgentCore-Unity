@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.9] - 2026-07-17
+
+### Added
+- `AgentCoreColors.cs` — UI 统一色板 C# 单一真源（成功绿 #5cb85c / 危险红 #d9534f / 主题蓝 #4a86c8 / 警告黄 #f0ad4e 等）。此前语义色散落在 USS 与多个组件的 C# 硬编码里，同一"成功绿"曾有三个不同值（USS #5cb85c、ToolCallCard #4CAF50、ContextUsagePanel Color(0.2,0.8,0.3)）。
+
+### Fixed — UI 交互与视觉审查（P0/P1）
+- **P0 IME Enter 误发送** — 中文/日文/韩文输入法在候选框按 Enter 是"确认选词"，此前会被误判为发送消息，导致半句话被发出。新增 `IsImeComposing()`（基于 `Input.compositionString`）守卫，组字期间的 Enter 不再触发发送。
+- **P0 GetContextBudget 高频遍历** — `UpdateContextUsagePanel()` 此前挂在每个 AgentEvent（含 StreamToken/ReasoningToken 高频事件）上，且 `GetContextBudget()` 每次都遍历整个消息历史估算 token。流式输出时形成 O(N token × M 消息) 无谓重算。改为仅在真正影响预算的事件（AssistantMessage/StateChanged/ToolCallCompleted/ToolCallFailed/Error）后刷新。
+- **P1 流式视觉跳变（方案C）** — 此前流式阶段显示纯文本（表格是 `|a|b|`、代码块是裸文本），最终化瞬间切换 block 富渲染造成布局跳变。改为流式与最终化统一走 block 渲染路径（`RenderTextAsBlocks`），代码块/表格在流式阶段即为深色框/网格；新增 `CloseDanglingCodeFence` 补齐未闭合代码块使其能在流式期显示。仍保留 4000 字符尾部窗口 + 16ms 节流控制 DOM 规模。
+- **P1 ToolCallCard 超长结果性能** — 只读 multiline TextField 非虚拟化，承载数万字符的工具结果（读大文件/大 JSON）会在展开时卡顿。显示截断到 8000 字符并追加提示，完整原文保留在 `_detailsRaw` 供"复制"按钮取用。
+- **P1 色板统一** — ToolCallCard / ContextUsagePanel 的硬编码语义色统一引用 `AgentCoreColors`；ChatWindow.uss 中的强调蓝（原 #4A90D9）统一为 #4a86c8。有意的层次色（用户气泡填充蓝 #3a5f8a、error 气泡明暗红 #ff7777/#e05555）明确保留并注释说明。
+
+### Fixed — HelpBubble & 对话泡泡（前序修复，随本版一并提交）
+- HelpBubble 帮助浮窗背景透明/字体不继承 — 根因是面板挂到了 USS 作用域外的 `unity-panel-container`。新增 `ResolveMountRoot()` 定位持有 styleSheets 的 rootVisualElement，所有视觉属性 inline 兜底，补回 `EnsureCJKFont()`。
+- 对话泡泡底部引用区溢出 — 引用栏容器加宽度约束（flexShrink/maxWidth/overflow），chip 改 NoWrap+Ellipsis。
+- 窗口缩至极限宽度致 Unity 无响应 — 根因是 `SyncBubbleContentHeight` 在 GeometryChangedEvent 里反向写 minHeight 形成正反馈死循环。加防重入 flag + 8px 容差 + 比较上次写入目标值三重防护；MinWindowSize 宽度 360→420 作纵深防御。
+
 ## [1.7.8] - 2026-07-15
 
 ### Fixed

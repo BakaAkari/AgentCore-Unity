@@ -89,6 +89,15 @@ namespace AgentCore.Editor.UI
             {
                 case KeyCode.Return or KeyCode.KeypadEnter when !evt.shiftKey:
                     // Enter（不含 Shift）-> 发送消息
+                    // IME 守卫：中文/日文/韩文输入法在候选框按 Enter 是"确认选词"，
+                    // 不应触发发送。UnityEngine.Input.compositionString 在组字未提交时非空，
+                    // 用它拦截 IME 确认阶段的 Enter。组字提交后 compositionString 会清空，
+                    // 用户再按 Enter 才真正发送。
+                    if (IsImeComposing())
+                    {
+                        // 处于输入法组字状态：不发送，也不拦截默认行为（让 TextField 完成选词/换行）
+                        break;
+                    }
                     evt.PreventDefault();
                     evt.StopPropagation();
                     OnSendClicked();
@@ -116,6 +125,32 @@ namespace AgentCore.Editor.UI
                     evt.StopPropagation();
                     ShowExportMenu();
                     break;
+            }
+        }
+
+        /// <summary>
+        /// 判断当前是否处于输入法（IME）组字状态。
+        /// <para>
+        /// 中日韩输入法在候选词未确认时，<see cref="UnityEngine.Input.compositionString"/>
+        /// 会保存正在组字的临时串（未提交）。此时用户按 Enter 是"确认选词"而非"发送消息"，
+        /// 必须拦截，否则会把半句话误发出去 —— 这是中文用户最高频的输入痛点。
+        /// </para>
+        /// <para>
+        /// 组字提交后 compositionString 立即清空，用户下一次按 Enter 才真正发送，符合直觉。
+        /// UnityEngine.Input 在 Editor 环境下可用；异常时保守返回 false（不拦截，退回原有发送行为）。
+        /// </para>
+        /// </summary>
+        /// <returns>正在组字返回 true，否则 false。</returns>
+        private static bool IsImeComposing()
+        {
+            try
+            {
+                return !string.IsNullOrEmpty(UnityEngine.Input.compositionString);
+            }
+            catch
+            {
+                // 某些平台/上下文下访问 Input 可能抛异常，保守返回 false
+                return false;
             }
         }
 
