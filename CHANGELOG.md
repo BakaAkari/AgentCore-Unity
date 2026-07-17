@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.10] - 2026-07-18
+
+### Fixed
+- **MessageReferenceBar chip 截断**：引用栏 `[File]`/`[GO]` 可点击按钮被截成一半高。根因是上一版修引用溢出时给 chip 设了固定 `height:22` + `overflow:hidden` + 上下 `padding:0`，11px 字体的 Button 行高（含上下 border）超过 22px 内容区被垂直裁切。改为 `minHeight:22`（保底可点击尺寸）+ 高度由内容自然撑开 + 上下 `padding:2`；`overflow:hidden` 保留用于水平方向长路径省略号截断。
+
+### Added
+- **HelpBubble 快捷键补齐**：帮助面板"快捷键"区此前只列 3 个全局键（Ctrl+Shift+Q/X/E），遗漏输入框内高频快捷键，用户误以为不存在。补上 Enter（发送）/ Shift+Enter（换行）/ Ctrl+N（新建会话）/ Escape（取消当前操作）。
+- **HubRail 图标化**：左侧窄栏（52px）模块按钮 + Settings 按钮从文字标签改为 Unity 内置编辑器图标（`ResolveBuiltinIconName` 映射已知模块 ID → 内置图标名，`TryApplyIcon` 应用）。健壮回退：图标名在当前 Unity 版本不存在 / 取到空贴图 / API 异常时静默保留原文字标签，未知/第三方扩展模块也保留文字，绝不出现空按钮。
+
+### Changed
+- **虚拟列表加载更多滚动补偿**：`MessageListManager.LoadMoreItems` 向容器顶部插入旧消息会把用户正在看的内容整体下推造成视觉跳动。现记录插入前内容高度 + 滚动值，插入后下一帧（`schedule.Execute`）把高度增量补偿到 `scroller.value`，使视口锚定内容保持原位。
+
+### Notes
+- UI 交互视觉审查 P3 项经逐一核实判定**无需改动**：ScrollToBottom 双帧延迟是"等 DOM 布局稳定"的务实方案（改动风险大于收益）；error 气泡 `align-self:stretch` 满宽是有意设计（错误信息醒目打断对话流，非对齐 bug）；键盘可访问性属增强非缺陷。
+
 ## [1.7.9] - 2026-07-17
 
 ### Added

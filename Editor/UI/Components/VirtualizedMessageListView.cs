@@ -321,10 +321,19 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 加载更多历史消息（将隐藏的旧消息批量恢复到 DOM）。
+        /// <para>
+        /// 关键：向容器顶部插入旧消息会把用户当前正在看的内容整体下推，造成视觉跳动。
+        /// 这里记录插入前的内容高度，插入后（下一帧布局稳定时）把高度增量补偿到
+        /// scroller.value 上，使用户盯着的那条消息保持在视口原位，消除跳动。
+        /// </para>
         /// </summary>
         private void LoadMoreItems()
         {
             if (_hiddenCount == 0) return;
+
+            // 记录插入前的锚定信息：内容高度 + 当前滚动值
+            float heightBefore = _container?.layout.height ?? 0f;
+            float valueBefore = _scrollView?.verticalScroller.value ?? 0f;
 
             // 计算本次要恢复的项数
             int toRestore = Mathf.Min(LoadMoreBatchSize, _hiddenCount);
@@ -351,6 +360,26 @@ namespace AgentCore.Editor.UI.Components
             {
                 // 更新按钮文本
                 UpdateLoadMoreButtonText();
+            }
+
+            // 布局在插入后异步更新。等下一帧拿到新高度，把增量补到 scroller.value，
+            // 让插入前处于视口的内容保持原位（否则会整体下跳）。
+            if (_scrollView != null && _container != null)
+            {
+                _container.schedule.Execute(() =>
+                {
+                    if (_container == null || _scrollView == null) return;
+                    float heightAfter = _container.layout.height;
+                    float delta = heightAfter - heightBefore;
+                    if (delta > 0f)
+                    {
+                        var scroller = _scrollView.verticalScroller;
+                        float target = valueBefore + delta;
+                        // 夹在合法范围内，避免越界
+                        if (target > scroller.highValue) target = scroller.highValue;
+                        scroller.value = target;
+                    }
+                });
             }
         }
 

@@ -114,6 +114,11 @@ namespace AgentCore.Editor.UI.Components
             content.Add(MakeShortcutItem("Ctrl+Shift+X",
                 "全局上下文注入（选中任意 Unity 物体后按此键，自动采集上下文注入聊天）"));
             content.Add(MakeShortcutItem("Ctrl+Shift+E", "导出当前会话"));
+            // 输入框内快捷键（此前帮助面板遗漏，用户误以为只有上面 3 个全局键）
+            content.Add(MakeShortcutItem("Enter", "发送消息"));
+            content.Add(MakeShortcutItem("Shift+Enter", "输入框内换行"));
+            content.Add(MakeShortcutItem("Ctrl+N", "新建会话"));
+            content.Add(MakeShortcutItem("Escape", "取消当前进行中的操作"));
 
             content.Add(MakeSectionHeader("使用技巧"));
             content.Add(MakeTip("选中 Hierarchy / Project / Console 中的物体后按 Ctrl+Shift+X，Agent 会自动理解上下文"));

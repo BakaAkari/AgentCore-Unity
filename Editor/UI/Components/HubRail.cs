@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
@@ -151,6 +152,8 @@ namespace AgentCore.Editor.UI.Components
             _settingsButton.tooltip = "打开 AgentCore 设置";
             _settingsButton.AddToClassList("hub-rail__button");
             _settingsButton.AddToClassList("hub-rail__settings-button");
+            // 齿轮图标，失败回退到 "Set" 文字
+            TryApplyIcon(_settingsButton, "settings");
             Add(_settingsButton);
         }
 
@@ -168,6 +171,8 @@ namespace AgentCore.Editor.UI.Components
             button.tooltip = string.IsNullOrWhiteSpace(module.Tooltip) ? module.Id : module.Tooltip;
             button.AddToClassList("hub-rail__button");
             button.AddToClassList("hub-rail__module-button");
+            // 已知模块用 Unity 内置图标（窄栏 52px 下比文字更清晰）；未知/扩展模块保留文字回退。
+            TryApplyIcon(button, moduleId);
             container.Add(button);
             _moduleButtons[moduleId] = button;
         }
@@ -233,6 +238,50 @@ namespace AgentCore.Editor.UI.Components
             EditorPrefs.SetString(ActiveModuleKey, moduleId);
             UpdateActiveState();
             OnModuleChanged?.Invoke(moduleId);
+        }
+
+        /// <summary>
+        /// 已知模块 ID → Unity 内置编辑器图标名的映射。
+        /// 不在表内的模块（如第三方扩展面板）返回 null，按钮保留文字标签。
+        /// </summary>
+        private static string ResolveBuiltinIconName(string moduleId)
+        {
+            if (string.IsNullOrWhiteSpace(moduleId)) return null;
+            switch (moduleId.ToLowerInvariant())
+            {
+                case "chat":       return "d_UnityEditor.ConsoleWindow";   // 对话/日志
+                case "settings":   return "d_SettingsIcon";                // 齿轮
+                case "knowledge":  return "d_UnityEditor.InspectorWindow"; // 书本/知识
+                case "memory":     return "d_Profiler.Memory";             // 记忆/内存
+                case "index":      return "d_Search Icon";                 // 索引/搜索
+                case "vcs":        return "d_UnityEditor.VersionControl";  // 版本控制
+                default:           return null;
+            }
+        }
+
+        /// <summary>
+        /// 尝试给按钮应用 Unity 内置图标。成功则清空文字只显示图标；
+        /// 任何失败（图标名在当前 Unity 版本不存在、取到空贴图、异常）都保留原文字回退，
+        /// 保证窄栏在任何 Unity 版本下都不会出现"既无图标又无文字"的空按钮。
+        /// </summary>
+        private static void TryApplyIcon(Button button, string moduleId)
+        {
+            var iconName = ResolveBuiltinIconName(moduleId);
+            if (string.IsNullOrEmpty(iconName)) return; // 未知模块：保留文字
+
+            try
+            {
+                var content = EditorGUIUtility.IconContent(iconName);
+                var tex = content?.image as Texture2D;
+                if (tex == null) return; // 取不到贴图：保留文字
+
+                button.style.backgroundImage = new StyleBackground(tex);
+                button.text = string.Empty; // 有图标了，清空文字避免图文重叠
+            }
+            catch
+            {
+                // 图标 API 在极端版本差异下抛异常 —— 静默回退到文字，不影响功能
+            }
         }
     }
 }

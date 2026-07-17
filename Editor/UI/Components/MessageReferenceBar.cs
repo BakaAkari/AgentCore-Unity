@@ -77,9 +77,10 @@ namespace AgentCore.Editor.UI.Components
             chip.AddToClassList("message-reference-bar__chip");
             chip.tooltip = BuildTooltip(r);
 
-            // 尺寸：足够点击 + 显示文本，避免被 Unity Button 默认 min-height 挤压成一条
+            // 尺寸：用 minHeight 保证可点击高度，但不锁死 height —— 让高度由内容
+            // （文本行高 + 上下 border）自然撑开。此前固定 height:22 + overflow:hidden
+            // 会把超出 22px 的文本上下裁掉，导致 [File]/[GO] 图标字形被截成一半。
             chip.style.minHeight = 22;
-            chip.style.height = 22;
             chip.style.flexShrink = 1;
             chip.style.flexGrow = 0;
             chip.style.maxWidth = new Length(100, LengthUnit.Percent);
@@ -90,8 +91,9 @@ namespace AgentCore.Editor.UI.Components
             chip.style.marginLeft = 0;
             chip.style.paddingLeft = 10;
             chip.style.paddingRight = 10;
-            chip.style.paddingTop = 0;
-            chip.style.paddingBottom = 0;
+            // 垂直 padding 给文本行高留出空间，避免贴着上下 border 显得被切
+            chip.style.paddingTop = 2;
+            chip.style.paddingBottom = 2;
 
             // 文本
             chip.style.fontSize = 11;
