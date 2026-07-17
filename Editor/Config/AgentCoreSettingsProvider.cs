@@ -179,6 +179,9 @@ namespace AgentCore.Editor.Config
         private string _message = string.Empty;
         private bool _confirmed;
 
+        /// <summary>CJK 字体缓存（IMGUI 模式下需要手动设置 GUI.skin.font）</summary>
+        private static Font _cachedFont;
+
         /// <summary>
         /// Shows a blocking modal input dialog.
         /// </summary>
@@ -197,8 +200,40 @@ namespace AgentCore.Editor.Config
             return window._confirmed ? window._value : null;
         }
 
+        /// <summary>
+        /// 获取或创建 CJK 字体（与 ChatWindow 使用相同的跨平台回退链）。
+        /// IMGUI 模式下独立 EditorWindow 不继承 GUI.skin.font，
+        /// 需要显式设置，否则中文 bold 会出现笔画粗细不均的合成问题。
+        /// </summary>
+        private static Font GetCJKFont()
+        {
+            if (_cachedFont != null)
+                return _cachedFont;
+
+#if UNITY_EDITOR_WIN
+            string[] fontCandidates = { "Microsoft YaHei", "SimHei", "Arial" };
+#elif UNITY_EDITOR_OSX
+            string[] fontCandidates = { "PingFang SC", "Hiragino Sans GB", "Arial" };
+#else
+            string[] fontCandidates = { "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Arial" };
+#endif
+            foreach (var fontName in fontCandidates)
+            {
+                _cachedFont = Font.CreateDynamicFontFromOSFont(fontName, 14);
+                if (_cachedFont != null) break;
+            }
+            return _cachedFont;
+        }
+
         private void OnGUI()
         {
+            // 设置 CJK 字体，确保中文渲染正常
+            var font = GetCJKFont();
+            if (font != null && GUI.skin.font != font)
+            {
+                GUI.skin.font = font;
+            }
+
             EditorGUILayout.LabelField(_message, EditorStyles.wordWrappedLabel);
             EditorGUILayout.Space(8);
             GUI.SetNextControlName("input");

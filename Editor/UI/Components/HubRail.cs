@@ -140,6 +140,10 @@ namespace AgentCore.Editor.UI.Components
             spacer.AddToClassList("hub-rail__spacer");
             Add(spacer);
 
+            // 帮助气泡（马里奥问号方块，hover 显示技巧面板）
+            var helpBubble = new HelpBubble();
+            Add(helpBubble);
+
             // Settings 按钮（底部固定）
             _settingsButton = new Button(OnSettingsClicked);
             _settingsButton.name = "hub-rail-settings";

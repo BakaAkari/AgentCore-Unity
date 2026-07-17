@@ -1428,3 +1428,121 @@
 .thinking-drawer__preview {
     max-width: 400px;
 }
+
+/* ============================================================
+ * HelpBubble — 马里奥问号方块风格的帮助浮窗
+ * 黄色方块 + ? 符号，hover 弹出技巧面板
+ * ============================================================ */
+
+/* --- 问号方块按钮 --- */
+.help-bubble__button {
+    width: 36px;
+    height: 36px;
+    margin: 2px 8px;
+    padding: 0;
+    font-size: 18px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    border-radius: 4px;
+    border-width: 2px;
+    border-color: #b8860b;
+    background-color: #fbc02d;
+    color: #3e2723;
+    transition-property: background-color, transform;
+    transition-duration: 120ms;
+    transition-timing-function: ease-in-out;
+}
+
+/* hover 时方块微微变亮 + 轻微弹跳感（通过 scale 模拟） */
+.help-bubble__button:hover {
+    background-color: #ffd54f;
+    border-color: #ff8f00;
+    color: #1a1a1a;
+}
+
+/* 按下时方块回压 */
+.help-bubble__button:active {
+    background-color: #f9a825;
+}
+
+/* 面板显示时按钮的激活态（类似马里奥方块被顶到后的状态） */
+.help-bubble__button--active {
+    background-color: #ff8f00;
+    border-color: #e65100;
+    color: #fff8e1;
+}
+
+/* --- 帮助窗口内容容器（独立 EditorWindow，不再需要 absolute 定位） --- */
+.help-bubble__panel-title {
+    font-size: 17px;
+    -unity-font-style: bold;
+    color: #fbc02d;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom-width: 1px;
+    border-bottom-color: #444444;
+}
+
+/* --- 分区标题 --- */
+.help-bubble__section-header {
+    font-size: 13px;
+    -unity-font-style: bold;
+    color: #999999;
+    margin-top: 14px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.help-bubble__section-header:first-of-type {
+    margin-top: 0;
+}
+
+/* --- 快捷键条目行 --- */
+.help-bubble__shortcut-row {
+    flex-direction: row;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    padding: 4px 0;
+}
+
+/* 快捷键按键标签 — 类似键盘按键样式 */
+.help-bubble__shortcut-key {
+    flex-shrink: 0;
+    min-width: 104px;
+    max-width: 104px;
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: #fbc02d;
+    background-color: #3a3520;
+    border-width: 1px;
+    border-color: #5a4a1b;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-right: 12px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+/* 快捷键说明文字 */
+.help-bubble__shortcut-desc {
+    flex-grow: 1;
+    font-size: 13px;
+    color: #c8c8c8;
+    white-space: normal;
+    line-height: 18px;
+}
+
+/* --- 纯文本技巧条目 --- */
+.help-bubble__tip-item {
+    font-size: 14px;
+    -unity-font-style: bold;
+    color: #d8d8d8;
+    margin-bottom: 8px;
+    padding: 5px 8px;
+    padding-left: 12px;
+    border-left-width: 2px;
+    border-left-color: #fbc02d;
+    white-space: normal;
+    line-height: 20px;
+}
