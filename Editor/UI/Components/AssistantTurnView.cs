@@ -31,6 +31,7 @@ namespace AgentCore.Editor.UI.Components
                 ThinkingDrawer = new ThinkingDrawer();
                 ToolSlot = new VisualElement();
                 ToolSlot.style.flexDirection = FlexDirection.Column;
+                ToolSlot.style.width = Length.Percent(100);
             }
         }
 
@@ -91,18 +92,26 @@ namespace AgentCore.Editor.UI.Components
             style.flexDirection = FlexDirection.Column;
             style.marginTop = 2;
             style.marginBottom = 2;
+            // v1.7.13 fix: turn 容器及各 slot 强制撑满对话区可用宽度，
+            // 否则整个 turn 的宽度会被首段渲染的内容（如一句短文本气泡）锁成 min-content，
+            // 导致后续加入的工具卡片/长内容被压窄。撑满后各段独立铺开，
+            // MessageBubble 仍靠自身 max-width:82% + align-self:flex-start 保持内容自然伸缩。
+            style.width = Length.Percent(100);
 
             _roundsContainer = new VisualElement { name = $"rounds-container-{messageId}" };
             _roundsContainer.style.flexDirection = FlexDirection.Column;
+            _roundsContainer.style.width = Length.Percent(100);
             Add(_roundsContainer);
 
             // Phase 9: Self-Challenge Card 挂载点(位于所有轮次之下、Bubble 之上)
             _selfChallengeSlot = new VisualElement { name = $"self-challenge-slot-{messageId}" };
             _selfChallengeSlot.style.flexDirection = FlexDirection.Column;
+            _selfChallengeSlot.style.width = Length.Percent(100);
             Add(_selfChallengeSlot);
 
             _bubbleSlot = new VisualElement { name = $"bubble-slot-{messageId}" };
             _bubbleSlot.style.flexDirection = FlexDirection.Column;
+            _bubbleSlot.style.width = Length.Percent(100);
             Add(_bubbleSlot);
 
             // 自动创建第一轮区域
@@ -123,6 +132,7 @@ namespace AgentCore.Editor.UI.Components
 
             var sectionContainer = new VisualElement();
             sectionContainer.style.flexDirection = FlexDirection.Column;
+            sectionContainer.style.width = Length.Percent(100);
             sectionContainer.Add(section.ThinkingDrawer);
             sectionContainer.Add(section.ToolSlot);
 

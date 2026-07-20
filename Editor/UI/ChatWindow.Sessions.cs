@@ -299,6 +299,11 @@ namespace AgentCore.Editor.UI
         {
             var menu = new GenericMenu();
 
+            menu.AddItem(new GUIContent("自动重命名"), false, () =>
+            {
+                AutoRenameSession(sessionId, itemElement);
+            });
+
             menu.AddItem(new GUIContent("重命名"), false, () =>
             {
                 BeginRenameSession(sessionId, currentTitle, itemElement);
@@ -324,6 +329,58 @@ namespace AgentCore.Editor.UI
             });
 
             menu.ShowAsContext();
+        }
+
+        /// <summary>
+        /// 自动重命名会话：基于会话最近上下文调用 LLM 生成能反映当前主话题的标题。
+        /// <para>
+        /// 与手动重命名互补 —— 手动重命名让用户直接编辑，自动重命名交给 LLM 概括当前话题，
+        /// 解决"话题漂移后标题仍停留在最初内容"的问题。
+        /// </para>
+        /// </summary>
+        /// <param name="sessionId">目标会话 ID。</param>
+        /// <param name="itemElement">会话列表项元素（用于生成期间的视觉反馈）。</param>
+        private async void AutoRenameSession(string sessionId, VisualElement itemElement)
+        {
+            if (string.IsNullOrEmpty(sessionId)) return;
+
+            // 生成期间在标题上给出临时反馈
+            var titleLabel = itemElement?.Q<Label>($"session-title-{sessionId}");
+            string originalText = titleLabel?.text;
+            if (titleLabel != null)
+            {
+                titleLabel.text = "正在生成标题…";
+            }
+
+            string newTitle = null;
+            try
+            {
+                newTitle = await SessionAutoTitleService.GenerateTitleAsync(sessionId);
+            }
+            catch (System.Exception ex)
+            {
+                AgentCoreLog.Error($"[ChatWindow] AutoRenameSession failed: {ex.Message}");
+            }
+
+            // await 续体在 Unity 同步上下文回到主线程；仍用 delayCall 确保 UI/存储操作安全
+            EditorApplication.delayCall += () =>
+            {
+                if (!string.IsNullOrWhiteSpace(newTitle))
+                {
+                    SessionManager.Instance.RenameSession(sessionId, newTitle);
+                    RefreshSessionList();
+                }
+                else
+                {
+                    // 失败：恢复原标题文本，刷新列表以清除临时提示
+                    if (titleLabel != null && originalText != null)
+                    {
+                        titleLabel.text = originalText;
+                    }
+                    RefreshSessionList();
+                    AgentCoreLog.Warning("[ChatWindow] 自动重命名未生成有效标题（LLM 不可用或无足够上下文）。");
+                }
+            };
         }
 
         /// <summary>

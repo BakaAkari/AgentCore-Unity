@@ -1,6 +1,6 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.7.12 | **更新日期**: 2026-07-20 | **状态**:
+> **版本**: v1.7.13 | **更新日期**: 2026-07-20 | **状态**:
 > Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）；**v1.7.0 Settings v20 死字段清理 + VCS 模块修复**（12 字段删除 / 进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持）；**v1.7.1 新装路径 + VCS 开机触发 + CS0162 修复**；**v1.7.2 文档整理归档（无代码变化）**；**v1.7.3 老项目升级安装 Preferences 目录 Move 弹窗修复（beforeAssemblyReload 回调）**；**Phase 9 Self-Challenge 收尾**（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
@@ -37,11 +37,11 @@
 
 凡涉及文件、资源、索引、记忆、知识库、VCS 操作和工具调用的功能，不得再默认只以标准 `Assets/` 目录或 Unity 项目根为 AgentCore 全局边界。
 
-### 0.4 当前项目快照 (v1.7.12)
+### 0.4 当前项目快照 (v1.7.13)
 
 | 维度 | 状态 |
 |------|------|
-| **版本** | 1.7.12 (2026-07-20) — v1.7.12: 日志分级全量贯彻（83 文件 329 处裸 Debug.* → AgentCoreLog.*：Warning 245 / Error 74 / Info 10，补 62 文件 using；此前绕过 Settings Log Verbosity 开关永远输出，现全部日志受分级控制）；v1.7.11 (2026-07-18) 三项修复（HubRail 仅保留 Settings 齿轮图标其余回退文字，消除图标/文字割裂 / StreamingTextElement SanitizeForDisplay 清洗无法渲染字符消除对话 □ 方块 / ManageComponentTool 支持 ObjectReference 字段赋值 instanceId·资源路径·场景名·null + GameObject↔Component 转换）；v1.7.10 (2026-07-18) UI 收尾（MessageReferenceBar chip 截断修复 minHeight+内容撑高 / HelpBubble 补齐输入框快捷键 Enter·Shift+Enter·Ctrl+N·Escape / HubRail 图标化 ResolveBuiltinIconName+TryApplyIcon 带文字回退 / MessageListManager.LoadMoreItems 滚动位置补偿消除加载更多跳动；P3 项 ScrollToBottom 双帧延迟·error stretch·键盘可访问性经核实判定无需改动）；v1.7.9 (2026-07-17) — v1.7.9: HelpBubble 浮窗根因修复（ResolveMountRoot 挂载点）+ 对话泡泡引用溢出/窗口缩窄卡死修复（GeometryChangedEvent 反馈死循环三重防护 + MinWindowSize 420）+ UI 交互视觉审查 P0/P1（IME Enter 误发送守卫 / GetContextBudget 移出高频路径 / 流式视觉跳变方案C 统一 block 渲染 / ToolCallCard 超长结果 8000 字符截断显示 / 色板统一 AgentCoreColors 单一真源）；v1.7.7~1.7.8: 修复 Preferences 目录 Move 弹窗根因（_cachedDirEnsured 缓存 + 目录扫描选错版本 + SafeSave 返回值）+ CS0103 打包遗漏修正；v1.7.6: 修复 v1.7.5 遗漏的 using 指令（CS0103）；v1.7.5: Preferences 路径硬编码兜底 + ScriptingDefineSymbols 版本兼容（Unity 2023+/6 ForGroup API 废弃迁移）；v1.7.4: 修复路径解析根因（Unity 内部版本号 vs 营销版本号不匹配，三级路径解析）；v1.7.3: beforeAssemblyReload 回调；v1.7.2: minimalism / self-challenge 历史文档整理归档；v1.7.1: 修复新装路径不存在（[InitializeOnLoad] 静态构造函数）+ VCS 远端检查开机触发（_lastCheckedUtc 初始化为 UtcNow）+ 3 个 CS0162 编译警告清理 + SessionStorage 日志降级；v1.7.0: Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens）+ VCS 模块修复（进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持 / Perforce ignore 标注） |
+| **版本** | 1.7.13 (2026-07-20) — v1.7.13: 会话自动重命名（右键菜单基于最近 12 条上下文调 LLM 生成反映当前主话题的标题，SessionAutoTitleService）+ 助手气泡宽度修复（AssistantTurnView 6 个 wrapper 设 width:100%，消除首段短内容压窄后续工具卡片/长内容）+ ROADMAP 同步实现现状（Tier 0/1/2 标记完成 + ADR-19）；v1.7.12 (2026-07-20) — v1.7.12: 日志分级全量贯彻（83 文件 329 处裸 Debug.* → AgentCoreLog.*：Warning 245 / Error 74 / Info 10，补 62 文件 using；此前绕过 Settings Log Verbosity 开关永远输出，现全部日志受分级控制）；v1.7.11 (2026-07-18) 三项修复（HubRail 仅保留 Settings 齿轮图标其余回退文字，消除图标/文字割裂 / StreamingTextElement SanitizeForDisplay 清洗无法渲染字符消除对话 □ 方块 / ManageComponentTool 支持 ObjectReference 字段赋值 instanceId·资源路径·场景名·null + GameObject↔Component 转换）；v1.7.10 (2026-07-18) UI 收尾（MessageReferenceBar chip 截断修复 minHeight+内容撑高 / HelpBubble 补齐输入框快捷键 Enter·Shift+Enter·Ctrl+N·Escape / HubRail 图标化 ResolveBuiltinIconName+TryApplyIcon 带文字回退 / MessageListManager.LoadMoreItems 滚动位置补偿消除加载更多跳动；P3 项 ScrollToBottom 双帧延迟·error stretch·键盘可访问性经核实判定无需改动）；v1.7.9 (2026-07-17) — v1.7.9: HelpBubble 浮窗根因修复（ResolveMountRoot 挂载点）+ 对话泡泡引用溢出/窗口缩窄卡死修复（GeometryChangedEvent 反馈死循环三重防护 + MinWindowSize 420）+ UI 交互视觉审查 P0/P1（IME Enter 误发送守卫 / GetContextBudget 移出高频路径 / 流式视觉跳变方案C 统一 block 渲染 / ToolCallCard 超长结果 8000 字符截断显示 / 色板统一 AgentCoreColors 单一真源）；v1.7.7~1.7.8: 修复 Preferences 目录 Move 弹窗根因（_cachedDirEnsured 缓存 + 目录扫描选错版本 + SafeSave 返回值）+ CS0103 打包遗漏修正；v1.7.6: 修复 v1.7.5 遗漏的 using 指令（CS0103）；v1.7.5: Preferences 路径硬编码兜底 + ScriptingDefineSymbols 版本兼容（Unity 2023+/6 ForGroup API 废弃迁移）；v1.7.4: 修复路径解析根因（Unity 内部版本号 vs 营销版本号不匹配，三级路径解析）；v1.7.3: beforeAssemblyReload 回调；v1.7.2: minimalism / self-challenge 历史文档整理归档；v1.7.1: 修复新装路径不存在（[InitializeOnLoad] 静态构造函数）+ VCS 远端检查开机触发（_lastCheckedUtc 初始化为 UtcNow）+ 3 个 CS0162 编译警告清理 + SessionStorage 日志降级；v1.7.0: Settings v20 死字段清理（12 字段删除 + disabledTools 默认值修正 + Model Info 显示 effective tokens）+ VCS 模块修复（进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持 / Perforce ignore 标注） |
 | **代码规模** | 288 个 .cs 文件，约 97K 行代码，51 个原生工具 |
 | **核心架构** | AgentLoop (partial 9 文件) + ChatWindow (partial 9 文件) + ToolAutoDiscovery 重建注册表 + DomainReload 恢复 + Schema 预校验 + ToolScopeResolver 渐进暴露 — 稳定 |
 | **Bootstrap 链** | SOUL(+SOUL.ext) → TOOLS → PROJECT(auto) → PROJECT.md(user) — 已完整（Rules System 已废弃，见 ADR-10） |
@@ -614,6 +614,25 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ---
 
+### ADR-19: Tier 1 项目扫描从「静态拆分文档 + 手动 re-init」演进为「实时静默收集 + 缓存注入」
+
+- **状态**: 已采纳（2026-07-20 追认既有实现）
+- **背景**: ROADMAP §7 原规划 Tier 1「全量项目扫描」设计为：首次检测 `MEMORY.md` 不存在时自动触发一次全量扫描 → 生成 `PROJECT.tools.md` / `PROJECT.architecture.md` 等拆分文档落地 → 之后用户手动 re-init 更新。实际开发中该目标以不同路径落地，文档未同步，导致 §7 长期把已完成的 Tier 1 标记为 P0 待开发。
+- **决策**: 追认现有实现为 Tier 1 的正式方案，不再按原规划补建拆分文档与 re-init 入口。现有实现（`ProjectContextCollector` + `BootstrapLoader`）：在每次 Bootstrap（`autoProjectContext` 开启时）实时收集 Unity 版本、渲染管线、目标平台、项目结构、UPM 包、脚本统计/命名空间分布；重量级扫描走 `CollectHeavyAsync` 后台执行 + 5 分钟缓存；结果作为 `context.Project` 延迟注入 system prompt，不落地成文件。
+- **理由**:
+  - **不过期**: 实时收集每次反映项目当前状态，静态快照文档会随项目演进过时，需要手动 re-init 维护
+  - **零手动**: 无需用户记得 re-init，符合 ADR-17 极简即开即用哲学（Tier 1 定位「首次自动 + 之后手动」，实时方案更进一步做到全自动）
+  - **无冗余文件**: 不在项目里生成 `PROJECT.tools.md` 等文件，减少 VCS 噪声与用户困惑
+  - **性能可控**: 快速版仅用 Unity API + UPM manifest 不扫盘；重量级扫描后台 + 缓存，不阻塞交互
+- **达成的目标**: Tier 1 的核心目标「agent 具备 Tier 0 覆盖不了的项目全局视野」已满足——agent 知道项目渲染管线、平台、结构、依赖包。
+- **不影响**:
+  - Tier 0 Memory（跨 session 事实积累）与 Tier 2 Skills 各自独立
+  - 用户可编辑的 `PROJECT.md`（项目约定/偏好）仍照常加载注入，与自动收集的 `context.Project` 分离
+- **拒绝替代方案**:
+  - "按原规划补建 PROJECT.tools.md/PROJECT.architecture.md 拆分文档 + re-init 按钮" — 引入过期风险与手动维护负担，与实时收集重复，ROI 低（用户已确认静默方案更好）
+
+---
+
 ## 5. 风险评估
 
 | 风险 | 可能性 | 影响 | 缓解措施 |
@@ -662,13 +681,13 @@ v1.5.z / v1.6.0 — 4 周 review 结果决定：保留 / 局部调整 / 回滚
 
 ## 7. 下一步行动建议
 
-> v1.7.6 已发布（修复 v1.7.5 遗漏的 using 指令 CS0103）。Self-Challenge 机制标记收尾（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）。后续开发方向按优先级排列如下。
+> v1.7.12 已发布。自演化知识系统 Tier 0/1/2（Memory / Init Project / Skills+Curator）已落地——其中 Tier 1 由「静态拆分文档 + 手动 re-init」演进为「每次 Bootstrap 实时静默收集 + 缓存注入」，效果更优（不过期、零手动），见 ADR-19。剩余方向均为 P2，按优先级排列如下。
 
 | 优先级 | 任务 | 原因 |
 |--------|------|------|
-| **P0** | **自演化知识系统 Tier 0 — 自动事实积累（Memory）** | agent 在正常对话中自然积累跨 session 事实，零手动触发：用户纠正 → 更新认知；发现项目特征（URP/HDRP/命名规范/Odin）→ 记录。存储 `MEMORY.md` 始终注入，硬 cap ~500 字符，agent 用 add/replace/remove 工具维护。零外部依赖（纯文件，替代废弃的 mem0 方案） |
-| **P0** | **自演化知识系统 Tier 1 — 全量项目扫描（Init Project）** | 解决 Tier 0 覆盖不了的全局视野：agent 正常对话不会遍历整个项目结构。首次检测到 `MEMORY.md` 不存在时自动触发一次全量扫描，之后用户手动 re-init 更新。生成 `PROJECT.tools.md` / `PROJECT.architecture.md` 等拆分文档，索引注入 + 按需 read_file。不绑定版本号，v1.7.3 修复完成后排期 |
-| **P1** | **自演化知识系统 Tier 2 — 流程复用 + 生命周期维护（Skills + Curator）** | **Skills**：复杂任务完成后 agent 主动询问"要保存这个流程吗"——用户确认是必要的质量控制（agent 自主判断"什么值得沉淀"不可靠）。项目级 `.agentcore/skills/`，Bootstrap 链加载。**Curator**：低频后台检查（每小时，纯文件系统检查不开 LLM）skill 引用的文件路径是否仍存在，标记过期不删除。和 Skills 互补：Skills 积累"怎么用"，Curator 检查"还对吗" |
+| ✅ 已完成 | **自演化知识系统 Tier 0 — 自动事实积累（Memory）** | 已实现（AutoMemoryStrategy + ContextMemorySettingsPage）：agent 在正常对话中跨 session 积累事实，`MEMORY.md` 注入，add/replace/remove 维护，纯文件零外部依赖 |
+| ✅ 已完成 | **自演化知识系统 Tier 1 — 项目扫描（Init Project）** | 已实现，**但实现路径演进（见 ADR-19）**：原规划为「首次自动触发 + 手动 re-init + 生成 PROJECT.tools.md/PROJECT.architecture.md 拆分文档」；实际落地为 ProjectContextCollector 在每次 Bootstrap（autoProjectContext 开启时）实时收集 Unity 版本/渲染管线/平台/结构/UPM 包/脚本统计，后台重扫 CollectHeavyAsync + 5min 缓存，作为 context.Project 延迟注入 system prompt（不落地成文件）。实时收集比静态快照更优：不过期、无需手动 re-init |
+| ✅ 已完成 | **自演化知识系统 Tier 2 — 流程复用（Skills）** | 已实现（SkillRegistry + LoadSkillTool + SkillScopeState + Bootstrap 链加载）：skill 加载与作用域管理落地。Curator 生命周期维护如需强化可后续单独评估 |
 | P2 | **Goal 模式** | 跨轮持久化目标，agent 每轮记得当前大任务；session 级不跨 session；每轮注入 system prompt；agent 回复末尾附 goal 进度一行 |
 | P2 | **MCP Server — 协议骨架（8.1.1 ~ 8.1.4）** | JSON-RPC + stdio，对外互操作；治理前置 G.1/G.2/G.3 已满足 |
 | P2 | **MCP Server — 传输与兼容性（8.1.5 ~ 8.1.7）** | stdio 稳定后扩展 HTTP/SSE 传输；覆盖 Claude Desktop / Cursor / Continue / CLI 四类客户端 |

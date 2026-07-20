@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.13] - 2026-07-20
+
+### Added
+- **会话自动重命名**：会话列表右键菜单新增「自动重命名」项（排在「重命名」上方），基于会话**最近 12 条上下文**调用 LLM 生成能反映当前主话题的简短标题，解决"话题漂移后标题仍停留在最初内容"的问题。复用统一 LLM 管道（`SessionAutoTitleService`，非流式、低 token 预算、≤24 字中文标题）；生成期间标题显示"正在生成标题…"，失败恢复原标题。
+
+### Fixed
+- **助手气泡宽度被首段短内容压窄**：`AssistantTurnView` 及其内部 6 个 column wrapper 容器（turn 自身 / roundsContainer / selfChallengeSlot / bubbleSlot / sectionContainer / ToolSlot）未设宽度，导致整个 turn 宽度被首段渲染内容锁成 min-content——第一段是短文本气泡时，后续工具卡片/长内容被压窄。修复：6 个 wrapper 全部设 `width: 100%`，每个 turn 恒定撑满对话区可用宽度；MessageBubble 本身不变（保持 max-width:82% + align-self:flex-start 的内容自然伸缩）。
+
+### Docs
+- **ROADMAP 同步实现现状**：§7 表头刷新至 v1.7.13；自演化知识系统 Tier 0/1/2 从"待开发"标记为已完成；新增 **ADR-19** 记录 Tier 1 由「静态拆分文档 + 手动 re-init」演进为「实时静默收集 + 缓存注入」的决策。
+
 ## [1.7.12] - 2026-07-20
 
 ### Changed
