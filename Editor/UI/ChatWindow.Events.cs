@@ -1,6 +1,7 @@
 using AgentCore.Editor.Core;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI
 {
@@ -217,7 +218,7 @@ namespace AgentCore.Editor.UI
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning($"[AgentCore.UI] Failed to update context usage panel: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore.UI] Failed to update context usage panel: {ex.Message}");
             }
         }
 

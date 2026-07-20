@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Cloud;
 using AgentCore.Editor.LLM;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -68,7 +69,7 @@ namespace AgentCore.Editor.Core
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // 仅超时导致的取消，不是用户主动取消
-                Debug.LogWarning($"[AgentCore] Memory recall timed out after {MemoryRecallTimeoutSeconds}s.");
+                AgentCoreLog.Warning($"[AgentCore] Memory recall timed out after {MemoryRecallTimeoutSeconds}s.");
                 return new List<Mem0Memory>();
             }
         }

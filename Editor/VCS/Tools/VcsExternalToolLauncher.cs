@@ -1,5 +1,6 @@
 ﻿using System;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -119,7 +120,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             catch (Exception ex)
             {
                 reason = $"Failed to launch {displayName}: {ex.Message}";
-                Debug.LogWarning($"[Version Control] {reason} Command: {fileName} {arguments}");
+                AgentCoreLog.Warning($"[Version Control] {reason} Command: {fileName} {arguments}");
                 return false;
             }
         }

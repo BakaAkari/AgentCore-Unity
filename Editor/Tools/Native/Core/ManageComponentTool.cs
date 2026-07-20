@@ -11,6 +11,7 @@ using UnityEditor;
 using UnityEditorInternal;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Native.Core
 {
@@ -358,7 +359,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 if (errors.Count > 0)
                 {
-                    Debug.LogWarning($"[AgentCore] Some properties failed on '{componentTypeName}': {string.Join(", ", errors)}");
+                    AgentCoreLog.Warning($"[AgentCore] Some properties failed on '{componentTypeName}': {string.Join(", ", errors)}");
                     return ToolResponse.OkWithData(new JObject
                     {
                         ["gameObject"] = go.name,

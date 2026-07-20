@@ -11,6 +11,7 @@ using AgentCore.Editor.Components.Indexing.Roots;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
 using Newtonsoft.Json.Linq;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.Indexing.Tools
 {
@@ -282,7 +283,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             catch (Exception ex)
             {
                 // per-root state is best-effort — don't fail the whole status call
-                UnityEngine.Debug.LogWarning($"[AgentCore] search_code::status per-root fetch failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] search_code::status per-root fetch failed: {ex.Message}");
             }
 
             return ToolResponse.OkWithData(new
@@ -321,7 +322,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[AgentCore] diagnose workspace resolve failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] diagnose workspace resolve failed: {ex.Message}");
             }
 
             var perRootEntries = await BuildPerRootStateEntriesAsync(ct);
@@ -1322,7 +1323,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[AgentCore] BuildPerRootStateEntriesAsync failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] BuildPerRootStateEntriesAsync failed: {ex.Message}");
             }
 
             return result;

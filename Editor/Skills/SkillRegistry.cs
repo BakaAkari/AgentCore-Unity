@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Skills
 {
@@ -78,7 +79,7 @@ namespace AgentCore.Editor.Skills
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore][Skills] Failed to read '{name}' at {meta.FilePath}: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore][Skills] Failed to read '{name}' at {meta.FilePath}: {ex.Message}");
                 return null;
             }
         }
@@ -114,7 +115,7 @@ namespace AgentCore.Editor.Skills
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore][Skills] Registry scan failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore][Skills] Registry scan failed: {ex.Message}");
             }
             finally
             {
@@ -139,7 +140,7 @@ namespace AgentCore.Editor.Skills
 
                     if (_skills.ContainsKey(meta.Name))
                     {
-                        Debug.LogWarning($"[AgentCore][Skills] Duplicate skill name '{meta.Name}'. " +
+                        AgentCoreLog.Warning($"[AgentCore][Skills] Duplicate skill name '{meta.Name}'. " +
                                          $"Existing: {_skills[meta.Name].FilePath}; ignoring: {meta.FilePath}");
                         continue;
                     }
@@ -149,7 +150,7 @@ namespace AgentCore.Editor.Skills
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore][Skills] Failed to scan '{skillsRoot}': {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore][Skills] Failed to scan '{skillsRoot}': {ex.Message}");
             }
         }
 
@@ -181,7 +182,7 @@ namespace AgentCore.Editor.Skills
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore][Skills] Failed to build metadata for '{skillFile}': {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore][Skills] Failed to build metadata for '{skillFile}': {ex.Message}");
                 return null;
             }
         }

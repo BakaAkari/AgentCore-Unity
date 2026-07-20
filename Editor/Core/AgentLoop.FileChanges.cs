@@ -1,5 +1,6 @@
 ﻿using System;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -35,7 +36,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to restore FileChangeTracker: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to restore FileChangeTracker: {ex.Message}");
             }
         }
 

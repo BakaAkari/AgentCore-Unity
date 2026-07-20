@@ -2,6 +2,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Components.VCS.Tools;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.UI
 {
@@ -81,7 +82,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             var vcsType = VcsDetector.DetectVcs();
             if (vcsType == VcsType.None)
             {
-                Debug.LogWarning($"[VCS] No version control system detected for {displayName}.");
+                AgentCoreLog.Warning($"[VCS] No version control system detected for {displayName}.");
                 return;
             }
 
@@ -90,7 +91,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             if (!TryLaunchExternalTool(vcsType, operation, selectedPath, rootPath, out var reason))
             {
-                Debug.LogWarning($"[VCS] {displayName}: {reason}");
+                AgentCoreLog.Warning($"[VCS] {displayName}: {reason}");
             }
         }
 

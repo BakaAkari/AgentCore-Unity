@@ -204,19 +204,19 @@ namespace AgentCore.Editor.UI
         {
             if (_agentLoop == null)
             {
-                Debug.LogError("[AgentCore] AgentLoop is not initialized, cannot retry.");
+                AgentCoreLog.Error("[AgentCore] AgentLoop is not initialized, cannot retry.");
                 return;
             }
 
             if (_agentLoop.CurrentState != AgentState.Idle)
             {
-                Debug.LogWarning("[AgentCore] Cannot retry while agent is busy.");
+                AgentCoreLog.Warning("[AgentCore] Cannot retry while agent is busy.");
                 return;
             }
 
             if (string.IsNullOrEmpty(message))
             {
-                Debug.LogWarning("[AgentCore] No message to retry.");
+                AgentCoreLog.Warning("[AgentCore] No message to retry.");
                 return;
             }
 
@@ -229,7 +229,7 @@ namespace AgentCore.Editor.UI
             // 异步发送消息
             AsyncHelper.RunAsync(
                 () => _agentLoop.SendMessageAsync(message),
-                onError: ex => Debug.LogError($"[AgentCore] Retry error: {ex.Message}")
+                onError: ex => AgentCoreLog.Error($"[AgentCore] Retry error: {ex.Message}")
             );
         }
 
@@ -258,7 +258,7 @@ namespace AgentCore.Editor.UI
         {
             if (_agentLoop == null || _messageContainer == null)
             {
-                Debug.LogWarning($"[AgentCore.UI] RebuildMessageBubbles 中止: _agentLoop={(_agentLoop != null ? "OK" : "null")}, _messageContainer={(_messageContainer != null ? "OK" : "null")}");
+                AgentCoreLog.Warning($"[AgentCore.UI] RebuildMessageBubbles 中止: _agentLoop={(_agentLoop != null ? "OK" : "null")}, _messageContainer={(_messageContainer != null ? "OK" : "null")}");
                 return;
             }
 

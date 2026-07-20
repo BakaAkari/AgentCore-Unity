@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Workspace;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
@@ -43,7 +44,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[IndexStoreFactory] ResolveFromCurrent failed: {ex.Message}");
+                AgentCoreLog.Warning($"[IndexStoreFactory] ResolveFromCurrent failed: {ex.Message}");
                 return null;
             }
         }
@@ -68,7 +69,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[IndexStoreFactory] Cannot create index dir '{indexDir}': {ex.Message}. Falling back to JsonlIndexStore.");
+                AgentCoreLog.Warning($"[IndexStoreFactory] Cannot create index dir '{indexDir}': {ex.Message}. Falling back to JsonlIndexStore.");
                 return new JsonlIndexStore(indexDir);
             }
 
@@ -78,12 +79,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
             try
             {
                 var store = new SqliteIndexStore(dbPath);
-                UnityEngine.Debug.Log($"[IndexStoreFactory] Using SQLite backend: {dbPath}");
+                AgentCoreLog.Info($"[IndexStoreFactory] Using SQLite backend: {dbPath}");
                 return store;
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning(
+                AgentCoreLog.Warning(
                     $"[IndexStoreFactory] SQLite init failed ({ex.GetType().Name}: {ex.Message}). " +
                     $"Falling back to JsonlIndexStore at '{indexDir}'.");
                 return new JsonlIndexStore(indexDir);

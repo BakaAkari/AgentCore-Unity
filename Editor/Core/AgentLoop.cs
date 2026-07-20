@@ -204,7 +204,7 @@ namespace AgentCore.Editor.Core
         {
             if (_isInitialized)
             {
-                Debug.LogWarning("[AgentCore] AgentLoop already initialized, skipping.");
+                AgentCoreLog.Warning("[AgentCore] AgentLoop already initialized, skipping.");
                 return;
             }
 
@@ -216,7 +216,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] ToolAutoDiscovery failed (non-fatal): {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] ToolAutoDiscovery failed (non-fatal): {ex.Message}");
             }
 
             string systemPrompt;
@@ -232,7 +232,7 @@ namespace AgentCore.Editor.Core
 
                 if (string.IsNullOrWhiteSpace(systemPrompt))
                 {
-                    Debug.LogWarning("[AgentCore] Bootstrap returned empty system prompt, using default.");
+                    AgentCoreLog.Warning("[AgentCore] Bootstrap returned empty system prompt, using default.");
                     systemPrompt = DefaultSystemPrompt;
                 }
                 else
@@ -245,8 +245,8 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Failed to load Bootstrap context: {ex.Message}");
-                Debug.LogWarning("[AgentCore] Using default system prompt as fallback.");
+                AgentCoreLog.Error($"[AgentCore] Failed to load Bootstrap context: {ex.Message}");
+                AgentCoreLog.Warning("[AgentCore] Using default system prompt as fallback.");
                 systemPrompt = DefaultSystemPrompt;
                 _deferredContext = null;
             }
@@ -296,7 +296,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to restore compression metrics: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to restore compression metrics: {ex.Message}");
             }
 
             // G.3 ActiveToolScope: 初始化工具作用域状态并注入到 RequestToolsTool
@@ -437,7 +437,7 @@ namespace AgentCore.Editor.Core
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"[AgentCore] Memory recall failed (non-blocking): {ex.Message}");
+                        AgentCoreLog.Warning($"[AgentCore] Memory recall failed (non-blocking): {ex.Message}");
                         // 记忆召回失败不应阻塞对话
                     }
                 }
@@ -470,7 +470,7 @@ namespace AgentCore.Editor.Core
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"[AgentCore] Cold-start snapshot failed (non-blocking): {ex.Message}");
+                        AgentCoreLog.Warning($"[AgentCore] Cold-start snapshot failed (non-blocking): {ex.Message}");
                     }
                 }
 
@@ -483,7 +483,7 @@ namespace AgentCore.Editor.Core
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"[AgentCore][Skills] SyncSkillMessages failed (non-blocking): {ex.Message}");
+                        AgentCoreLog.Warning($"[AgentCore][Skills] SyncSkillMessages failed (non-blocking): {ex.Message}");
                     }
                 }
 
@@ -510,7 +510,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Error during SendMessageAsync: {ex}");
+                AgentCoreLog.Error($"[AgentCore] Error during SendMessageAsync: {ex}");
                 assistantTurn.IsStreaming = false;
 
                 // 发送结构化错误事件（携带异常类型、HTTP 状态码、堆栈等）
@@ -569,7 +569,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to save session before reset: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to save session before reset: {ex.Message}");
             }
 
             // 2.5. Phase 3: 触发自动记忆（fire-and-forget，不阻塞重置流程）
@@ -579,7 +579,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Auto-memory trigger failed (non-fatal): {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Auto-memory trigger failed (non-fatal): {ex.Message}");
             }
 
             // 3. 清除历史
@@ -620,13 +620,13 @@ namespace AgentCore.Editor.Core
         {
             if (string.IsNullOrEmpty(sessionId))
             {
-                Debug.LogWarning("[AgentCore] Cannot load session with empty Id.");
+                AgentCoreLog.Warning("[AgentCore] Cannot load session with empty Id.");
                 return false;
             }
 
             if (CurrentState != AgentState.Idle)
             {
-                Debug.LogWarning("[AgentCore] Cannot load session while agent is busy.");
+                AgentCoreLog.Warning("[AgentCore] Cannot load session while agent is busy.");
                 return false;
             }
 
@@ -637,7 +637,7 @@ namespace AgentCore.Editor.Core
             var session = SessionManager.Instance.LoadSession(sessionId);
             if (session == null)
             {
-                Debug.LogWarning($"[AgentCore] Failed to load session: {sessionId}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to load session: {sessionId}");
                 return false;
             }
 

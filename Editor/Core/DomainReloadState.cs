@@ -392,7 +392,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] DomainReloadState.Save failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] DomainReloadState.Save failed: {ex.Message}");
             }
         }
 

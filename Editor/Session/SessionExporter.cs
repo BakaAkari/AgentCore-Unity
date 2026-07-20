@@ -130,7 +130,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Failed to export session: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Failed to export session: {ex.Message}");
                 return false;
             }
         }

@@ -12,6 +12,7 @@ using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -46,7 +47,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Failed to build tool definitions: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Failed to build tool definitions: {ex.Message}");
                 return null;
             }
         }
@@ -109,7 +110,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] FileChangeTracker failed (non-fatal): {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] FileChangeTracker failed (non-fatal): {ex.Message}");
             }
 
             // Phase 2.5: 检查是否有编译相关的工具调用
@@ -173,7 +174,7 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Compilation watch failed: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Compilation watch failed: {ex.Message}");
                 }
             }
 
@@ -371,7 +372,7 @@ namespace AgentCore.Editor.Core
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"[AgentCore] Tool result compression failed for '{result.ToolName}' (non-fatal): {ex.Message}");
+                        AgentCoreLog.Warning($"[AgentCore] Tool result compression failed for '{result.ToolName}' (non-fatal): {ex.Message}");
                     }
                 }
 

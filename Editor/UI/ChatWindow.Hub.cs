@@ -7,6 +7,7 @@ using AgentCore.Editor.UI.Components;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI
 {
@@ -138,7 +139,7 @@ namespace AgentCore.Editor.UI
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Failed to create toolbar status contribution '{contribution.Id}': {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to create toolbar status contribution '{contribution.Id}': {ex.Message}");
                 }
             }
         }
@@ -228,7 +229,7 @@ namespace AgentCore.Editor.UI
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Failed to create Hub panel contribution '{contribution.Id}': {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to create Hub panel contribution '{contribution.Id}': {ex.Message}");
                 }
             }
         }
@@ -289,7 +290,7 @@ namespace AgentCore.Editor.UI
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"[AgentCore] Hub panel contribution '{kvp.Key}' lifecycle callback failed: {ex.Message}");
+                        AgentCoreLog.Warning($"[AgentCore] Hub panel contribution '{kvp.Key}' lifecycle callback failed: {ex.Message}");
                     }
                 }
             }

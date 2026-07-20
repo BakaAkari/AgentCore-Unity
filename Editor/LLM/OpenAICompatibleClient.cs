@@ -162,7 +162,7 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url
                         break;
 
                     case StreamChunkType.Error:
-                        Debug.LogWarning($"[AgentCore] Stream error: {chunk.Error}");
+                        AgentCoreLog.Warning($"[AgentCore] Stream error: {chunk.Error}");
                         onChunk?.Invoke(chunk);
                         break;
                 }
@@ -301,7 +301,7 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url
             }
 
             // 策略 3：最后手段 — 将整个 arguments 作为纯文本包装
-            Debug.LogWarning($"[AgentCore] Unable to fully repair tool arguments, wrapping as raw text. Original (first 200 chars): {arguments.Substring(0, Math.Min(200, arguments.Length))}");
+            AgentCoreLog.Warning($"[AgentCore] Unable to fully repair tool arguments, wrapping as raw text. Original (first 200 chars): {arguments.Substring(0, Math.Min(200, arguments.Length))}");
             // 用 Newtonsoft.Json 安全序列化为字符串值，确保所有特殊字符被正确转义
             var safeContent = Newtonsoft.Json.JsonConvert.SerializeObject(arguments);
             // safeContent 现在是一个带引号的合法 JSON 字符串，如 "\"...escaped content...\""

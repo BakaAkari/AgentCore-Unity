@@ -5,6 +5,7 @@ using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Core;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
@@ -137,7 +138,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] IndexingStatusBlockBuilder failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] IndexingStatusBlockBuilder failed: {ex.Message}");
                 return null;
             }
         }

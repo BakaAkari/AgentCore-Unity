@@ -66,7 +66,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         settings.logLevel = newLevel;
                         settings.SaveSettings();
                         AgentCore.Editor.Utils.AgentCoreLog.Invalidate();
-                        UnityEngine.Debug.Log($"[AgentCore] Log level changed: {current} -> {newLevel}");
+                        AgentCoreLog.Info($"[AgentCore] Log level changed: {current} -> {newLevel}");
                     }
                 });
         }
@@ -281,7 +281,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to read package version: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to read package version: {ex.Message}");
             }
 
             return "unknown";

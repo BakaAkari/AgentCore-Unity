@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI.Context
 {
@@ -117,7 +118,7 @@ namespace AgentCore.Editor.UI.Context
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] ConsoleContextCollector reflection init failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] ConsoleContextCollector reflection init failed: {ex.Message}");
                 _reflectionFailed = true;
                 return false;
             }
@@ -173,7 +174,7 @@ namespace AgentCore.Editor.UI.Context
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] ConsoleContextCollector read failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] ConsoleContextCollector read failed: {ex.Message}");
                 try { _endGettingEntries?.Invoke(null, null); } catch { /* ignore */ }
             }
 

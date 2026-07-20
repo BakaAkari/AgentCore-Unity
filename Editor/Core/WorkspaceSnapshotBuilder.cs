@@ -6,6 +6,7 @@ using AgentCore.Editor.Workspace;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -90,13 +91,13 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] IndexStatusBlockProvider failed: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] IndexStatusBlockProvider failed: {ex.Message}");
                 }
             }
             catch (Exception ex)
             {
                 sb.AppendLine($"(快照部分收集失败: {ex.Message})");
-                Debug.LogWarning($"[AgentCore] WorkspaceSnapshotBuilder error: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] WorkspaceSnapshotBuilder error: {ex.Message}");
             }
 
             sb.Append(SnapshotMarkerEnd);

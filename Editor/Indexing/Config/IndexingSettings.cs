@@ -60,7 +60,7 @@ namespace AgentCore.Editor.Components.Indexing.Config
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] IndexingSettings.Save failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] IndexingSettings.Save failed: {ex.Message}");
             }
         }
     }

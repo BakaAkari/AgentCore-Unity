@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.LLM;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core.Compression
 {
@@ -112,7 +113,7 @@ namespace AgentCore.Editor.Core.Compression
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] LLM compression failed for '{toolName}': {ex.Message}. Falling back to truncation.");
+                AgentCoreLog.Warning($"[AgentCore] LLM compression failed for '{toolName}': {ex.Message}. Falling back to truncation.");
                 _metrics.RecordToolResultCompressionFailure();
             }
 

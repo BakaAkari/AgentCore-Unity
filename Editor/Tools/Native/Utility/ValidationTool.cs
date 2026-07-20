@@ -11,6 +11,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Native.Utility
 {
@@ -662,7 +663,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 catch (Exception ex)
                 {
                     summary[checkName + "_error"] = -1;
-                    UnityEngine.Debug.LogWarning($"[ValidationTool] {checkName} failed: {ex.Message}");
+                    AgentCoreLog.Warning($"[ValidationTool] {checkName} failed: {ex.Message}");
                 }
             }
 

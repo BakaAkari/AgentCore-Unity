@@ -5,6 +5,7 @@ using System.Linq;
 using AgentCore.Editor.LLM;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -227,7 +228,7 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] FileChangeTracker: Failed to snapshot for {toolName}: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] FileChangeTracker: Failed to snapshot for {toolName}: {ex.Message}");
                 }
             }
         }
@@ -301,7 +302,7 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] FileChangeTracker: Failed to track {toolName}: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] FileChangeTracker: Failed to track {toolName}: {ex.Message}");
                 }
             }
         }
@@ -680,7 +681,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] FileChangeTracker.SerializeToJson failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] FileChangeTracker.SerializeToJson failed: {ex.Message}");
                 return null;
             }
         }
@@ -728,7 +729,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] FileChangeTracker.RestoreFromJson failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] FileChangeTracker.RestoreFromJson failed: {ex.Message}");
                 return 0;
             }
         }

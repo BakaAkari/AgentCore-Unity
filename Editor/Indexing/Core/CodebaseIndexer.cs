@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Components.Indexing.Roots;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
@@ -118,7 +119,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 var storedVersion = await _store.GetMetadataAsync(workspaceId, MetaKeyIndexVersion, ct);
                 if (storedVersion != CurrentIndexVersion)
                 {
-                    UnityEngine.Debug.Log($"[CodebaseIndexer] Index version changed ({storedVersion} → {CurrentIndexVersion}), forcing full rebuild.");
+                    AgentCoreLog.Info($"[CodebaseIndexer] Index version changed ({storedVersion} → {CurrentIndexVersion}), forcing full rebuild.");
                 }
 
                 // 3. 清空旧索引
@@ -170,7 +171,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     }
                     catch (Exception ex)
                     {
-                        UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Unhandled exception indexing '{filePath}': {ex.Message}");
+                        AgentCoreLog.Warning($"[CodebaseIndexer] Unhandled exception indexing '{filePath}': {ex.Message}");
                         progress.ErrorFiles++;
                     }
 
@@ -206,7 +207,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 var failed = IndexingProgress.CreateFailed(progress, $"Full indexing failed: {ex.Message}");
                 ReportProgress(onProgress, failed);
-                UnityEngine.Debug.LogError($"[CodebaseIndexer] Full indexing failed: {ex}");
+                AgentCoreLog.Error($"[CodebaseIndexer] Full indexing failed: {ex}");
                 return failed;
             }
         }
@@ -256,7 +257,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 if (string.IsNullOrEmpty(lastFullIndex) || storedVersion != CurrentIndexVersion)
                 {
-                    UnityEngine.Debug.Log("[CodebaseIndexer] No full index found or version mismatch, falling back to full indexing.");
+                    AgentCoreLog.Info("[CodebaseIndexer] No full index found or version mismatch, falling back to full indexing.");
                     return await RunFullIndexAsync(onProgress, ct);
                 }
 
@@ -370,7 +371,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 var failed = IndexingProgress.CreateFailed(progress, $"Incremental indexing failed: {ex.Message}");
                 ReportProgress(onProgress, failed);
-                UnityEngine.Debug.LogError($"[CodebaseIndexer] Incremental indexing failed: {ex}");
+                AgentCoreLog.Error($"[CodebaseIndexer] Incremental indexing failed: {ex}");
                 return failed;
             }
         }
@@ -552,7 +553,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 var failed = IndexingProgress.CreateFailed(progress, $"Targeted incremental indexing failed: {ex.Message}");
                 ReportProgress(onProgress, failed);
-                UnityEngine.Debug.LogError($"[CodebaseIndexer] Targeted incremental indexing failed: {ex}");
+                AgentCoreLog.Error($"[CodebaseIndexer] Targeted incremental indexing failed: {ex}");
                 return failed;
             }
         }
@@ -573,7 +574,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[CodebaseIndexer] GetStatsAsync failed: {ex.Message}");
+                AgentCoreLog.Warning($"[CodebaseIndexer] GetStatsAsync failed: {ex.Message}");
                 return null;
             }
         }
@@ -640,7 +641,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 if (!Directory.Exists(root.RootPath))
                 {
-                    UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Root directory not found, skipping: {root.RootPath}");
+                    AgentCoreLog.Warning($"[CodebaseIndexer] Root directory not found, skipping: {root.RootPath}");
                     continue;
                 }
 
@@ -658,7 +659,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 }
                 catch (Exception ex)
                 {
-                    UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Failed to scan root '{root.RootPath}': {ex.Message}");
+                    AgentCoreLog.Warning($"[CodebaseIndexer] Failed to scan root '{root.RootPath}': {ex.Message}");
                 }
             }
 
@@ -690,7 +691,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 }
                 catch (Exception ex)
                 {
-                    UnityEngine.Debug.LogWarning($"[CodebaseIndexer] EnumerateFiles failed for '{rootPath}' pattern '{pattern}': {ex.Message}");
+                    AgentCoreLog.Warning($"[CodebaseIndexer] EnumerateFiles failed for '{rootPath}' pattern '{pattern}': {ex.Message}");
                     continue;
                 }
 
@@ -810,7 +811,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Cannot stat file '{filePath}': {ex.Message}");
+                AgentCoreLog.Warning($"[CodebaseIndexer] Cannot stat file '{filePath}': {ex.Message}");
                 progress.SkippedFiles++;
                 return;
             }
@@ -832,13 +833,13 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Extraction timed out for '{filePath}' (>5s), skipping.");
+                AgentCoreLog.Warning($"[CodebaseIndexer] Extraction timed out for '{filePath}' (>5s), skipping.");
                 progress.ErrorFiles++;
                 return;
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Extraction failed for '{filePath}': {ex.Message}");
+                AgentCoreLog.Warning($"[CodebaseIndexer] Extraction failed for '{filePath}': {ex.Message}");
                 progress.ErrorFiles++;
                 return;
             }
@@ -868,7 +869,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 }
                 catch (Exception ex)
                 {
-                    UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Failed to persist error file record '{filePath}': {ex.Message}");
+                    AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist error file record '{filePath}': {ex.Message}");
                 }
 
                 progress.ErrorFiles++;
@@ -889,7 +890,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Failed to persist file record '{filePath}': {ex.Message}");
+                AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist file record '{filePath}': {ex.Message}");
                 progress.ErrorFiles++;
                 return;
             }
@@ -912,7 +913,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 }
                 catch (Exception ex)
                 {
-                    UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Failed to persist symbols for '{filePath}': {ex.Message}");
+                    AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist symbols for '{filePath}': {ex.Message}");
                 }
 
                 // 提取并持久化依赖关系
@@ -934,7 +935,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 }
                 catch (Exception ex)
                 {
-                    UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Failed to extract/persist dependencies for '{filePath}': {ex.Message}");
+                    AgentCoreLog.Warning($"[CodebaseIndexer] Failed to extract/persist dependencies for '{filePath}': {ex.Message}");
                 }
             }
         }
@@ -1053,7 +1054,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"[CodebaseIndexer] Progress callback threw: {ex.Message}");
+                AgentCoreLog.Warning($"[CodebaseIndexer] Progress callback threw: {ex.Message}");
             }
         }
     }

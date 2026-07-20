@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using AgentCore.Editor.LLM;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -172,7 +173,7 @@ namespace AgentCore.Editor.Core
                 // system prompt 已超限，只保留 system prompt
                 var minimal = new List<ChatMessage>();
                 if (systemMessage != null) minimal.Add(systemMessage);
-                Debug.LogWarning("[AgentCore] Context window trimmed: system prompt alone exceeds budget.");
+                AgentCoreLog.Warning("[AgentCore] Context window trimmed: system prompt alone exceeds budget.");
                 return minimal;
             }
 

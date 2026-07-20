@@ -9,6 +9,7 @@ using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Native.Core
 {
@@ -241,7 +242,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     }
                     else
                     {
-                        Debug.LogWarning($"[AgentCore] Parent '{parentPath}' not found, creating at root.");
+                        AgentCoreLog.Warning($"[AgentCore] Parent '{parentPath}' not found, creating at root.");
                     }
                 }
 
@@ -751,7 +752,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 }
                 catch (Exception)
                 {
-                    Debug.LogWarning($"[AgentCore] Tag '{tag}' is not defined. Add it in Project Settings first.");
+                    AgentCoreLog.Warning($"[AgentCore] Tag '{tag}' is not defined. Add it in Project Settings first.");
                 }
             }
 
@@ -766,7 +767,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 }
                 else
                 {
-                    Debug.LogWarning($"[AgentCore] Layer '{layerName}' not found.");
+                    AgentCoreLog.Warning($"[AgentCore] Layer '{layerName}' not found.");
                 }
             }
 

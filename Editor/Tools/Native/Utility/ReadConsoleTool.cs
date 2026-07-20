@@ -12,6 +12,7 @@ using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Native.Utility
 {
@@ -839,7 +840,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
                 if (_logEntriesType == null)
                 {
-                    Debug.LogWarning("[AgentCore] ReadConsoleTool: Cannot find LogEntries type.");
+                    AgentCoreLog.Warning("[AgentCore] ReadConsoleTool: Cannot find LogEntries type.");
                     _reflectionFailed = true;
                     return false;
                 }
@@ -853,7 +854,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
                 if (_logEntryType == null)
                 {
-                    Debug.LogWarning("[AgentCore] ReadConsoleTool: Cannot find LogEntry type.");
+                    AgentCoreLog.Warning("[AgentCore] ReadConsoleTool: Cannot find LogEntry type.");
                     _reflectionFailed = true;
                     return false;
                 }
@@ -872,7 +873,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 if (_getCountMethod == null || _startGettingEntriesMethod == null ||
                     _endGettingEntriesMethod == null || _getEntryInternalMethod == null)
                 {
-                    Debug.LogWarning("[AgentCore] ReadConsoleTool: Cannot find required LogEntries methods.");
+                    AgentCoreLog.Warning("[AgentCore] ReadConsoleTool: Cannot find required LogEntries methods.");
                     _reflectionFailed = true;
                     return false;
                 }
@@ -887,7 +888,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
                 if (_conditionField == null)
                 {
-                    Debug.LogWarning("[AgentCore] ReadConsoleTool: Cannot find LogEntry.condition field.");
+                    AgentCoreLog.Warning("[AgentCore] ReadConsoleTool: Cannot find LogEntry.condition field.");
                     _reflectionFailed = true;
                     return false;
                 }
@@ -896,7 +897,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] ReadConsoleTool reflection init failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] ReadConsoleTool reflection init failed: {ex.Message}");
                 _reflectionFailed = true;
                 return false;
             }

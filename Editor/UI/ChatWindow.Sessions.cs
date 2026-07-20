@@ -7,6 +7,7 @@ using AgentCore.Editor.UI.Components;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI
 {
@@ -202,7 +203,7 @@ namespace AgentCore.Editor.UI
             // 如果 Agent 正忙，不允许切换
             if (_agentLoop.CurrentState != AgentState.Idle)
             {
-                Debug.LogWarning("[AgentCore] Cannot switch session while agent is busy.");
+                AgentCoreLog.Warning("[AgentCore] Cannot switch session while agent is busy.");
                 return;
             }
 
@@ -220,13 +221,13 @@ namespace AgentCore.Editor.UI
                 }
                 catch (Exception amEx)
                 {
-                    Debug.LogWarning($"[AgentCore] Auto-memory trigger on session switch failed (non-fatal): {amEx.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Auto-memory trigger on session switch failed (non-fatal): {amEx.Message}");
                 }
 
                 // 2. 加载目标会话（AgentLoop.LoadSession 不再重复保存）
                 if (!_agentLoop.LoadSession(sessionId))
                 {
-                    Debug.LogWarning($"[AgentCore] Failed to switch to session: {sessionId}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to switch to session: {sessionId}");
                     return;
                 }
 
@@ -254,7 +255,7 @@ namespace AgentCore.Editor.UI
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Error switching session: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Error switching session: {ex.Message}");
             }
         }
 
@@ -267,7 +268,7 @@ namespace AgentCore.Editor.UI
 
             if (_agentLoop.CurrentState != AgentState.Idle)
             {
-                Debug.LogWarning("[AgentCore] Cannot create new session while agent is busy.");
+                AgentCoreLog.Warning("[AgentCore] Cannot create new session while agent is busy.");
                 return;
             }
 
@@ -284,7 +285,7 @@ namespace AgentCore.Editor.UI
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Error creating new session: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Error creating new session: {ex.Message}");
             }
         }
 
@@ -485,7 +486,7 @@ namespace AgentCore.Editor.UI
             var sessionId = SessionManager.Instance?.CurrentSessionId;
             if (string.IsNullOrEmpty(sessionId))
             {
-                Debug.LogWarning("[AgentCore] No active session to export.");
+                AgentCoreLog.Warning("[AgentCore] No active session to export.");
                 return;
             }
 
@@ -513,7 +514,7 @@ namespace AgentCore.Editor.UI
                 var session = SessionStorage.Load(sessionId);
                 if (session == null)
                 {
-                    Debug.LogError($"[AgentCore] Failed to load session: {sessionId}");
+                    AgentCoreLog.Error($"[AgentCore] Failed to load session: {sessionId}");
                     return;
                 }
 
@@ -537,7 +538,7 @@ namespace AgentCore.Editor.UI
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Export failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Export failed: {ex.Message}");
             }
         }
 

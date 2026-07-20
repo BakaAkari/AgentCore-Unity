@@ -36,7 +36,7 @@ namespace AgentCore.Editor.Workspace.Config
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] WorkspaceConfigStorage.Load failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] WorkspaceConfigStorage.Load failed: {ex.Message}");
                 return new WorkspaceConfig();
             }
         }
@@ -53,7 +53,7 @@ namespace AgentCore.Editor.Workspace.Config
             var path = GetConfigPath(workspaceRoot);
             if (path == null)
             {
-                Debug.LogWarning("[AgentCore] WorkspaceConfigStorage.Save: workspaceRoot is null or empty.");
+                AgentCoreLog.Warning("[AgentCore] WorkspaceConfigStorage.Save: workspaceRoot is null or empty.");
                 return false;
             }
 
@@ -71,7 +71,7 @@ namespace AgentCore.Editor.Workspace.Config
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] WorkspaceConfigStorage.Save failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] WorkspaceConfigStorage.Save failed: {ex.Message}");
                 return false;
             }
         }

@@ -3,6 +3,7 @@ using AgentCore.Editor.Core;
 using AgentCore.Editor.Session;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI
 {
@@ -38,7 +39,7 @@ namespace AgentCore.Editor.UI
                 // 通过 AgentLoop.LoadSession 恢复对话状态
                 if (!_agentLoop.LoadSession(session.Id))
                 {
-                    Debug.LogWarning("[AgentCore] Failed to restore session via AgentLoop.");
+                    AgentCoreLog.Warning("[AgentCore] Failed to restore session via AgentLoop.");
                     DomainReloadState.instance.ClearInterruption();
                     // 修复 #5: 恢复失败时也需要确保有活动会话
                     EnsureSessionExists();
@@ -103,7 +104,7 @@ namespace AgentCore.Editor.UI
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to restore session: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to restore session: {ex.Message}");
                 // 修复 #5: 异常时也需要确保有活动会话
                 EnsureSessionExists();
             }

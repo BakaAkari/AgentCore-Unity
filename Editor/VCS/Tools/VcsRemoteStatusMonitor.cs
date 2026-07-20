@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Components.VCS.Config;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -111,7 +112,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             catch (Exception ex)
             {
                 _lastError = ex.Message;
-                Debug.LogWarning($"[Version Control] Remote status check failed: {ex.Message}");
+                AgentCoreLog.Warning($"[Version Control] Remote status check failed: {ex.Message}");
                 return LastStatus;
             }
             finally

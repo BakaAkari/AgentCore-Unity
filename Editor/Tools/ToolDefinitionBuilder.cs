@@ -5,6 +5,7 @@ using AgentCore.Editor.Config;
 using AgentCore.Editor.LLM;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools
 {
@@ -95,7 +96,7 @@ namespace AgentCore.Editor.Tools
             var tools = ToolRegistry.Instance.GetAllTools();
             if (tools == null || tools.Count == 0)
             {
-                Debug.LogWarning($"{LogPrefix}No tools registered in ToolRegistry, returning empty list");
+                AgentCoreLog.Warning($"{LogPrefix}No tools registered in ToolRegistry, returning empty list");
                 return new List<ToolDefinition>();
             }
 
@@ -108,7 +109,7 @@ namespace AgentCore.Editor.Tools
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"{LogPrefix}Failed to build definition for tool '{tool.Metadata?.Name}': {ex.Message}");
+                    AgentCoreLog.Error($"{LogPrefix}Failed to build definition for tool '{tool.Metadata?.Name}': {ex.Message}");
                 }
             }
 
@@ -129,7 +130,7 @@ namespace AgentCore.Editor.Tools
             var tools = ToolRegistry.Instance.GetAllTools();
             if (tools == null || tools.Count == 0)
             {
-                Debug.LogWarning($"{LogPrefix}No tools registered in ToolRegistry, returning empty list");
+                AgentCoreLog.Warning($"{LogPrefix}No tools registered in ToolRegistry, returning empty list");
                 return new List<ToolDefinition>();
             }
 
@@ -155,7 +156,7 @@ namespace AgentCore.Editor.Tools
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"{LogPrefix}Failed to build definition for tool '{tool.Metadata?.Name}': {ex.Message}");
+                    AgentCoreLog.Error($"{LogPrefix}Failed to build definition for tool '{tool.Metadata?.Name}': {ex.Message}");
                 }
             }
 
@@ -185,7 +186,7 @@ namespace AgentCore.Editor.Tools
             var tools = ToolRegistry.Instance.GetToolsByCategory(category);
             if (tools == null || tools.Count == 0)
             {
-                Debug.LogWarning($"{LogPrefix}No tools found for category '{category}'");
+                AgentCoreLog.Warning($"{LogPrefix}No tools found for category '{category}'");
                 return new List<ToolDefinition>();
             }
 
@@ -198,7 +199,7 @@ namespace AgentCore.Editor.Tools
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"{LogPrefix}Failed to build definition for tool '{tool.Metadata?.Name}': {ex.Message}");
+                    AgentCoreLog.Error($"{LogPrefix}Failed to build definition for tool '{tool.Metadata?.Name}': {ex.Message}");
                 }
             }
 
@@ -246,13 +247,13 @@ namespace AgentCore.Editor.Tools
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"{LogPrefix}Failed to build definition for tool '{name}': {ex.Message}");
+                    AgentCoreLog.Error($"{LogPrefix}Failed to build definition for tool '{name}': {ex.Message}");
                 }
             }
 
             if (missingNames.Count > 0)
             {
-                Debug.LogWarning($"{LogPrefix}Tools not found in registry: {string.Join(", ", missingNames)}");
+                AgentCoreLog.Warning($"{LogPrefix}Tools not found in registry: {string.Join(", ", missingNames)}");
             }
 
             AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Built {definitions.Count}/{nameList.Count} tool definitions by name whitelist");
@@ -282,7 +283,7 @@ namespace AgentCore.Editor.Tools
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"{LogPrefix}Failed to build definition for metadata '{metadata.Name}': {ex.Message}");
+                    AgentCoreLog.Error($"{LogPrefix}Failed to build definition for metadata '{metadata.Name}': {ex.Message}");
                 }
             }
 

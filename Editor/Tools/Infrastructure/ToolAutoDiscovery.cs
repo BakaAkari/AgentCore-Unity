@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Infrastructure
 {
@@ -70,7 +71,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
                             }
                             catch (Exception ex)
                             {
-                                Debug.LogError($"[AgentCore] Failed to register tool '{attr.Name}' ({type.FullName}): {ex.Message}");
+                                AgentCoreLog.Error($"[AgentCore] Failed to register tool '{attr.Name}' ({type.FullName}): {ex.Message}");
                                 errors++;
                             }
                         }

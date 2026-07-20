@@ -4,6 +4,7 @@ using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using UnityEngine;
 using System.Threading.Tasks;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Session
 {
@@ -143,7 +144,7 @@ namespace AgentCore.Editor.Session
         {
             if (string.IsNullOrEmpty(CurrentSessionId))
             {
-                Debug.LogWarning($"{LogPrefix}No active session to save.");
+                AgentCoreLog.Warning($"{LogPrefix}No active session to save.");
                 return;
             }
 
@@ -158,7 +159,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogError($"{LogPrefix}Failed to save current session: {ex.Message}");
+                AgentCoreLog.Error($"{LogPrefix}Failed to save current session: {ex.Message}");
             }
         }
 
@@ -171,7 +172,7 @@ namespace AgentCore.Editor.Session
         {
             if (string.IsNullOrEmpty(sessionId))
             {
-                Debug.LogWarning($"{LogPrefix}Cannot load session with empty Id.");
+                AgentCoreLog.Warning($"{LogPrefix}Cannot load session with empty Id.");
                 return null;
             }
 
@@ -208,13 +209,13 @@ namespace AgentCore.Editor.Session
         {
             if (string.IsNullOrEmpty(sessionId))
             {
-                Debug.LogWarning($"{LogPrefix}Cannot rename session with empty Id.");
+                AgentCoreLog.Warning($"{LogPrefix}Cannot rename session with empty Id.");
                 return false;
             }
 
             if (string.IsNullOrEmpty(newTitle))
             {
-                Debug.LogWarning($"{LogPrefix}Cannot rename session with empty title.");
+                AgentCoreLog.Warning($"{LogPrefix}Cannot rename session with empty title.");
                 return false;
             }
 
@@ -223,7 +224,7 @@ namespace AgentCore.Editor.Session
                 var session = SessionStorage.Load(sessionId);
                 if (session == null)
                 {
-                    Debug.LogWarning($"{LogPrefix}Session not found for rename: {sessionId}");
+                    AgentCoreLog.Warning($"{LogPrefix}Session not found for rename: {sessionId}");
                     return false;
                 }
 
@@ -242,7 +243,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogError($"{LogPrefix}Failed to rename session {sessionId}: {ex.Message}");
+                AgentCoreLog.Error($"{LogPrefix}Failed to rename session {sessionId}: {ex.Message}");
                 return false;
             }
         }
@@ -256,7 +257,7 @@ namespace AgentCore.Editor.Session
         {
             if (string.IsNullOrEmpty(sessionId))
             {
-                Debug.LogWarning($"{LogPrefix}Cannot delete session with empty Id.");
+                AgentCoreLog.Warning($"{LogPrefix}Cannot delete session with empty Id.");
                 return;
             }
 
@@ -379,7 +380,7 @@ namespace AgentCore.Editor.Session
             catch (Exception ex)
             {
                 // 静默处理 — 自动记忆失败不应影响正常功能
-                Debug.LogWarning($"{LogPrefix}Failed to trigger auto-memory: {ex.Message}");
+                AgentCoreLog.Warning($"{LogPrefix}Failed to trigger auto-memory: {ex.Message}");
             }
         }
 
@@ -402,7 +403,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"{LogPrefix}Failed to trigger auto-memory: {ex.Message}");
+                AgentCoreLog.Warning($"{LogPrefix}Failed to trigger auto-memory: {ex.Message}");
             }
         }
 

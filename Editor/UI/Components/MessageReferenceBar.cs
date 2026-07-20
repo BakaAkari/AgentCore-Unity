@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI.Components
 {
@@ -164,7 +165,7 @@ namespace AgentCore.Editor.UI.Components
             var obj = AssetDatabase.LoadAssetAtPath<Object>(r.Target);
             if (obj == null)
             {
-                Debug.LogWarning($"[AgentCore] 未找到资源: {r.Target}");
+                AgentCoreLog.Warning($"[AgentCore] 未找到资源: {r.Target}");
                 return;
             }
 
@@ -194,7 +195,7 @@ namespace AgentCore.Editor.UI.Components
 
             if (go == null)
             {
-                Debug.LogWarning($"[AgentCore] 未找到 GameObject: {r.Target}");
+                AgentCoreLog.Warning($"[AgentCore] 未找到 GameObject: {r.Target}");
                 return;
             }
 

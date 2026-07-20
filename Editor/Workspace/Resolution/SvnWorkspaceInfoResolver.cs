@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Workspace.Resolution
 {
@@ -54,7 +55,7 @@ namespace AgentCore.Editor.Workspace.Resolution
             catch (Exception ex)
             {
                 info.ErrorMessage = $"SvnWorkspaceInfoResolver error: {ex.Message}";
-                UnityEngine.Debug.LogWarning($"[AgentCore] {info.ErrorMessage}");
+                AgentCoreLog.Warning($"[AgentCore] {info.ErrorMessage}");
             }
 
             return info;

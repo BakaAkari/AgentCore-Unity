@@ -66,7 +66,7 @@ namespace AgentCore.Editor.Core
                 // Token Budget 检查（在轮次开始前，第 1 轮不检查）
                 if (tokenBudget > 0 && currentRound > 1 && accumulatedTokens >= tokenBudget)
                 {
-                    Debug.LogWarning($"[AgentCore]{logPrefix} Token budget exceeded ({accumulatedTokens}/{tokenBudget}) at round {currentRound}. Triggering summary.");
+                    AgentCoreLog.Warning($"[AgentCore]{logPrefix} Token budget exceeded ({accumulatedTokens}/{tokenBudget}) at round {currentRound}. Triggering summary.");
                     break;
                 }
 
@@ -103,7 +103,7 @@ namespace AgentCore.Editor.Core
                 //   若 LLM 忽略指令仍然输出 tool_calls, 视为 bug 并强制降级为 final response。
                 if (CurrentState == AgentState.WaitingForClarification)
                 {
-                    Debug.LogWarning($"[AgentCore][SelfChallenge] LLM returned {assistantMessage.ToolCalls.Count} tool_call(s) while in WaitingForClarification state. Rejecting tool dispatch and forcing final response.");
+                    AgentCoreLog.Warning($"[AgentCore][SelfChallenge] LLM returned {assistantMessage.ToolCalls.Count} tool_call(s) while in WaitingForClarification state. Rejecting tool dispatch and forcing final response.");
                     assistantMessage.ToolCalls.Clear();
                     HandleFinalResponse(assistantMessage, assistantTurn);
                     break;
@@ -139,7 +139,7 @@ namespace AgentCore.Editor.Core
                 if (allToolCallsFailed)
                 {
                     consecutiveAllFailRounds++;
-                    Debug.LogWarning($"[AgentCore]{logPrefix} All tool calls failed in round {currentRound}. " +
+                    AgentCoreLog.Warning($"[AgentCore]{logPrefix} All tool calls failed in round {currentRound}. " +
                                      $"Consecutive failure rounds: {consecutiveAllFailRounds}/{allToolsFailBlockThreshold}");
                 }
                 else
@@ -176,7 +176,7 @@ namespace AgentCore.Editor.Core
                     int failCount = perToolFailCount[warnTool];
                     int effectiveBlock = GetEffectiveThreshold(warnTool, toolFailBlockThreshold);
 
-                    Debug.LogWarning($"[AgentCore]{logPrefix} Tool '{warnTool}' has failed {failCount} times (block at {effectiveBlock}). Sending degradation warning.");
+                    AgentCoreLog.Warning($"[AgentCore]{logPrefix} Tool '{warnTool}' has failed {failCount} times (block at {effectiveBlock}). Sending degradation warning.");
 
                     _messages.Add(ChatMessage.System(
                         $"[SYSTEM WARNING] Tool '{warnTool}' 已连续失败 {failCount} 次。" +
@@ -192,7 +192,7 @@ namespace AgentCore.Editor.Core
                         ? $"Tool '{blockTool}' has failed {perToolFailCount[blockTool]} consecutive times (threshold: {GetEffectiveThreshold(blockTool, toolFailBlockThreshold)})"
                         : $"All tool calls have failed consecutively {consecutiveAllFailRounds} rounds (threshold: {allToolsFailBlockThreshold})";
 
-                    Debug.LogWarning($"[AgentCore]{logPrefix} {reason}. Forcing final response.");
+                    AgentCoreLog.Warning($"[AgentCore]{logPrefix} {reason}. Forcing final response.");
 
                     _messages.Add(ChatMessage.System(
                         "[SYSTEM] " + reason + "。" +
@@ -206,7 +206,7 @@ namespace AgentCore.Editor.Core
 
                     if (finalMessage != null && finalMessage.ToolCalls != null && finalMessage.ToolCalls.Count > 0)
                     {
-                        Debug.LogWarning($"[AgentCore]{logPrefix} LLM returned {finalMessage.ToolCalls.Count} tool call(s) in final round despite stop instruction. Ignoring.");
+                        AgentCoreLog.Warning($"[AgentCore]{logPrefix} LLM returned {finalMessage.ToolCalls.Count} tool call(s) in final round despite stop instruction. Ignoring.");
                         finalMessage.ToolCalls.Clear();
                     }
 
@@ -236,7 +236,7 @@ namespace AgentCore.Editor.Core
                 {
                     warnedToolTargets.Add(repeatWarnTarget);
                     var (warnToolName, warnTarget) = SplitToolTargetKey(repeatWarnTarget);
-                    Debug.LogWarning($"[AgentCore]{logPrefix} Tool '{warnToolName}' has been called {perToolTargetCallCount[repeatWarnTarget]} times on target '{warnTarget}'. Sending repetition warning.");
+                    AgentCoreLog.Warning($"[AgentCore]{logPrefix} Tool '{warnToolName}' has been called {perToolTargetCallCount[repeatWarnTarget]} times on target '{warnTarget}'. Sending repetition warning.");
 
                     _messages.Add(ChatMessage.System(
                         $"[SYSTEM WARNING] Tool '{warnToolName}' 已连续调用 {perToolTargetCallCount[repeatWarnTarget]} 次针对同一目标 '{warnTarget}'。" +
@@ -249,7 +249,7 @@ namespace AgentCore.Editor.Core
                     var (blockToolName, blockTarget) = SplitToolTargetKey(repeatBlockTarget);
                     string reason = $"Tool '{blockToolName}' has been called {perToolTargetCallCount[repeatBlockTarget]} times on the same target '{blockTarget}' (threshold: {toolTargetRepeatBlockThreshold})";
 
-                    Debug.LogWarning($"[AgentCore]{logPrefix} {reason}. Forcing final response.");
+                    AgentCoreLog.Warning($"[AgentCore]{logPrefix} {reason}. Forcing final response.");
 
                     _messages.Add(ChatMessage.System(
                         "[SYSTEM] " + reason + "。" +
@@ -262,7 +262,7 @@ namespace AgentCore.Editor.Core
 
                     if (finalMessage != null && finalMessage.ToolCalls != null && finalMessage.ToolCalls.Count > 0)
                     {
-                        Debug.LogWarning($"[AgentCore]{logPrefix} LLM returned {finalMessage.ToolCalls.Count} tool call(s) in final round despite stop instruction. Ignoring.");
+                        AgentCoreLog.Warning($"[AgentCore]{logPrefix} LLM returned {finalMessage.ToolCalls.Count} tool call(s) in final round despite stop instruction. Ignoring.");
                         finalMessage.ToolCalls.Clear();
                     }
 
@@ -284,7 +284,7 @@ namespace AgentCore.Editor.Core
                     ? $"Token 预算已耗尽（已消耗 {accumulatedTokens:N0}，预算 {tokenBudget:N0}）"
                     : $"已达到工具调用轮次上限（{maxRounds} 轮）";
 
-                Debug.LogWarning($"[AgentCore]{logPrefix} {limitReason}. Requesting LLM to summarize.");
+                AgentCoreLog.Warning($"[AgentCore]{logPrefix} {limitReason}. Requesting LLM to summarize.");
 
                 _messages.Add(ChatMessage.System(
                     "[SYSTEM] " + limitReason + "。" +
@@ -297,7 +297,7 @@ namespace AgentCore.Editor.Core
 
                 if (summaryMessage != null && summaryMessage.ToolCalls != null && summaryMessage.ToolCalls.Count > 0)
                 {
-                    Debug.LogWarning($"[AgentCore]{logPrefix} LLM returned {summaryMessage.ToolCalls.Count} tool call(s) in summary round despite stop instruction. Ignoring.");
+                    AgentCoreLog.Warning($"[AgentCore]{logPrefix} LLM returned {summaryMessage.ToolCalls.Count} tool call(s) in summary round despite stop instruction. Ignoring.");
                     summaryMessage.ToolCalls.Clear();
                 }
 
@@ -317,7 +317,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception saveEx)
             {
-                Debug.LogWarning($"[AgentCore]{logPrefix} Auto-save failed: {saveEx.Message}");
+                AgentCoreLog.Warning($"[AgentCore]{logPrefix} Auto-save failed: {saveEx.Message}");
             }
         }
 
@@ -359,7 +359,7 @@ namespace AgentCore.Editor.Core
             if (string.IsNullOrEmpty(assistantTurn.Content))
             {
                 assistantTurn.Content = "[系统提示] 助手未返回任何内容。";
-                Debug.LogWarning("[AgentCore] HandleFinalResponse: Assistant content is empty, using fallback message.");
+                AgentCoreLog.Warning("[AgentCore] HandleFinalResponse: Assistant content is empty, using fallback message.");
             }
 
             // Phase 9: Node A 完成后的分派 — 若结论 = 反问用户, 进入 WaitingForClarification 状态
@@ -440,12 +440,12 @@ namespace AgentCore.Editor.Core
                 // BLOCK: 需要触发验证性 tool call, 此处 v1.5.0-alpha 仅记录, 完整实施留给 v1.5.0-beta
                 if (reviewResult.Verdict == NodeBVerdict.BLOCK)
                 {
-                    Debug.LogWarning("[AgentCore][SelfChallenge] Node B verdict = BLOCK. Verification-loop back to tool loop not implemented in v1.5.0-alpha; accepting draft with warning.");
+                    AgentCoreLog.Warning("[AgentCore][SelfChallenge] Node B verdict = BLOCK. Verification-loop back to tool loop not implemented in v1.5.0-alpha; accepting draft with warning.");
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore][SelfChallenge] Node B invocation failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore][SelfChallenge] Node B invocation failed: {ex.Message}");
             }
             finally
             {
@@ -507,7 +507,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore][SelfChallenge] Draft regeneration failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore][SelfChallenge] Draft regeneration failed: {ex.Message}");
             }
         }
 
@@ -693,7 +693,7 @@ namespace AgentCore.Editor.Core
                     else
                         perToolFailCount[toolName] = 1;
 
-                    Debug.LogWarning($"[AgentCore] Tool '{toolName}' failed. " +
+                    AgentCoreLog.Warning($"[AgentCore] Tool '{toolName}' failed. " +
                                      $"Consecutive failures for this tool: {perToolFailCount[toolName]}");
                 }
                 else

@@ -9,6 +9,7 @@ using AgentCore.Editor.Config;
 using AgentCore.Editor.LLM;
 using Newtonsoft.Json;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Session
 {
@@ -125,7 +126,7 @@ namespace AgentCore.Editor.Session
                     }
                     else
                     {
-                        Debug.LogWarning($"{LogPrefix}Failed to store memory: {result.Message}");
+                        AgentCoreLog.Warning($"{LogPrefix}Failed to store memory: {result.Message}");
                     }
                 }
 
@@ -138,7 +139,7 @@ namespace AgentCore.Editor.Session
             catch (Exception ex)
             {
                 // 静默处理 — 自动记忆失败不应影响正常功能
-                Debug.LogWarning($"{LogPrefix}Failed to extract and store memories: {ex.Message}");
+                AgentCoreLog.Warning($"{LogPrefix}Failed to extract and store memories: {ex.Message}");
             }
         }
 
@@ -256,7 +257,7 @@ namespace AgentCore.Editor.Session
 
                 if (response?.Choices == null || response.Choices.Count == 0)
                 {
-                    Debug.LogWarning($"{LogPrefix}LLM returned empty response for memory extraction.");
+                    AgentCoreLog.Warning($"{LogPrefix}LLM returned empty response for memory extraction.");
                     return new List<string>();
                 }
 
@@ -276,7 +277,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"{LogPrefix}LLM extraction failed: {ex.Message}");
+                AgentCoreLog.Warning($"{LogPrefix}LLM extraction failed: {ex.Message}");
                 return new List<string>();
             }
         }
@@ -320,7 +321,7 @@ namespace AgentCore.Editor.Session
             }
             catch (JsonException ex)
             {
-                Debug.LogWarning($"{LogPrefix}Failed to parse memories JSON: {ex.Message}. Response: {responseContent}");
+                AgentCoreLog.Warning($"{LogPrefix}Failed to parse memories JSON: {ex.Message}. Response: {responseContent}");
                 return new List<string>();
             }
         }
@@ -345,7 +346,7 @@ namespace AgentCore.Editor.Session
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] AutoMemory background task failed: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] AutoMemory background task failed: {ex.Message}");
                 }
             });
         }

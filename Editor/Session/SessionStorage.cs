@@ -5,6 +5,7 @@ using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Session
 {
@@ -55,13 +56,13 @@ namespace AgentCore.Editor.Session
         {
             if (session == null)
             {
-                Debug.LogError($"{LogPrefix}Cannot save null session.");
+                AgentCoreLog.Error($"{LogPrefix}Cannot save null session.");
                 return;
             }
 
             if (string.IsNullOrEmpty(session.Id))
             {
-                Debug.LogError($"{LogPrefix}Cannot save session with empty Id.");
+                AgentCoreLog.Error($"{LogPrefix}Cannot save session with empty Id.");
                 return;
             }
 
@@ -78,7 +79,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogError($"{LogPrefix}Failed to save session {session.Id}: {ex.Message}");
+                AgentCoreLog.Error($"{LogPrefix}Failed to save session {session.Id}: {ex.Message}");
             }
         }
 
@@ -91,7 +92,7 @@ namespace AgentCore.Editor.Session
         {
             if (string.IsNullOrEmpty(sessionId))
             {
-                Debug.LogError($"{LogPrefix}Cannot load session with empty Id.");
+                AgentCoreLog.Error($"{LogPrefix}Cannot load session with empty Id.");
                 return null;
             }
 
@@ -110,7 +111,7 @@ namespace AgentCore.Editor.Session
 
                 if (session == null)
                 {
-                    Debug.LogError($"{LogPrefix}Failed to deserialize session: {sessionId}");
+                    AgentCoreLog.Error($"{LogPrefix}Failed to deserialize session: {sessionId}");
                     return null;
                 }
 
@@ -119,7 +120,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogError($"{LogPrefix}Failed to load session {sessionId}: {ex.Message}");
+                AgentCoreLog.Error($"{LogPrefix}Failed to load session {sessionId}: {ex.Message}");
                 return null;
             }
         }
@@ -165,7 +166,7 @@ namespace AgentCore.Editor.Session
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"{LogPrefix}Failed to parse session file {Path.GetFileName(file)}: {ex.Message}");
+                        AgentCoreLog.Warning($"{LogPrefix}Failed to parse session file {Path.GetFileName(file)}: {ex.Message}");
                     }
                 }
 
@@ -174,7 +175,7 @@ namespace AgentCore.Editor.Session
             }
             catch (Exception ex)
             {
-                Debug.LogError($"{LogPrefix}Failed to list sessions: {ex.Message}");
+                AgentCoreLog.Error($"{LogPrefix}Failed to list sessions: {ex.Message}");
             }
 
             return summaries;
@@ -188,7 +189,7 @@ namespace AgentCore.Editor.Session
         {
             if (string.IsNullOrEmpty(sessionId))
             {
-                Debug.LogError($"{LogPrefix}Cannot delete session with empty Id.");
+                AgentCoreLog.Error($"{LogPrefix}Cannot delete session with empty Id.");
                 return;
             }
 
@@ -203,12 +204,12 @@ namespace AgentCore.Editor.Session
                 }
                 else
                 {
-                    Debug.LogWarning($"{LogPrefix}Session file not found for deletion: {sessionId}");
+                    AgentCoreLog.Warning($"{LogPrefix}Session file not found for deletion: {sessionId}");
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"{LogPrefix}Failed to delete session {sessionId}: {ex.Message}");
+                AgentCoreLog.Error($"{LogPrefix}Failed to delete session {sessionId}: {ex.Message}");
             }
         }
 

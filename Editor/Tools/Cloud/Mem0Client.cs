@@ -187,7 +187,7 @@ namespace AgentCore.Editor.Cloud
             {
                 if (!string.IsNullOrEmpty(userId))
                 {
-                    Debug.LogWarning($"[AgentCore] Mem0Client: 忽略非系统格式的 userId '{userId}'，使用系统生成 ID '{systemId}'");
+                    AgentCoreLog.Warning($"[AgentCore] Mem0Client: 忽略非系统格式的 userId '{userId}'，使用系统生成 ID '{systemId}'");
                 }
                 _userId = systemId;
             }
@@ -260,7 +260,7 @@ namespace AgentCore.Editor.Cloud
                 // 此时记忆实际上未被持久化。
                 if (string.IsNullOrWhiteSpace(responseBody) || responseBody.Trim() == "null")
                 {
-                    Debug.LogWarning($"[AgentCore] AddMemoryAsync: 服务返回空响应 (body={responseBody})。" +
+                    AgentCoreLog.Warning($"[AgentCore] AddMemoryAsync: 服务返回空响应 (body={responseBody})。" +
                         "记忆可能未被保存。这是 OpenMemory REST API 的已知问题，" +
                         "请确认 user_id '{uid}' 已通过 MCP SSE 注册。");
                     return new Mem0AddResult
@@ -286,7 +286,7 @@ namespace AgentCore.Editor.Cloud
                         };
                     }
 
-                    Debug.LogWarning($"[AgentCore] AddMemoryAsync: HTTP 200 但无 results，response={responseBody}");
+                    AgentCoreLog.Warning($"[AgentCore] AddMemoryAsync: HTTP 200 但无 results，response={responseBody}");
                     return new Mem0AddResult
                     {
                         Id = null,
@@ -297,7 +297,7 @@ namespace AgentCore.Editor.Cloud
                 catch (Exception parseEx)
                 {
                     // 如果响应格式不匹配，记录详细信息以便调试
-                    Debug.LogWarning($"[AgentCore] AddMemoryAsync: 响应解析失败 ({parseEx.Message})，原始响应={responseBody}");
+                    AgentCoreLog.Warning($"[AgentCore] AddMemoryAsync: 响应解析失败 ({parseEx.Message})，原始响应={responseBody}");
                     return new Mem0AddResult
                     {
                         Id = null,
@@ -308,7 +308,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Mem0Client.AddMemoryAsync failed: {ex.Message}\n{ex.StackTrace}");
+                AgentCoreLog.Error($"[AgentCore] Mem0Client.AddMemoryAsync failed: {ex.Message}\n{ex.StackTrace}");
                 return new Mem0AddResult
                 {
                     Id = null,
@@ -350,7 +350,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Mem0Client.SearchMemoryAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Mem0Client.SearchMemoryAsync failed: {ex.Message}");
                 return new List<Mem0Memory>();
             }
         }
@@ -389,7 +389,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Mem0Client.ListMemoriesAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Mem0Client.ListMemoriesAsync failed: {ex.Message}");
                 return new List<Mem0Memory>();
             }
         }
@@ -422,7 +422,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Mem0Client.DeleteMemoryAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Mem0Client.DeleteMemoryAsync failed: {ex.Message}");
                 return false;
             }
         }
@@ -479,7 +479,7 @@ namespace AgentCore.Editor.Cloud
                 }
             }
 
-            Debug.LogWarning($"[AgentCore] Mem0Client.TestConnectionAsync failed: {lastError}");
+            AgentCoreLog.Warning($"[AgentCore] Mem0Client.TestConnectionAsync failed: {lastError}");
             return (false, lastError ?? "无法连接到 mem0 服务");
         }
 
@@ -558,7 +558,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Mem0Client.CheckUserExistsAsync failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Mem0Client.CheckUserExistsAsync failed: {ex.Message}");
                 return (false, $"查询失败: {ex.Message}", Mem0ConnectionStatus.Error);
             }
         }
@@ -724,13 +724,13 @@ namespace AgentCore.Editor.Cloud
                         {
                             var errorText = resultObj.SelectToken("result.content[0].text")?.Value<string>()
                                             ?? "未知错误";
-                            Debug.LogWarning($"[AgentCore] MCP add_memories returned error: {errorText}");
+                            AgentCoreLog.Warning($"[AgentCore] MCP add_memories returned error: {errorText}");
                             return (false, $"MCP add_memories 失败: {errorText}");
                         }
                     }
                     catch (Exception parseEx)
                     {
-                        Debug.LogWarning($"[AgentCore] Failed to parse add_memories response: {parseEx.Message}");
+                        AgentCoreLog.Warning($"[AgentCore] Failed to parse add_memories response: {parseEx.Message}");
                     }
                 }
 
@@ -752,7 +752,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Mem0Client.CreateUserViaMcpAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Mem0Client.CreateUserViaMcpAsync failed: {ex.Message}");
                 return (false, $"创建失败: {ex.Message}");
             }
             finally
@@ -840,7 +840,7 @@ namespace AgentCore.Editor.Cloud
                 }
             }
 
-            Debug.LogWarning($"[AgentCore] MCP SSE timeout waiting for response id={expectedId}");
+            AgentCoreLog.Warning($"[AgentCore] MCP SSE timeout waiting for response id={expectedId}");
             return null;
         }
 

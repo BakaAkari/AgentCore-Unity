@@ -7,6 +7,7 @@ using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Native.Scripting
 {
@@ -255,7 +256,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 else
                 {
                     // Don't fail, just warn
-                    Debug.LogWarning($"[AgentCore] Parent GameObject not found: '{parentName}'. Prefab instantiated at root.");
+                    AgentCoreLog.Warning($"[AgentCore] Parent GameObject not found: '{parentName}'. Prefab instantiated at root.");
                 }
             }
 

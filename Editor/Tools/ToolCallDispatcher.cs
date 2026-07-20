@@ -213,7 +213,7 @@ namespace AgentCore.Editor.Tools
                 {
                     stopwatch.Stop();
                     var errorMsg = $"Unknown tool '{toolName}'. Available tools: {GetAvailableToolNames()}";
-                    Debug.LogWarning($"{LogPrefix}{errorMsg}");
+                    AgentCoreLog.Warning($"{LogPrefix}{errorMsg}");
                     return new ToolCallResult(
                         toolCall,
                         ToolResult.Fail(errorMsg, stopwatch.Elapsed.TotalMilliseconds),
@@ -228,7 +228,7 @@ namespace AgentCore.Editor.Tools
                 {
                     stopwatch.Stop();
                     var errorMsg = $"Invalid JSON arguments for tool '{toolName}': {TruncateForLog(toolCall.Function?.Arguments)}";
-                    Debug.LogWarning($"{LogPrefix}{errorMsg}");
+                    AgentCoreLog.Warning($"{LogPrefix}{errorMsg}");
                     return new ToolCallResult(
                         toolCall,
                         ToolResult.Fail(errorMsg, stopwatch.Elapsed.TotalMilliseconds),
@@ -243,7 +243,7 @@ namespace AgentCore.Editor.Tools
                 {
                     stopwatch.Stop();
                     var errorMsg = $"Invalid arguments for tool '{toolName}': {validationError}";
-                    Debug.LogWarning($"{LogPrefix}{errorMsg}");
+                    AgentCoreLog.Warning($"{LogPrefix}{errorMsg}");
                     return new ToolCallResult(
                         toolCall,
                         ToolResult.Fail(errorMsg, stopwatch.Elapsed.TotalMilliseconds),
@@ -256,7 +256,7 @@ namespace AgentCore.Editor.Tools
                 if (Safety.PlayModePreflight.IsBlockedInPlayMode(tool.Metadata.Capabilities, out var playModeReason))
                 {
                     stopwatch.Stop();
-                    Debug.LogWarning($"{LogPrefix}Tool '{toolName}' blocked by Play Mode preflight.");
+                    AgentCoreLog.Warning($"{LogPrefix}Tool '{toolName}' blocked by Play Mode preflight.");
                     return new ToolCallResult(
                         toolCall,
                         ToolResult.Fail(playModeReason, stopwatch.Elapsed.TotalMilliseconds),
@@ -284,7 +284,7 @@ namespace AgentCore.Editor.Tools
                         stopwatch.Stop();
                         var reasons = decision.Reasons != null ? string.Join("; ", decision.Reasons) : "Blocked by policy";
                         var blockMsg = $"Tool '{toolName}' blocked: {reasons}.{BlockedSuffix}";
-                        Debug.LogWarning($"{LogPrefix}{blockMsg}");
+                        AgentCoreLog.Warning($"{LogPrefix}{blockMsg}");
                         return new ToolCallResult(
                             toolCall,
                             ToolResult.Fail(blockMsg, stopwatch.Elapsed.TotalMilliseconds),
@@ -359,7 +359,7 @@ namespace AgentCore.Editor.Tools
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                Debug.LogError($"{LogPrefix}Tool '{toolName}' threw exception: {ex.Message}\n{ex.StackTrace}");
+                AgentCoreLog.Error($"{LogPrefix}Tool '{toolName}' threw exception: {ex.Message}\n{ex.StackTrace}");
                 return new ToolCallResult(
                     toolCall,
                     ToolResult.Fail($"Exception executing '{toolName}': {ex.Message}", stopwatch.Elapsed.TotalMilliseconds),
@@ -561,14 +561,14 @@ namespace AgentCore.Editor.Tools
             if (_confirmationProvider == null)
             {
                 // Fail-safe: 无提供器时自动拒绝
-                Debug.LogWarning($"{LogPrefix}No confirmation provider configured. Fail-safe: rejecting RequireConfirmation decision.");
+                AgentCoreLog.Warning($"{LogPrefix}No confirmation provider configured. Fail-safe: rejecting RequireConfirmation decision.");
                 return false;
             }
 
             if (decision.ConfirmationRequest == null)
             {
                 // 防御性检查：RequireConfirmation 必须携带 request
-                Debug.LogError($"{LogPrefix}RequireConfirmation decision without ConfirmationRequest. Rejecting.");
+                AgentCoreLog.Error($"{LogPrefix}RequireConfirmation decision without ConfirmationRequest. Rejecting.");
                 return false;
             }
 

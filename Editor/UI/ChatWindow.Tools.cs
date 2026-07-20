@@ -2,6 +2,7 @@ using AgentCore.Editor.Core;
 using AgentCore.Editor.UI.Components;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI
 {
@@ -133,7 +134,7 @@ namespace AgentCore.Editor.UI
             }
             else
             {
-                Debug.LogWarning($"[AgentCore.UI] HandleToolCallCompleted: 未找到 key={key} 的卡片, 当前 keys=[{string.Join(", ", _activeToolCards.Keys)}]");
+                AgentCoreLog.Warning($"[AgentCore.UI] HandleToolCallCompleted: 未找到 key={key} 的卡片, 当前 keys=[{string.Join(", ", _activeToolCards.Keys)}]");
             }
         }
 
@@ -162,7 +163,7 @@ namespace AgentCore.Editor.UI
             }
             else
             {
-                Debug.LogWarning($"[AgentCore.UI] HandleToolCallFailed: 未找到 key={key} 的卡片, 当前 keys=[{string.Join(", ", _activeToolCards.Keys)}]");
+                AgentCoreLog.Warning($"[AgentCore.UI] HandleToolCallFailed: 未找到 key={key} 的卡片, 当前 keys=[{string.Join(", ", _activeToolCards.Keys)}]");
             }
         }
 

@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI.Components
 {
@@ -132,7 +133,7 @@ namespace AgentCore.Editor.UI.Components
             }
             else
             {
-                Debug.LogWarning($"[AgentCore] MessageBubble UXML not found at: {UxmlPath}, using fallback layout.");
+                AgentCoreLog.Warning($"[AgentCore] MessageBubble UXML not found at: {UxmlPath}, using fallback layout.");
                 CreateFallbackLayout();
             }
 
@@ -615,7 +616,7 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Copy to clipboard failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Copy to clipboard failed: {ex.Message}");
                 _copyButton.text = "失败";
                 schedule.Execute(() => { if (_copyButton != null) _copyButton.text = "复制"; }).StartingIn(1200);
                 return;

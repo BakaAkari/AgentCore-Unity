@@ -40,7 +40,7 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save file change records (idle): {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] beforeAssemblyReload: Failed to save file change records (idle): {ex.Message}");
                 }
 
                 // Phase 5: 空闲状态也保存压缩统计数据
@@ -59,7 +59,7 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save compression metrics (idle): {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] beforeAssemblyReload: Failed to save compression metrics (idle): {ex.Message}");
                 }
 
                 try
@@ -71,7 +71,7 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save idle session: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] beforeAssemblyReload: Failed to save idle session: {ex.Message}");
                 }
                 return;
             }
@@ -188,7 +188,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save file change records: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] beforeAssemblyReload: Failed to save file change records: {ex.Message}");
             }
 
             // 7.5 Phase 5: 保存压缩统计数据到 DomainReloadState
@@ -207,7 +207,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save compression metrics: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] beforeAssemblyReload: Failed to save compression metrics: {ex.Message}");
             }
 
             // 8. 强制保存当前对话历史到磁盘
@@ -221,7 +221,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] beforeAssemblyReload: Failed to save session: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] beforeAssemblyReload: Failed to save session: {ex.Message}");
             }
 
             // 8. 取消当前操作的 CancellationToken
@@ -263,7 +263,7 @@ namespace AgentCore.Editor.Core
             // 2. 确保 AgentLoop 已完全初始化
             if (!_isInitialized)
             {
-                Debug.LogWarning("[AgentCore] TryResumeAfterReload: AgentLoop not initialized, cannot resume.");
+                AgentCoreLog.Warning("[AgentCore] TryResumeAfterReload: AgentLoop not initialized, cannot resume.");
                 reloadState.ClearInterruption();
                 return false;
             }
@@ -271,7 +271,7 @@ namespace AgentCore.Editor.Core
             // 3. 确保当前处于 Idle 状态
             if (CurrentState != AgentState.Idle)
             {
-                Debug.LogWarning($"[AgentCore] TryResumeAfterReload: Agent is in {CurrentState} state, cannot resume.");
+                AgentCoreLog.Warning($"[AgentCore] TryResumeAfterReload: Agent is in {CurrentState} state, cannot resume.");
                 reloadState.ClearInterruption();
                 return false;
             }
@@ -279,7 +279,7 @@ namespace AgentCore.Editor.Core
             // 4. 确保消息历史不为空（至少有 system prompt）
             if (_messages.Count == 0)
             {
-                Debug.LogWarning("[AgentCore] TryResumeAfterReload: Message history is empty, cannot resume.");
+                AgentCoreLog.Warning("[AgentCore] TryResumeAfterReload: Message history is empty, cannot resume.");
                 reloadState.ClearInterruption();
                 return false;
             }
@@ -327,7 +327,7 @@ namespace AgentCore.Editor.Core
                     break;
 
                 default:
-                    Debug.LogWarning($"[AgentCore] TryResumeAfterReload: Unknown phase {phase}, clearing state.");
+                    AgentCoreLog.Warning($"[AgentCore] TryResumeAfterReload: Unknown phase {phase}, clearing state.");
                     reloadState.ClearInterruption();
                     return false;
             }
@@ -642,14 +642,14 @@ namespace AgentCore.Editor.Core
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogError($"[AgentCore] Error during resume LLM call: {ex}");
+                        AgentCoreLog.Error($"[AgentCore] Error during resume LLM call: {ex}");
                         assistantTurn.IsStreaming = false;
                         EmitEvent(AgentEvent.ErrorEvent(ex, "Domain Reload 恢复"));
                         SetState(AgentState.Error);
                         SetState(AgentState.Idle);
                     }
                 },
-                onError: ex => Debug.LogError($"[AgentCore] TriggerResumeLLMCall error: {ex.Message}")
+                onError: ex => AgentCoreLog.Error($"[AgentCore] TriggerResumeLLMCall error: {ex.Message}")
             );
         }
     }

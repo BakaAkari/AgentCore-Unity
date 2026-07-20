@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -110,7 +111,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to get SVN log: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to get SVN log: {ex.Message}");
             }
 
             return commits;
@@ -192,7 +193,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to get SVN tags: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to get SVN tags: {ex.Message}");
             }
 
             return tags;
@@ -620,7 +621,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to parse SVN status XML: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to parse SVN status XML: {ex.Message}");
             }
 
             return files;
@@ -652,7 +653,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to parse SVN info: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to parse SVN info: {ex.Message}");
             }
         }
 
@@ -683,7 +684,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to parse SVN log XML: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to parse SVN log XML: {ex.Message}");
             }
 
             return commits;
@@ -708,7 +709,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to parse SVN remote info: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to parse SVN remote info: {ex.Message}");
             }
         }
 
@@ -821,7 +822,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to parse SVN info XML: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to parse SVN info XML: {ex.Message}");
             }
         }
 

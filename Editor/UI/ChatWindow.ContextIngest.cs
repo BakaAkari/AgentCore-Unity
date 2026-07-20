@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.ShortcutManagement;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI
 {
@@ -53,7 +54,7 @@ namespace AgentCore.Editor.UI
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Context ingest collect failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Context ingest collect failed: {ex.Message}");
                 return;
             }
 
@@ -72,7 +73,7 @@ namespace AgentCore.Editor.UI
             var window = EnsureChatWindow(focusInput: false);
             if (window == null)
             {
-                Debug.LogWarning("[AgentCore] Context ingest: failed to open ChatWindow.");
+                AgentCoreLog.Warning("[AgentCore] Context ingest: failed to open ChatWindow.");
                 return;
             }
 

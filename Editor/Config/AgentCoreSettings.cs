@@ -40,7 +40,7 @@ namespace AgentCore.Editor.Config
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Fallback EnsureVcsDefaultForCurrentProject failed: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Fallback EnsureVcsDefaultForCurrentProject failed: {ex.Message}");
                 }
             };
         }
@@ -261,7 +261,7 @@ namespace AgentCore.Editor.Config
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogError($"[AgentCore] Failed to fetch models: {ex.Message}");
+                        AgentCoreLog.Error($"[AgentCore] Failed to fetch models: {ex.Message}");
                     }
                 };
             }
@@ -276,7 +276,7 @@ namespace AgentCore.Editor.Config
             if (settingsVersion < 1 && mem0Endpoint == "http://localhost:18910")
             {
                 mem0Endpoint = "http://localhost:8765";
-                UnityEngine.Debug.Log("[AgentCore] Settings migrated v0→v1: mem0Endpoint updated");
+                AgentCoreLog.Info("[AgentCore] Settings migrated v0→v1: mem0Endpoint updated");
             }
 
             // v1-v16: 历史迁移(逻辑保留但精简日志)
@@ -300,7 +300,7 @@ namespace AgentCore.Editor.Config
             // v18: ADR-17 极简即开即用 — 清理已删除字段的孤儿数据
             if (settingsVersion < 18)
             {
-                UnityEngine.Debug.Log("[AgentCore] Settings migrated v17→v18: ADR-17 minimalism refactor — 9 fields removed, 25+ fields hidden. selfChallengeEnabled remains as unified control.");
+                AgentCoreLog.Info("[AgentCore] Settings migrated v17→v18: ADR-17 minimalism refactor — 9 fields removed, 25+ fields hidden. selfChallengeEnabled remains as unified control.");
             }
 
             // v19: GLM-5.2 reasoning optimization — limit thinking chain to prevent 370s+ response times
@@ -309,13 +309,13 @@ namespace AgentCore.Editor.Config
                 maxTokens = 8192;
                 reasoningEffort = "low";
                 reasoningMaxTokens = 2048;
-                UnityEngine.Debug.Log("[AgentCore] Settings migrated v18→v19: reasoning optimization (maxTokens=8192, reasoningEffort=low, reasoningMaxTokens=2048)");
+                AgentCoreLog.Info("[AgentCore] Settings migrated v18→v19: reasoning optimization (maxTokens=8192, reasoningEffort=low, reasoningMaxTokens=2048)");
             }
 
             // v20: 清理死字段 — 删除 12 个无引用的 HideInInspector 字段 + Compression LLM 残留
             if (settingsVersion < 20)
             {
-                UnityEngine.Debug.Log("[AgentCore] Settings migrated v19→v20: dead field cleanup (12 fields removed, disabledTools default cleared)");
+                AgentCoreLog.Info("[AgentCore] Settings migrated v19→v20: dead field cleanup (12 fields removed, disabledTools default cleared)");
             }
 
             settingsVersion = CurrentVersion;
@@ -338,13 +338,13 @@ namespace AgentCore.Editor.Config
                 if (!OptionalComponentManager.IsVcsEnabled())
                 {
                     OptionalComponentManager.SetVcsEnabled(true);
-                    UnityEngine.Debug.Log("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
+                    AgentCoreLog.Info("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
                 }
                 settings.SafeSave(true);
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to apply VCS default enablement: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to apply VCS default enablement: {ex.Message}");
                 if (retry)
                 {
                     EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(settings, retry: false);
@@ -359,7 +359,7 @@ namespace AgentCore.Editor.Config
         {
             if (string.IsNullOrEmpty(llmEndpoint))
             {
-                Debug.LogWarning("[AgentCore] LLM endpoint is empty, cannot fetch models.");
+                AgentCoreLog.Warning("[AgentCore] LLM endpoint is empty, cannot fetch models.");
                 return;
             }
 
@@ -378,17 +378,17 @@ namespace AgentCore.Editor.Config
                     {
                         llmModel = firstModel;
                         SafeSave(true);
-                        UnityEngine.Debug.Log($"[AgentCore] Fetched models, set default to: {firstModel}");
+                        AgentCoreLog.Info($"[AgentCore] Fetched models, set default to: {firstModel}");
                     }
                 }
                 else
                 {
-                    Debug.LogWarning($"[AgentCore] No models found in response: {content}");
+                    AgentCoreLog.Warning($"[AgentCore] No models found in response: {content}");
                 }
             }
             else
             {
-                Debug.LogError($"[AgentCore] Failed to fetch models: {response.StatusCode} {response.ReasonPhrase}");
+                AgentCoreLog.Error($"[AgentCore] Failed to fetch models: {response.StatusCode} {response.ReasonPhrase}");
             }
         }
 
@@ -474,7 +474,7 @@ namespace AgentCore.Editor.Config
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] AgentCoreSettings.Save failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] AgentCoreSettings.Save failed: {ex.Message}");
             }
         }
 

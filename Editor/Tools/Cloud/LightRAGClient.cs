@@ -322,7 +322,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] LightRAGClient.QueryAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] LightRAGClient.QueryAsync failed: {ex.Message}");
                 return new LightRAGQueryResult
                 {
                     Success = false,
@@ -361,7 +361,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] LightRAGClient.IndexTextAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] LightRAGClient.IndexTextAsync failed: {ex.Message}");
                 return false;
             }
         }
@@ -382,7 +382,7 @@ namespace AgentCore.Editor.Cloud
             {
                 if (!File.Exists(filePath))
                 {
-                    Debug.LogError($"[AgentCore] LightRAGClient.IndexFileAsync: File not found: {filePath}");
+                    AgentCoreLog.Error($"[AgentCore] LightRAGClient.IndexFileAsync: File not found: {filePath}");
                     return new LightRAGIndexResult
                     {
                         Accepted = false,
@@ -420,7 +420,7 @@ namespace AgentCore.Editor.Cloud
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Debug.LogError(
+                    AgentCoreLog.Error(
                         $"[AgentCore] LightRAGClient.IndexFileAsync error: " +
                         $"{(int)response.StatusCode} {response.ReasonPhrase} - {responseBody}");
                     return new LightRAGIndexResult
@@ -450,7 +450,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] LightRAGClient.IndexFileAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] LightRAGClient.IndexFileAsync failed: {ex.Message}");
                 return new LightRAGIndexResult
                 {
                     Accepted = false,
@@ -486,7 +486,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] LightRAGClient.GetDocumentsAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] LightRAGClient.GetDocumentsAsync failed: {ex.Message}");
                 return new List<LightRAGDocument>();
             }
         }
@@ -520,7 +520,7 @@ namespace AgentCore.Editor.Cloud
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Debug.LogError(
+                    AgentCoreLog.Error(
                         $"[AgentCore] LightRAGClient.DeleteDocumentAsync error: " +
                         $"{(int)response.StatusCode} {response.ReasonPhrase} - {responseBody}");
                     return false;
@@ -529,7 +529,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] LightRAGClient.DeleteDocumentAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] LightRAGClient.DeleteDocumentAsync failed: {ex.Message}");
                 return false;
             }
         }
@@ -552,7 +552,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] LightRAGClient.TrackStatusAsync failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] LightRAGClient.TrackStatusAsync failed: {ex.Message}");
                 return new LightRAGTrackStatus
                 {
                     Status = "failed",
@@ -579,7 +579,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] LightRAGClient.TestConnectionAsync failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] LightRAGClient.TestConnectionAsync failed: {ex.Message}");
                 return false;
             }
         }
@@ -607,7 +607,7 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] LightRAGClient.GetHealthAsync failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] LightRAGClient.GetHealthAsync failed: {ex.Message}");
                 return new LightRAGHealthInfo
                 {
                     IsHealthy = false,

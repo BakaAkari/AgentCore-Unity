@@ -5,6 +5,7 @@ using AgentCore.Editor.LLM;
 using AgentCore.Editor.Skills;
 using AgentCore.Editor.Tools.Native.Meta;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -142,7 +143,7 @@ namespace AgentCore.Editor.Core
                 var content = SkillRegistry.Instance.GetContent(skillName);
                 if (string.IsNullOrEmpty(content))
                 {
-                    Debug.LogWarning($"[AgentCore][Skills] Loaded skill '{skillName}' has no readable content, skipping injection.");
+                    AgentCoreLog.Warning($"[AgentCore][Skills] Loaded skill '{skillName}' has no readable content, skipping injection.");
                     continue;
                 }
 

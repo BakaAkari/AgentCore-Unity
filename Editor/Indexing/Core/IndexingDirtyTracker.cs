@@ -163,7 +163,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] IndexingDirtyTracker.Save failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] IndexingDirtyTracker.Save failed: {ex.Message}");
             }
         }
 
@@ -211,7 +211,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] IndexingDirtyTracker.Load failed, dirty set reset: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] IndexingDirtyTracker.Load failed, dirty set reset: {ex.Message}");
                 lock (_gate)
                 {
                     _changedPaths.Clear();
@@ -301,7 +301,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] IndexingDirtyTracker burst notify failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] IndexingDirtyTracker burst notify failed: {ex.Message}");
             }
         }
 

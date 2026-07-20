@@ -9,6 +9,7 @@ using AgentCore.Editor.Config;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI.Components
 {
@@ -378,7 +379,7 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] KnowledgeBasePanel.TestConnection failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] KnowledgeBasePanel.TestConnection failed: {ex.Message}");
                 _connectionStatus = ConnectionStatus.Failed;
             }
             finally
@@ -506,7 +507,7 @@ namespace AgentCore.Editor.UI.Components
             catch (Exception ex)
             {
                 errorMessage = ex.Message;
-                Debug.LogWarning($"[AgentCore] KnowledgeBasePanel.UploadFile failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] KnowledgeBasePanel.UploadFile failed: {ex.Message}");
             }
 
             // 上传失败
@@ -634,7 +635,7 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] KnowledgeBasePanel.PollIndexProgress failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] KnowledgeBasePanel.PollIndexProgress failed: {ex.Message}");
             }
 
             // 如果轮询结束但未完成（超时）
@@ -703,7 +704,7 @@ namespace AgentCore.Editor.UI.Components
             catch (Exception ex)
             {
                 errorMsg = ex.Message;
-                Debug.LogWarning($"[AgentCore] KnowledgeBasePanel.RefreshDocuments failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] KnowledgeBasePanel.RefreshDocuments failed: {ex.Message}");
             }
             finally
             {
@@ -907,7 +908,7 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] KnowledgeBasePanel.DeleteDocument failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] KnowledgeBasePanel.DeleteDocument failed: {ex.Message}");
                 EditorUtility.DisplayDialog("删除失败",
                     $"删除文档时发生错误：{ex.Message}", "确定");
             }

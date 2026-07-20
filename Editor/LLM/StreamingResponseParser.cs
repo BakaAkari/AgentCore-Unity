@@ -87,7 +87,7 @@ namespace AgentCore.Editor.LLM
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] SSE chunk parse error: {ex.Message}\nData: {data}");
+                    AgentCoreLog.Warning($"[AgentCore] SSE chunk parse error: {ex.Message}\nData: {data}");
                     // 解析错误不中断流，继续处理下一行
                 }
 

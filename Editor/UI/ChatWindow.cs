@@ -218,7 +218,7 @@ namespace AgentCore.Editor.UI
             }
             else
             {
-                Debug.LogError($"[AgentCore] ChatWindow UXML not found at: {UxmlPath}");
+                AgentCoreLog.Error($"[AgentCore] ChatWindow UXML not found at: {UxmlPath}");
                 rootVisualElement.Add(new Label("Error: ChatWindow.uxml not found."));
                 return;
             }
@@ -396,7 +396,7 @@ namespace AgentCore.Editor.UI
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Failed to save session on window close: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to save session on window close: {ex.Message}");
                 }
 
                 _agentLoop.OnAgentEvent -= HandleAgentEvent;
@@ -453,7 +453,7 @@ namespace AgentCore.Editor.UI
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Failed to initialize ChatWindow: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Failed to initialize ChatWindow: {ex.Message}");
                 UpdateStatusLabel("初始化失败", true);
             }
         }

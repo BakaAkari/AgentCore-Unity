@@ -7,6 +7,7 @@ using AgentCore.Editor.Config;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Skills;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core.Compression
 {
@@ -141,7 +142,7 @@ namespace AgentCore.Editor.Core.Compression
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Conversation compression failed: {ex.Message}. " +
+                AgentCoreLog.Warning($"[AgentCore] Conversation compression failed: {ex.Message}. " +
                                  "ContextWindowManager.TrimToFit will handle overflow.");
                 _metrics.RecordConversationCompressionFailure();
             }

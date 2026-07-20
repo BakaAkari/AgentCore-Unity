@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -124,7 +125,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to get Git log: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to get Git log: {ex.Message}");
             }
 
             return commits;
@@ -194,7 +195,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogWarning($"Failed to get Git tags: {ex.Message}");
+                AgentCoreLog.Warning($"Failed to get Git tags: {ex.Message}");
             }
 
             return tags;

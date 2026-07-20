@@ -2,6 +2,7 @@ using System;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Utils
 {
@@ -36,7 +37,7 @@ namespace AgentCore.Editor.Utils
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] JSON serialize error: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] JSON serialize error: {ex.Message}");
                 return "{}";
             }
         }
@@ -55,7 +56,7 @@ namespace AgentCore.Editor.Utils
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] JSON deserialize error: {ex.Message}\nJSON: {Truncate(json, 200)}");
+                AgentCoreLog.Error($"[AgentCore] JSON deserialize error: {ex.Message}\nJSON: {Truncate(json, 200)}");
                 return default;
             }
         }
@@ -74,7 +75,7 @@ namespace AgentCore.Editor.Utils
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] JSON parse error: {ex.Message}\nJSON: {Truncate(json, 200)}");
+                AgentCoreLog.Error($"[AgentCore] JSON parse error: {ex.Message}\nJSON: {Truncate(json, 200)}");
                 return null;
             }
         }
@@ -93,7 +94,7 @@ namespace AgentCore.Editor.Utils
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] JSON array parse error: {ex.Message}\nJSON: {Truncate(json, 200)}");
+                AgentCoreLog.Error($"[AgentCore] JSON array parse error: {ex.Message}\nJSON: {Truncate(json, 200)}");
                 return null;
             }
         }

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -38,7 +39,7 @@ namespace AgentCore.Editor.Core
         {
             if (_isWatching)
             {
-                Debug.LogWarning("[AgentCore] CompilationWatcher is already watching.");
+                AgentCoreLog.Warning("[AgentCore] CompilationWatcher is already watching.");
                 return _compilationTcs?.Task ?? Task.FromResult(new ErrorReport { Context = "Already watching" });
             }
 
@@ -145,7 +146,7 @@ namespace AgentCore.Editor.Core
 
                 if (_isWatching)
                 {
-                    Debug.LogWarning($"[AgentCore] Compilation watch timed out after {CompilationTimeoutSeconds}s");
+                    AgentCoreLog.Warning($"[AgentCore] Compilation watch timed out after {CompilationTimeoutSeconds}s");
                     Cleanup();
 
                     var report = new ErrorReport
@@ -164,7 +165,7 @@ namespace AgentCore.Editor.Core
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Timeout check error: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Timeout check error: {ex.Message}");
             }
         }
 

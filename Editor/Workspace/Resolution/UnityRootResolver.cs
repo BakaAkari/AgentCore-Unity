@@ -1,5 +1,6 @@
 using System.IO;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Workspace.Resolution
 {
@@ -43,14 +44,14 @@ namespace AgentCore.Editor.Workspace.Resolution
                 if (!hasProjectSettings && !hasManifest)
                 {
                     // 仍然返回，但调用方可通过日志感知
-                    Debug.LogWarning("[AgentCore] UnityRootResolver: ProjectSettings/ and Packages/manifest.json both missing, result may be unreliable.");
+                    AgentCoreLog.Warning("[AgentCore] UnityRootResolver: ProjectSettings/ and Packages/manifest.json both missing, result may be unreliable.");
                 }
 
                 return unityRoot;
             }
             catch (System.Exception ex)
             {
-                Debug.LogError($"[AgentCore] UnityRootResolver.Resolve() failed: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] UnityRootResolver.Resolve() failed: {ex.Message}");
                 return null;
             }
         }

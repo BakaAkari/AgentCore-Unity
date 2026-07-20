@@ -8,6 +8,7 @@ using AgentCore.Editor.Core.Compression;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -61,7 +62,7 @@ namespace AgentCore.Editor.Core
                     }
                     catch (System.Exception ex)
                     {
-                        Debug.LogWarning($"[AgentCore] Conversation compression failed (non-fatal): {ex.Message}");
+                        AgentCoreLog.Warning($"[AgentCore] Conversation compression failed (non-fatal): {ex.Message}");
                     }
                 }
             }
@@ -147,7 +148,7 @@ namespace AgentCore.Editor.Core
 
                 case StreamChunkType.Error:
                     // 流式过程中的解析错误
-                    Debug.LogError($"[AgentCore] Stream error: {chunk.Error}");
+                    AgentCoreLog.Error($"[AgentCore] Stream error: {chunk.Error}");
                     EmitEvent(AgentEvent.ErrorEvent(chunk.Error));
                     break;
 

@@ -8,6 +8,7 @@ using AgentCore.Editor.Config;
 using AgentCore.Editor.Core.SelfChallenge;
 using AgentCore.Editor.LLM;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -291,7 +292,7 @@ namespace AgentCore.Editor.Core
 
             if (!parseResult.Success)
             {
-                Debug.LogWarning($"[AgentCore][SelfChallenge] Node A structural validation failed with {parseResult.Issues.Count} issue(s). " +
+                AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node A structural validation failed with {parseResult.Issues.Count} issue(s). " +
                                  "Stage 3 correction retry will kick in.");
                 _currentSelfChallengeData.NodeARetryCount = 0;
                 _currentSelfChallengeData.NodeAOutput = block;
@@ -361,7 +362,7 @@ namespace AgentCore.Editor.Core
                     var retryMessage = retryResult?.GetMessage();
                     if (retryMessage == null || string.IsNullOrEmpty(retryMessage.Content))
                     {
-                        Debug.LogWarning($"[AgentCore][SelfChallenge] Node A retry attempt {attempt} returned empty content.");
+                        AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node A retry attempt {attempt} returned empty content.");
                         continue;
                     }
 
@@ -372,7 +373,7 @@ namespace AgentCore.Editor.Core
 
                     if (finalizeResult.State != IntentChallengeExtractorState.Completed)
                     {
-                        Debug.LogWarning($"[AgentCore][SelfChallenge] Node A retry attempt {attempt}: FinalizeContent state = {finalizeResult.State}");
+                        AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node A retry attempt {attempt}: FinalizeContent state = {finalizeResult.State}");
                         continue;
                     }
 
@@ -393,12 +394,12 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore][SelfChallenge] Node A retry attempt {attempt} threw: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node A retry attempt {attempt} threw: {ex.Message}");
                 }
             }
 
             // exhausted → fallback: 接受不完美的 output, 记录 retry count = maxRetries + 1
-            Debug.LogWarning($"[AgentCore][SelfChallenge] Node A correction retry exhausted after {maxRetries} attempts. Falling back to best-effort parse.");
+            AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node A correction retry exhausted after {maxRetries} attempts. Falling back to best-effort parse.");
             _currentSelfChallengeData.NodeARetryCount = maxRetries + 1;
             if (assistantTurn != null) assistantTurn.SelfChallenge = _currentSelfChallengeData;
             EmitEvent(AgentEvent.IntentChallengeCompleted(_currentSelfChallengeData, _currentSelfChallengeTurnId ?? assistantTurn?.Id));
@@ -435,7 +436,7 @@ namespace AgentCore.Editor.Core
             // 命中组合 1/2: 期望 LLM 已输出 [CLARIFICATION NEEDED]
             if (!ContainsClarificationNeededMarker(assistantMessageContent))
             {
-                Debug.LogWarning("[AgentCore][SelfChallenge] Node A concluded to ask clarification, but LLM output does not contain [CLARIFICATION NEEDED] marker. Proceeding normally.");
+                AgentCoreLog.Warning("[AgentCore][SelfChallenge] Node A concluded to ask clarification, but LLM output does not contain [CLARIFICATION NEEDED] marker. Proceeding normally.");
                 return false;
             }
 
@@ -593,7 +594,7 @@ namespace AgentCore.Editor.Core
                     var final = AnswerChallengeStreamExtractor.FinalizeContent(content);
                     if (final.State != AnswerChallengeExtractorState.Completed)
                     {
-                        Debug.LogWarning($"[AgentCore][SelfChallenge] Node B attempt {attempt}: extractor state = {final.State}");
+                        AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node B attempt {attempt}: extractor state = {final.State}");
                         _pendingNodeBValidationIssues = new[] { "Missing <answer_challenge>...</answer_challenge> block." };
                         continue;
                     }
@@ -615,7 +616,7 @@ namespace AgentCore.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore][SelfChallenge] Node B attempt {attempt} threw: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node B attempt {attempt} threw: {ex.Message}");
                     _pendingNodeBValidationIssues = new[] { $"Exception during Node B reviewer call: {ex.Message}" };
                 }
             }
@@ -623,7 +624,7 @@ namespace AgentCore.Editor.Core
             // 超过 retry 上限
             if (resultPayload == null)
             {
-                Debug.LogWarning($"[AgentCore][SelfChallenge] Node B correction retry exhausted after {maxRetries + 1} attempts. Accepting draft with best-effort parse.");
+                AgentCoreLog.Warning($"[AgentCore][SelfChallenge] Node B correction retry exhausted after {maxRetries + 1} attempts. Accepting draft with best-effort parse.");
                 nodeBData.NodeBRetryCount = maxRetries + 1;
                 nodeBData.NodeBVerdict = NodeBVerdict.PASS; // Fallback: 接受 draft
                 resultPayload = new AnswerChallengeResult(NodeBVerdict.PASS, null, null, skipped: false);

@@ -6,6 +6,7 @@ using System.Text;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Extensions
 {
@@ -155,12 +156,12 @@ namespace AgentCore.Editor.Extensions
                 }
                 else
                 {
-                    Debug.LogWarning($"[AgentCore] VCS auto-enable attempted but define not present after write; will retry on next Editor startup (project key: {projectKey})");
+                    AgentCoreLog.Warning($"[AgentCore] VCS auto-enable attempted but define not present after write; will retry on next Editor startup (project key: {projectKey})");
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] EnsureVcsDefaultForCurrentProject failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] EnsureVcsDefaultForCurrentProject failed: {ex.Message}");
             }
         }
 
@@ -193,7 +194,7 @@ namespace AgentCore.Editor.Extensions
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] RecordVcsUserIntent failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] RecordVcsUserIntent failed: {ex.Message}");
             }
         }
 
@@ -247,7 +248,7 @@ namespace AgentCore.Editor.Extensions
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Failed to set scripting define '{define}' for build target group {group}: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to set scripting define '{define}' for build target group {group}: {ex.Message}");
                 }
             }
 
@@ -284,7 +285,7 @@ namespace AgentCore.Editor.Extensions
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] PlayerSettings.SaveSettings() invocation failed: {ex.Message} (continuing with AssetDatabase.SaveAssets fallback)");
+                AgentCoreLog.Warning($"[AgentCore] PlayerSettings.SaveSettings() invocation failed: {ex.Message} (continuing with AssetDatabase.SaveAssets fallback)");
             }
 
             try
@@ -294,7 +295,7 @@ namespace AgentCore.Editor.Extensions
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] AssetDatabase.SaveAssets() failed after define change: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] AssetDatabase.SaveAssets() failed after define change: {ex.Message}");
             }
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
@@ -314,7 +315,7 @@ namespace AgentCore.Editor.Extensions
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to read scripting defines for build target group {group}: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to read scripting defines for build target group {group}: {ex.Message}");
                 return new HashSet<string>();
             }
         }

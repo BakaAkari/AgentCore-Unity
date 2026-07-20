@@ -1,6 +1,7 @@
 using System;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Extensions
 {
@@ -76,7 +77,7 @@ namespace AgentCore.Editor.Extensions
             {
                 // Never let bootstrap exceptions escape — they would poison Editor startup for
                 // the entire session. Log loudly instead so the user can report the issue.
-                Debug.LogError($"[AgentCore] OptionalComponentDefaultsBootstrap failed: {ex.Message}\n{ex.StackTrace}");
+                AgentCoreLog.Error($"[AgentCore] OptionalComponentDefaultsBootstrap failed: {ex.Message}\n{ex.StackTrace}");
             }
         }
     }

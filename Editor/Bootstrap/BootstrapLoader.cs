@@ -6,6 +6,7 @@ using System.Text;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Tools;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Bootstrap
 {
@@ -48,7 +49,7 @@ namespace AgentCore.Editor.Bootstrap
             context.Soul = LoadEmbeddedResource("SOUL.md");
             if (string.IsNullOrEmpty(context.Soul))
             {
-                Debug.LogWarning("[AgentCore] SOUL.md not found, using default.");
+                AgentCoreLog.Warning("[AgentCore] SOUL.md not found, using default.");
                 context.Soul = "你是一个 Unity 开发助手。请用中文回复。";
             }
 
@@ -71,7 +72,7 @@ namespace AgentCore.Editor.Bootstrap
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Failed to collect project context: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to collect project context: {ex.Message}");
                     context.Project = "(项目信息收集失败)";
                 }
             }
@@ -119,7 +120,7 @@ namespace AgentCore.Editor.Bootstrap
                 }
             }
 
-            Debug.LogWarning($"[AgentCore] Embedded resource not found: {fileName}");
+            AgentCoreLog.Warning($"[AgentCore] Embedded resource not found: {fileName}");
             return null;
         }
 
@@ -254,7 +255,7 @@ namespace AgentCore.Editor.Bootstrap
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to get tool metadata from ToolRegistry: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to get tool metadata from ToolRegistry: {ex.Message}");
                 return "> [WARNING] 工具列表获取失败，请检查 ToolRegistry 初始化状态。";
             }
 
@@ -459,7 +460,7 @@ namespace AgentCore.Editor.Bootstrap
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] Failed to load {fileName}: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] Failed to load {fileName}: {ex.Message}");
                 return null;
             }
         }

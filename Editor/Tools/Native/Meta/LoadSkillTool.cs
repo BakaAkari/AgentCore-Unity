@@ -9,6 +9,7 @@ using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Native.Meta
 {
@@ -190,7 +191,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
             state.MarkLoaded(name);
 
             try { OnSkillMutation?.Invoke(name, "load"); }
-            catch (Exception ex) { Debug.LogWarning($"[AgentCore][Skills] OnSkillMutation handler failed: {ex.Message}"); }
+            catch (Exception ex) { AgentCoreLog.Warning($"[AgentCore][Skills] OnSkillMutation handler failed: {ex.Message}"); }
 
             // 软 token budget warning（ADR-18 D5-b）
             var totalTokens = ComputeLoadedTokens(state);
@@ -249,7 +250,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
             state.Unload(name);
 
             try { OnSkillMutation?.Invoke(name, "unload"); }
-            catch (Exception ex) { Debug.LogWarning($"[AgentCore][Skills] OnSkillMutation handler failed: {ex.Message}"); }
+            catch (Exception ex) { AgentCoreLog.Warning($"[AgentCore][Skills] OnSkillMutation handler failed: {ex.Message}"); }
 
             return ToolResponse.OkWithData(
                 new JObject { ["name"] = name, ["remaining"] = state.LoadedCount },
@@ -279,7 +280,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
             state.MarkLoaded(name); // 幂等操作
 
             try { OnSkillMutation?.Invoke(name, "reload"); }
-            catch (Exception ex) { Debug.LogWarning($"[AgentCore][Skills] OnSkillMutation handler failed: {ex.Message}"); }
+            catch (Exception ex) { AgentCoreLog.Warning($"[AgentCore][Skills] OnSkillMutation handler failed: {ex.Message}"); }
 
             return ToolResponse.OkWithData(
                 BuildStatusData(name, meta, alreadyLoaded: false),

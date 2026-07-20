@@ -4,6 +4,7 @@ using AgentCore.Editor.Core;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI.Components
 {
@@ -410,12 +411,12 @@ namespace AgentCore.Editor.UI.Components
                     }
                     else
                     {
-                        Debug.LogWarning($"[AgentCore] Cannot open file: {filePath}");
+                        AgentCoreLog.Warning($"[AgentCore] Cannot open file: {filePath}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] Failed to open file: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to open file: {ex.Message}");
                 }
             }
         }

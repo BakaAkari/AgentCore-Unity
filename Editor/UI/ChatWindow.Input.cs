@@ -20,7 +20,7 @@ namespace AgentCore.Editor.UI
 
             if (_agentLoop == null)
             {
-                Debug.LogError("[AgentCore] AgentLoop is not initialized.");
+                AgentCoreLog.Error("[AgentCore] AgentLoop is not initialized.");
                 return;
             }
 
@@ -31,7 +31,7 @@ namespace AgentCore.Editor.UI
             if (_agentLoop.CurrentState != AgentState.Idle &&
                 _agentLoop.CurrentState != AgentState.WaitingForClarification)
             {
-                Debug.LogWarning($"[AgentCore] Cannot send message while agent is in {_agentLoop.CurrentState} state.");
+                AgentCoreLog.Warning($"[AgentCore] Cannot send message while agent is in {_agentLoop.CurrentState} state.");
                 return;
             }
 
@@ -56,7 +56,7 @@ namespace AgentCore.Editor.UI
                 () => _agentLoop.SendMessageAsync(text),
                 onError: ex =>
                 {
-                    Debug.LogError($"[AgentCore] SendMessage error: {ex.Message}");
+                    AgentCoreLog.Error($"[AgentCore] SendMessage error: {ex.Message}");
                     DismissPendingIndicator();
                 }
             );

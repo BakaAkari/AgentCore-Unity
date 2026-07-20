@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
+using AgentCore.Editor.Utils;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -815,7 +816,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 catch (Exception ex)
                 {
                     // Skip files that can't be read
-                    Debug.LogWarning($"Could not search file {file}: {ex.Message}");
+                    AgentCoreLog.Warning($"Could not search file {file}: {ex.Message}");
                 }
             }
 

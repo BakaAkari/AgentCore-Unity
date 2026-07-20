@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Utils
 {
@@ -50,7 +51,7 @@ namespace AgentCore.Editor.Utils
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"[AgentCore] Main thread callback error: {ex}");
+                    AgentCoreLog.Error($"[AgentCore] Main thread callback error: {ex}");
                 }
                 processed++;
             }
@@ -73,7 +74,7 @@ namespace AgentCore.Editor.Utils
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Async error: {ex}");
+                AgentCoreLog.Error($"[AgentCore] Async error: {ex}");
                 onError?.Invoke(ex);
             }
         }
@@ -94,7 +95,7 @@ namespace AgentCore.Editor.Utils
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Async error: {ex}");
+                AgentCoreLog.Error($"[AgentCore] Async error: {ex}");
                 onError?.Invoke(ex);
             }
         }

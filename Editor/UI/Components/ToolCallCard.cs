@@ -1,6 +1,7 @@
 ﻿using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI.Components
 {
@@ -385,7 +386,7 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (System.Exception ex)
             {
-                Debug.LogWarning($"[AgentCore.UI] ToolCallCard 复制到剪贴板失败: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore.UI] ToolCallCard 复制到剪贴板失败: {ex.Message}");
                 return;
             }
 

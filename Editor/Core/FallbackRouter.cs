@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.LLM;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Core
 {
@@ -93,12 +94,12 @@ namespace AgentCore.Editor.Core
                 {
                     lastException = ex;
                     LastError = ex.Message;
-                    Debug.LogWarning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
 
                     // 判断是否值得重试
                     if (!IsRetryableError(ex))
                     {
-                        Debug.LogError($"[AgentCore] Non-retryable error, giving up: {ex.Message}");
+                        AgentCoreLog.Error($"[AgentCore] Non-retryable error, giving up: {ex.Message}");
                         break;
                     }
                 }
@@ -166,7 +167,7 @@ namespace AgentCore.Editor.Core
                 {
                     lastException = ex;
                     LastError = ex.Message;
-                    Debug.LogWarning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
 
                     if (!IsRetryableError(ex))
                     {

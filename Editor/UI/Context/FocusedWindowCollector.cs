@@ -4,6 +4,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.UI.Context
 {
@@ -295,7 +296,7 @@ namespace AgentCore.Editor.UI.Context
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AgentCore] UI Toolkit Pick failed: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] UI Toolkit Pick failed: {ex.Message}");
                 return null;
             }
         }

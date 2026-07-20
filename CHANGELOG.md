@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.12] - 2026-07-20
+
+### Changed
+- **日志分级全量贯彻**：将 83 个文件中 329 处裸 `Debug.*` 调用统一迁移到受分级控制的 `AgentCoreLog.*`（`Debug.LogWarning`→`AgentCoreLog.Warning` 245 处 / `Debug.LogError`→`AgentCoreLog.Error` 74 处 / 低频 `Debug.Log`→`AgentCoreLog.Info` 10 处），并为 62 个文件补 `using AgentCore.Editor.Utils;`。此前这些调用绕过 Settings 的 Log Verbosity 开关永远输出，导致用户即便调到 Error/Silent 仍被 245 条 Warning 刷屏；现全部日志真正流经分级系统，开关名副其实。日志内容与格式不变，仅改调用通道。
+
 ## [1.7.11] - 2026-07-18
 
 ### Fixed

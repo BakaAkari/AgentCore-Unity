@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using AgentCore.Editor.Config.Settings.Pages;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Extensions
 {
@@ -112,7 +113,7 @@ namespace AgentCore.Editor.Extensions
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"AgentCore extension registry skipped assembly '{assembly.FullName}': {ex.Message}");
+                AgentCoreLog.Warning($"AgentCore extension registry skipped assembly '{assembly.FullName}': {ex.Message}");
                 return Enumerable.Empty<Type>();
             }
         }
@@ -153,7 +154,7 @@ namespace AgentCore.Editor.Extensions
         {
             if (type.GetConstructor(Type.EmptyTypes) == null)
             {
-                Debug.LogWarning($"AgentCore extension contribution '{type.FullName}' skipped: missing public parameterless constructor.");
+                AgentCoreLog.Warning($"AgentCore extension contribution '{type.FullName}' skipped: missing public parameterless constructor.");
                 return;
             }
 
@@ -164,7 +165,7 @@ namespace AgentCore.Editor.Extensions
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"AgentCore extension contribution '{type.FullName}' failed to initialize: {ex.Message}");
+                AgentCoreLog.Warning($"AgentCore extension contribution '{type.FullName}' failed to initialize: {ex.Message}");
             }
         }
 

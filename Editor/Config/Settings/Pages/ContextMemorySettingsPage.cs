@@ -424,7 +424,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var filePath = BootstrapLoader.GetDefaultUserFilePath(fileName);
             if (filePath == null)
             {
-                Debug.LogError("[AgentCore] Cannot determine project root directory.");
+                AgentCoreLog.Error("[AgentCore] Cannot determine project root directory.");
                 return;
             }
 
@@ -441,7 +441,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] Failed to create {fileName}: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Failed to create {fileName}: {ex.Message}");
             }
         }
 

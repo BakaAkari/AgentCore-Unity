@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools
 {
@@ -113,7 +114,7 @@ namespace AgentCore.Editor.Tools
             {
                 if (_tools.ContainsKey(name))
                 {
-                    Debug.LogWarning($"{LogPrefix}Overwriting existing tool '{name}'");
+                    AgentCoreLog.Warning($"{LogPrefix}Overwriting existing tool '{name}'");
                 }
 
                 _tools[name] = tool;
@@ -164,7 +165,7 @@ namespace AgentCore.Editor.Tools
             }
             else
             {
-                Debug.LogWarning($"{LogPrefix}Attempted to unregister unknown tool '{toolName}'");
+                AgentCoreLog.Warning($"{LogPrefix}Attempted to unregister unknown tool '{toolName}'");
             }
 
             return removed;

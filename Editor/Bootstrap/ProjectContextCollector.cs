@@ -75,7 +75,7 @@ namespace AgentCore.Editor.Bootstrap
             catch (Exception ex)
             {
                 sb.AppendLine($"\n> [WARN] 项目信息收集部分失败: {ex.Message}");
-                Debug.LogWarning($"[AgentCore] ProjectContextCollector error: {ex}");
+                AgentCoreLog.Warning($"[AgentCore] ProjectContextCollector error: {ex}");
             }
 
             return sb.ToString();
@@ -144,7 +144,7 @@ namespace AgentCore.Editor.Bootstrap
             catch (Exception ex)
             {
                 sb.AppendLine($"- **Workspace**: 收集失败 — {ex.Message}");
-                Debug.LogWarning($"[AgentCore] WorkspaceSummary collection error: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] WorkspaceSummary collection error: {ex.Message}");
             }
 
             return sb.ToString();
@@ -271,7 +271,7 @@ namespace AgentCore.Editor.Bootstrap
                 {
                     if (t.IsFaulted)
                     {
-                        Debug.LogWarning($"[AgentCore] Heavy project context prefetch failed: {t.Exception?.GetBaseException().Message}");
+                        AgentCoreLog.Warning($"[AgentCore] Heavy project context prefetch failed: {t.Exception?.GetBaseException().Message}");
                     }
                 }, TaskScheduler.Default);
             }
@@ -334,7 +334,7 @@ namespace AgentCore.Editor.Bootstrap
             catch (Exception ex)
             {
                 sb.AppendLine($"\n> [WARN] 扩展信息收集部分失败: {ex.Message}");
-                Debug.LogWarning($"[AgentCore] ProjectContextCollector heavy error: {ex}");
+                AgentCoreLog.Warning($"[AgentCore] ProjectContextCollector heavy error: {ex}");
             }
 
             return sb.ToString();

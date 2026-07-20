@@ -115,7 +115,7 @@ namespace AgentCore.Editor.LLM
             catch (Newtonsoft.Json.JsonReaderException ex)
             {
                 // extraRequestBody 格式错误时静默跳过，不阻断请求
-                Debug.LogWarning($"[AgentCore] RequestEnrichment: failed to parse extraRequestBody, skipping merge. Error: {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore] RequestEnrichment: failed to parse extraRequestBody, skipping merge. Error: {ex.Message}");
             }
         }
 

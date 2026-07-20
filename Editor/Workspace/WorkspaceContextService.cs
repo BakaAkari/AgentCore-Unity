@@ -3,6 +3,7 @@ using AgentCore.Editor.Workspace.Config;
 using AgentCore.Editor.Workspace.Resolution;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Workspace
 {
@@ -92,7 +93,7 @@ namespace AgentCore.Editor.Workspace
                 try { config = WorkspaceConfigStorage.Load(workspaceRoot); }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[AgentCore] WorkspaceContextService: failed to load workspace.json: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] WorkspaceContextService: failed to load workspace.json: {ex.Message}");
                 }
 
                 // Step 5: 解析 Scope Roots
@@ -128,7 +129,7 @@ namespace AgentCore.Editor.Workspace
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[AgentCore] WorkspaceContextService.Resolve() failed: {ex}");
+                AgentCoreLog.Error($"[AgentCore] WorkspaceContextService.Resolve() failed: {ex}");
                 return WorkspaceContext.CreateError($"Unexpected error during workspace resolution: {ex.Message}");
             }
             finally

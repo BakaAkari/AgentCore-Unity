@@ -9,6 +9,7 @@ using AgentCore.Editor.Components.VCS.Tools;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.UI
 {
@@ -431,7 +432,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             catch (Exception ex)
             {
                 ShowMessage($"Error refreshing data: {ex.Message}", true);
-                Debug.LogError($"[VersionControlPanel] Refresh error: {ex}");
+                AgentCoreLog.Error($"[VersionControlPanel] Refresh error: {ex}");
             }
             finally
             {
@@ -973,7 +974,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 {
                     var unstageResult = await _adapter.UnstageFilesAsync(new List<string> { filePath }, CancellationToken.None);
                     if (!unstageResult.Success)
-                        Debug.LogWarning($"[Version Control] Delete succeeded but failed to clean VCS staging record for '{filePath}': {unstageResult.ErrorMessage}");
+                        AgentCoreLog.Warning($"[Version Control] Delete succeeded but failed to clean VCS staging record for '{filePath}': {unstageResult.ErrorMessage}");
                 }
 
                 AssetDatabase.Refresh();
@@ -1004,7 +1005,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 }
                 else
                 {
-                    Debug.LogWarning($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\nError: {result.ErrorMessage}\n{output}");
+                    AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\nError: {result.ErrorMessage}\n{output}");
                     ShowMessage($"{operation} failed: {result.ErrorMessage}", true);
                 }
             }
@@ -1024,7 +1025,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             var cleanupResult = await VcsCommandExecutor.ExecuteAsync("svn", "cleanup", rootPath, ct: CancellationToken.None);
             if (!cleanupResult.Success)
             {
-                Debug.LogWarning($"[Version Control][{_currentVcsType}][{operation}] SVN cleanup failed.\nCommand: svn cleanup\nError: {cleanupResult.ErrorMessage}\n{cleanupResult.Output}\n{cleanupResult.Error}");
+                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][{operation}] SVN cleanup failed.\nCommand: svn cleanup\nError: {cleanupResult.ErrorMessage}\n{cleanupResult.Output}\n{cleanupResult.Error}");
                 return cleanupResult;
             }
 
@@ -1457,7 +1458,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open {displayName}. Command: {fileName} {arguments}. Error: {ex.Message}");
+                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open {displayName}. Command: {fileName} {arguments}. Error: {ex.Message}");
                 return false;
             }
         }
@@ -1583,7 +1584,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open TortoiseSVN add dialog. Error: {ex.Message}");
+                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open TortoiseSVN add dialog. Error: {ex.Message}");
                 return false;
             }
         }
@@ -1861,7 +1862,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             if (result == null)
             {
-                Debug.LogWarning($"[Version Control][{_currentVcsType}][{operation}] No operation result returned.");
+                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][{operation}] No operation result returned.");
                 return;
             }
 
@@ -1896,7 +1897,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (result.Success)
                 AgentCore.Editor.Utils.AgentCoreLog.Info(logText);
             else
-                Debug.LogWarning(logText);
+                AgentCoreLog.Warning(logText);
         }
 
         private void ShowMessage(string message, bool isError)

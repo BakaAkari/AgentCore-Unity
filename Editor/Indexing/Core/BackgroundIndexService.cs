@@ -7,6 +7,7 @@ using AgentCore.Editor.Components.Indexing.Config;
 using AgentCore.Editor.Components.Indexing.Models;
 using UnityEditor;
 using UnityEngine;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
@@ -297,7 +298,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                         try { await stateStore.RefreshAndMarkReadyAsync(rootId, ct); }
                         catch (Exception ex)
                         {
-                            Debug.LogWarning($"[AgentCore] Failed to refresh state for root {rootId}: {ex.Message}");
+                            AgentCoreLog.Warning($"[AgentCore] Failed to refresh state for root {rootId}: {ex.Message}");
                         }
                     }
                 }
@@ -335,14 +336,14 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 if (_consecutiveFailures >= maxFailures)
                 {
                     PublishDisabled(IndexingDirtyTracker.Count, _lastError);
-                    Debug.LogError($"[AgentCore] Background indexing disabled after {_consecutiveFailures} consecutive failures: {_lastError}");
+                    AgentCoreLog.Error($"[AgentCore] Background indexing disabled after {_consecutiveFailures} consecutive failures: {_lastError}");
                 }
                 else
                 {
                     var index = Math.Min(_consecutiveFailures - 1, BackoffSeconds.Length - 1);
                     _backoffUntil = EditorApplication.timeSinceStartup + BackoffSeconds[index];
                     PublishFailed(IndexingDirtyTracker.Count, _lastError);
-                    Debug.LogWarning($"[AgentCore] Background indexing failed, retry in {BackoffSeconds[index]}s: {_lastError}");
+                    AgentCoreLog.Warning($"[AgentCore] Background indexing failed, retry in {BackoffSeconds[index]}s: {_lastError}");
                 }
             }
             finally

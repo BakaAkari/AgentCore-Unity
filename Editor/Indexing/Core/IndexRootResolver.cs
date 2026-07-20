@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Components.Indexing.Roots;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
@@ -71,7 +72,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 }
                 catch (Exception ex)
                 {
-                    UnityEngine.Debug.LogWarning(
+                    AgentCoreLog.Warning(
                         $"[AgentCore.Indexing] Provider '{provider.ProviderId}' threw an exception: {ex.Message}");
                     continue;
                 }
