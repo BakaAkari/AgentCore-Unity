@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.11] - 2026-07-18
+
+### Fixed
+- **HubRail 图标视觉不一致**：v1.7.10 图标化后 chat 有图标、VCS 等无图标，视觉割裂。现仅 Settings 保留齿轮图标，chat/vcs 等所有模块统一回退文字标签。
+- **对话文本 □ 方块**：LLM 流式输出偶发混入无法渲染的异常字符（孤立代理项、Unicode noncharacter、控制字符），TMP 字体替换成 □。在 StreamingTextElement 的 AppendText / SetFinalText 入口新增 SanitizeForDisplay 清洗，保守剔除"一定渲染不了"的字符，正常中文/emoji/符号完全不受影响。
+- **ManageComponentTool 无法赋值 ObjectReference 字段**：修改组件时对象引用类型属性报 `unsupported property type 'ObjectReference'`。现支持通过 instanceId / 资源路径 / 场景对象名 / null 赋值，并自动做 GameObject↔Component 类型转换。
+
 ## [1.7.10] - 2026-07-18
 
 ### Fixed

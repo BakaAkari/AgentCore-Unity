@@ -885,9 +885,156 @@ namespace AgentCore.Editor.Tools.Native.Core
                     }
                     return false;
 
+                case SerializedPropertyType.ObjectReference:
+                    return SetObjectReferenceValue(prop, value);
+
                 default:
                     return false;
             }
+        }
+
+        /// <summary>
+        /// 为 ObjectReference 类型的 SerializedProperty 赋值。支持多种输入格式：
+        /// <list type="bullet">
+        /// <item>null / JSON null → 清空引用</item>
+        /// <item>{ "instanceId": 12345 } → 按实例 ID 精确解析（与读取输出对称）</item>
+        /// <item>{ "path": "Assets/.../X.prefab" } → 按资源路径加载 Asset</item>
+        /// <item>{ "name": "Player", "type": "Transform" } / { "name": "Player" } → 按名字在场景查找</item>
+        /// <item>纯字符串 "Player" → 按名字/层级路径在场景查找</item>
+        /// </list>
+        /// 关键：解析出的对象会按字段期望类型做 GameObject↔Component 转换，
+        /// 例如字段要 Transform 但给了 GameObject 名字时自动取其 Transform 组件。
+        /// </summary>
+        private bool SetObjectReferenceValue(SerializedProperty prop, JToken value)
+        {
+            // null → 清空引用
+            if (value == null || value.Type == JTokenType.Null)
+            {
+                prop.objectReferenceValue = null;
+                return true;
+            }
+
+            // 字段期望的对象类型（用于 GameObject↔Component 转换与类型校验）
+            var expectedType = ResolveExpectedObjectType(prop);
+
+            UnityEngine.Object resolved = null;
+
+            if (value is JObject obj)
+            {
+                // 1) instanceId 精确解析
+                var idToken = obj["instanceId"];
+                if (idToken != null && idToken.Type == JTokenType.Integer)
+                {
+                    resolved = EditorUtility.InstanceIDToObject(idToken.Value<int>());
+                }
+
+                // 2) 资源路径
+                if (resolved == null)
+                {
+                    var pathToken = obj["path"];
+                    if (pathToken != null && pathToken.Type == JTokenType.String)
+                    {
+                        var assetPath = pathToken.Value<string>();
+                        var loadType = expectedType ?? typeof(UnityEngine.Object);
+                        resolved = AssetDatabase.LoadAssetAtPath(assetPath, loadType);
+                    }
+                }
+
+                // 3) 按名字在场景查找
+                if (resolved == null)
+                {
+                    var nameToken = obj["name"];
+                    if (nameToken != null && nameToken.Type == JTokenType.String)
+                    {
+                        resolved = ResolveSceneObjectByName(nameToken.Value<string>(), expectedType);
+                    }
+                }
+            }
+            else if (value.Type == JTokenType.String)
+            {
+                var str = value.Value<string>();
+                // 先当资源路径试（含扩展名 / 以 Assets/ 开头），否则当场景名字
+                if (str.StartsWith("Assets/") || str.Contains("."))
+                {
+                    var loadType = expectedType ?? typeof(UnityEngine.Object);
+                    resolved = AssetDatabase.LoadAssetAtPath(str, loadType);
+                }
+                if (resolved == null)
+                {
+                    resolved = ResolveSceneObjectByName(str, expectedType);
+                }
+            }
+            else if (value.Type == JTokenType.Integer)
+            {
+                resolved = EditorUtility.InstanceIDToObject(value.Value<int>());
+            }
+
+            if (resolved == null)
+                return false; // 解析失败：调用方记录 unsupported/未找到
+
+            // 按字段期望类型做 GameObject ↔ Component 转换
+            var coerced = CoerceToExpectedType(resolved, expectedType);
+            if (coerced == null)
+                return false; // 类型不兼容
+
+            prop.objectReferenceValue = coerced;
+            return true;
+        }
+
+        /// <summary>反射解析 ObjectReference 字段的期望类型（如 Transform / Rigidbody / GameObject）。取不到返回 null。</summary>
+        private static Type ResolveExpectedObjectType(SerializedProperty prop)
+        {
+            try
+            {
+                var targetType = prop.serializedObject?.targetObject?.GetType();
+                if (targetType == null) return null;
+                // 支持带路径的属性名（取最后一段）；多数组件字段是顶层
+                var fieldName = prop.name;
+                var fi = targetType.GetField(fieldName,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                return fi?.FieldType;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>在场景中按名字/层级路径查找对象，并按期望类型返回 GameObject 或其组件。</summary>
+        private static UnityEngine.Object ResolveSceneObjectByName(string nameOrPath, Type expectedType)
+        {
+            var go = ToolHelpers.FindGameObject(nameOrPath);
+            if (go == null) return null;
+            return CoerceToExpectedType(go, expectedType);
+        }
+
+        /// <summary>
+        /// 把解析到的对象转换成字段期望类型：
+        /// 期望 Component 但拿到 GameObject → GetComponent；期望 GameObject 但拿到 Component → 取 gameObject。
+        /// 期望类型未知或已兼容则原样返回。不兼容返回 null。
+        /// </summary>
+        private static UnityEngine.Object CoerceToExpectedType(UnityEngine.Object resolved, Type expectedType)
+        {
+            if (resolved == null) return null;
+            if (expectedType == null) return resolved; // 未知期望：交由 Unity 赋值时自行校验
+
+            // 已经是兼容类型
+            if (expectedType.IsInstanceOfType(resolved)) return resolved;
+
+            // 期望 Component（或其子类）但拿到 GameObject → 取组件
+            if (typeof(Component).IsAssignableFrom(expectedType) && resolved is GameObject go)
+            {
+                var comp = go.GetComponent(expectedType);
+                return comp;
+            }
+
+            // 期望 GameObject 但拿到 Component → 取其 gameObject
+            if (expectedType == typeof(GameObject) && resolved is Component c)
+            {
+                return c.gameObject;
+            }
+
+            return null; // 不兼容
         }
 
         /// <summary>

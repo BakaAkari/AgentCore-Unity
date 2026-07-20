@@ -242,25 +242,27 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// 已知模块 ID → Unity 内置编辑器图标名的映射。
-        /// 不在表内的模块（如第三方扩展面板）返回 null，按钮保留文字标签。
+        /// 目前仅 settings 用齿轮图标；其余模块（chat/vcs/knowledge 等）一律返回 null 保留文字标签，
+        /// 避免"部分按钮有图标、部分是文字"的不一致视觉。
         /// </summary>
         private static string ResolveBuiltinIconName(string moduleId)
         {
             if (string.IsNullOrWhiteSpace(moduleId)) return null;
             switch (moduleId.ToLowerInvariant())
             {
-                case "chat":       return "d_UnityEditor.ConsoleWindow";   // 对话/日志
-                case "settings":   return "d_SettingsIcon";                // 齿轮
-                case "knowledge":  return "d_UnityEditor.InspectorWindow"; // 书本/知识
-                case "memory":     return "d_Profiler.Memory";             // 记忆/内存
-                case "index":      return "d_Search Icon";                 // 索引/搜索
-                case "vcs":        return "d_UnityEditor.VersionControl";  // 版本控制
-                default:           return null;
+                case "settings":   return "d_SettingsIcon"; // 齿轮
+                default:           return null;             // 其余模块保留文字标签
             }
         }
 
         /// <summary>
-        /// 尝试给按钮应用 Unity 内置图标。成功则清空文字只显示图标；
+        /// 尝试给按钮应用 Unity 内置图标。成功则清空按钮文字，改用一个固定 16x16 的
+        /// 居中 <see cref="Image"/> 子元素显示图标。
+        /// <para>
+        /// 关键：不能用 <c>button.style.backgroundImage</c> —— 内置编辑器图标是 16x16 小位图，
+        /// backgroundImage 默认拉伸铺满 44x36 的按钮，会把小图放大 2~3 倍导致像素化模糊。
+        /// 改用固定尺寸的 Image 子元素（ScaleToFit 保持比例、不放大），图标按原始清晰度显示。
+        /// </para>
         /// 任何失败（图标名在当前 Unity 版本不存在、取到空贴图、异常）都保留原文字回退，
         /// 保证窄栏在任何 Unity 版本下都不会出现"既无图标又无文字"的空按钮。
         /// </summary>
@@ -275,8 +277,21 @@ namespace AgentCore.Editor.UI.Components
                 var tex = content?.image as Texture2D;
                 if (tex == null) return; // 取不到贴图：保留文字
 
-                button.style.backgroundImage = new StyleBackground(tex);
                 button.text = string.Empty; // 有图标了，清空文字避免图文重叠
+
+                var icon = new Image
+                {
+                    image = tex,
+                    scaleMode = ScaleMode.ScaleToFit, // 保持比例，不放大到失真
+                    pickingMode = PickingMode.Ignore  // 点击穿透到按钮
+                };
+                // 固定 16x16 原生尺寸并居中，避免被父按钮拉伸
+                icon.style.width = 16;
+                icon.style.height = 16;
+                icon.style.alignSelf = Align.Center;
+                button.style.alignItems = Align.Center;
+                button.style.justifyContent = Justify.Center;
+                button.Add(icon);
             }
             catch
             {

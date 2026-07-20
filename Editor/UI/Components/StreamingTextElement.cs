@@ -956,6 +956,69 @@ namespace AgentCore.Editor.UI.Components
         #region 公开方法
 
         /// <summary>
+        /// 清洗待显示文本，剔除字体一定无法渲染、会显示成 □ 方块的异常字符。
+        /// <para>
+        /// 触发场景：LLM 流式输出偶发混入坏 token / 无效字节序列（如孤立代理项、
+        /// Unicode noncharacter、控制字符），TMP 字体渲染时替换成 □。
+        /// </para>
+        /// 保守原则：只剔除"一定渲染不了"的字符，正常中文 / emoji / 常用符号 / 拉丁文
+        /// 全部原样保留。按 Unicode 码点遍历，正确处理代理对避免拆坏 emoji。
+        /// </summary>
+        private static string SanitizeForDisplay(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            var sb = new StringBuilder(text.Length);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+
+                // 高代理项：需与后随低代理项组成合法代理对
+                if (char.IsHighSurrogate(c))
+                {
+                    if (i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+                    {
+                        int cp = char.ConvertToUtf32(c, text[i + 1]);
+                        if (!IsNoncharacter(cp))
+                        {
+                            sb.Append(c);
+                            sb.Append(text[i + 1]);
+                        }
+                        i++; // 跳过已消费的低代理项
+                    }
+                    // 孤立高代理项：丢弃
+                    continue;
+                }
+                if (char.IsLowSurrogate(c))
+                {
+                    // 孤立低代理项：丢弃
+                    continue;
+                }
+
+                // 控制字符：保留常见空白（换行/回车/制表），其余 C0/C1 丢弃
+                if (char.IsControl(c) && c != '\n' && c != '\r' && c != '\t')
+                    continue;
+
+                // BMP 内的 noncharacter
+                if (IsNoncharacter(c))
+                    continue;
+
+                sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>判断码点是否为 Unicode noncharacter（永久保留、任何字体都不渲染）。</summary>
+        private static bool IsNoncharacter(int cp)
+        {
+            // 每个平面末尾两个码点 U+xFFFE / U+xFFFF
+            if ((cp & 0xFFFE) == 0xFFFE) return true;
+            // U+FDD0 .. U+FDEF
+            if (cp >= 0xFDD0 && cp <= 0xFDEF) return true;
+            return false;
+        }
+
+        /// <summary>
         /// 追加流式文本。
         /// 每次收到一个 token 时调用此方法，文本会累积显示。
         /// v1.6.5: token 先累积到 _pendingBuffer，由 flush 定时器每帧合并写一次 Label。
@@ -963,6 +1026,10 @@ namespace AgentCore.Editor.UI.Components
         /// <param name="text">要追加的文本片段</param>
         public void AppendText(string text)
         {
+            if (string.IsNullOrEmpty(text)) return;
+
+            // 剔除会渲染成 □ 的异常字符（LLM 偶发坏 token）
+            text = SanitizeForDisplay(text);
             if (string.IsNullOrEmpty(text)) return;
 
             // 累积到 builder（用于最终化）
@@ -1113,7 +1180,8 @@ namespace AgentCore.Editor.UI.Components
             _flushScheduled = false;
             _pendingBuffer.Clear();
 
-            _currentText = text ?? "";
+            // 剔除会渲染成 □ 的异常字符（与流式路径一致）
+            _currentText = SanitizeForDisplay(text ?? "");
             HideCursor();
 
             // 用全量文本做最终渲染（非流式：不补围栏——最终文本理应已闭合）
