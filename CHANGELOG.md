@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.15] - 2026-07-20
+
+### Fixed
+- **工具确认面板不弹（信任 scope 无感知残留）**：破坏性工具（如 `manage_gameobject:create`）被策略引擎正确判为 `RequireConfirmation`，却直接执行、不弹确认面板。根因是会话级信任 scope（YOLO / Trust Low-Med）残留——用户先前测试时点过 `YOLO (All)` 或 `Trust Low/Med`，该状态经 `SessionState` 持久化后，**新建对话 session 时未被清除**，导致 `IsToolConfirmationTrusted` 直接返回 true 跳过面板。策略判定链（`ToolRiskPolicy` → `ExtractActionFromParameters` → `RequiresDestructiveActionConfirmation`）全程正确，缺陷仅在信任生命周期。修复：`OnNewSessionClicked` 与 `SwitchToSession` 两处切换对话入口新增 `ClearPendingToolConfirmations()`，把工具信任生命周期**绑定到对话 session**——新建/切换对话即失效。Domain Reload（脚本重编译）仍保留信任（`SessionState` 持久化不变），Editor 完全重启自然归零。诊断用 `[DIAG-POLICY]` 临时日志已移除。
+
+## [1.7.14] - 2026-07-20
+
+### Added
+- **ask_user 中途提问工具（挂起-唤醒完整态）**：Agent 遇实现方向岔路（多方案权衡 / 需求歧义 / 继续须假设）时主动调 `ask_user` 提问，独立选项面板阻断（无超时·不自动拒绝·永久等待），loop 检测 `ToolResult.IsAwaitingUserInput` 标志 → `SetState(WaitingForUserInput)` → 截断退出循环不空等；用户点选项或「我自己描述」自由文本应答后，`ResumeFromUserInput` 追加 user 消息 + `TriggerResumeLLMCall` 唤醒 LLM 继续。挂起状态存 `DomainReloadState`（3 字段）跨 domain reload 存活，reload 后 `TryRestorePendingAskUser` 重建面板。新增 `AgentLoop.AskUser.cs` + `ChatWindow.AskUser.cs` + `AskUserTool.cs`（纯函数化，自动发现注册）；`ToolResult` 加 `IsAwaitingUserInput` / `AskUserQuestion` / `AskUserOptions` 字段。复刻 WaitingCompilation 范式，完全不碰 SelfChallenge。SOUL §2 加中途收束方向引导。
+
+### Fixed
+- **助手气泡宽度被首段短内容压窄**：`AssistantTurnView` 6 个 column wrapper 容器设 `width: 100%`，每个 turn 恒定撑满对话区可用宽度，消除首段短文本气泡把后续工具卡片/长内容压窄的问题。
+
 ## [1.7.13] - 2026-07-20
 
 ### Added

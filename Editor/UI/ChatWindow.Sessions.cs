@@ -231,6 +231,11 @@ namespace AgentCore.Editor.UI
                     return;
                 }
 
+                // 2.5 重置会话级工具信任 scope（YOLO / Trust Low-Med）。
+                // 切换到另一段对话 = 进入新的对话上下文，上一段对话开启的直通状态不应延续。
+                // 与 OnNewSessionClicked 语义一致：信任绑定对话 session。
+                ClearPendingToolConfirmations();
+
                 // 3. 重建消息气泡
                 RebuildMessageBubbles();
 
@@ -278,10 +283,16 @@ namespace AgentCore.Editor.UI
                 ClearMessages();
                 _agentLoop.ResetConversation();
 
+                // 1.5 重置会话级工具信任 scope（YOLO / Trust Low-Med）。
+                // 信任生命周期绑定到"对话 session"：新建对话即失效，避免上一段对话开启的
+                // 直通状态无感知地延续到新对话。Domain Reload 仍保留（SessionState），
+                // Editor 完全重启自然归零。
+                ClearPendingToolConfirmations();
+
                 // 2. 刷新会话列表
                 RefreshSessionList();
 
-                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] New session created.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] New session created (tool trust scopes reset).");
             }
             catch (Exception ex)
             {
