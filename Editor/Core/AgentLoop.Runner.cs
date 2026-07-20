@@ -128,11 +128,23 @@ namespace AgentCore.Editor.Core
                 }
                 accumulatedTokens += roundTokens;
 
+                // ask_user 挂起截断：某工具调用 ask_user → loop 干净结束、进入 WaitingForUserInput 等用户应答。
+                // 占位 tool_result 已由 ExecuteToolCallsAsync 写入历史（合法）；用户应答后经
+                // ResumeFromUserInput 追加 user 消息并 TriggerResumeLLMCall 唤醒继续。
+                if (!string.IsNullOrEmpty(_pendingUserInputToolCallId))
+                {
+                    AgentCore.Editor.Utils.AgentCoreLog.Info(
+                        $"[AgentCore]{logPrefix} ask_user suspend: truncating loop, waiting for user input (toolCallId={_pendingUserInputToolCallId}).");
+                    SetState(AgentState.WaitingForUserInput);
+                    return;
+                }
+
                 if (ct.IsCancellationRequested)
                 {
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore]{logPrefix} Cancelled during tool execution.");
                     break;
                 }
+
 
                 // 连续失败检测
                 bool allToolCallsFailed = CheckAllToolCallsFailed(assistantTurn, assistantMessage.ToolCalls.Count);
@@ -343,8 +355,10 @@ namespace AgentCore.Editor.Core
                 PrepareAssistantMessageForHistory(assistantMessage, assistantTurn);
                 _messages.Add(assistantMessage);
 
-                // 确保 UI 轮次内容与清洗后的 LLM 历史一致
-                if (!string.IsNullOrEmpty(assistantMessage.Content))
+                // 确保 UI 轮次内容与清洗后的 LLM 历史一致。
+                // 用 IsNullOrWhiteSpace：GLM-5.2 reasoning 吃满预算时可能返回纯空白符（空格/换行）content，
+                // 若用 IsNullOrEmpty 会把空白符当有效正文赋值，导致后续 fallback 判断失效、留下空正文气泡。
+                if (!string.IsNullOrWhiteSpace(assistantMessage.Content))
                 {
                     assistantTurn.Content = assistantMessage.Content;
                 }
@@ -355,11 +369,14 @@ namespace AgentCore.Editor.Core
                 _messages.Add(ChatMessage.Assistant(assistantTurn.Content));
             }
 
-            // 兜底：如果最终内容仍为空，提供默认消息
-            if (string.IsNullOrEmpty(assistantTurn.Content))
+            // 空正文检测（含纯空白符）：reasoning-only 回复（GLM 把预算全用在思考、没输出正文）不再填
+            // "[系统提示]" 占位文本，而是标记为空 —— UI 侧据此移除空正文气泡（保留 reasoning 折叠区）。
+            bool isBlankFinalContent = string.IsNullOrWhiteSpace(assistantTurn.Content);
+            if (isBlankFinalContent)
             {
-                assistantTurn.Content = "[系统提示] 助手未返回任何内容。";
-                AgentCoreLog.Warning("[AgentCore] HandleFinalResponse: Assistant content is empty, using fallback message.");
+                // 归一化为空串，避免空白符流入下游（Node A/B 分析、历史）造成误判。
+                assistantTurn.Content = string.Empty;
+                AgentCoreLog.Warning("[AgentCore] HandleFinalResponse: Assistant content is empty/whitespace (reasoning-only turn); UI will drop the empty content bubble.");
             }
 
             // Phase 9: Node A 完成后的分派 — 若结论 = 反问用户, 进入 WaitingForClarification 状态

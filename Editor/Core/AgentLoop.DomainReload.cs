@@ -21,7 +21,9 @@ namespace AgentCore.Editor.Core
         private void OnBeforeAssemblyReload()
         {
             // 1. 检查当前是否正在执行操作
-            if (CurrentState == AgentState.Idle)
+            // WaitingForUserInput（ask_user 挂起）视同"干净挂起"：历史已完整合法（占位 tool_result 已写入），
+            // 挂起状态由 SavePendingAskUser 独立持久化，不应标记为"执行中被打断"，故与 Idle 同路径处理。
+            if (CurrentState == AgentState.Idle || CurrentState == AgentState.WaitingForUserInput)
             {
                 // 修复 #6: Agent 空闲时也需要保存当前会话到磁盘，
                 // 确保 Domain Reload 后 TryRestoreSession() 能恢复会话。

@@ -99,6 +99,24 @@ namespace AgentCore.Editor.Core
             // Phase 2 Step 11: 停止 Console 错误捕获
             var consoleErrors = _consoleCapture.StopCapture();
 
+            // ask_user 挂起检测：若某个工具返回 IsAwaitingUserInput，注册挂起请求到 UI 面板，
+            // 记录 pending tool_call id。Runner 检测到 _pendingUserInputToolCallId 后会截断退出循环。
+            // 用户应答后由 ResumeFromUserInput 写入真实 tool_result 并唤醒。
+            foreach (var result in results)
+            {
+                if (result?.Result != null && result.Result.IsAwaitingUserInput)
+                {
+                    var q = result.Result.AskUserQuestion ?? "";
+                    var opts = result.Result.AskUserOptions;
+                    RecordPendingUserQuery(result.ToolCall.Id, q, opts);
+                    AgentCore.Editor.Utils.AgentCoreLog.Info(
+                        $"[AgentCore][ask_user] Suspend requested (toolCallId={_pendingUserInputToolCallId}). Notifying UI.");
+                    // 通知 UI 弹出选项面板（主线程 marshal 由订阅方负责）
+                    OnUserQueryRaised?.Invoke(_pendingUserInputToolCallId, q, opts);
+                    break; // 一次只处理一个 ask_user 挂起
+                }
+            }
+
             // Phase 4.5: 追踪工具执行产生的文件变更并通知 UI
             try
             {

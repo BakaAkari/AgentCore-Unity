@@ -679,6 +679,44 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 - **根因**：只读 multiline TextField 非虚拟化，承载数万字符（读大文件/大 JSON）在展开时构建全量文本网格 → 卡顿。
 - **修复**：显示截断到 `DetailsDisplayLimit = 8000` 字符并追加提示，完整原文保留在 `_detailsRaw` 供"复制"按钮取用（复制不受影响）。
 
+### 6.11 v1.7.14 架构模式补充 — ask_user 中途提问（挂起-唤醒完整态）
+
+#### 设计目标与哲学
+
+- **目标**：Agent 遇到影响实现方向的岔路口（多种合理方案、需求歧义、继续做必须基于假设）时，主动停下向用户提问、等用户拍板后再继续，而非凭猜测往可能错误方向无限执行。防跑偏刚需。
+- **交互契约**：没人回答就卡住——**不推进、不拒绝、不超时**，界面保持阻断；LLM 直接截断结束当前轮释放；用户事后（可能只是没在窗口/没看到）通过后再唤醒 LLM 继续。
+- **完全不碰 SelfChallenge**：走全新独立 `AgentState.WaitingForUserInput` + 独立 partial `AgentLoop.AskUser.cs`。SelfChallenge 是给低性能 LLM 的临时模块（准非维护），不绑定。
+
+#### 复刻 WaitingCompilation 范式（关键：不发明新机制）
+
+现有 `WaitingCompilation`（loop 等 Unity 编译完成再继续）就是"挂起-等外部事件-唤醒"的成熟范本，ask_user 照此复刻：
+
+| WaitingCompilation | ask_user |
+|---|---|
+| 工具触发编译 → WaitingForCompilation | ask_user 调用 → WaitingForUserInput |
+| loop 挂起等编译事件 | loop **截断退出**等用户应答 |
+| CompilationFinished → ResumeFromWaitingCompilation | 用户应答 → ResumeFromUserInput |
+| TriggerResumeLLMCall | TriggerResumeLLMCall（**复用同一个**） |
+
+#### 数据流（纯函数工具 + loop 层接管 UI）
+
+1. **AskUserTool 是纯函数**：只解析 question/options，返回带 `ToolResult.IsAwaitingUserInput=true`（+ AskUserQuestion/AskUserOptions）的结果。不接触 UI、不阻塞、不 await。通过 `[AgentTool]` 特性 + ToolAutoDiscovery 自动发现注册（无参构造）。
+2. **ExecuteToolCallsAsync（Tools.cs）检测标志**：遍历 results 命中 `IsAwaitingUserInput` → `RecordPendingUserQuery(toolCallId, q, opts)`（记录 + 持久化）+ `OnUserQueryRaised?.Invoke(...)` 通知 UI。占位 tool_result（"正在等待应答"）由 BuildToolMessagesWithCompressionAsync 照常写入，保证历史合法（一个 tool_call 恰好一个 result）。
+3. **Runner.cs 截断**：ExecuteToolCallsAsync 后检测 `_pendingUserInputToolCallId != null` → `SetState(WaitingForUserInput)` → `return`（干净退出循环，不进下一轮 LLM 调用，不空等）。
+4. **UI 应答唤醒**：ChatWindow.AskUser.cs 订阅 `OnUserQueryRaised`，渲染选项面板（无超时·永久阻断）。用户点选项 / 「我自己描述」自由文本 → `ResumeFromUserInput(answer)`：因占位 result 已存在（不能补第二个），改为**追加一条 user 消息**携带答案 → `TriggerResumeLLMCall()` 唤醒（SanitizeMessageHistory 清配对 + 新 assistant turn，不要求末条特定 role）。
+
+#### 跨 domain reload 存活
+
+- `DomainReloadState` 加 3 字段（`_pendingAskUserToolCallId/Question/Options`）+ `SavePendingAskUser`/`ClearPendingAskUser`/`HasPendingAskUser`。RecordPendingUserQuery 时存盘，应答/放弃时清盘。
+- `OnBeforeAssemblyReload`：`WaitingForUserInput` 视同**干净挂起**（与 Idle 同路径，仅保存会话，**不标记 `_wasInterrupted`**）——因历史已完整合法，无 pending tool_call 需补 result。
+- reload 后 `ChatWindow.CreateGUI` 在 TryRestoreSession 之后调 `TryRestorePendingAskUser` → `AgentLoop.RestorePendingUserInputFromReload`（恢复内存标志 + SetState）→ 重建面板。
+
+#### 关键陷阱
+
+- **占位 result 不可避免**：BuildToolMessagesWithCompressionAsync 对所有 result 无差别写 ChatMessage.Tool。故唤醒**不能补第二个 result**（双 result 非法），必须走追加 user 消息路线。占位文本要明确告知 LLM"真正答案在随后的 user 消息"。
+- **时序竞态（已排除）**：OnUserQueryRaised 在 ExecuteToolCallsAsync 内触发，此时 loop 尚未走到 Runner 的 SetState。潜在竞态由 `EditorApplication.delayCall` 排除——HandleUserQueryRaised 把 ShowUserQuery 推迟到下一编辑器 tick，loop 剩余同步代码（含截断）在当前调用栈内跑完，面板渲染必然晚于截断。**delayCall 是关键防线，勿去除。**
+- **UI 无 emoji**：选项按钮/提示文本严禁 emoji（SDF 字体渲染成方块，SOUL §3）。
+
 ## 7. 编码硬规则
 
 ### 7.1 禁止事项

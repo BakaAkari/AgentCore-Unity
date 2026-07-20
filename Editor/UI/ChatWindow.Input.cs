@@ -18,6 +18,18 @@ namespace AgentCore.Editor.UI
             var text = _inputField?.value?.Trim();
             if (string.IsNullOrEmpty(text)) return;
 
+            // ask_user 自由文本答案拦截：Agent 正等待用户"自己描述"的回答时，
+            // 这条输入应作为 ask_user 的答案回传，而非当成新一轮消息发送。
+            if (_awaitingFreeTextAnswer)
+            {
+                if (TryConsumeFreeTextAnswer(text))
+                {
+                    _inputField.value = "";
+                    _inputField.Focus();
+                    return;
+                }
+            }
+
             if (_agentLoop == null)
             {
                 AgentCoreLog.Error("[AgentCore] AgentLoop is not initialized.");

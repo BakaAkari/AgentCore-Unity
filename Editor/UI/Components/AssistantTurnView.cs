@@ -188,6 +188,18 @@ namespace AgentCore.Editor.UI.Components
             return Bubble;
         }
 
+        /// <summary>
+        /// 移除消息气泡（保留 ThinkingDrawer / ToolGroup / SelfChallengeCard）。
+        /// 用于 reasoning-only 空正文回复：GLM 把 max_tokens 全用在 reasoning、没输出正文时，
+        /// 不保留空的正文气泡壳，但用户仍可展开 ThinkingDrawer 查看思考过程。
+        /// </summary>
+        public void RemoveBubble()
+        {
+            if (Bubble == null) return;
+            Bubble.RemoveFromHierarchy();
+            Bubble = null;
+        }
+
         #endregion
 
         #region 工具调用分组

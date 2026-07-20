@@ -149,6 +149,19 @@ namespace AgentCore.Editor.UI
         {
             if (string.IsNullOrEmpty(messageId)) return;
 
+            // reasoning-only 空正文回复：GLM 把 max_tokens 全用在 reasoning、没输出正文时，
+            // 移除空的正文气泡壳，避免留下视觉上空白的气泡。ThinkingDrawer 是 AssistantTurnView 的
+            // 独立子元素，会按自身 reasoning 是否为空自动显示/隐藏，不受此处影响（有思考仍可展开查看）。
+            if (string.IsNullOrWhiteSpace(fullContent))
+            {
+                if (_assistantTurnViews.TryGetValue(messageId, out var emptyTurnView))
+                {
+                    emptyTurnView.RemoveBubble();
+                }
+                _messageBubbles.Remove(messageId);
+                return;
+            }
+
             if (_messageBubbles.TryGetValue(messageId, out var bubble))
             {
                 bubble.FinalizeContent(fullContent);

@@ -47,6 +47,15 @@ namespace AgentCore.Editor.Core
         /// </summary>
         ReviewingAnswer,
 
+        /// <summary>
+        /// 等待用户主动应答 — Agent 在执行任务中途调用 <c>ask_user</c> 工具、
+        /// 主动向用户提出决策性问题以收束实现方向时进入。与 <see cref="WaitingForClarification"/>
+        /// （SelfChallenge Node A 专用）完全独立：本状态由通用 ask_user 机制驱动，
+        /// 不依赖 SelfChallenge 模块。该状态下 Agent loop 暂停，等待用户从选项按钮中选择
+        /// 或自行输入文字；用户应答后 loop 携带答案继续执行。
+        /// </summary>
+        WaitingForUserInput,
+
         /// <summary>发生错误</summary>
         Error
     }

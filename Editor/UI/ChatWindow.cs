@@ -348,6 +348,7 @@ namespace AgentCore.Editor.UI
                 // 必须在此处(CreateGUI 生命周期内)调用,不能在字段初始化器/构造器中调用
                 LoadSessionTrustScopesFromState();
                 InitializeToolConfirmationPanel(chatArea, inputArea);
+                InitializeAskUserPanel(chatArea, inputArea);
 
                 // 6.8 Phase 6.0.4: 创建上下文使用情况面板并插入到 input-area 之前（在文件变更面板之后）
                 _contextUsagePanel = new ContextUsagePanel();
@@ -375,6 +376,9 @@ namespace AgentCore.Editor.UI
             // 8. Phase 3: 尝试恢复上一次的会话
             TryRestoreSession();
 
+            // 8.4 ask_user：若 domain reload 前有挂起的提问，恢复挂起状态并重建面板
+            TryRestorePendingAskUser();
+
             // 8.5 刷新会话列表
             RefreshSessionList();
         }
@@ -400,6 +404,7 @@ namespace AgentCore.Editor.UI
                 }
 
                 _agentLoop.OnAgentEvent -= HandleAgentEvent;
+                _agentLoop.OnUserQueryRaised -= HandleUserQueryRaised;
                 _agentLoop.Dispose(); // P1-1 fix: 调用 Dispose() 释放 ConsoleErrorCapture、CompilationWatcher 等资源
                 _agentLoop = null;
             }
@@ -419,6 +424,7 @@ namespace AgentCore.Editor.UI
             _messageListManager = null;
 
             ClearPendingToolConfirmations();
+            ClearPendingUserQuery();
             DisposeToolbarStatusContributions();
             DisposeHubPanels();
 
@@ -445,6 +451,7 @@ namespace AgentCore.Editor.UI
                 var confirmationProvider = new DelegatingToolConfirmationProvider(RequestEmbeddedToolConfirmationAsync);
                 _agentLoop = new AgentLoop(llmClient, confirmationProvider);
                 _agentLoop.OnAgentEvent += HandleAgentEvent;
+                _agentLoop.OnUserQueryRaised += HandleUserQueryRaised;
 
                 // 初始化（加载 Bootstrap 上下文）
                 _agentLoop.Initialize();

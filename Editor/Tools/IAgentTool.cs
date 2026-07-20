@@ -207,6 +207,20 @@ namespace AgentCore.Editor.Tools
         public bool IsCompileRelated { get; set; }
 
         /// <summary>
+        /// 是否为 ask_user 挂起请求：Agent 主动向用户提问、需要暂停 loop 等待用户应答。
+        /// loop 层检测到此标志后：注册挂起请求到 UI、切换到 WaitingForUserInput 状态、截断退出循环。
+        /// 用户应答后由 ResumeFromUserInput 写入真实 tool_result 并唤醒。
+        /// 与 IsCompileRelated 同为"工具驱动 loop 状态切换"的标志位。
+        /// </summary>
+        public bool IsAwaitingUserInput { get; set; }
+
+        /// <summary>ask_user 的问题文本（仅 IsAwaitingUserInput=true 时有效）。</summary>
+        public string AskUserQuestion { get; set; }
+
+        /// <summary>ask_user 的候选选项（仅 IsAwaitingUserInput=true 时有效，可为 null）。</summary>
+        public System.Collections.Generic.List<string> AskUserOptions { get; set; }
+
+        /// <summary>
         /// 私有构造函数，通过静态工厂方法创建实例。
         /// </summary>
         private ToolResult(bool success, string output, string error, double executionTimeMs)

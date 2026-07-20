@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Utils;
 using UnityEditor;
@@ -117,6 +118,16 @@ namespace AgentCore.Editor.Core
         /// <summary>对话压缩前的总 token 数</summary>
         [SerializeField] private int _conversationOriginalTokens;
 
+        // ── ask_user 挂起状态（跨 domain reload 保留，用于 reload 后重建提问面板）──
+        /// <summary>挂起的 ask_user tool_call ID（非空表示 reload 前 loop 正等待用户应答）。</summary>
+        [SerializeField] private string _pendingAskUserToolCallId;
+
+        /// <summary>挂起的 ask_user 问题文本。</summary>
+        [SerializeField] private string _pendingAskUserQuestion;
+
+        /// <summary>挂起的 ask_user 候选选项。</summary>
+        [SerializeField] private List<string> _pendingAskUserOptions = new List<string>();
+
         #endregion
 
         #region 公开属性
@@ -192,6 +203,19 @@ namespace AgentCore.Editor.Core
 
         /// <summary>对话压缩前的总 token 数</summary>
         public int ConversationOriginalTokens => _conversationOriginalTokens;
+
+        /// <summary>挂起的 ask_user tool_call ID（非空表示有待恢复的提问面板）。</summary>
+        public string PendingAskUserToolCallId => _pendingAskUserToolCallId;
+
+        /// <summary>挂起的 ask_user 问题文本。</summary>
+        public string PendingAskUserQuestion => _pendingAskUserQuestion;
+
+        /// <summary>挂起的 ask_user 候选选项（只读副本）。</summary>
+        public List<string> PendingAskUserOptions =>
+            _pendingAskUserOptions != null ? new List<string>(_pendingAskUserOptions) : new List<string>();
+
+        /// <summary>是否有挂起的 ask_user 提问待恢复。</summary>
+        public bool HasPendingAskUser => !string.IsNullOrEmpty(_pendingAskUserToolCallId);
 
         #endregion
 
@@ -365,6 +389,7 @@ namespace AgentCore.Editor.Core
             _compilationErrors = string.Empty;
             _interruptedToolCallId = string.Empty;
             // 注意：不清除 _fileChangeRecordsJson 和压缩统计数据，这些数据独立于中断状态
+            // 注意：不清除 ask_user 挂起状态，其独立于中断恢复流程，由 ClearPendingAskUser 单独清理
 
             SafeSave(true);
 
@@ -372,6 +397,29 @@ namespace AgentCore.Editor.Core
             {
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] DomainReloadState: Interruption cleared for session {sessionId}.");
             }
+        }
+
+        /// <summary>
+        /// 保存 ask_user 挂起状态（reload 前调用）。用于 reload 后重建提问面板。
+        /// </summary>
+        public void SavePendingAskUser(string toolCallId, string question, List<string> options)
+        {
+            _pendingAskUserToolCallId = toolCallId ?? string.Empty;
+            _pendingAskUserQuestion = question ?? string.Empty;
+            _pendingAskUserOptions = options != null ? new List<string>(options) : new List<string>();
+            SafeSave(true);
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] DomainReloadState: Pending ask_user saved (toolCallId={toolCallId}).");
+        }
+
+        /// <summary>清除 ask_user 挂起状态（用户已应答 / 放弃时调用）。</summary>
+        public void ClearPendingAskUser()
+        {
+            if (string.IsNullOrEmpty(_pendingAskUserToolCallId)) return;
+            _pendingAskUserToolCallId = string.Empty;
+            _pendingAskUserQuestion = string.Empty;
+            _pendingAskUserOptions = new List<string>();
+            SafeSave(true);
+            AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] DomainReloadState: Pending ask_user cleared.");
         }
 
         /// <summary>
