@@ -315,7 +315,7 @@ namespace AgentCore.Editor.UI
                 _messageScrollView.RegisterCallback<WheelEvent>(_ => CheckUserScrolled(force: true), TrickleDown.TrickleDown);
             }
 
-            // 5. 绑定输入框键盘事件（Enter 发送，Shift+Enter 换行，Escape 取消）
+            // 5. 绑定输入框键盘事件（Enter 发送，Ctrl+Enter 换行，Escape 取消）
             _inputField?.RegisterCallback<KeyDownEvent>(OnInputFieldKeyDown);
 
             // 5.5 绑定窗口级键盘事件（输入框未聚焦时也能响应快捷键）

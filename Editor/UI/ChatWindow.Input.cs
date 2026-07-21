@@ -87,8 +87,8 @@ namespace AgentCore.Editor.UI
         /// <summary>
         /// 输入框键盘事件处理。
         /// <list type="bullet">
-        ///   <item>Enter — 发送消息</item>
-        ///   <item>Shift+Enter — 换行</item>
+        ///   <item>Enter — 发送消息（IME 组字时不发送，交给输入法上屏）</item>
+        ///   <item>Ctrl+Enter — 输入框内换行</item>
         ///   <item>Escape — 取消当前操作</item>
         ///   <item>Ctrl+N — 新建会话</item>
         ///   <item>Ctrl+Shift+E — 导出当前会话</item>
@@ -99,15 +99,25 @@ namespace AgentCore.Editor.UI
         {
             switch (evt.keyCode)
             {
-                case KeyCode.Return or KeyCode.KeypadEnter when !evt.shiftKey:
-                    // Enter（不含 Shift）-> 发送消息
-                    // IME 守卫：中文/日文/韩文输入法在候选框按 Enter 是"确认选词"，
+                case KeyCode.Return or KeyCode.KeypadEnter when evt.ctrlKey:
+                    // Ctrl+Enter -> 换行。
+                    // Ctrl+Enter 不是 TextField 内建 KeyboardTextEditor 会响应的组合键
+                    //（内建只处理 Enter 换行 / Shift+Enter），因此这里自己插入换行不会与
+                    // 内建的 default action 冲突，也不会触发 Shift+Enter 那种拦不住的全选。
+                    evt.PreventDefault();
+                    evt.StopPropagation();
+                    InsertNewlineAtCursor();
+                    break;
+
+                case KeyCode.Return or KeyCode.KeypadEnter when !evt.ctrlKey:
+                    // Enter（不含 Ctrl）-> 发送消息。
+                    // IME 守卫：中文/日文/韩文输入法在候选框按 Enter 是"确认选词/上屏"，
                     // 不应触发发送。UnityEngine.Input.compositionString 在组字未提交时非空，
-                    // 用它拦截 IME 确认阶段的 Enter。组字提交后 compositionString 会清空，
+                    // 用它拦截 IME 确认阶段的 Enter —— 此时直接 break，既不发送也不拦截默认行为，
+                    // 让输入法把候选内容上屏到输入框。组字提交后 compositionString 清空，
                     // 用户再按 Enter 才真正发送。
                     if (IsImeComposing())
                     {
-                        // 处于输入法组字状态：不发送，也不拦截默认行为（让 TextField 完成选词/换行）
                         break;
                     }
                     evt.PreventDefault();
@@ -269,6 +279,59 @@ namespace AgentCore.Editor.UI
         public void FocusInputField()
         {
             _inputField?.Focus();
+        }
+
+        /// <summary>
+        /// 在当前光标处插入换行符（供 Ctrl+Enter 使用）。
+        /// <para>
+        /// 若存在选区（cursorIndex ≠ selectIndex），用换行替换整个选区，符合"选中后按键覆盖"的直觉；
+        /// 插入后光标定位到换行之后，用户可直接续写下一行。
+        /// </para>
+        /// <para>
+        /// 用 <see cref="TextInputBaseField{T}.SetValueWithoutNotify"/> 赋值而非 value setter + Focus()，
+        /// 避免触发内建通知链引发的意外全选；赋值后立即 + 延迟一帧两次强制钉住光标、清除选区，
+        /// 覆盖内建可能的选区重置。
+        /// </para>
+        /// </summary>
+        private void InsertNewlineAtCursor()
+        {
+            if (_inputField == null) return;
+
+            var current = _inputField.value ?? string.Empty;
+            var cursor = _inputField.cursorIndex;
+            var select = _inputField.selectIndex;
+
+            // 归一化选区边界（cursor/select 可能任一在前，且可能越界）
+            var start = System.Math.Min(cursor, select);
+            var end = System.Math.Max(cursor, select);
+            if (start < 0) start = 0;
+            if (start > current.Length) start = current.Length;
+            if (end < 0) end = 0;
+            if (end > current.Length) end = current.Length;
+
+            var head = current.Substring(0, start);
+            var tail = current.Substring(end);
+            var newCursor = head.Length + 1;
+
+            _inputField.SetValueWithoutNotify(head + "\n" + tail);
+
+            SetInputCursor(newCursor);
+            _inputField.schedule.Execute(() => SetInputCursor(newCursor));
+        }
+
+        /// <summary>把输入框光标钉在指定位置并清除选区（cursorIndex == selectIndex）。</summary>
+        private void SetInputCursor(int index)
+        {
+            if (_inputField == null) return;
+            try
+            {
+                _inputField.cursorIndex = index;
+                _inputField.selectIndex = index;
+            }
+            catch
+            {
+                // 某些 Unity 版本上 cursorIndex 只读或延迟生效，忽略即可
+            }
         }
 
         #endregion

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.18] - 2026-07-21
+
+### Fixed
+- **输入框 Shift+Enter 触发全选 / 换行交互异常**：Unity 2022.3 多行 TextField 的内建 `KeyboardTextEditor` 通过 default action 通道处理 Shift+Enter，把它错误地当成全选（连续按会全选→再按替换掉整段文本）。事件拦截（`StopPropagation` / `StopImmediatePropagation`，甚至下沉阶段注册到内部 `unity-text-input` 子元素）都拦不住 default action —— 经 DIAG 日志实证：全选在按键 default action 阶段注入，发生在自定义 handler 执行之后的间隙，无法靠拦截根治。
+
+### Changed
+- **输入框换行键位改为 Ctrl+Enter，发送保持 Enter**：不再与内建抢 Enter/Shift+Enter（内建对这两个键的 default action 拦不住），改用内建不响应的 Ctrl+Enter 组合键自己插入换行，彻底绕开全选坑。Enter 仍为发送，且保留 IME 守卫 —— 中日韩输入法组字未提交时按 Enter 是"确认选词/上屏"，此时不发送，让候选内容上屏到输入框；组字提交后再按 Enter 才真正发送。换行插入用 `SetValueWithoutNotify` + 光标钉位（立即 + 延迟一帧两次），避免 value setter/Focus 引发的意外全选。HelpBubble 快捷键提示同步更新。
+
 ## [1.7.17] - 2026-07-21
 
 ### Fixed
