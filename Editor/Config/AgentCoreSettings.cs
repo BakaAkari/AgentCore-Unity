@@ -97,7 +97,7 @@ namespace AgentCore.Editor.Config
         public bool compressionEnabled = true;
 
         // --- Log Level (v1.6.5+, control Debug.Log verbosity) ---
-        [Tooltip("Log verbosity — Silent: 无任何输出; Error: 仅错误; Warning: 错误+警告; Info: 默认,含关键业务事件; Debug: 包含高频细节 (流式 token、每 event)")]
+        [Tooltip("Log verbosity — Silent: no output; Error: errors only; Warning: errors + warnings; Info: default, incl. key business events; Debug: incl. high-frequency details (streaming token, per-event)")]
         public AgentCore.Editor.Utils.LogLevel logLevel = AgentCore.Editor.Utils.LogLevel.Info;
 
         // ═══════════════════════════════════════════════════════════════

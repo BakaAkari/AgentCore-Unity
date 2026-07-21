@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.20] - 2026-07-21
+
+### Changed
+- **设置界面全英文化**：清理设置界面残留的中文 UI 文本（此前 Log Verbosity 卡片描述、Log Level 下拉 tooltip、以及 `AgentCoreSettings.logLevel` 字段的 `[Tooltip]` 特性混有中文）。完整扫描 Config/Settings 相关文件后统一翻为英文，共 3 处；代码注释里的中文（不显示在界面）保留不动。
+- **HelpBubble 使用技巧面板精简**：移除快捷键区中 `Ctrl+Shift+E 导出会话`、`Enter 发送消息`、`Escape 取消操作` 三个条目；面板期望高度 540→620，配合内容减少尽量避免用户滚动（面板高度仍受当前窗口物理高度约束，极小窗口下仍可滚动）。
+- **设置界面 Quick Actions 按钮宽度统一**：Quick Actions 卡片内 5 个按钮此前混用 140/150 宽度导致每行不齐，统一为常量 `ButtonWidth = 150f`（取 150 以容纳最长文案 "Refresh Tool Registry"）。
+
 ## [1.7.19] - 2026-07-21
 
 ### Changed

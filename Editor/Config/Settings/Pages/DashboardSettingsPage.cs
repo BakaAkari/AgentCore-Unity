@@ -51,7 +51,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             context.Ui.DrawCard(
                 "Log Verbosity",
-                "控制 [AgentCore] 前缀日志的详细程度,回复阶段狂刷 log 卡编辑器时切到 Warning 或 Error 即可。",
+                "Controls the verbosity of [AgentCore]-prefixed logs. If heavy logging during responses lags the Editor, switch to Warning or Error.",
                 () =>
                 {
                     var settings = context.Settings;
@@ -59,7 +59,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     var newLevel = (AgentCore.Editor.Utils.LogLevel)EditorGUILayout.EnumPopup(
                         new GUIContent(
                             "Log Level",
-                            "Silent: 完全静默(慎用) · Error: 仅错误 · Warning: 警告+错误 · Info: 默认,关键业务事件 · Debug: 全部,含流式 token/每 event 高频日志"),
+                            "Silent: fully silent (use with caution) · Error: errors only · Warning: warnings + errors · Info: default, key business events · Debug: everything, incl. streaming token / per-event high-frequency logs"),
                         current);
                     if (newLevel != current)
                     {
@@ -172,16 +172,19 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
         private static void DrawQuickActionsCard(AgentCoreSettingsContext context)
         {
+            // 所有 Quick Actions 按钮统一宽度，避免每行按钮宽度不一致（此前混用 140/150）
+            const float ButtonWidth = 150f;
+
             context.Ui.DrawCard("Quick Actions", "Common shortcuts and maintenance actions.", () =>
             {
                 EditorGUILayout.BeginHorizontal();
 
-                if (GUILayout.Button("Open Chat Window", GUILayout.Width(140)))
+                if (GUILayout.Button("Open Chat Window", GUILayout.Width(ButtonWidth)))
                 {
                     ChatWindow.ShowWindow();
                 }
 
-                if (GUILayout.Button("Refresh Tool Registry", GUILayout.Width(150)))
+                if (GUILayout.Button("Refresh Tool Registry", GUILayout.Width(ButtonWidth)))
                 {
                     AgentCore.Editor.Tools.Infrastructure.ToolAutoDiscovery.DiscoverAndRegisterAll();
                     AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Tool registry refreshed.");
@@ -192,7 +195,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                 EditorGUILayout.BeginHorizontal();
 
-                if (GUILayout.Button("Open Logs", GUILayout.Width(140)))
+                if (GUILayout.Button("Open Logs", GUILayout.Width(ButtonWidth)))
                 {
                     var logPath = GetEditorLogPath();
                     if (!string.IsNullOrEmpty(logPath) && File.Exists(logPath))
@@ -205,7 +208,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     }
                 }
 
-                if (GUILayout.Button("Reset Settings", GUILayout.Width(150)))
+                if (GUILayout.Button("Reset Settings", GUILayout.Width(ButtonWidth)))
                 {
                     if (EditorUtility.DisplayDialog(
                         "Reset Settings",
@@ -223,7 +226,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                 EditorGUILayout.BeginHorizontal();
 
-                if (GUILayout.Button("Clear Secure Keys", GUILayout.Width(150)))
+                if (GUILayout.Button("Clear Secure Keys", GUILayout.Width(ButtonWidth)))
                 {
                     if (EditorUtility.DisplayDialog(
                         "Clear Secure Keys",
