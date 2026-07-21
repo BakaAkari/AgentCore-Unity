@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.17] - 2026-07-21
+
+### Fixed
+- **GameObject 工具链无法操作 inactive 对象**：`ToolHelpers.FindGameObject` / `FindGameObjectsByName` 及 `SmartOperationsTool` 的场景对象查找使用 `FindObjectsByType<GameObject>(FindObjectsSortMode.None)`，该重载在 Unity 2022.3 默认 `FindObjectsInactive.Exclude`，导致 inactive 对象查不到。后果：用 `set_active_batch` 等工具禁用一个对象后，再也无法用同一工具链（`get_info` / `modify` / `set_active_batch` / `manage_component` / `smart_operations`）重新找到并启用它——启用能力闭环缺口。修复：三处查找统一补 `FindObjectsInactive.Include`。对照组 `FindGameObjectsTool`（`activeOnly:false` 时已正确传 Include）不受影响。注：`SceneAnalysisTool` / `OptimizationTool` 中按 `Renderer`/`Light` 统计渲染对象的查找保持默认 Exclude（统计活跃渲染物是正确语义，未改）。
+
 ## [1.7.16] - 2026-07-21
 
 ### Changed

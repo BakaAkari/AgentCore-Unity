@@ -123,8 +123,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
             var go = GameObject.Find(nameOrPath);
             if (go != null) return go;
 
-            // 再尝试按名称在所有对象中查找
-            var allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+            // 再尝试按名称在所有对象中查找（含 inactive，否则禁用后的对象不可达）
+            var allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             return allObjects.FirstOrDefault(o => o.name == nameOrPath);
         }
 
@@ -149,7 +149,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
             if (string.IsNullOrEmpty(name))
                 return result;
 
-            var allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+            var allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (var o in allObjects)
             {
                 if (o.name == name)

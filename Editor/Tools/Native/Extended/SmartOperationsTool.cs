@@ -463,7 +463,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     return ToolResponse.Fail($"Component type not found: {component}");
             }
 
-            var allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+            var allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             var matched = new List<GameObject>();
 
             foreach (var go in allObjects)
