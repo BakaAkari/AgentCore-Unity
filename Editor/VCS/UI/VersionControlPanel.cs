@@ -416,7 +416,9 @@ namespace AgentCore.Editor.Components.VCS.UI
                 {
                     _currentFiles = statusResult.Files ?? new List<VcsFileStatus>();
                     UpdateStatusList(_currentFiles);
-                    _viewDiffButton.SetEnabled(_currentFiles.Count > 0);
+                    // View Diff 走外部图形 diff 工具（目前仅 SVN/TortoiseSVN 支持），
+                    // 非 SVN 时禁用按钮，避免点击后只弹"需要外部客户端"的空操作。
+                    _viewDiffButton.SetEnabled(_currentFiles.Count > 0 && SupportsExternalFileTool("diff"));
                 }
 
                 // 更新提交历史
@@ -1478,12 +1480,14 @@ namespace AgentCore.Editor.Components.VCS.UI
         private bool TryOpenExternalDiff(string filePath)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
-            var absolutePath = GetAbsolutePath(filePath);
-            
+            // filePath 为空表示"整个工作副本 diff"（按钮无选中态），path 传 VCS 根目录；
+            // 否则针对具体文件。TortoiseSVN 的 /command:diff 对目录与文件都适用。
+            var targetPath = string.IsNullOrWhiteSpace(filePath) ? rootPath : GetAbsolutePath(filePath);
+
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:diff /path:\"{absolutePath}\"", rootPath, "TortoiseSVN diff window");
+                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:diff /path:\"{targetPath}\"", rootPath, "TortoiseSVN diff window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false; // Git GUI 和 P4V 不支持单文件 diff 窗口
@@ -1788,42 +1792,21 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         #region View Diff
 
-        private async void OnViewDiffClicked()
+        private void OnViewDiffClicked()
         {
+            // 呼出对应 VCS 软件的图形 diff 功能，不把 diff 文本写入 Console
+            //（Console 输出受日志分级开关影响、且极易被淹没忽略）。
+            // 目前仅维护 SVN（TortoiseSVN）；Git / Perforce 不做，按钮在这两种 VCS 下已被禁用
+            //（见 RefreshAllData 中 _viewDiffButton.SetEnabled 的 SupportsExternalFileTool 判定）。
+            // 有单选文件则 diff 该文件，否则对整个工作副本做 diff（filePath 传 null）。
             var selectedFiles = GetSelectedFilePaths();
             string filePath = selectedFiles.Count == 1 ? selectedFiles.First() : null;
-            await ShowDiffAsync(filePath);
-        }
 
-        private async Task ShowDiffAsync(string filePath)
-        {
-            if (_adapter == null)
+            if (TryOpenExternalDiff(filePath))
                 return;
 
-            _viewDiffButton.SetEnabled(false);
-
-            try
-            {
-                var diff = await _adapter.GetDiffAsync(filePath, CancellationToken.None);
-
-                if (string.IsNullOrEmpty(diff))
-                {
-                    ShowMessage("No differences to display.", false);
-                }
-                else
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[Version Control] Diff Output{(string.IsNullOrEmpty(filePath) ? string.Empty : $" ({filePath})")}:\n{diff}");
-                    ShowMessage(string.IsNullOrEmpty(filePath) ? "Diff output logged to Console." : $"Diff for '{filePath}' logged to Console.", false);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowMessage($"Error getting diff: {ex.Message}", true);
-            }
-            finally
-            {
-                _viewDiffButton.SetEnabled(true);
-            }
+            // SVN 但外部工具不可用（TortoiseSVN 未安装/未配置）时提示
+            ShowExternalToolUnavailable("Diff");
         }
 
         #endregion

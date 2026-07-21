@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.19] - 2026-07-21
+
+### Changed
+- **VCS 面板 View Diff 按钮改为呼出外部图形 diff 工具**：Working Copy Status 面板的 View Diff 此前把 diff 文本通过 `AgentCoreLog.Info` 写入 Unity Console —— 该输出受 Settings 日志分级开关影响（调到 Warning/Error 时被吞），且极易被 Console 其他日志淹没忽略。现改为与右键菜单 `Show Working Copy Diff` 一致，直接呼出对应 VCS 软件的图形 diff 功能（有单选文件则 diff 该文件，否则对整个工作副本做 diff），不再写 Console。删除旧的 `ShowDiffAsync` 实现。
+- **View Diff 目前仅维护 SVN**：TortoiseSVN 下按钮可用（`TortoiseProc.exe /command:diff`）；Git / Perforce 的图形 diff 集成不做，这两种 VCS 下按钮禁用（`SupportsExternalFileTool("diff")` 判定），避免提供点击后无实际动作的假入口。
+
 ## [1.7.18] - 2026-07-21
 
 ### Fixed
