@@ -161,7 +161,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
                     attr.RiskLevel,
                     attr.Capabilities,
                     attr.RequiresConfirmation,
-                    attr.Visibility);
+                    attr.Visibility,
+                    attr.ReadOnlyActions);
             }
 
             public ToolMetadata Metadata => _metadata;

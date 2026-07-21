@@ -36,6 +36,7 @@ namespace AgentCore.Editor.UI
         {
             _hubPanelStateSnapshot = CaptureHubPanelState();
             AgentCoreSettings.OnSettingsChanged += OnSettingsChangedRebuildHub;
+            HubNavBadgeBus.BadgeChanged += OnHubNavBadgeChanged;
         }
 
         /// <summary>
@@ -44,6 +45,50 @@ namespace AgentCore.Editor.UI
         private void UnsubscribeHubSettingsChanged()
         {
             AgentCoreSettings.OnSettingsChanged -= OnSettingsChangedRebuildHub;
+            HubNavBadgeBus.BadgeChanged -= OnHubNavBadgeChanged;
+        }
+
+        /// <summary>
+        /// Hub 导航角标状态变化回调：把某个模块的标签覆盖 / 告警高亮应用到对应导航按钮。
+        /// 由 <see cref="HubNavBadgeBus"/> 在任意模块（如 VCS）推送状态时触发。
+        /// </summary>
+        /// <param name="state">目标模块的最新角标状态。</param>
+        private void OnHubNavBadgeChanged(HubNavBadgeState state)
+        {
+            if (state == null || _hubRail == null)
+                return;
+
+            ApplyHubNavBadge(state);
+        }
+
+        /// <summary>
+        /// 把单个角标状态应用到 HubRail 按钮（标签覆盖 + 告警高亮）。
+        /// </summary>
+        private void ApplyHubNavBadge(HubNavBadgeState state)
+        {
+            if (state == null || _hubRail == null || string.IsNullOrWhiteSpace(state.ModuleId))
+                return;
+
+            if (!string.IsNullOrWhiteSpace(state.LabelOverride))
+                _hubRail.SetModuleLabel(state.ModuleId, state.LabelOverride);
+
+            _hubRail.SetModuleAlert(state.ModuleId, state.Alert);
+        }
+
+        /// <summary>
+        /// 在 HubRail 构建/重建后，从 <see cref="HubNavBadgeBus"/> 一次性拉取所有已发布的模块角标状态并应用。
+        /// <para>
+        /// 必要性：模块驱动器（如 VCS）通常在 <c>[InitializeOnLoad]</c> 阶段就推送了状态，可能早于本窗口打开；
+        /// 若不主动拉取，早期事件会丢失，按钮外观与实际状态不同步。
+        /// </para>
+        /// </summary>
+        private void SyncHubNavBadges()
+        {
+            if (_hubRail == null)
+                return;
+
+            foreach (var state in HubNavBadgeBus.Snapshot())
+                ApplyHubNavBadge(state);
         }
 
         /// <summary>
@@ -97,6 +142,9 @@ namespace AgentCore.Editor.UI
             var mainBody = rootVisualElement.Q<VisualElement>("main-body");
             mainBody?.Insert(0, _hubRail);
             _hubRail.OnModuleChanged += OnHubModuleChanged;
+
+            // 4.5 同步导航角标状态（重建后按钮外观与各模块最新状态对齐）
+            SyncHubNavBadges();
 
             // 5. 切换到之前的模块（如果仍存在），否则回退到 Chat
             var targetModule = _hubPanels.ContainsKey(previousModuleId) ? previousModuleId : ChatModuleId;

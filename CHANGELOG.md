@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.16] - 2026-07-21
+
+### Changed
+- **工具确认流程重构（风险分级 + 能力位联合决策）**：确认面板"弹不弹"的判定从单一破坏性标志升级为 `ToolRiskLevel`（风险分级）× `ToolCapability`（能力位）联合决策，并以 action token 作兜底。修复了多 action 混合工具的能力位"连坐"问题——同一工具内只读 action（如 `manage_gameobject:get_info`）不再因该工具含破坏性 action 而被误判为需确认，判定粒度落到 **action 级**而非工具级。涉及 `ToolRiskPolicy`、`AgentToolAttribute`、`IAgentTool`、`ChatWindow.Confirmation` 及全部原生工具的 action 白名单标注。
+- **VCS 更新操作不再弹系统确认框**：`VersionControlPanel` 内点击 Update 不再弹出"很像报错"的 `EditorUtility.DisplayDialog` 确认框，直接打开对应外部 VCS 窗口（TortoiseSVN / Git GUI / P4V）。理由：操作已收敛在 VCS 页面内，用户在此触发即代表明确知晓在操作 VCS。
+
+### Added
+- **set_selection 多选增强**：`manage_editor:set_selection` 支持多目标选择、InstanceID 定位、同名对象全选，参数兼容数组 / 逗号字符串 / 字符串化 JSON 三种形态。新增 `ToolHelpers.FindGameObjectsByName`。
+- **Hub 左侧 VCS 导航按钮动态化**：新增通用 `HubNavBadgeBus`（导航角标事件总线，保留每模块最新状态供晚开窗口拉取）+ `HubRail.SetModuleLabel` / `SetModuleAlert` 通用方法。VCS 侧新增 `VcsHubNavBadgeDriver`（`InitializeOnLoad`）：按检测到的 VCS 类型把导航按钮标签动态改为 **SVN / GIT / P4**（未检测到保留默认 "VCS"）；订阅 `VcsRemoteStatusMonitor.StatusChanged`，远端有更新时按钮**变黄高亮**（`.hub-rail__button--alert`），无更新时恢复。架构上 VCS asmdef 单向依赖主 Editor，经通用总线通信，无循环依赖，其他模块可复用同一角标机制。
+
+### Fixed
+- **set_active_batch per-item `active` 被忽略**：`manage_gameobject:set_active_batch` 传 `items:[{target, active}]` 时，handler 只读顶层 `parameters["active"]` → 为 null → 回退默认 `true`，导致 `active:false` 的对象未被禁用（静默给错结果）。修复：改为逐 item 读取 `active`（缺省回退顶层 active，再回退 true），summary 改为计数式 `N succeeded, M failed`，不再假设单一 active 值。经全量排查，其余 24 个 batch handler 无同类隐患（范式 A per-item 提取正确 / 范式 B 顶层统一操作值是设计意图）。
+
+### Removed
+- **SceneView 顶部 VCS 黄色警示条**：删除 `VcsSceneViewUpdateBanner`（原在场景视图顶部绘制琥珀色更新提醒条 + 6 处 `EditorUtility.DisplayDialog`）。远端更新提示改由左侧 VCS 导航按钮变黄承担，不再遮挡场景视图。
+
 ## [1.7.15] - 2026-07-20
 
 ### Fixed

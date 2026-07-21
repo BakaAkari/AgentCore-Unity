@@ -136,6 +136,28 @@ namespace AgentCore.Editor.Tools.Infrastructure
             return EditorUtility.InstanceIDToObject(instanceId) as GameObject;
         }
 
+        /// <summary>
+        /// 按名称查找场景中所有同名 GameObject（用于同名全选场景）。
+        /// <para>
+        /// 与 <see cref="FindGameObject"/> 的区别：后者只返回第一个匹配，本方法返回全部同名对象。
+        /// 传入层级路径（含 '/'）时不适用本方法——路径本身即为消歧手段，应走精确单个查找。
+        /// </para>
+        /// </summary>
+        public static System.Collections.Generic.List<GameObject> FindGameObjectsByName(string name)
+        {
+            var result = new System.Collections.Generic.List<GameObject>();
+            if (string.IsNullOrEmpty(name))
+                return result;
+
+            var allObjects = UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+            foreach (var o in allObjects)
+            {
+                if (o.name == name)
+                    result.Add(o);
+            }
+            return result;
+        }
+
         #endregion
 
         #region Vector 解析

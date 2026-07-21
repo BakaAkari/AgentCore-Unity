@@ -33,6 +33,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ExecuteCode | ToolCapability.ModifyScripts,
+        ReadOnlyActions = new[] { "get_results", "list_tests" },
         Visibility = ToolVisibility.OnDemand)]
     public class ManageTestTool : IAgentTool
     {

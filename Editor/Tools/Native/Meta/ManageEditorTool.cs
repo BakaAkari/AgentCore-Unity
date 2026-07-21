@@ -22,7 +22,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Description = "Control Unity Editor state and access project-level settings. " +
             "Actions: get_info (editor version, platform, play state, active scene, render pipeline — use to verify environment), " +
             "play_mode (enter/exit/pause play mode), refresh (force asset reimport/recompile), " +
-            "get_selection/set_selection (current editor selection), focus_window (bring editor windows to front), " +
+            "get_selection/set_selection (current editor selection; set_selection accepts a single target or an array of targets for multi-select), focus_window (bring editor windows to front), " +
             "get_project_settings/set_project_setting (PlayerSettings, Physics, Quality, etc.). " +
             "Use get_info as a first step to confirm editor connectivity and project state. " +
             "Use refresh after script changes to trigger recompilation. " +
@@ -30,7 +30,8 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Category = "meta",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
-        Capabilities = ToolCapability.ModifyProjectSettings)]
+        Capabilities = ToolCapability.ModifyProjectSettings,
+        ReadOnlyActions = new[] { "get_info", "get_selection", "get_project_settings" })]
     public class ManageEditorTool : IAgentTool
     {
         #region Schema
@@ -54,8 +55,11 @@ namespace AgentCore.Editor.Tools.Native.Meta
                     ""description"": ""Window to focus (for focus_window action)""
                 },
                 ""target"": {
-                    ""type"": ""string"",
-                    ""description"": ""Target GameObject name or asset path (for set_selection action)""
+                    ""description"": ""Target(s) for set_selection. Each target may be: a GameObject name (selects ALL objects with that name), a hierarchy path like 'Player/Camera' (selects one exact object), an integer InstanceID, or an asset path. Pass a single string or an array of strings for multi-select."",
+                    ""oneOf"": [
+                        { ""type"": ""string"" },
+                        { ""type"": ""array"", ""items"": { ""type"": ""string"" } }
+                    ]
                 },
                 ""import_mode"": {
                     ""type"": ""string"",
@@ -338,42 +342,194 @@ namespace AgentCore.Editor.Tools.Native.Meta
                     : "No objects selected.");
         }
 
+        /// <summary>构造单个 GameObject 的选择信息 JObject（供 set_selection 结果复用）。</summary>
+        private static JObject GameObjectInfo(GameObject go)
+        {
+            return new JObject
+            {
+                ["name"] = go.name,
+                ["instance_id"] = go.GetInstanceID(),
+                ["type"] = "GameObject"
+            };
+        }
+
         private ToolResponse HandleSetSelection(JObject parameters)
         {
-            var target = ToolHelpers.GetRequiredString(parameters, "target");
-
-            // Try to find as GameObject in scene
-            var go = ToolHelpers.FindGameObject(target);
-            if (go != null)
+            // v1.7.16：支持单选与多选。target 可为单个字符串，或字符串数组（多选）。
+            // 收集所有目标标识符（GameObject 名/层级路径 或 资源路径），逐个解析后一次性设置 Selection.objects。
+            var token = parameters["target"];
+            if (token == null || token.Type == JTokenType.Null)
             {
-                Undo.RecordObject(Selection.activeGameObject != null ? (UnityEngine.Object)Selection.activeGameObject : go,
-                    "AgentCore: Set Selection");
-                Selection.activeGameObject = go;
-                EditorGUIUtility.PingObject(go);
-                return ToolResponse.OkWithData(new JObject
-                {
-                    ["name"] = go.name,
-                    ["instance_id"] = go.GetInstanceID(),
-                    ["type"] = "GameObject"
-                }, $"Selected GameObject: '{go.name}'");
+                return ToolResponse.Fail("Missing required parameter: 'target' (string or array of strings).");
             }
 
-            // Try to find as asset
-            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target);
-            if (asset != null)
+            var targets = new System.Collections.Generic.List<string>();
+            if (token.Type == JTokenType.Array)
             {
-                Selection.activeObject = asset;
-                EditorGUIUtility.PingObject(asset);
-                return ToolResponse.OkWithData(new JObject
+                foreach (var item in (JArray)token)
                 {
-                    ["name"] = asset.name,
-                    ["instance_id"] = asset.GetInstanceID(),
-                    ["type"] = asset.GetType().Name,
-                    ["asset_path"] = target
-                }, $"Selected asset: '{asset.name}'");
+                    var s = item?.ToString();
+                    if (!string.IsNullOrWhiteSpace(s)) targets.Add(s.Trim());
+                }
+            }
+            else
+            {
+                var s = token.ToString().Trim();
+                // 兼容 LLM 把数组序列化成字符串传入的情况，例如 target = "[\"a\", \"b\"]"。
+                if (s.StartsWith("[") && s.EndsWith("]"))
+                {
+                    JArray arr = null;
+                    try { arr = JArray.Parse(s); } catch { arr = null; }
+                    if (arr != null)
+                    {
+                        foreach (var item in arr)
+                        {
+                            var e = item?.ToString();
+                            if (!string.IsNullOrWhiteSpace(e)) targets.Add(e.Trim());
+                        }
+                    }
+                }
+
+                // 未识别为 JSON 数组：再兼容逗号分隔的多目标写法 "a, b"。
+                if (targets.Count == 0)
+                {
+                    if (s.IndexOf(',') >= 0)
+                    {
+                        foreach (var part in s.Split(','))
+                        {
+                            var e = part.Trim();
+                            if (!string.IsNullOrWhiteSpace(e)) targets.Add(e);
+                        }
+                    }
+                    else if (!string.IsNullOrWhiteSpace(s))
+                    {
+                        targets.Add(s);
+                    }
+                }
             }
 
-            return ToolResponse.Fail($"Could not find GameObject or asset with target: '{target}'");
+            if (targets.Count == 0)
+            {
+                return ToolResponse.Fail("Parameter 'target' contained no valid entries.");
+            }
+
+            var resolved = new System.Collections.Generic.List<UnityEngine.Object>();
+            var resolvedInfo = new JArray();
+            var notFound = new System.Collections.Generic.List<string>();
+
+            foreach (var target in targets)
+            {
+                bool matched = false;
+
+                if (target.IndexOf('/') >= 0)
+                {
+                    // 含层级路径：路径本身即消歧手段，精确匹配单个 GameObject。
+                    var go = ToolHelpers.FindGameObject(target);
+                    if (go != null)
+                    {
+                        resolved.Add(go);
+                        resolvedInfo.Add(GameObjectInfo(go));
+                        matched = true;
+                    }
+                }
+                else if (int.TryParse(target, out var instanceId))
+                {
+                    // 纯整数：优先按 InstanceID 解析（可指向 GameObject 或资源对象）。
+                    var obj = EditorUtility.InstanceIDToObject(instanceId);
+                    if (obj != null)
+                    {
+                        resolved.Add(obj);
+                        resolvedInfo.Add(obj is GameObject g
+                            ? GameObjectInfo(g)
+                            : new JObject
+                            {
+                                ["name"] = obj.name,
+                                ["instance_id"] = instanceId,
+                                ["type"] = obj.GetType().Name
+                            });
+                        matched = true;
+                    }
+                    else
+                    {
+                        // InstanceID 无对应对象，回退按名字（罕见：物体名恰为纯数字）。
+                        var byName = ToolHelpers.FindGameObjectsByName(target);
+                        foreach (var g in byName)
+                        {
+                            resolved.Add(g);
+                            resolvedInfo.Add(GameObjectInfo(g));
+                        }
+                        matched = byName.Count > 0;
+                    }
+                }
+                else
+                {
+                    // 普通名字：选中所有同名 GameObject（同名全选）。
+                    var byName = ToolHelpers.FindGameObjectsByName(target);
+                    foreach (var g in byName)
+                    {
+                        resolved.Add(g);
+                        resolvedInfo.Add(GameObjectInfo(g));
+                    }
+                    matched = byName.Count > 0;
+                }
+
+                if (matched)
+                    continue;
+
+                // 场景对象未命中：尝试按资源路径解析。
+                var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target);
+                if (asset != null)
+                {
+                    resolved.Add(asset);
+                    resolvedInfo.Add(new JObject
+                    {
+                        ["name"] = asset.name,
+                        ["instance_id"] = asset.GetInstanceID(),
+                        ["type"] = asset.GetType().Name,
+                        ["asset_path"] = target
+                    });
+                    continue;
+                }
+
+                notFound.Add(target);
+            }
+
+            if (resolved.Count == 0)
+            {
+                return ToolResponse.Fail(
+                    $"Could not find any GameObject or asset for target(s): {string.Join(", ", notFound)}");
+            }
+
+            // 一次性设置选择集：单个走 activeObject，多个走 Selection.objects。
+            if (resolved.Count == 1)
+            {
+                Selection.activeObject = resolved[0];
+            }
+            else
+            {
+                Selection.objects = resolved.ToArray();
+            }
+            EditorGUIUtility.PingObject(resolved[0]);
+
+            var data = new JObject
+            {
+                ["selected_count"] = resolved.Count,
+                ["selected"] = resolvedInfo
+            };
+            if (notFound.Count > 0)
+            {
+                data["not_found"] = new JArray(notFound);
+            }
+
+            var summary = resolved.Count == 1
+                ? $"Selected: '{((resolvedInfo[0] as JObject)?["name"])}'"
+                : $"Selected {resolved.Count} objects.";
+            if (notFound.Count > 0)
+            {
+                summary += $" ({notFound.Count} not found: {string.Join(", ", notFound)})";
+            }
+
+            return ToolResponse.OkWithData(data, summary);
         }
 
         private ToolResponse HandleRefresh(JObject parameters)

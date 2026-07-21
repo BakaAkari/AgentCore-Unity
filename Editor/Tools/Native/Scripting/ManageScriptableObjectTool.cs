@@ -30,7 +30,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
-        Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles)]
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
+        ReadOnlyActions = new[] { "get", "find", "list_types", "export_json" })]
     public class ManageScriptableObjectTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
@@ -56,6 +57,30 @@ namespace AgentCore.Editor.Tools
         public bool RequiresConfirmation { get; }
 
         /// <summary>
+        /// 只读 action 白名单（v1.7.16 治理层粒度修复）。
+        /// <para>
+        /// 供多 action 混合读写工具声明哪些 action 是只读的。<see cref="ToolRiskPolicy"/>
+        /// 对命中的 action 跳过风险等级 / 能力位主判据。大小写不敏感。默认空数组。
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<string> ReadOnlyActions { get; }
+
+        /// <summary>
+        /// 判断给定 action 是否在只读白名单中（大小写不敏感）。
+        /// </summary>
+        public bool IsReadOnlyAction(string action)
+        {
+            if (string.IsNullOrWhiteSpace(action) || ReadOnlyActions == null || ReadOnlyActions.Count == 0)
+                return false;
+            for (int i = 0; i < ReadOnlyActions.Count; i++)
+            {
+                if (string.Equals(ReadOnlyActions[i], action, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 工具对 LLM 的可见性级别（G.3 ActiveToolScope）。
         /// 默认为 <see cref="ToolVisibility.AlwaysVisible"/>。
         /// </summary>
@@ -109,7 +134,8 @@ namespace AgentCore.Editor.Tools
             ToolRiskLevel riskLevel,
             ToolCapability capabilities,
             bool requiresConfirmation,
-            ToolVisibility visibility = ToolVisibility.AlwaysVisible)
+            ToolVisibility visibility = ToolVisibility.AlwaysVisible,
+            IReadOnlyList<string> readOnlyActions = null)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = description ?? throw new ArgumentNullException(nameof(description));
@@ -120,50 +146,22 @@ namespace AgentCore.Editor.Tools
             Capabilities = capabilities;
             RequiresConfirmation = requiresConfirmation;
             Visibility = visibility;
-        }
-
-        /// <summary>
-        /// 基于现有 ToolMetadata 克隆出一份附带风险字段的新实例。
-        /// <para>
-        /// <c>ToolAutoDiscovery</c> 在注册时使用：工具类的 <c>Metadata</c> 仍由旧构造创建，
-        /// 由 Discovery 用本方法附加 Attribute 上的风险声明，无需修改工具实现代码。
-        /// </para>
-        /// </summary>
-        /// <summary>
-        /// 基于现有 ToolMetadata 克隆出一份附带风险字段的新实例。
-        /// <para>
-        /// <c>ToolAutoDiscovery</c> 在注册时使用：工具类的 <c>Metadata</c> 仍由旧构造创建，
-        /// 由 Discovery 用本方法附加 Attribute 上的风险声明，无需修改工具实现代码。
-        /// </para>
-        /// </summary>
-        public ToolMetadata WithRisk(
-            ToolRiskLevel riskLevel,
-            ToolCapability capabilities,
-            bool requiresConfirmation)
-        {
-            return new ToolMetadata(
-                Name,
-                Description,
-                Category,
-                ParametersSchema,
-                RequiresMainThread,
-                riskLevel,
-                capabilities,
-                requiresConfirmation,
-                Visibility);
+            ReadOnlyActions = readOnlyActions ?? Array.Empty<string>();
         }
 
         /// <summary>
         /// 基于现有 ToolMetadata 克隆出附带风险字段和可见性的新实例（G.3 ActiveToolScope）。
         /// <para>
-        /// <c>ToolAutoDiscovery</c> 在注册时使用，同时透传 Attribute 上的风险声明和可见性声明。
+        /// <c>ToolAutoDiscovery</c> 在注册时使用，同时透传 Attribute 上的风险声明、可见性声明
+        /// 及只读 action 白名单（v1.7.16）。
         /// </para>
         /// </summary>
         public ToolMetadata WithRiskAndVisibility(
             ToolRiskLevel riskLevel,
             ToolCapability capabilities,
             bool requiresConfirmation,
-            ToolVisibility visibility)
+            ToolVisibility visibility,
+            IReadOnlyList<string> readOnlyActions = null)
         {
             return new ToolMetadata(
                 Name,
@@ -174,7 +172,8 @@ namespace AgentCore.Editor.Tools
                 riskLevel,
                 capabilities,
                 requiresConfirmation,
-                visibility);
+                visibility,
+                readOnlyActions);
         }
     }
 

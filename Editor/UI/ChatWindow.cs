@@ -293,8 +293,12 @@ namespace AgentCore.Editor.UI
             // 3.8 订阅 Hub 模块切换事件
             _hubRail.OnModuleChanged += OnHubModuleChanged;
 
-            // 3.9 订阅设置变更事件（用于动态重建 Hub 面板）
+            // 3.9 订阅设置变更事件（用于动态重建 Hub 面板）+ 导航角标事件
             SubscribeHubSettingsChanged();
+
+            // 3.10 同步导航角标状态：模块驱动器（如 VCS）可能在窗口打开前就已推送状态，
+            //      先订阅（3.9）再拉取快照，避免遗漏早期事件导致按钮外观不同步。
+            SyncHubNavBadges();
 
             // 4. 绑定按钮事件
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());

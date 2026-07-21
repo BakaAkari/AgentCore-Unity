@@ -26,7 +26,8 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
-        Capabilities = ToolCapability.ExecuteCode)]
+        Capabilities = ToolCapability.ExecuteCode,
+        ReadOnlyActions = new[] { "list", "validate" })]
     public class ExecuteMenuItemTool : IAgentTool
     {
         #region Schema

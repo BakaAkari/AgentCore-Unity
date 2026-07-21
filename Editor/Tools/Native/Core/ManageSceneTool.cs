@@ -25,7 +25,8 @@ namespace AgentCore.Editor.Tools.Native.Core
             "Returns: scene list with paths and load states, or hierarchy tree with depth/components. " +
             "Note: opening a new scene discards unsaved changes in the current scene unless saved first.",
         Category = "Scene", RequiresMainThread = true,
-        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene | ToolCapability.WriteProjectFiles)]
+        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene | ToolCapability.WriteProjectFiles,
+        ReadOnlyActions = new[] { "get_active", "get_hierarchy", "list", "get_build_scenes", "list_open_scenes" })]
     public class ManageSceneTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

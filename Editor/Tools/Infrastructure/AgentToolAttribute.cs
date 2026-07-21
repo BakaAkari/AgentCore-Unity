@@ -67,6 +67,20 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// </summary>
         public bool RequiresConfirmation { get; set; } = false;
 
+        /// <summary>
+        /// 只读 action 白名单（v1.7.16 治理层粒度修复）。
+        /// <para>
+        /// 用于<b>多 action 混合读写</b>工具（如 manage_scene 既有只读 get_hierarchy
+        /// 又有写操作 create/open/save）。工具级 <see cref="Capabilities"/> / <see cref="RiskLevel"/>
+        /// 只能声明一次，会把只读 action 一并连坐触发确认。此列表让工具显式声明哪些 action 是只读的，
+        /// <see cref="Safety.ToolRiskPolicy"/> 对命中的 action 跳过风险等级 / 能力位主判据（破坏性 token 兜底仍生效）。
+        /// </para>
+        /// <para>
+        /// 大小写不敏感。纯只读工具（无副作用能力位）或纯写工具无需声明此字段。
+        /// </para>
+        /// </summary>
+        public string[] ReadOnlyActions { get; set; } = System.Array.Empty<string>();
+
         // ---------------------------------------------------------------
         // G.3 ActiveToolScope — 工具可见性
         // 默认 AlwaysVisible，现有工具无需修改即可保持向后兼容。

@@ -28,7 +28,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
-        Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene)]
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "get_info" })]
     public class ManagePrefabTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

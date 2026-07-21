@@ -31,7 +31,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         RequiresMainThread = true,
         MayModifyScripts = true,
         RiskLevel = ToolRiskLevel.High,
-        Capabilities = ToolCapability.ModifyScripts | ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles)]
+        Capabilities = ToolCapability.ModifyScripts | ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles,
+        ReadOnlyActions = new[] { "analyze", "find_references", "get_info", "list", "read", "search" })]
     public class ManageScriptTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

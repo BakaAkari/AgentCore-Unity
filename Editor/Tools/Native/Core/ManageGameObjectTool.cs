@@ -25,7 +25,8 @@ namespace AgentCore.Editor.Tools.Native.Core
             "Returns: JSON with name, hierarchy path, instanceId, transform, and active state. " +
             "Note: 'target' accepts a name or hierarchy path (e.g. '/Canvas/Panel/Button'). Duplicate names return the first match — use find_gameobjects to disambiguate.",
         Category = "GameObject", RequiresMainThread = true,
-        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene)]
+        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "get_info" })]
     public class ManageGameObjectTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -91,7 +92,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 },
                 ""active"": {
                     ""type"": ""boolean"",
-                    ""description"": ""Active state for batch actions""
+                    ""description"": ""Default active state for set_active_batch. Used for items that don't specify their own 'active', and for names given as a comma-separated string.""
                 },
                 ""names"": {
                     ""type"": ""string"",
@@ -631,18 +632,57 @@ namespace AgentCore.Editor.Tools.Native.Core
         {
             try
             {
-                var names = GetNamesFromParameters(parameters);
-                if (names.Count == 0)
-                    return ToolResponse.Fail("'names' is required for 'set_active_batch' action.");
+                // 顶层 active 作为默认值：items 中未显式指定 active 的项、以及 names 字符串形式的项都用它。
+                bool defaultActive = ToolHelpers.GetOptionalBool(parameters, "active", true);
 
-                bool active = ToolHelpers.GetOptionalBool(parameters, "active", true);
+                // 收集 (目标名, 期望active) 对。支持三种形态：
+                //   1. items:[{target/name, active}]  —— per-item 独立 active（LLM 常用）
+                //   2. names:"a,b" + 顶层 active       —— 全局统一 active
+                //   3. 两者混用
+                var targets = new List<(string Name, bool Active)>();
+
+                var names = ToolHelpers.GetOptionalString(parameters, "names");
+                if (!string.IsNullOrEmpty(names))
+                {
+                    foreach (var n in names.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrEmpty(x)))
+                        targets.Add((n, defaultActive));
+                }
+
+                if (parameters["items"] is JArray items)
+                {
+                    foreach (var item in items)
+                    {
+                        if (item.Type == JTokenType.String)
+                        {
+                            var value = item.Value<string>();
+                            if (!string.IsNullOrWhiteSpace(value))
+                                targets.Add((value.Trim(), defaultActive));
+                        }
+                        else if (item is JObject obj)
+                        {
+                            var value = ToolHelpers.GetOptionalString(obj, "name");
+                            if (string.IsNullOrEmpty(value))
+                                value = ToolHelpers.GetOptionalString(obj, "target");
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                // per-item active：缺省时回退顶层默认。
+                                bool itemActive = ToolHelpers.GetOptionalBool(obj, "active", defaultActive);
+                                targets.Add((value.Trim(), itemActive));
+                            }
+                        }
+                    }
+                }
+
+                if (targets.Count == 0)
+                    return ToolResponse.Fail("'names' or 'items' is required for 'set_active_batch' action.");
+
                 var successes = new JArray();
                 var failures = new JArray();
                 Undo.IncrementCurrentGroup();
                 int undoGroup = Undo.GetCurrentGroup();
                 Undo.SetCurrentGroupName("Set Active GameObjects Batch");
 
-                foreach (var name in names)
+                foreach (var (name, active) in targets)
                 {
                     var go = ToolHelpers.FindGameObject(name);
                     if (go == null)
@@ -659,7 +699,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 }
 
                 Undo.CollapseUndoOperations(undoGroup);
-                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Set active={active} on {successes.Count} GameObject(s), {failures.Count} failure(s).");
+                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"set_active_batch: {successes.Count} succeeded, {failures.Count} failed.");
             }
             catch (Exception ex)
             {

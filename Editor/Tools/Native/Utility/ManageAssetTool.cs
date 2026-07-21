@@ -31,7 +31,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
         Category = "Asset",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
-        Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles)]
+        Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
+        ReadOnlyActions = new[] { "get_dependencies", "get_info", "search" })]
     public class ManageAssetTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

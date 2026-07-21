@@ -1704,14 +1704,8 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
             }
 
-            var status = VcsRemoteStatusMonitor.LastStatus;
-            if (status != null && status.HasRemoteChanges)
-            {
-                var message = $"{status.Summary}\n\nThis will open the corresponding external VCS update/sync window. Local conflicts are not auto-resolved in Unity.";
-                if (!EditorUtility.DisplayDialog("Version Control Update", message, "Open Update Window", "Cancel"))
-                    return;
-            }
-
+            // 更新操作不再弹系统确认框：VCS 页面内触发即代表用户明确知道在操作 VCS。
+            // 直接打开对应的外部 VCS 窗口，冲突由外部工具处理，Unity 侧不自动解决。
             if (TryOpenExternalUpdateWindow())
                 return;
 

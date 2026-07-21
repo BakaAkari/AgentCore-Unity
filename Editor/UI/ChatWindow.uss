@@ -164,6 +164,18 @@
     color: #ffffff;
 }
 
+/* 告警高亮：模块有需要关注的状态时（如 VCS 远端有更新）导航按钮变黄。 */
+.hub-rail__button--alert {
+    color: #f2ad1f;
+    border-left-width: 2px;
+    border-left-color: #f2ad1f;
+}
+
+.hub-rail__button--alert:hover {
+    background-color: #3a3320;
+    color: #ffc233;
+}
+
 .hub-rail__settings-button {
     margin-bottom: 6px;
     color: #777777;

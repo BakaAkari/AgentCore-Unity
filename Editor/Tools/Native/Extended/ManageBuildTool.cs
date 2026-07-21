@@ -31,6 +31,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.BuildPlayer | ToolCapability.ModifyProjectSettings,
+        ReadOnlyActions = new[] { "get_player_settings", "get_scenes", "get_settings", "show_folder" },
         RequiresConfirmation = true,
         Visibility = ToolVisibility.OnDemand)]
     public class ManageBuildTool : IAgentTool

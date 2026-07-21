@@ -34,6 +34,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.InstallPackages,
+        ReadOnlyActions = new[] { "check_installed", "get_dependencies", "get_info", "get_versions", "list", "search" },
         RequiresConfirmation = true,
         Visibility = ToolVisibility.OnDemand)]
     public class ManagePackageTool : IAgentTool

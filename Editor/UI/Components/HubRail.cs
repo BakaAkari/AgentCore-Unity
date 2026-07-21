@@ -241,6 +241,49 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
+        /// 运行时覆盖某个模块导航按钮的显示文字（例如 VCS 模块按检测到的类型显示 SVN/GIT/P4）。
+        /// <para>
+        /// 仅对保留文字标签的按钮生效；已应用内置图标的按钮（如 Settings）文字为空，覆盖无视觉效果。
+        /// 传入空字符串等价于不覆盖（忽略）。找不到对应按钮时静默返回。
+        /// </para>
+        /// </summary>
+        /// <param name="moduleId">目标模块 ID。</param>
+        /// <param name="label">新的显示文字。</param>
+        public void SetModuleLabel(string moduleId, string label)
+        {
+            if (string.IsNullOrWhiteSpace(moduleId) || string.IsNullOrWhiteSpace(label))
+                return;
+
+            if (_moduleButtons.TryGetValue(moduleId, out var button) && button != null)
+            {
+                button.text = label;
+            }
+        }
+
+        /// <summary>
+        /// 设置某个模块导航按钮的告警高亮状态（例如 VCS 远端有更新时按钮变黄）。
+        /// <para>
+        /// 通过增删 <c>hub-rail__button--alert</c> USS class 实现，具体配色由 ChatWindow.uss 定义。
+        /// 找不到对应按钮时静默返回。
+        /// </para>
+        /// </summary>
+        /// <param name="moduleId">目标模块 ID。</param>
+        /// <param name="alert">是否高亮告警。</param>
+        public void SetModuleAlert(string moduleId, bool alert)
+        {
+            if (string.IsNullOrWhiteSpace(moduleId))
+                return;
+
+            if (_moduleButtons.TryGetValue(moduleId, out var button) && button != null)
+            {
+                if (alert)
+                    button.AddToClassList("hub-rail__button--alert");
+                else
+                    button.RemoveFromClassList("hub-rail__button--alert");
+            }
+        }
+
+        /// <summary>
         /// 已知模块 ID → Unity 内置编辑器图标名的映射。
         /// 目前仅 settings 用齿轮图标；其余模块（chat/vcs/knowledge 等）一律返回 null 保留文字标签，
         /// 避免"部分按钮有图标、部分是文字"的不一致视觉。

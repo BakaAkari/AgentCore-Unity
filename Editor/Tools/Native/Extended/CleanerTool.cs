@@ -32,6 +32,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ReadProject | ToolCapability.DeleteProjectFiles | ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "find_duplicates", "find_empty_folders", "find_large_assets", "find_missing_references", "find_missing_scripts", "find_unused_assets", "get_asset_usage", "get_dependency_tree" },
         Visibility = ToolVisibility.OnDemand)]
     public class CleanerTool : IAgentTool
     {

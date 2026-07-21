@@ -26,7 +26,8 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
         RequiresMainThread = true,
         MayModifyScripts = false,
         RiskLevel = ToolRiskLevel.Medium,
-        Capabilities = ToolCapability.ModifyAgentConfig)]
+        Capabilities = ToolCapability.ModifyAgentConfig,
+        ReadOnlyActions = new[] { "get_config_paths", "read_project_config", "read_soul_extension" })]
     public class ManageWorkspaceConfigTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -34,6 +34,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "analyze_overdraw", "analyze_scene", "find_duplicate_materials", "find_large_assets", "get_static_flags" },
         Visibility = ToolVisibility.OnDemand)]
     public class OptimizationTool : IAgentTool
     {

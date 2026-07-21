@@ -33,6 +33,48 @@ namespace AgentCore.Editor.Tools.Safety
     public static class ToolRiskPolicy
     {
         /// <summary>
+        /// 需要用户确认的能力位掩码（v1.7.16 起，主判据之一）。
+        /// <para>
+        /// 只要工具声明了这些能力中的任意一项，即视为有副作用、需要用户确认，
+        /// 无论其 <see cref="ToolRiskLevel"/> 声明与否。这样即便工具漏标 RiskLevel
+        /// （默认 Medium），只要能力位诚实声明了写/删/执行/网络，就不会被误判为可直通。
+        /// </para>
+        /// <para>
+        /// 不含 <see cref="ToolCapability.ReadProject"/>（纯读）与
+        /// <see cref="ToolCapability.BatchExecute"/>（批量标志本身不代表副作用，
+        /// 其子操作各自的能力位才是判据）。
+        /// </para>
+        /// </summary>
+        private const ToolCapability ConfirmationCapabilityMask =
+            ToolCapability.WriteProjectFiles |
+            ToolCapability.DeleteProjectFiles |
+            ToolCapability.ModifyScene |
+            ToolCapability.ModifyAssets |
+            ToolCapability.ModifyScripts |
+            ToolCapability.ExecuteCode |
+            ToolCapability.InstallPackages |
+            ToolCapability.BuildPlayer |
+            ToolCapability.NetworkAccess |
+            ToolCapability.VersionControlWrite |
+            ToolCapability.ModifyProjectSettings |
+            ToolCapability.ModifyAgentConfig;
+
+        /// <summary>
+        /// 需要用户确认的风险等级集合（v1.7.16 起，主判据之一）。
+        /// <para>
+        /// High / Destructive / External / CodeExecution 一律需要确认。
+        /// ReadOnly / Low / Medium 不因等级本身触发确认（是否触发取决于能力位与 action token）。
+        /// </para>
+        /// </summary>
+        private static bool IsHighRiskLevel(ToolRiskLevel level)
+        {
+            return level == ToolRiskLevel.High
+                || level == ToolRiskLevel.Destructive
+                || level == ToolRiskLevel.External
+                || level == ToolRiskLevel.CodeExecution;
+        }
+
+        /// <summary>
         /// 破坏性 action 的 token 列表（v1.4.5 起扩展）。
         /// <para>
         /// 匹配规则：把 action 名按下划线拆成 token，任一 token 命中此列表即视为破坏性。
@@ -155,6 +197,52 @@ namespace AgentCore.Editor.Tools.Safety
                 return ToolPolicyDecision.RequireConfirmation(risk, confirmation, reasons);
             }
 
+            // v1.7.16 治理层粒度修复：多 action 混合读写工具（如 manage_scene）声明的
+            // 工具级 Capabilities / RiskLevel 会把只读 action（get_hierarchy/list/...）一并连坐。
+            // 若当前 action 在工具的只读白名单内，则跳过 RiskLevel / 能力位主判据，
+            // 只保留破坏性 token 兜底（防止工具误把带破坏性动词的 action 标进只读列表）。
+            bool isReadOnlyAction = metadata.IsReadOnlyAction(action);
+
+            // v1.7.16 主判据 1：高危风险等级（High/Destructive/External/CodeExecution）一律确认。
+            // 此前风险分级几乎不参与"弹不弹"决策（只在 Trust Low/Med 过滤时用），导致声明了
+            // Destructive 但 action 名不在 token 表、又没声明 RequiresConfirmation 的工具被直接 Allow。
+            if (!isReadOnlyAction && IsHighRiskLevel(metadata.RiskLevel))
+            {
+                reasons.Add($"Tool risk level '{metadata.RiskLevel}' requires explicit user approval.");
+                var confirmation = BuildConfirmationRequest(
+                    toolName,
+                    action,
+                    risk,
+                    metadata,
+                    reasons,
+                    parameterSummary,
+                    targets,
+                    allowSessionTrust: true);
+
+                return ToolPolicyDecision.RequireConfirmation(risk, confirmation, reasons);
+            }
+
+            // v1.7.16 主判据 2：命中写/删/执行/网络等副作用能力位一律确认。
+            // 能力位是比 action 字符串更可靠的信号；即便工具漏标 RiskLevel（默认 Medium），
+            // 只要诚实声明了副作用能力，就不会被误判为可直通。
+            if (!isReadOnlyAction && (metadata.Capabilities & ConfirmationCapabilityMask) != 0)
+            {
+                var matchedCap = metadata.Capabilities & ConfirmationCapabilityMask;
+                reasons.Add($"Tool declares side-effecting capabilities ({matchedCap}); explicit user approval required.");
+                var confirmation = BuildConfirmationRequest(
+                    toolName,
+                    action,
+                    risk,
+                    metadata,
+                    reasons,
+                    parameterSummary,
+                    targets,
+                    allowSessionTrust: true);
+
+                return ToolPolicyDecision.RequireConfirmation(risk, confirmation, reasons);
+            }
+
+            // v1.7.16 兜底：action 名破坏性 token 匹配（保留以覆盖能力位/风险等级都漏标的工具）。
             if (RequiresDestructiveActionConfirmation(action, out var matchedToken))
             {
                 reasons.Add($"Destructive action token '{matchedToken}' detected in '{action}'; explicit user approval required.");

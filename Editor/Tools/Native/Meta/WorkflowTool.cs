@@ -30,7 +30,8 @@ namespace AgentCore.Editor.Tools.Native.Meta
         RequiresMainThread = true,
         MayModifyScripts = false,
         RiskLevel = ToolRiskLevel.High,
-        Capabilities = ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.BatchExecute)]
+        Capabilities = ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.BatchExecute,
+        ReadOnlyActions = new[] { "count_objects", "list_scenes", "snapshot_hierarchy", "collect_by_component", "collect_by_layer", "collect_by_tag" })]
     public class WorkflowTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

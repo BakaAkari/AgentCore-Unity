@@ -36,7 +36,8 @@ namespace AgentCore.Editor.Tools.FileSystem
         RequiresMainThread = false,
         MayModifyScripts = true,
         RiskLevel = ToolRiskLevel.High,
-        Capabilities = ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles)]
+        Capabilities = ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles,
+        ReadOnlyActions = new[] { "read_file", "file_info", "list_directory", "search_content", "ascii" })]
     public class ManageFileTool : IAgentTool
     {
         /// <summary>

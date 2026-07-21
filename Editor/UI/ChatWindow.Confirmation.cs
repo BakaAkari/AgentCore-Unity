@@ -443,15 +443,39 @@ namespace AgentCore.Editor.UI
                 return true;
             }
 
-            // Low-Med: 仅 ReadOnly/Low/Medium 直通
+            // Low-Med: 仅 ReadOnly/Low/Medium 且不含副作用能力位的工具直通。
+            // v1.7.16：仅看 ToolRisk 不够——大量工具漏标 RiskLevel（默认 Medium），
+            // 若只按等级放行，会把"删文件/改脚本/装包/VCS 写/网络"等标称 Medium 的写工具
+            // 静默放过。故追加能力位闸门：含 SideEffectCapabilityMask 的一律不被 Low/Med 信任放行，
+            // 与 ToolRiskPolicy 的确认判据保持一致（用户想全放行应显式选 YOLO）。
             if (_sessionTrustScopes.Contains(ToolConfirmationTrustScope.SessionLowMediumRisk)
-                && IsLowOrMediumRisk(request.Risk.ToolRisk))
+                && IsLowOrMediumRisk(request.Risk.ToolRisk)
+                && (request.Risk.Capabilities & SideEffectCapabilityMask) == 0)
             {
                 return true;
             }
 
             return false;
         }
+
+        /// <summary>
+        /// 有副作用的能力位掩码（与 <see cref="AgentCore.Editor.Tools.Safety.ToolRiskPolicy"/>
+        /// 的 ConfirmationCapabilityMask 保持一致）。含这些能力的工具即便标称 Low/Medium，
+        /// 也不会被 Trust Low/Med 信任放行，须显式 YOLO。
+        /// </summary>
+        private const ToolCapability SideEffectCapabilityMask =
+            ToolCapability.WriteProjectFiles |
+            ToolCapability.DeleteProjectFiles |
+            ToolCapability.ModifyScene |
+            ToolCapability.ModifyAssets |
+            ToolCapability.ModifyScripts |
+            ToolCapability.ExecuteCode |
+            ToolCapability.InstallPackages |
+            ToolCapability.BuildPlayer |
+            ToolCapability.NetworkAccess |
+            ToolCapability.VersionControlWrite |
+            ToolCapability.ModifyProjectSettings |
+            ToolCapability.ModifyAgentConfig;
 
         private static bool IsLowOrMediumRisk(ToolRiskLevel level)
         {

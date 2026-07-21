@@ -29,7 +29,8 @@ namespace AgentCore.Editor.Tools.Native.Core
             "Returns: JSON with component type, enabled state, and all serialized properties with current values. " +
             "Note: componentType uses the class name (e.g. 'Rigidbody', 'BoxCollider', 'AudioSource'), not the full namespace.",
         Category = "Component", RequiresMainThread = true,
-        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene)]
+        RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "get", "list", "get_components_batch" })]
     public class ManageComponentTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
