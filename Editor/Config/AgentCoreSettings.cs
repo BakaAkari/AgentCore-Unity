@@ -46,8 +46,11 @@ namespace AgentCore.Editor.Config
         }
 
         // --- 版本迁移 ---
+        /// <summary>Current settings schema version. Bumped whenever migrations add/remove fields.</summary>
+        public const int CurrentVersion = 21;
+
+        /// <summary>Persisted schema version of this settings asset. Compared against <see cref="CurrentVersion"/> to trigger MigrateSettings.</summary>
         [SerializeField] private int settingsVersion = 0;
-        private const int CurrentVersion = 20;
 
         // ═══════════════════════════════════════════════════════════════
         // 用户 UI 可见字段 (共 ~10 个, 极简哲学: 只保留必要)
@@ -316,6 +319,18 @@ namespace AgentCore.Editor.Config
             if (settingsVersion < 20)
             {
                 AgentCoreLog.Info("[AgentCore] Settings migrated v19→v20: dead field cleanup (12 fields removed, disabledTools default cleared)");
+            }
+
+            // v21: 修复 v20 遗留 bug — v20 声称清理 disabledTools 默认值但实际没执行 Clear。
+            // 强制从 disabledTools 移除历史遗留的 "execute_code"(v1.7.21 起 SOUL §2.10 要求 execute_code:run 可用,
+            // 但历史 settings 里 execute_code 被硬编码写入 disabledTools 导致 ToolRegistry 过滤掉该工具,
+            // 使 SOUL 引导的能力不可用)。只精准移除 execute_code 单项,不清空整个 disabledTools 以尊重用户其它禁用意图。
+            if (settingsVersion < 21)
+            {
+                if (disabledTools != null && disabledTools.Remove("execute_code"))
+                {
+                    AgentCoreLog.Info("[AgentCore] Settings migrated v20→v21: removed 'execute_code' from disabledTools (v20 migration bug fix; execute_code:run is required by SOUL §2.10 as of v1.7.21).");
+                }
             }
 
             settingsVersion = CurrentVersion;

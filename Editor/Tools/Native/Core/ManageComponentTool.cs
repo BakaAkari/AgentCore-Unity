@@ -753,7 +753,9 @@ namespace AgentCore.Editor.Tools.Native.Core
                         // Fallback: try reflection-based property setting
                         if (!TrySetPropertyViaReflection(component, prop.Name, prop.Value))
                         {
-                            errors.Add($"Property '{prop.Name}' not found on '{component.GetType().Name}'.");
+                            errors.Add($"Property '{prop.Name}' not found on '{component.GetType().Name}'. " +
+                                       $"Tip: nested fields use dot notation (e.g. 'stats.attack'), array elements use " +
+                                       $"'fieldName.Array.data[N]' — run 'get' first to see the exact propertyPath keys available.");
                         }
                     }
                 }
@@ -1147,7 +1149,11 @@ namespace AgentCore.Editor.Tools.Native.Core
         {
             var result = ToolHelpers.SerializeComponent(component);
 
-            // Add all serialized properties
+            // Add all serialized properties.
+            // v1.7.22: recurse into nested serialized properties and use propertyPath as the JSON key,
+            // so agents can see nested fields (e.g. "stats.attack", "clips.Array.data[0].name") and
+            // pass them directly back to modify/set_property_batch — Unity's SerializedObject.FindProperty
+            // already accepts dot-separated path notation.
             var serializedObject = new SerializedObject(component);
             var propsObj = new JObject();
             var iterator = serializedObject.GetIterator();
@@ -1156,19 +1162,27 @@ namespace AgentCore.Editor.Tools.Native.Core
             {
                 do
                 {
-                    // Skip internal Unity properties
+                    // Skip internal Unity properties.
                     if (iterator.name == "m_Script" || iterator.name == "m_ObjectHideFlags")
+                        continue;
+
+                    // Skip the two synthetic top-level array wrappers (Array + size); the real elements
+                    // are already surfaced under their own paths (Array.data[N]).
+                    if (iterator.name == "Array" || iterator.name == "size")
                         continue;
 
                     var propValue = GetSerializedPropertyValue(iterator);
                     if (propValue != null)
                     {
-                        propsObj[iterator.name] = propValue;
+                        // Use propertyPath (full dot-separated path) so nested fields become
+                        // agent-addressable modify keys directly.
+                        propsObj[iterator.propertyPath] = propValue;
                     }
-                } while (iterator.NextVisible(false));
+                } while (iterator.NextVisible(true)); // enterChildren = true → recurse into structs/nested
             }
 
             result["serializedProperties"] = propsObj;
+            result["_hint"] = "Property keys use SerializedObject path notation. Nested fields (e.g. 'stats.attack') and array elements (e.g. 'clips.Array.data[0].name') can be passed directly to modify or set_property_batch.";
             return result;
         }
 

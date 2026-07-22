@@ -257,8 +257,15 @@ namespace AgentCore.Editor.Cloud
         private readonly string _baseUrl;
         private readonly string _apiKey;
 
-        /// <summary>请求超时时间（秒）</summary>
+        /// <summary>请求超时时间（秒）— 用于索引/文档管理/健康检查等快操作</summary>
         private const int TimeoutSeconds = 30;
+
+        /// <summary>
+        /// 查询超时时间（秒）— query 触发后端 LLM 推理 + 图谱/向量检索，
+        /// 30 秒对首次查询/冷启动/刚索引完数据的场景明显不够（测试实测持续超时），
+        /// 单独给一个更长的超时。
+        /// </summary>
+        private const int QueryTimeoutSeconds = 180;
 
         /// <summary>
         /// 创建 LightRAGClient 实例。
@@ -311,7 +318,7 @@ namespace AgentCore.Editor.Cloud
                     ["top_k"] = topK
                 };
 
-                var response = await PostAsync<RAGQueryResponse>("/query", payload, ct);
+                var response = await PostAsync<RAGQueryResponse>("/query", payload, ct, QueryTimeoutSeconds);
 
                 return new LightRAGQueryResult
                 {
@@ -621,7 +628,7 @@ namespace AgentCore.Editor.Cloud
         //  内部 HTTP 辅助方法
         // ─────────────────────────────────────────
 
-        private async Task<T> PostAsync<T>(string path, JObject payload, CancellationToken ct)
+        private async Task<T> PostAsync<T>(string path, JObject payload, CancellationToken ct, int? timeoutSeconds = null)
         {
             var url = $"{_baseUrl}{path}";
             var client = HttpClientFactory.GetClient();
@@ -631,7 +638,7 @@ namespace AgentCore.Editor.Cloud
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds ?? TimeoutSeconds));
 
             var response = await client.SendAsync(request, cts.Token);
             var responseBody = await response.Content.ReadAsStringAsync();

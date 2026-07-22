@@ -19,7 +19,7 @@ namespace AgentCore.Editor.Tools.Native.Core
     /// </summary>
     [AgentTool("manage_gameobject",
         Description = "Create, modify, delete, duplicate, reparent, and inspect GameObjects in the currently open scene. " +
-            "Supports single and batch operations (create_batch, modify_batch, delete_batch, set_active_batch, arrange_grid). " +
+            "Supports single and batch operations (create_batch, modify_batch, delete_batch, set_active_batch). " +
             "Applicable: operating on objects in the active scene hierarchy. " +
             "NOT for: Prefab asset editing (use manage_prefab), adding/removing components (use manage_component), reading scene structure (use manage_scene get_hierarchy). " +
             "Returns: JSON with name, hierarchy path, instanceId, transform, and active state. " +
@@ -34,7 +34,7 @@ namespace AgentCore.Editor.Tools.Native.Core
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""create"", ""delete"", ""get_info"", ""modify"", ""set_transform"", ""set_parent"", ""duplicate"", ""create_batch"", ""modify_batch"", ""delete_batch"", ""set_active_batch"", ""arrange_grid""],
+                    ""enum"": [""create"", ""delete"", ""get_info"", ""modify"", ""set_transform"", ""set_parent"", ""duplicate"", ""create_batch"", ""modify_batch"", ""delete_batch"", ""set_active_batch""],
                     ""description"": ""Action to perform""
                 },
                 ""target"": {
@@ -102,20 +102,6 @@ namespace AgentCore.Editor.Tools.Native.Core
                     ""type"": ""array"",
                     ""description"": ""Batch operation items""
                 },
-                ""columns"": {
-                    ""type"": ""integer"",
-                    ""description"": ""Column count for arrange_grid""
-                },
-                ""spacing"": {
-                    ""type"": ""object"",
-                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
-                    ""description"": ""Grid spacing for arrange_grid""
-                },
-                ""start_position"": {
-                    ""type"": ""object"",
-                    ""properties"": { ""x"": {""type"":""number""}, ""y"": {""type"":""number""}, ""z"": {""type"":""number""} },
-                    ""description"": ""Start position for arrange_grid""
-                },
                 ""includeComponents"": {
                     ""type"": ""boolean"",
                     ""description"": ""Include component details in get_info""
@@ -180,12 +166,9 @@ namespace AgentCore.Editor.Tools.Native.Core
                     case "set_active_batch":
                         response = HandleSetActiveBatch(parameters);
                         break;
-                    case "arrange_grid":
-                        response = HandleArrangeGrid(parameters);
-                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: create, delete, get_info, modify, set_transform, set_parent, duplicate, create_batch, modify_batch, delete_batch, set_active_batch, arrange_grid");
+                            $"Unknown action: '{action}'. Valid actions: create, delete, get_info, modify, set_transform, set_parent, duplicate, create_batch, modify_batch, delete_batch, set_active_batch");
                         break;
                 }
             }
@@ -704,53 +687,6 @@ namespace AgentCore.Editor.Tools.Native.Core
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"Error setting active batch: {ex.Message}");
-            }
-        }
-
-        private ToolResponse HandleArrangeGrid(JObject parameters)
-        {
-            try
-            {
-                var names = GetNamesFromParameters(parameters);
-                if (names.Count == 0)
-                    return ToolResponse.Fail("'names' is required for 'arrange_grid' action.");
-
-                int columns = Math.Max(1, ToolHelpers.GetOptionalInt(parameters, "columns", 1));
-                var spacing = ToolHelpers.ParseVector3(parameters["spacing"], Vector3.one);
-                var startPosition = ToolHelpers.ParseVector3(parameters["start_position"], Vector3.zero);
-                var successes = new JArray();
-                var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Arrange GameObjects Grid");
-
-                int placed = 0;
-                foreach (var name in names)
-                {
-                    var go = ToolHelpers.FindGameObject(name);
-                    if (go == null)
-                    {
-                        failures.Add(new JObject { ["name"] = name, ["error"] = $"GameObject '{name}' not found." });
-                        continue;
-                    }
-
-                    ToolHelpers.RecordUndo(go.transform, "Arrange GameObject Grid");
-                    int row = placed / columns;
-                    int col = placed % columns;
-                    var position = startPosition + new Vector3(col * spacing.x, 0f, row * spacing.z) + new Vector3(0f, row * spacing.y, 0f);
-                    go.transform.position = position;
-                    EditorUtility.SetDirty(go);
-                    MarkSceneDirty(go);
-                    successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["position"] = ToolHelpers.Vector3ToJson(position) });
-                    placed++;
-                }
-
-                Undo.CollapseUndoOperations(undoGroup);
-                return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Arranged {successes.Count} GameObject(s), {failures.Count} failure(s).");
-            }
-            catch (Exception ex)
-            {
-                return ToolResponse.Fail($"Error arranging GameObjects grid: {ex.Message}");
             }
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -13,18 +14,36 @@ using UnityEngine;
 namespace AgentCore.Editor.Tools.Native.Scripting
 {
     /// <summary>
-    /// Execute simple C# expressions via reflection.
-    /// Supports static method calls, property reads, and simple Unity API queries.
-    /// For complex code, recommend using manage_script to create and run scripts.
+    /// Execute a C# code block inside the Editor via Mono.CSharp.Evaluator.
+    /// <para>
+    /// Contract (v1.7.27, refined from v1.7.26 rewrite — see CHANGELOG):
+    /// - Single entry point, no <c>action</c> parameter. You pass a multi-statement C# block via <c>code</c>.
+    /// - Return-value semantics follow Mono.CSharp REPL: if the last thing in your block is an EXPRESSION
+    ///   (no trailing semicolon), its value is returned. If the last thing is a statement, no value is returned.
+    ///   Example (returns 42):        <c>var x = 40; x + 2</c>
+    ///   Example (returns "hello"):   <c>"hello"</c>
+    ///   Example (returns nothing):   <c>Debug.Log("ok");</c>
+    /// - The <c>__result</c> convention from v1.7.0-v1.7.25 is GONE. Do not use it.
+    /// - Compile errors are captured via a <c>StreamReportPrinter</c> bound to a <c>StringWriter</c>
+    ///   (see <see cref="TryBuildEvaluator"/>), then split by regex: only lines matching
+    ///   <c>error CS&lt;digits&gt;</c> mark the call as a failure; warnings and continuation lines
+    ///   (e.g. Unity 2022.3's ~80 CS1685 mscorlib duplicates) are surfaced in <c>data.warnings</c>
+    ///   but do NOT block success.
+    /// - <c>Debug.Log</c> emitted while the code runs is captured via
+    ///   <c>Application.logMessageReceivedThreaded</c> (single subscription — the Threaded variant
+    ///   covers main-thread logs too, so subscribing to both channels would double-capture) and
+    ///   returned in <c>data.output</c>.
+    /// - The Evaluator is built purely via reflection against the built-in Mono.CSharp assembly —
+    ///   no asmdef change, no compile-time dependency.
+    /// </para>
     /// </summary>
     [AgentTool("execute_code",
-        Description = "Execute C# expressions at runtime via reflection. Evaluates a single expression and returns the result. " +
-            "Supports: static method calls (e.g. 'PlayerSettings.productName'), property reads, simple Unity API queries, " +
-            "object inspection, and type discovery. " +
-            "Use for: verifying API behavior, reading runtime values, checking Unity settings not exposed by other tools, " +
-            "confirming version-specific API existence. " +
-            "NOT for: complex multi-statement logic (create a script instead), modifying files, or operations with side effects that other tools handle. " +
-            "Returns: string representation of the expression result, or error message if evaluation fails. " +
+        Description = "Execute a multi-statement C# code block inside the Unity Editor. " +
+            "Return-value semantics: if the last thing in your block is an expression (no trailing semicolon), its value is returned; " +
+            "otherwise nothing is returned. Example returning 42: 'var x = 40; x + 2'. Example returning nothing: 'Debug.Log(\"ok\");'. " +
+            "Compile errors are reported as failures (not silent nulls). Debug.Log output during execution is captured in 'output'. " +
+            "Supports LINQ, loops, control flow, and any Unity Editor API. " +
+            "Use for one-off batch scene edits, hierarchy queries, computed transforms, and ad-hoc Editor API exploration — do not create throwaway .cs files for such tasks. " +
             "Note: RESTRICTED tool — must be activated via request_tools before use. Requires user confirmation.",
         Category = "Scripting",
         Visibility = ToolVisibility.Restricted,
@@ -35,42 +54,63 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         RequiresConfirmation = true)]
     public class ExecuteCodeTool : IAgentTool
     {
-        private static readonly JObject _parametersSchema = JObject.Parse(@"{
+        private static readonly JObject _parametersSchema = JObject.Parse(@"
+{
             ""type"": ""object"",
             ""properties"": {
-                ""action"": {
-                    ""type"": ""string"",
-                    ""enum"": [""evaluate""],
-                    ""description"": ""Action to perform""
-                },
                 ""code"": {
                     ""type"": ""string"",
-                    ""description"": ""C# expression to evaluate (e.g., 'UnityEngine.Application.dataPath', 'UnityEditor.EditorApplication.isPlaying')""
+                    ""description"": ""Multi-statement C# block. If the last item is an expression (no trailing ';'), its value is returned; otherwise nothing is returned. E.g. 'var x = 40; x + 2' returns 42. Compile errors are reported as failures.""
                 },
                 ""context"": {
                     ""type"": ""string"",
                     ""enum"": [""editor"", ""scene""],
-                    ""description"": ""Execution context (default: 'editor')""
+                    ""description"": ""Execution context (default: 'editor'). Purely informational — currently unused by the executor.""
                 }
             },
-            ""required"": [""action"", ""code""]
+            ""required"": [""code""]
         }");
 
         /// <summary>
-        /// Allowed namespace prefixes for security.
+        /// Namespaces auto-imported for every invocation. Kept in sync with the assemblies referenced
+        /// in <see cref="ConfigureEvaluator"/>.
+        /// <para>
+        /// Restored to the full v1.7.0 set in v1.7.27 after the diagnostic classifier was fixed
+        /// (see the error/warning split in <see cref="HandleRun"/>). The 5 rounds of CS0433/CS0246/
+        /// CS0234 failures were NOT caused by these usings — they were caused by the classifier
+        /// treating CS1685 warning continuation lines as errors. With that fixed, the full using
+        /// set works. Assembly coverage:
+        ///   - System, System.IO, System.Text, System.Text.RegularExpressions, System.Collections.Generic
+        ///     → mscorlib.dll + System.dll (both in GetDefaultReferences)
+        ///   - System.Linq → System.Core.dll (typeof(Enumerable).Assembly)
+        ///   - UnityEngine, UnityEngine.SceneManagement → UnityEngine.CoreModule.dll (typeof(GameObject).Assembly)
+        ///   - UnityEditor → UnityEditor.CoreModule.dll (typeof(EditorApplication).Assembly)
+        ///   - UnityEditor.SceneManagement → UnityEditor.SceneManagerModule.dll
+        ///     (typeof(EditorSceneManager).Assembly) — separate module, needs explicit reference.
+        /// </para>
         /// </summary>
-        private static readonly string[] AllowedNamespaces = new[]
-        {
-            "UnityEngine",
-            "UnityEditor",
-            "System",
-            "System.IO",
-            "System.Linq"
-        };
+        private const string DefaultUsings =
+            "using System; using System.IO; using System.Text; using System.Text.RegularExpressions; " +
+            "using System.Linq; using System.Collections.Generic; " +
+            "using UnityEngine; using UnityEngine.SceneManagement; " +
+            "using UnityEditor; using UnityEditor.SceneManagement;";
+
+        /// <summary>
+        /// Human-readable list of pre-imported namespaces + return-value semantics + Mono.CSharp
+        /// limitations — appended to error messages so the agent can self-correct without guessing.
+        /// </summary>
+        private const string EnvironmentHint =
+            "Return-value semantics: the last item of your block is returned iff it is an EXPRESSION with no trailing ';'. " +
+            "Example returning 42: 'var x = 40; x + 2'. Example returning nothing: 'Debug.Log(\"ok\");'. " +
+            "Pre-imported namespaces: System, System.IO, System.Text, System.Text.RegularExpressions, System.Linq, " +
+            "System.Collections.Generic, UnityEngine, UnityEngine.SceneManagement, UnityEditor, UnityEditor.SceneManagement. " +
+            "Mono.CSharp.Evaluator limitations: no async/await, no top-level 'return' outside a method, " +
+            "some C# 8+ syntax unsupported (records, switch expressions, using declarations, target-typed new). " +
+            "Use classic statements.";
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "execute_code",
-            description: "Execute simple C# expressions via reflection — static method calls, property reads, and Unity API queries",
+            description: "Execute a multi-statement C# code block via Mono.CSharp.Evaluator. Last expression is the return value.",
             category: "Scripting",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -83,18 +123,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
             try
             {
-                var action = ToolHelpers.GetRequiredString(parameters, "action").ToLowerInvariant();
-
-                switch (action)
-                {
-                    case "evaluate":
-                        response = HandleEvaluate(parameters);
-                        break;
-                    default:
-                        response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: evaluate");
-                        break;
-                }
+                response = HandleRun(parameters);
             }
             catch (ArgumentException ex)
             {
@@ -109,327 +138,388 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             return Task.FromResult(response.ToToolResult(sw.Elapsed.TotalMilliseconds));
         }
 
-        #region Action Handlers
+        #region Handler
 
-        private ToolResponse HandleEvaluate(JObject parameters)
+        /// <summary>
+        /// Compile and run the agent's C# block. Compile errors are captured from the
+        /// StreamReportPrinter's StringWriter sink (see <see cref="TryBuildEvaluator"/>), split
+        /// by regex into errors vs warnings, and only true errors mark the call as a failure.
+        /// Debug.Log output is captured separately via <c>logMessageReceivedThreaded</c>.
+        /// </summary>
+        private ToolResponse HandleRun(JObject parameters)
         {
             var code = ToolHelpers.GetRequiredString(parameters, "code");
             var context = ToolHelpers.GetOptionalString(parameters, "context", "editor");
 
-            // Trim whitespace and trailing semicolons
-            code = code.Trim().TrimEnd(';');
+            if (string.IsNullOrWhiteSpace(code))
+                return ToolResponse.Fail("Code is empty. Pass a C# block via the 'code' parameter.");
 
-            if (string.IsNullOrEmpty(code))
-                return ToolResponse.Fail("Code expression is empty.");
+            // Reject legacy 'action' parameter loudly instead of silently ignoring — agents trained
+            // on the v1.7.0-v1.7.25 schema still emit it. Same for the '__result =' pattern.
+            if (parameters["action"] != null)
+            {
+                var actionValue = parameters["action"].ToString();
+                if (!string.IsNullOrEmpty(actionValue) && !actionValue.Equals("run", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ToolResponse.Fail(
+                        $"The 'action' parameter is no longer supported (was '{actionValue}'). " +
+                        "execute_code now has a single entry point. Just pass 'code'. " + EnvironmentHint);
+                }
+                // action='run' is tolerated silently for one release cycle to ease migration.
+            }
 
-            // Security check: block dangerous patterns
             if (ContainsDangerousPattern(code))
                 return ToolResponse.Fail(
-                    "Code contains potentially dangerous operations (Process.Start, File.Delete, etc.). " +
-                    "Use manage_script to create a script for complex operations.");
+                    "Code contains potentially dangerous operations (Process.Start, File.Delete, AppDomain.Unload, etc.). " +
+                    "Remove the dangerous call before running.");
 
-            // Try to evaluate the expression
+            if (!TryBuildEvaluator(out object evaluator, out Type evType, out StringWriter errorSink, out string buildError))
+                return ToolResponse.Fail("Failed to initialize Mono.CSharp evaluator: " + buildError);
+
+            var runMethod = evType.GetMethod("Run", new[] { typeof(string) });
+            var evaluateMethod = evType.GetMethods()
+                .FirstOrDefault(m => m.Name == "Evaluate" && m.GetParameters().Length == 3);
+
+            if (runMethod == null || evaluateMethod == null)
+                return ToolResponse.Fail("Mono.CSharp.Evaluator API mismatch: Run/Evaluate methods not found.");
+
+            if (!ConfigureEvaluator(evaluator, evType, runMethod, out string configError))
+                return ToolResponse.Fail("Evaluator setup failed: " + configError);
+
+            // Capture Debug.Log output for the duration of the run.
+            // logMessageReceivedThreaded fires for messages emitted on ANY thread (including the
+            // main thread), so subscribing to it alone gives us complete coverage. The earlier
+            // v1.7.26/v1.7.27-dev code also subscribed to the plain `logMessageReceived` — that
+            // caused every main-thread log to be captured TWICE (Case B smoke output showed
+            // `[Log] SMOKE_B` duplicated). Threaded-only is the correct single subscription.
+            var capturedLogs = new List<string>();
+            var logLock = new object();
+            Application.LogCallback logHandler = (msg, stack, type) =>
+            {
+                lock (logLock) capturedLogs.Add($"[{type}] {msg}");
+            };
+            Application.logMessageReceivedThreaded += logHandler;
+
+            string runtimeError = null;
+            string parseTailError = null;
+            object resultValue = null;
+            bool resultSet = false;
+
             try
             {
-                var result = EvaluateExpression(code);
+                // The 3-arg Evaluate handles both multi-statement blocks and a trailing expression:
+                //   int Evaluate(string input, out object result, out bool result_set);
+                // If the last item is an expression, result_set=true and result carries the value.
+                // If the last item is a statement, result_set=false and result is null.
+                // Compile errors go to the StreamReportPrinter we wired into the CompilerContext
+                // (captured via `errorSink`, see TryBuildEvaluator) — NOT to Console.Error, which
+                // was our v1.7.26 initial mistake.
+                var args = new object[] { code, null, null };
+                var remaining = evaluateMethod.Invoke(evaluator, args);
+                resultValue = args[1];
+                resultSet = args[2] is bool b && b;
 
-                var data = new JObject
+                // Non-null return from Evaluate means part of the input could not be parsed — this
+                // is a compile/parse failure (unbalanced braces, unterminated string, etc.), not a
+                // runtime exception. Route it to the compile-error channel below so the response
+                // classification stays consistent.
+                if (remaining is string tail && !string.IsNullOrWhiteSpace(tail))
                 {
-                    ["expression"] = code,
-                    ["context"] = context
-                };
-
-                if (result != null)
-                {
-                    data["result"] = FormatResult(result);
-                    data["resultType"] = result.GetType().FullName;
+                    parseTailError = "Evaluator could not parse the tail of your code: " + tail.Trim();
                 }
-                else
-                {
-                    data["result"] = "null";
-                    data["resultType"] = "null";
-                }
-
-                return ToolResponse.OkWithData(data, $"Evaluated: {code}");
-            }
-            catch (TargetInvocationException tie)
-            {
-                var inner = tie.InnerException ?? tie;
-                return ToolResponse.Fail($"Execution error: {inner.Message}");
             }
             catch (Exception ex)
             {
-                return ToolResponse.Fail(
-                    $"Cannot evaluate expression: {ex.Message}. " +
-                    "This tool supports simple static property/method access (e.g., 'UnityEngine.Application.dataPath'). " +
-                    "For complex code, use manage_script to create and run a script.");
+                runtimeError = Unwrap(ex).Message;
             }
+            finally
+            {
+                Application.logMessageReceivedThreaded -= logHandler;
+            }
+
+            var sinkText = errorSink?.ToString().Trim() ?? string.Empty;
+
+            // The StreamReportPrinter captures ALL compiler diagnostics: errors (CS0xxx error)
+            // AND warnings (CSxxxx warning). In a stock Unity 2022.3 install, Mono.CSharp emits
+            // ~80+ CS1685 "predefined type defined multiple times" WARNINGS on every evaluation
+            // because the unityjit-win32 mscorlib and the Managed/ mscorlib both define the same
+            // BCL types. These warnings DO NOT block compilation — spike + first smoke round
+            // proved a clean expression like `var x = 40; x + 2` still returns 42 with warnings
+            // present. So we must split the sink: only actual *errors* make the call a failure;
+            // warnings are surfaced for reference but never block success.
+            //
+            // CRITICAL: every CS1685 warning is followed by a continuation line like
+            //   "C:\...\System.Core.dll (Location of the symbol related to previous warning)"
+            // that contains NEITHER "error CS" NOR "warning CS". Treating such lines as errors
+            // (previous "safe default" behaviour) caused EVERY evaluation to be marked FAIL even
+            // when the primary diagnostics were all warnings. So the safe default is now the
+            // OPPOSITE: only lines that explicitly say `error CS<digits>` count as errors;
+            // anything else is a warning-adjacent line and gets grouped with warnings.
+            var errorLines = new List<string>();
+            var warningLines = new List<string>();
+            var errorPattern = new System.Text.RegularExpressions.Regex(@"\berror\s+CS\d+\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            foreach (var line in sinkText.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0) continue;
+                if (errorPattern.IsMatch(trimmed))
+                    errorLines.Add(trimmed);
+                else
+                    warningLines.Add(trimmed); // warnings + continuation lines like "(Location of the symbol...)"
+            }
+            // Parse-tail failures (Evaluate returned a non-null remaining string) are compile-level
+            // failures, not runtime exceptions — merge them into errorLines so the response is
+            // classified as `compileError`, matching the "compile errors are failures" contract.
+            if (!string.IsNullOrEmpty(parseTailError))
+                errorLines.Add(parseTailError);
+            var compileErrors = string.Join("\n", errorLines);
+            var compileWarnings = string.Join("\n", warningLines);
+
+            var data = new JObject { ["context"] = context };
+            if (capturedLogs.Count > 0)
+                data["output"] = new JArray(capturedLogs);
+            if (warningLines.Count > 0)
+                data["warnings"] = compileWarnings;
+
+            // Only actual compile *errors* block success. Warnings (CS1685 etc.) are surfaced
+            // in data.warnings but do not turn a working evaluation into a failure.
+            if (!string.IsNullOrEmpty(compileErrors))
+            {
+                data["compileError"] = compileErrors;
+                data["hint"] = EnvironmentHint;
+                return ToolResponse.Fail(
+                    "Compile error: " + compileErrors +
+                    (capturedLogs.Count > 0 ? " (see 'output' for logs emitted before the failure)" : "") +
+                    " " + EnvironmentHint);
+            }
+
+            if (!string.IsNullOrEmpty(runtimeError))
+            {
+                data["error"] = runtimeError;
+                data["hint"] = EnvironmentHint;
+                return ToolResponse.Fail(
+                    "Runtime error: " + runtimeError +
+                    (capturedLogs.Count > 0 ? " (see 'output' for logs captured before the error)" : "") +
+                    " " + EnvironmentHint);
+            }
+
+            if (resultSet)
+            {
+                if (resultValue != null)
+                {
+                    data["result"] = FormatResult(resultValue);
+                    data["resultType"] = resultValue.GetType().FullName;
+                }
+                else
+                {
+                    data["result"] = JValue.CreateNull();
+                    data["resultType"] = "null";
+                }
+                return ToolResponse.OkWithData(data, "Code executed, result captured.");
+            }
+
+            // No trailing expression = no return value. This is a NORMAL success case, not an error —
+            // e.g. the user wrote `Debug.Log("x");` or a pure loop.
+            data["result"] = JValue.CreateNull();
+            data["resultType"] = "void";
+            return ToolResponse.OkWithData(data,
+                "Code executed. No return value (last item was a statement, not an expression). " +
+                (capturedLogs.Count > 0
+                    ? "See 'output' for captured Debug.Log entries."
+                    : "To return a value, end the block with an expression (no trailing ';'). Example: 'var x = 40; x + 2'."));
         }
 
         #endregion
 
-        #region Expression Evaluation
+        #region Evaluator Setup
 
         /// <summary>
-        /// Evaluate a simple expression like "Type.Property" or "Type.Method()" via reflection.
+        /// Reference the Unity + BCL assemblies the imported namespaces live in, then apply the
+        /// default <c>using</c> block. Called once per fresh Evaluator instance.
         /// </summary>
-        private object EvaluateExpression(string expression)
+        private static bool ConfigureEvaluator(object evaluator, Type evType, MethodInfo runMethod, out string error)
         {
-            // Try to parse as a member access chain: Namespace.Type.Member.SubMember...
-            // Strategy: try progressively longer type names, then resolve the remaining as members
-
-            var parts = expression.Split('.');
-            if (parts.Length < 2)
-                throw new ArgumentException(
-                    $"Expression must be in format 'Type.Member' or 'Namespace.Type.Member'. Got: '{expression}'");
-
-            // Check if it looks like a method call (has parentheses)
-            var lastPart = parts[parts.Length - 1];
-            bool isMethodCall = lastPart.Contains("(");
-            string methodArgs = null;
-
-            if (isMethodCall)
+            error = null;
+            try
             {
-                var parenStart = lastPart.IndexOf('(');
-                var parenEnd = lastPart.LastIndexOf(')');
-                if (parenEnd > parenStart)
+                var refAssembly = evType.GetMethod("ReferenceAssembly", new[] { typeof(Assembly) });
+                if (refAssembly != null)
                 {
-                    methodArgs = lastPart.Substring(parenStart + 1, parenEnd - parenStart - 1).Trim();
+                    // Assemblies covering DefaultUsings namespaces. Each assembly is referenced
+                    // exactly once — de-dupe via a HashSet keyed on Assembly identity so that
+                    // types living in the same DLL (e.g. GameObject and Scene both in
+                    // UnityEngine.CoreModule) don't produce CS0433 "type defined in multiple
+                    // assemblies" errors.
+                    //
+                    //   typeof(GameObject).Assembly              = UnityEngine.CoreModule
+                    //     covers: UnityEngine, UnityEngine.SceneManagement
+                    //   typeof(EditorApplication).Assembly       = UnityEditor.CoreModule
+                    //     covers: UnityEditor
+                    //   typeof(EditorSceneManager).Assembly      = UnityEditor.SceneManagerModule
+                    //     covers: UnityEditor.SceneManagement
+                    //   typeof(Enumerable).Assembly              = System.Core
+                    //     covers: System.Linq
+                    //
+                    // System / System.IO / System.Text / System.Text.RegularExpressions /
+                    // System.Collections.Generic all live in mscorlib.dll + System.dll, both of
+                    // which Mono.CSharp's GetDefaultReferences() already loads at Evaluator init.
+                    var seen = new HashSet<Assembly>();
+                    var refs = new[]
+                    {
+                        typeof(GameObject).Assembly,
+                        typeof(EditorApplication).Assembly,
+                        typeof(UnityEditor.SceneManagement.EditorSceneManager).Assembly,
+                        typeof(Enumerable).Assembly,
+                    };
+                    foreach (var asm in refs)
+                    {
+                        if (asm != null && seen.Add(asm))
+                            refAssembly.Invoke(evaluator, new object[] { asm });
+                    }
                 }
-                parts[parts.Length - 1] = lastPart.Substring(0, lastPart.IndexOf('('));
+                runMethod.Invoke(evaluator, new object[] { DefaultUsings });
+                return true;
             }
-
-            // Try to resolve the type by testing progressively longer prefixes
-            Type resolvedType = null;
-            int memberStartIndex = -1;
-
-            for (int i = parts.Length - 1; i >= 1; i--)
+            catch (Exception ex)
             {
-                var typeName = string.Join(".", parts, 0, i);
-                resolvedType = ResolveType(typeName);
-                if (resolvedType != null)
-                {
-                    memberStartIndex = i;
-                    break;
-                }
+                error = Unwrap(ex).Message;
+                return false;
             }
+        }
 
-            if (resolvedType == null)
-                throw new ArgumentException($"Could not resolve type from expression: '{expression}'");
-
-            // Security: check namespace
-            if (!IsAllowedType(resolvedType))
-                throw new ArgumentException(
-                    $"Type '{resolvedType.FullName}' is not in the allowed namespaces. " +
-                    $"Allowed: {string.Join(", ", AllowedNamespaces)}");
-
-            // Resolve member chain
-            object currentValue = null;
-            Type currentType = resolvedType;
-            bool isStatic = true;
-
-            for (int i = memberStartIndex; i < parts.Length; i++)
+        /// <summary>
+        /// Build a Mono.CSharp.Evaluator instance purely via reflection. A fresh Evaluator is
+        /// constructed per call (perfect variable isolation between calls).
+        /// <para>
+        /// Wires a <c>StreamReportPrinter(TextWriter)</c> into the CompilerContext so compile
+        /// errors flow into <paramref name="errorSink"/> — this is the ONLY reliable way to
+        /// capture Mono.CSharp diagnostics. The <c>ConsoleReportPrinter</c> variant we used in
+        /// the v1.7.26 first-cut snapshots its <c>TextWriter</c> from <c>Console.Error</c> at
+        /// ctor time, so a later <c>Console.SetError</c> can NOT redirect it — we would end up
+        /// with a silent success/null on any compile error (Case C smoke failure).
+        /// </para>
+        /// </summary>
+        private static bool TryBuildEvaluator(out object evaluator, out Type evType, out StringWriter errorSink, out string error)
+        {
+            evaluator = null;
+            evType = null;
+            errorSink = new StringWriter();
+            error = null;
+            try
             {
-                var memberName = parts[i];
-                bool isLastPart = (i == parts.Length - 1);
-                bool callAsMethod = isLastPart && isMethodCall;
+                var asm = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => a.GetName().Name == "Mono.CSharp")
+                    ?? Assembly.Load("Mono.CSharp");
 
-                if (callAsMethod)
+                evType = asm.GetType("Mono.CSharp.Evaluator");
+                var settingsType = asm.GetType("Mono.CSharp.CompilerSettings");
+                var ctxType = asm.GetType("Mono.CSharp.CompilerContext");
+                var reportType = asm.GetType("Mono.CSharp.Report");
+                var streamPrinterType = asm.GetType("Mono.CSharp.StreamReportPrinter");
+
+                if (evType == null || settingsType == null || ctxType == null || streamPrinterType == null)
                 {
-                    // Try method invocation
-                    var method = currentType.GetMethod(memberName,
-                        BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance) |
-                        BindingFlags.FlattenHierarchy);
-
-                    if (method == null)
-                        throw new ArgumentException($"Method '{memberName}' not found on type '{currentType.Name}'");
-
-                    var methodParams = method.GetParameters();
-                    object[] args;
-
-                    if (string.IsNullOrEmpty(methodArgs))
-                    {
-                        args = new object[0];
-                    }
-                    else if (methodParams.Length == 0)
-                    {
-                        args = new object[0];
-                    }
-                    else
-                    {
-                        args = ParseMethodArguments(methodArgs, methodParams);
-                    }
-
-                    currentValue = method.Invoke(isStatic ? null : currentValue, args);
-                    currentType = method.ReturnType;
+                    error = "core Mono.CSharp types missing " +
+                        $"(Evaluator={evType!=null}, Settings={settingsType!=null}, Context={ctxType!=null}, StreamPrinter={streamPrinterType!=null}).";
+                    return false;
                 }
-                else
+
+                var settings = Activator.CreateInstance(settingsType);
+
+                // Bind our sink into a StreamReportPrinter. Public ctor signature in Mono.CSharp
+                // is StreamReportPrinter(TextWriter). Search flexibly so we don't break across
+                // Mono versions (which sometimes flip parameter order or add a bool).
+                object printer = null;
+                foreach (var pc in streamPrinterType.GetConstructors())
                 {
-                    // Try property first
-                    var prop = currentType.GetProperty(memberName,
-                        BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance) |
-                        BindingFlags.FlattenHierarchy);
-
-                    if (prop != null)
+                    var pp = pc.GetParameters();
+                    if (pp.Length >= 1 && typeof(TextWriter).IsAssignableFrom(pp[0].ParameterType))
                     {
-                        currentValue = prop.GetValue(isStatic ? null : currentValue);
-                        currentType = prop.PropertyType;
+                        var callArgs = new object[pp.Length];
+                        callArgs[0] = errorSink;
+                        for (int i = 1; i < pp.Length; i++)
+                            callArgs[i] = pp[i].HasDefaultValue ? pp[i].DefaultValue :
+                                (pp[i].ParameterType.IsValueType ? Activator.CreateInstance(pp[i].ParameterType) : null);
+                        printer = pc.Invoke(callArgs);
+                        break;
                     }
-                    else
-                    {
-                        // Try field
-                        var field = currentType.GetField(memberName,
-                            BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance) |
-                            BindingFlags.FlattenHierarchy);
+                }
+                if (printer == null)
+                {
+                    error = "StreamReportPrinter(TextWriter) ctor not found.";
+                    return false;
+                }
 
-                        if (field != null)
+                // CompilerContext ctor: (CompilerSettings, ReportPrinter) [older]
+                //                    or (CompilerSettings, Report)            [newer]
+                object ctx = null;
+                foreach (var c in ctxType.GetConstructors())
+                {
+                    var ps = c.GetParameters();
+                    if (ps.Length != 2 || ps[0].ParameterType != settingsType) continue;
+
+                    if (ps[1].ParameterType.IsInstanceOfType(printer))
+                    {
+                        ctx = c.Invoke(new[] { settings, printer });
+                        break;
+                    }
+                    if (reportType != null && ps[1].ParameterType == reportType)
+                    {
+                        var rc = reportType.GetConstructors()
+                            .FirstOrDefault(x => x.GetParameters().Length == 1);
+                        if (rc != null)
                         {
-                            currentValue = field.GetValue(isStatic ? null : currentValue);
-                            currentType = field.FieldType;
-                        }
-                        else
-                        {
-                            throw new ArgumentException(
-                                $"Member '{memberName}' not found on type '{currentType.Name}'");
+                            ctx = c.Invoke(new[] { settings, rc.Invoke(new[] { printer }) });
+                            break;
                         }
                     }
                 }
 
-                isStatic = false; // After first member access, subsequent accesses are instance-based
-            }
-
-            return currentValue;
-        }
-
-        /// <summary>
-        /// Resolve a type name across all loaded assemblies.
-        /// </summary>
-        private Type ResolveType(string typeName)
-        {
-            // Direct lookup
-            var type = Type.GetType(typeName);
-            if (type != null) return type;
-
-            // Search all assemblies
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                type = assembly.GetType(typeName);
-                if (type != null) return type;
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Check if a type is in the allowed namespaces.
-        /// </summary>
-        private bool IsAllowedType(Type type)
-        {
-            if (type == null || type.Namespace == null) return false;
-            return AllowedNamespaces.Any(ns => type.Namespace.StartsWith(ns));
-        }
-
-        /// <summary>
-        /// Parse simple method arguments from a string.
-        /// Supports: strings ("..."), numbers, booleans, null.
-        /// </summary>
-        private object[] ParseMethodArguments(string argsString, ParameterInfo[] paramInfos)
-        {
-            if (string.IsNullOrWhiteSpace(argsString))
-                return new object[0];
-
-            // Simple split by comma (doesn't handle commas inside strings well, but sufficient for basic use)
-            var argStrings = SplitArguments(argsString);
-            var args = new object[argStrings.Length];
-
-            for (int i = 0; i < argStrings.Length && i < paramInfos.Length; i++)
-            {
-                args[i] = ConvertArgument(argStrings[i].Trim(), paramInfos[i].ParameterType);
-            }
-
-            return args;
-        }
-
-        /// <summary>
-        /// Split argument string by commas, respecting quoted strings.
-        /// </summary>
-        private string[] SplitArguments(string argsString)
-        {
-            var args = new List<string>();
-            var current = "";
-            bool inQuotes = false;
-            char quoteChar = '"';
-
-            for (int i = 0; i < argsString.Length; i++)
-            {
-                char c = argsString[i];
-
-                if (inQuotes)
+                if (ctx == null)
                 {
-                    if (c == quoteChar)
-                        inQuotes = false;
-                    else
-                        current += c;
+                    error = "could not construct CompilerContext (no matching ctor).";
+                    return false;
                 }
-                else
+
+                var evCtor = evType.GetConstructors().FirstOrDefault(
+                    c => c.GetParameters().Length == 1 && c.GetParameters()[0].ParameterType == ctxType);
+                if (evCtor == null)
                 {
-                    if (c == '"' || c == '\'')
-                    {
-                        inQuotes = true;
-                        quoteChar = c;
-                    }
-                    else if (c == ',')
-                    {
-                        args.Add(current.Trim());
-                        current = "";
-                    }
-                    else
-                    {
-                        current += c;
-                    }
+                    error = "no Evaluator(CompilerContext) ctor found.";
+                    return false;
                 }
+
+                evaluator = evCtor.Invoke(new[] { ctx });
+                return true;
             }
-
-            if (!string.IsNullOrEmpty(current.Trim()))
-                args.Add(current.Trim());
-
-            return args.ToArray();
+            catch (Exception ex)
+            {
+                error = Unwrap(ex).Message;
+                return false;
+            }
         }
 
         /// <summary>
-        /// Convert a string argument to the target parameter type.
+        /// Unwrap nested TargetInvocationException / reflection exceptions to the real root cause.
         /// </summary>
-        private object ConvertArgument(string value, Type targetType)
+        private static Exception Unwrap(Exception ex)
         {
-            if (value == "null") return null;
-            if (value == "true") return true;
-            if (value == "false") return false;
-
-            if (targetType == typeof(string))
-                return value;
-            if (targetType == typeof(int))
-                return int.Parse(value);
-            if (targetType == typeof(float))
-                return float.Parse(value);
-            if (targetType == typeof(double))
-                return double.Parse(value);
-            if (targetType == typeof(bool))
-                return bool.Parse(value);
-            if (targetType == typeof(long))
-                return long.Parse(value);
-
-            // Try generic conversion
-            return Convert.ChangeType(value, targetType);
+            while (ex is TargetInvocationException tie && tie.InnerException != null)
+                ex = tie.InnerException;
+            return ex;
         }
 
+        #endregion
+
+        #region Result Formatting
+
         /// <summary>
-        /// Format a result object for JSON output.
+        /// Format a result object for JSON output. Truncates enumerables to keep responses bounded.
         /// </summary>
-        private JToken FormatResult(object result)
+        private static JToken FormatResult(object result)
         {
             if (result == null) return JValue.CreateNull();
 
-            // Primitive types
             if (result is string s) return new JValue(s);
             if (result is bool b) return new JValue(b);
             if (result is int i) return new JValue(i);
@@ -438,29 +528,23 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (result is double d) return new JValue(d);
             if (result is decimal dec) return new JValue(dec);
 
-            // Unity types
             if (result is Vector3 v3) return ToolHelpers.Vector3ToJson(v3);
             if (result is Vector2 v2) return new JObject { ["x"] = v2.x, ["y"] = v2.y };
             if (result is Color color) return new JValue($"#{ColorUtility.ToHtmlStringRGBA(color)}");
             if (result is Quaternion q) return ToolHelpers.QuaternionToJson(q);
 
-            // GameObject
             if (result is GameObject go) return ToolHelpers.SerializeGameObject(go);
-
-            // Component
             if (result is Component comp) return ToolHelpers.SerializeComponent(comp);
 
-            // Enum
             if (result is Enum e) return new JValue(e.ToString());
 
-            // Arrays and collections
-            if (result is System.Collections.IEnumerable enumerable && !(result is string))
+            if (result is System.Collections.IEnumerable enumerable)
             {
                 var arr = new JArray();
                 int count = 0;
                 foreach (var item in enumerable)
                 {
-                    if (count >= 100) // Limit array output
+                    if (count >= 100)
                     {
                         arr.Add("[... truncated]");
                         break;
@@ -471,14 +555,19 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 return arr;
             }
 
-            // Fallback: ToString
             return new JValue(result.ToString());
         }
 
+        #endregion
+
+        #region Security
+
         /// <summary>
-        /// Check for dangerous code patterns.
+        /// Reject code containing patterns the tool is not permitted to execute (process launch,
+        /// file/dir deletion, assembly loading, unmanaged interop). This is a coarse first-line
+        /// guard — the primary safety net is user confirmation via <c>RequiresConfirmation</c>.
         /// </summary>
-        private bool ContainsDangerousPattern(string code)
+        private static bool ContainsDangerousPattern(string code)
         {
             var dangerous = new[]
             {

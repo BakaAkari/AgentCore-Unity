@@ -5,6 +5,298 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.27] - 2026-07-22
+
+### Context
+
+v1.7.26 完全重写了 ExecuteCodeTool 走 Mono.CSharp.Evaluator，但发布前的 smoke 测试暴露 **5 轮反复失败**：Case A `var x = 40; x + 2` 期望返回 42，Case B `Debug.Log("SMOKE_B");` 期望 output 含 `[Log] SMOKE_B`，Case C `__result = "legacy";` 期望编译失败 CS0103。5 轮迭代每次换一个新错误（CS0433 → CS0246 → CS0234 → CS0234 → 双通道 log 重复），我一直以为是**程序集引用配置错**，反复换 ReferenceAssembly 组合都修不好。
+
+对抗性根因（Claude Opus 换手后的全量分析）：**不是程序集问题，是错误分类器 bug**。
+
+- v1.7.26 首次用 `StreamReportPrinter` 拿到完整 Mono.CSharp 诊断后，实现了 error/warning 分离逻辑。但 Unity 2022.3 的 Mono2x 环境下，每个 CS1685 warning（mscorlib 类型重复定义，无害噪音）都跟一行续行 `"C:\...\System.Core.dll (Location of the symbol related to previous warning)"`——这行**既不含 `error CS`，也不含 `warning CS`**，前置 safe-default 分支把它当 error → 所有求值都被判 FAIL，即使程序集配置对了也无效。
+- 我 5 轮迭代都在改 ReferenceAssembly 列表（删掉、facade 换 CoreModule、只留 3 个 spike 引用），但**从未质疑分类器逻辑**。每次修完看到"CS0433/CS0246/CS0234"就以为是新错误，实际上大部分错误信号都是 CS1685 warning 的续行被误判 —— 表象在换，根因不动。
+- 用户在第 5 轮暴怒后换 Claude Opus 4-7 重新分析，读了完整 554 行源码后定位到分类逻辑，翻转 safe-default——只有匹配 `\berror\s+CS\d+\b` 的行才归 error，其他一律归 warning。三 case 立刻全 PASS。
+
+### Change
+
+- **错误分类器修复（本次核心）**：`HandleRun` 里的 sink 解析改用严格正则 `\berror\s+CS\d+\b` 白名单匹配 error，续行 / `(Location of the symbol...)` / 未知格式一律归 warning。以后即使 Mono.CSharp 换版本输出未知格式的诊断，也不会误判成 error 阻塞成功。
+- **恢复 v1.7.0 全部 10 个默认 usings**：v1.7.26 因误判把 usings 缩到 4 个（`UnityEngine / UnityEditor / System.Linq / System.Collections.Generic`）作为"最小实证配置"。分类器修好后 5 轮里所有 CS0433/CS0246/CS0234 的表象自动消失，把 usings 恢复到完整清单：`System / System.IO / System.Text / System.Text.RegularExpressions / System.Linq / System.Collections.Generic / UnityEngine / UnityEngine.SceneManagement / UnityEditor / UnityEditor.SceneManagement`。同步扩 `EnvironmentHint`。
+- **补 `UnityEditor.SceneManagement` 程序集引用**：`EditorSceneManager` 类型不在 `UnityEditor.CoreModule.dll`，独立在 `UnityEditor.SceneManagerModule.dll`。`ConfigureEvaluator` 新增 `typeof(EditorSceneManager).Assembly` 引用，用 `HashSet<Assembly>` 去重避免同 dll 二次引用产生的 CS0433。其他命名空间的程序集分布：GameObject/Scene 同在 UnityEngine.CoreModule，Enumerable 在 System.Core，System.IO/Text/Regex 在 mscorlib+System（GetDefaultReferences 已覆盖）。
+- **双通道 Debug.Log 捕获去重**：v1.7.26 同时订阅 `Application.logMessageReceived` + `logMessageReceivedThreaded`，Editor 主线程日志被两条通道各触发一次导致 `output` 数组出现两条相同 `[Log] X`。改为**只订阅 `logMessageReceivedThreaded`**（Threaded 变体覆盖所有线程含主线程，是完整覆盖）。
+- **Evaluate 剩余字符串归入 compileError**：Mono.CSharp `Evaluate(string, out object, out bool)` 返回非空字符串表示尾部无法解析（未闭合括号/未终结字符串等语法错误），v1.7.26 把它写进 `runtimeError`——本质上是**编译期失败**，不是运行时异常。改为独立变量 `parseTailError`，最终合并进 `errorLines` 走 `compileError` 分支，响应分类与"编译错误必须以失败返回"契约一致。
+- **XML doc 同步现状**：类头注释还在描述"Console.Error 重定向"（v1.7.26 首版策略），已改用 StreamReportPrinter+StringWriter。同步更新契约声明为 v1.7.27。
+
+### 搭车杂项（工作区累积的独立小改动，一并 commit）
+
+- **AgentCoreSettings v20→v21 迁移**：v20 迁移声称"清理 disabledTools 默认值"但实际没执行 Clear，导致部分历史 settings 仍在 disabledTools 里挂着硬编码的 `execute_code`——ToolRegistry 过滤掉该工具后 SOUL §2.10 引导的能力实际不可用。v21 迁移精准移除 `execute_code` 单项（不清空整个 disabledTools 以尊重用户其它禁用意图）。
+- **LightRAGClient query 超时 30s→180s**：`/query` 触发后端 LLM 推理 + 图谱/向量检索，冷启动/刚索引完首次查询实测持续超时；`PostAsync` 新增可选 `timeoutSeconds` 参数，查询走 180s 独立超时，其他快操作（索引/文档管理/健康检查）保持 30s。
+- **Mem0Client add 自动注册用户**：OpenMemory 对未注册的 user_id 返回 404 "User not found"，用户需手动去服务端注册。新增内部实现 `AddMemoryAsync(..., bool allowAutoRegister, ...)`：add 失败时若识别为 user not found 错误，自动调 `CreateUserAsync` 隐式注册后重试一次；`allowAutoRegister=false` 阻止无限递归。
+
+### Verification
+
+三 case smoke test（Unity 2022.3.50f1 + Mono2x）全 PASS：
+
+| Case | 代码 | 实测 |
+|---|---|---|
+| A | `var x = 40; x + 2` | `success:true / result:42 / resultType:System.Int32`；warnings 里仅两条 CS1685（DynamicAttribute + Expression）|
+| B | `Debug.Log("SMOKE_B");` | `success:true / resultType:void`；`output:["[Log] SMOKE_B"]`（**单条不重复**）|
+| C | `__result = "legacy";` | `success:false`；`compileError` 含 `error CS0103: The name '__result' does not exist in the current context` |
+
+响应里 `EnvironmentHint` 显示 10 个命名空间清单，实证 usings 恢复且未触发新的引用冲突。静态验证：括号平衡 `{} 58/58`、`() 198/198`、`[] 44/44`；`logMessageReceived` 无 Threaded 后缀变体归零（单一订阅+单一解绑各 1 次）；`'\r', '\n'` char 字面量正确（patch 工具历史坏损已字节级修复）。
+
+## [1.7.26] - 2026-07-22
+
+### Context
+
+v1.7.21~v1.7.25 五连弹推动"通用能力优先于特化堆砌"落地后，用户实测 `execute_code(action="run")` 却发现一个更基础的问题：**任何写法都返回 `success: true / result: null / resultType: void`**，包括最简的 `__result = "hello";`，甚至 `Debug.Log("...")` 的输出也没进 Unity Console（0 entries）。
+
+对抗性自检根因（不是修修补补）：
+- v1.7.0 起用反射 `new Evaluator(CompilerContext)` 构造出的评估器是"裸编译器"，**没有 InteractiveBase REPL 全局作用域绑定**——对未声明变量做 `__result = value` 赋值，C# 编译器视为编译错误，不是 REPL 特殊语义。
+- Mono.CSharp 的 `ConsoleReportPrinter` 把编译错误写到进程 `Console.Error`（stderr），**既不进 Unity Console 也不进 `Application.logMessageReceived`**，被工具静默吞掉。
+- `Run(code)` 调用因编译失败什么都没做，随后 `Evaluate("__result")` 找不到变量 → `resultSet=false` → 返回 "code executed but no value was returned"。
+- 结果：**失败被伪装成成功**——agent 拿到 `success:true / result:null` 无法判断"是没赋值"还是"编译错了"，撞墙无解，只能退回创建 `.cs` 脚本的老路（正是 v1.7.21 想根治的）。
+
+v1.7.0 CHANGELOG 声称 "spike PASS"，但 spike 阶段大概率用了 `var __result = ...;` 这种带类型声明的写法，或走 `Evaluate(single-expression)` 单表达式路径，落到 tool 里的 `Run + Evaluate("__result")` 两段式端到端 smoke 从未真正过。
+
+### Change
+
+**ExecuteCodeTool 完全重写**：契约、返回值语义、错误捕获、schema、agent 引导语全部同步换代。
+
+- **`__result = value` 约定彻底废除**。返回值语义改为 Roslyn Scripting / IPython 风格："如果代码块最后一项是**表达式**（无结尾 `;`），它的值就是返回值；否则不返回值"。示例：
+  - `var x = 40; x + 2` → 返回 42
+  - `var scenes = Directory.GetFiles(...); "found " + scenes.Length` → 返回字符串
+  - `Debug.Log("ok");` → 不返回值（正常成功，不是失败）
+- **`action` 参数删除**：`execute_code` 从此只有一个入口，参数只剩 `code` + 可选 `context`。旧 schema 里的 `action="evaluate"` 分支完全删除（约 -300 行：`HandleEvaluate` / `EvaluateExpression` / `ResolveType` / `IsAllowedType` / `ParseMethodArguments` / `SplitArguments` / `ConvertArgument` / `AllowedNamespaces` 常量）。传 `action="run"` 静默兼容一个版本周期以缓解迁移；传其他 action 值直接失败并附环境提示。
+- **编译错误从"静默吞掉"改为"失败并附错"**：`Console.SetError(new StringWriter())` 在 Evaluate 调用前后重定向 stderr，拿回 Mono.CSharp `ConsoleReportPrinter` 写的完整诊断，作为 `data.compileError` 字段返回 + `ToolResponse.Fail(...)` 而不是 `OkWithData`——agent 撞墙时能立即看到 "line N: The name 'foo' does not exist" 这类真错，不再有"success:true / result:null / 没日志"的黑盒。
+- **`Run + Evaluate("__result")` 两段式改为单次 `Evaluate(string, out object, out bool)`**：Mono.CSharp 的 3 参 Evaluate 本身就吃多语句块 + 末尾表达式（这是 Interactive C# `csharp` 命令行的运作方式），一次调用同时得到 result 和 result_set，语义更贴 REPL，也避开了两段式里"第二段编译第一段的变量名字符串"这种脆弱依赖。
+- **Debug.Log 捕获保留**：`Application.logMessageReceived` 侦听 + 收集到 `data.output`，与错误捕获并存（同时捕获日志和 stderr 编译错误）。
+- **Evaluator 反射构造保留**：不引入 asmdef 依赖（这条历史决策是对的），只是把 `ConsoleReportPrinter` 的行为通过 `Console.SetError` 重定向捕获，无需 Reflection.Emit 生子类。
+- **SOUL §2.10 同步重写**：把"assign the final value to `__result`"整段改成"the last expression is the return value"，给三个示例（返回 42 / 返回 string / 不返回），明确声明"legacy `__result` pattern removed in v1.7.26"；命名空间清单和"不要写 .cs 脚本"部分保留。
+- **工具 Description / schema.description / RunAvailableNamespacesHint 常量**全部更新为新语义（新常量名 `EnvironmentHint`）。
+
+### Verification
+
+- 静态：括号平衡 `{}` 57/57、`()` 179/179；legacy 标识符 (`__result` / `AllowedNamespaces` / `HandleEvaluate` / `EvaluateExpression` / `ResolveType` / `IsAllowedType` / `ParseMethodArguments` / `SplitArguments` / `ConvertArgument` / `RunAvailableNamespacesHint` / `RunUsings`) 残留 0 或 2（仅在废除说明注释里），新增关键点 (`ConfigureEvaluator` / `EnvironmentHint` / `DefaultUsings` / `Console.SetError` / `errorCapture` / `compileError`) 引用完整。
+- 用户端到端 3-case smoke（编译后）：
+  - Case A（返回表达式）：`var x = 40; x + 2` → 期望 `result=42, resultType=Int32`
+  - Case B（纯语句无返回）：`Debug.Log("SMOKE_B");` → 期望 `resultType=void`、`output` 里能看到 `[Log] SMOKE_B`
+  - Case C（编译错误）：`__result = "legacy";` → 期望 **失败**、`compileError` 里含"`__result` does not exist"或类似诊断，不再是 "success:null"
+
+### Files changed
+
+- `Editor/Tools/Native/Scripting/ExecuteCodeTool.cs`（完全重写，764→~430 行）
+- `Editor/Bootstrap/Resources/SOUL.md`（§2.10 整段重写）
+- `package.json`（1.7.25 → 1.7.26）
+- `CHANGELOG.md`（新增本条）
+- `README.md`（版本号 + 段落追加）
+- `plans/ROADMAP.md`（版本号 + 段落追加）
+
+### Notes
+
+Version bump 到 **1.7.26** 而非 2.0.0：`execute_code` 对外契约变了（`action` 参数、`__result` 约定废除），但该工具是 `Visibility=Restricted`、仅由 agent 通过 SOUL 引导使用，无外部脚本 API 依赖，SOUL 已同步；从用户视角是 agent 行为改善而非 breaking change。若未来加入外部 MCP 暴露，视届时情况再考虑 2.0。
+
+## [1.7.25] - 2026-07-21
+
+### Context
+v1.7.21~v1.7.24 已从 agent 引导层（SOUL §2 第 10 条）+ 能力层（execute_code:run 的 RunUsings 扩至 10 命名空间 + SerializedProperty 嵌套 propertyPath 可见性）+ 存量代码层（manage_gameobject 删 sort_children/arrange_grid、workflow 15→3 action）三个方向执行了「通用能力优先于特化堆砌」原则。SmartOperationsTool 是最后一个仍以纯几何/纯空间批量特化 action 堆砌的工具。审计其 7 个 action：
+
+- `align_objects`：LINQ `values.Min()/Max()/Average()` + foreach 赋值 → execute_code:run 5-8 行
+- `distribute_objects`：等距间隔 + foreach 赋值 → execute_code:run 8-10 行
+- `snap_to_grid`：`Mathf.Round(x / g) * g` → execute_code:run 3 行
+- `align_to_ground`：`Physics.Raycast(origin, Vector3.down, out hit, Mathf.Infinity)` → execute_code:run 5 行
+- `randomize_transform`：`UnityEngine.Random.Range` 三段 → execute_code:run 8 行
+- `select_by_criteria`：**与 `find_gameobjects` 工具的 duplicate 功能** —— find_gameobjects schema 已有 `searchTerm/tag/layer/componentType/activeOnly` 五维过滤，完全覆盖 `name_contains/tag/layer/component` 四维；仅 `static_only` 差一维，用 `execute_code:run` 一行 `.Where(g => g.isStatic)` 补
+- `replace_objects`：**保留** —— `PrefabUtility.InstantiatePrefab` + 保 `transform/parent/sibling index` + `Undo group`，agent 用 execute_code:run 现拼 15+ 行且易漏 undo/sibling index
+
+### Removed
+- **6 个 smart_operations action** 及各自 handler / 私有 helper：
+  - `align_objects` / `HandleAlignObjects`
+  - `distribute_objects` / `HandleDistributeObjects`
+  - `snap_to_grid` / `HandleSnapToGrid`
+  - `align_to_ground` / `HandleAlignToGround`
+  - `randomize_transform` / `HandleRandomizeTransform`
+  - `select_by_criteria` / `HandleSelectByCriteria`（重复 find_gameobjects）
+- **3 个私有 helper**（replace_objects 不用）：`GetAxisValue` / `CalculateAlignTarget` / `GetGameObjectPath`
+- **12 个 schema 字段**（仅供已删 action 用）：`axis` / `mode` / `grid_size` / `offset` / `layer_mask` / `position_range` / `rotation_range` / `scale_range` / `component` / `tag` / `layer` / `name_contains` / `static_only` / 参数字段 `name`
+
+### Changed
+- **`smart_operations` action 集**：7 → 1（`replace_objects`）
+- **schema 属性字段**：15 → 3（`action` / `names` / `prefab_path`），`required` 三项都必填
+- **default case 兜底提示**：主动列出已删除的 6 个 action + 各自替代方案（execute_code:run 具体 C# 片段 / find_gameobjects 工具）
+- **工具级 Description**：改为聚焦式描述，明确告知 select_by_criteria 已被 find_gameobjects 覆盖、其他 5 个 action 应用 execute_code:run
+- **类顶 XML doc**：完整列出每个删除 action 的 execute_code:run 替代代码片段
+
+### Kept (justification)
+- `replace_objects`：`PrefabUtility.InstantiatePrefab` + 保 `position/rotation/localScale/parent/siblingIndex` + `Undo.SetCurrentGroupName` + `Undo.RegisterCreatedObjectUndo` + `Undo.DestroyObjectImmediate` + `Undo.CollapseUndoOperations`。这套「原地换 prefab 且完整保留场景关系 + 单一 Undo 组」的组合，agent 用 execute_code:run 现拼易漏 undo 环节，是真正的高频语义化工程操作
+
+### Files Modified
+- `Editor/Tools/Native/Extended/SmartOperationsTool.cs`（-18276 字符 / -396 行，585 行 → 189 行 / 27524 字节 → 8650 字节，-68%）
+
+### Verification (static)
+- 栈式括号平衡（排除 verbatim string / block-comment / line-comment）：depth=0
+- 保留 helper `ResolveGameObjects` 引用完整（1 定义 + 1 调用 = 2 命中）
+- 保留 handler `HandleReplaceObjects` 引用完整（1 定义 + 1 dispatcher case = 2 命中）
+- 删除的 6 个 handler 名 + 2 个 helper 名（`GetAxisValue` / `CalculateAlignTarget`）全项目 .cs 源码残留 0
+- `GetGameObjectPath` 名字在其他工具类中有同名 private 方法（`WorkflowTool.cs` 保留的 helper），不冲突
+
+### v1.7.21~v1.7.25 五连弹总结
+| 版本 | 层次 | 动作 |
+| --- | --- | --- |
+| v1.7.21 | Agent 引导 + 能力 | SOUL.md §2 新增第 10 条 execute_code:run 使用指引；ExecuteCodeTool RunUsings 5→10 命名空间；新增可用命名空间提示常量 |
+| v1.7.22 | 能力 | ManageComponentTool: SerializeComponentDetailed 递归展开嵌套 SerializedProperty，key 用 propertyPath；HandleModify FindProperty null 时提示先 get 看嵌套字段名 |
+| v1.7.23 | 存量代码 | ManageGameObjectTool: 删 sort_children + arrange_grid（-138 行） |
+| v1.7.24 | 存量代码 | WorkflowTool: 15→3 action（-744 行 / -60%） |
+| v1.7.25 | 存量代码 | SmartOperationsTool: 7→1 action（-396 行 / -68%） |
+| 累计 | — | 工具内 action 精简 20 项 + 内部 helper 12 项；代码 -1278 行；工具总数仍 51 |
+
+## [1.7.24] - 2026-07-21
+
+### Context
+用户在 v1.7.20 附近对 workflow 工具堆砌批量 action 明显不满 —— "一个能跑任意 C# 的 execute_code > N 个专用工具"、"用户明确质疑 sort_children 这类特化工具让普适性变窄"（USER 记忆）。v1.7.21 SOUL 引导 + v1.7.22 propertyPath + v1.7.23 sort_children/arrange_grid 删除后，WorkflowTool 剩下的 12 个批量/收集 action 全部可用 execute_code:run 一段 3-8 行 C# 完整覆盖：
+- `batch_set_tag`: `foreach (var n in names) FindGameObject(n).tag = "T";`
+- `batch_set_layer`: `foreach (var n in names) FindGameObject(n).layer = LayerMask.NameToLayer("L");`
+- `batch_set_active`: `foreach (var n in names) FindGameObject(n).SetActive(true);`
+- `batch_set_static`: `foreach (var n in names) GameObjectUtility.SetStaticEditorFlags(FindGameObject(n), StaticEditorFlags.BatchingStatic|StaticEditorFlags.NavigationStatic);`
+- `collect_by_component`: `Object.FindObjectsByType<Rigidbody>(FindObjectsSortMode.None).Select(c => c.name).ToArray()`
+- `collect_by_tag`: `GameObject.FindGameObjectsWithTag("Enemy").Select(g => g.name).ToArray()`
+- `collect_by_layer`: `Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None).Where(g => g.layer == LayerMask.NameToLayer("UI")).Select(g => g.name).ToArray()`
+- `batch_add_component`: `foreach (var n in names) FindGameObject(n).AddComponent<Rigidbody>();`
+- `batch_remove_component`: `foreach (var n in names) Object.DestroyImmediate(FindGameObject(n).GetComponent<Rigidbody>());`
+- `batch_move_to_parent`: `var p = FindGameObject("Parent").transform; foreach (var n in names) FindGameObject(n).transform.SetParent(p);`
+- `count_objects`: `Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None).Length`
+- `list_scenes`: `AssetDatabase.FindAssets("t:Scene").Select(g => AssetDatabase.GUIDToAssetPath(g)).ToArray()`
+
+保留的 3 个 action 各有 execute_code:run 无法优雅表达的独特价值。
+
+### Removed
+- **12 个 workflow action** 及各自 handler / 私有 helper：
+  - `batch_set_tag` / `HandleBatchSetTag` / `IsValidTag`
+  - `batch_set_layer` / `HandleBatchSetLayer` / `ResolveLayer`
+  - `batch_set_active` / `HandleBatchSetActive`
+  - `batch_set_static` / `HandleBatchSetStatic` / `ResolveStaticFlags` 及其 `#pragma warning disable/restore CS0618`（legacy NavMesh 兼容包裹）
+  - `collect_by_component` / `HandleCollectByComponent`
+  - `collect_by_tag` / `HandleCollectByTag`
+  - `collect_by_layer` / `HandleCollectByLayer`
+  - `batch_add_component` / `HandleBatchAddComponent`
+  - `batch_remove_component` / `HandleBatchRemoveComponent`
+  - `batch_move_to_parent` / `HandleBatchMoveToParent`
+  - `count_objects` / `HandleCountObjects`
+  - `list_scenes` / `HandleListScenes`
+- **schema 6 个仅供已删 action 用的字段**：`tag` / `layer` / `active` / `static_flags` / `component_type` / `parent_name`
+
+### Changed
+- **`workflow` action 集**：15 → 3（`batch_rename` / `find_replace_name` / `snapshot_hierarchy`）
+- **schema 属性字段**：14 → 10
+- **`ReadOnlyActions`**：`{ count_objects, list_scenes, snapshot_hierarchy, collect_by_component, collect_by_layer, collect_by_tag }` → `{ snapshot_hierarchy }`
+- **`Capabilities`**：`ModifyScene | ModifyAssets | BatchExecute` → `ModifyScene | BatchExecute`（删除 `ModifyAssets`，剩余三个 action 都不改资产）
+- **default case 兜底提示**：主动列出已删除的 12 个 action + 指引改用 `execute_code:run`
+- **工具级 Description**：改为聚焦式描述 + 明确告知"其他批量操作请用 execute_code:run"
+
+### Kept (justification)
+- `batch_rename`：占位符 pattern 语义 `{index}` / `{name}` / `{parent}` / `{index:00}` 字符串模板 + regex 替换 + 顺序编号，用 execute_code:run 每次现写 15+ 行不划算
+- `find_replace_name`：场景全量遍历 + regex 或 plain-text find-replace + dry_run 预览 + include_inactive + search_root 范围限定，是高频语义化操作
+- `snapshot_hierarchy`：递归深度限制 + 结构化 JSON 树输出（agent 一次消化整场景结构），比 execute_code:run 现拼 tree 更友好
+
+### Files Modified
+- `Editor/Tools/Native/Meta/WorkflowTool.cs`（-29424 字符 / -744 行，1211 行 → 467 行 / 49116 字节 → 19692 字节，-60%）
+
+### Verification (static)
+- 栈式括号平衡（排除 verbatim string / block-comment / line-comment 干扰）：depth=0
+- 5 个保留 helper（`GetTargetGameObjects` / `GetAllGameObjects` / `CollectAllChildren` / `BuildHierarchyNode` / `GetGameObjectPath`）引用全部命中定义，无 dangling 调用
+- 删除的 12 个 handler 名 + 3 个 helper 名（`ResolveLayer` / `IsValidTag` / `ResolveStaticFlags`）全项目 grep 残留 0
+- 工具总数仍 51（未删工具本体，仅精简工具内 action 12 项）
+
+## [1.7.23] - 2026-07-21
+
+### Context
+用户在 v1.7.16/v1.7.20 期间反复质疑：`sort_children`（v1.7.16 附加）和 `arrange_grid` 是否让工具普适性变窄？v1.7.21 用 SOUL 引导 + v1.7.22 用 propertyPath 修复后，`execute_code:run` 已能在 5-15 行 C# 内完整覆盖这两个 action 的功能：
+- 排序: `go.transform.Cast<Transform>().OrderBy(c=>c.name).ToList().ForEach((c,i)=>c.SetSiblingIndex(i));`（LINQ 一行版；含 undo 则 ~5 行）
+- 网格: `foreach var i in Enumerable.Range(...) { targets[i].transform.position = ... }`（~8 行）
+
+它们没有 execute_code:run 无法表达的独特语义，属于纯几何/纯排序特化工具堆砌，删除是"通用能力优先"原则的直接落地。
+
+### Removed
+- **`manage_gameobject.sort_children` action** 及所有关联代码：
+  - `HandleSortChildren` handler 方法（`~L459-507`，49 行）
+  - `SortChildrenRecursive` 辅方法（`~L514-542`，29 行）
+  - XML doc 块（`~L453-458`，6 行）
+  - schema 里 `order` / `recursive` 两个专用参数字段
+  - tool `[AgentTool]` Description 里对 sort_children 的引用（无，本身不在描述里）
+  - dispatcher `case "sort_children":` 分支（3 行）
+  - `Unknown action` 兜底提示的 sort_children token
+- **`manage_gameobject.arrange_grid` action** 及所有关联代码：
+  - `HandleArrangeGrid` handler 方法（`~L813-858`，46 行）
+  - schema 里 `columns` / `spacing` / `start_position` 三个专用参数字段（14 行）
+  - tool `[AgentTool]` Description 提到 arrange_grid 的一处引用
+  - dispatcher `case "arrange_grid":` 分支（3 行）
+  - `Unknown action` 兜底提示的 arrange_grid token
+
+### Changed
+- **`manage_gameobject` action 集**：13 → 11（`create` / `delete` / `get_info` / `modify` / `set_transform` / `set_parent` / `duplicate` / `create_batch` / `modify_batch` / `delete_batch` / `set_active_batch`）
+- **工具总数**：51 不变（本弹只精简工具**内**的特化 action，不删工具本体）
+
+### Files Modified
+- `Editor/Tools/Native/Core/ManageGameObjectTool.cs`（-8153 字符，44526 → 36373 字节）
+
+### Verification (static + cross-file)
+- 括号平衡：205 `{` / 205 `}`
+- 关键词全项目残留（源码 + 资源 + 除 plans/ CHANGELOG 外全扫）：
+  - `sort_children`: 0
+  - `SortChildren`: 0
+  - `HandleSortChildren`: 0
+  - `arrange_grid`: 0
+  - `ArrangeGrid`: 0
+  - `HandleArrangeGrid`: 0
+
+## [1.7.22] - 2026-07-21
+
+### Context
+v1.7.21 补 SOUL 引导后自查发现另一处根因盲点：即便 agent 知道调 `execute_code:run` 或走 `manage_component.modify`，它从 `manage_component.get` 输出里看到的 `serializedProperties` **只有顶层字段名**——嵌套字段（`stats.attack`）、数组元素（`clips.Array.data[0].name`）根本不存在于 JSON 输出里，agent 无法知道能这么改。Unity 官方 `SerializedObject.FindProperty(string)` **本身已支持点分隔路径**（[官方文档](https://docs.unity3d.com/ScriptReference/SerializedObject.FindProperty.html)明确 "You can also use the property path notation"），所以修复只需在 `get` 层暴露真正的 `propertyPath`。
+
+### Changed
+- **`ManageComponentTool.SerializeComponentDetailed` 递归展开嵌套 SerializedProperty**：
+  - `iterator.NextVisible(false)` → `NextVisible(true)`，第二个 `NextVisible` 也改为 `true` 使遍历真正进入结构/嵌套字段。
+  - JSON key 从 `iterator.name`（叶名）改为 `iterator.propertyPath`（完整点分隔路径），agent 从 `get` 输出直接看到 `stats.attack` / `weapons.Array.data[0].damage` 这类可回传的路径。
+  - 跳过合成的顶层 `Array` / `size` 包装名（它们的真实元素已用 `Array.data[N]` 路径露出，重复列纯噪声）。
+  - `serializedProperties` JObject 附 `_hint` 字段说明 key 是 path notation，可直接回传 `modify` 或 `set_property_batch`。
+- **`ManageComponentTool.SetPropertiesViaSerializedObject` FindProperty 未命中错误信息附提示**：从 `"Property 'X' not found on 'C'."` 扩为附上 tip 引导 agent 先跑 `get` 看真实 propertyPath 键，明确 nested 用 `stats.attack`、数组元素用 `fieldName.Array.data[N]` 的语法。
+
+### Files Modified
+- `Editor/Tools/Native/Core/ManageComponentTool.cs`
+  - `SerializeComponentDetailed`（~L1146-1180）：递归 + propertyPath + Array/size 跳过 + _hint
+  - `SetPropertiesViaSerializedObject`（~L753-760）：错误信息附路径语法提示
+
+### Verification (static)
+- 括号平衡：305 `{` / 305 `}`
+- `iterator.propertyPath` 引用次数：1（新路径）
+- `NextVisible(true)` 出现次数：2（原本 1 处顶层入口 + 现在 1 处遍历循环）
+- `NextVisible(false)` 残留：0
+- `_hint` 输出字段：1 处
+
+## [1.7.21] - 2026-07-21
+
+### Context
+用户反馈：agent 在处理"按名字升序排列子物体"的用户请求时，连续四次工具调用失败——先试 `execute_menu_item` 找不到菜单，再试 `execute_code(action="execute")` 参数错误，再试 `execute_code(action="evaluate")` 多行 C# 被评估器拒绝，最终退回创建 Editor 脚本 `.cs` 文件走菜单调用，因 Domain Reload 时序问题连菜单都没注册上。用户随后追问："你刚才是单独专门的写了一个特化的工具吗？这样会不会让工具普适性和适用面变窄？"
+
+这次 v1.7.21 正面回答该质疑：**不加特化工具，改升级通用能力。** agent 撞墙的真正根因不是缺 `sort_children`（该 action v1.7.20 已存在于 `manage_gameobject`），而是 agent 不知道 `execute_code(action="run")` 存在于 v1.7.20 中且已能跑多行 C#——SOUL 从未告诉它。本弹从"引导 + 能力 + 错误自纠"三个层面根因治理。
+
+### Changed
+- **SOUL.md §2.10 新增"临时代码优先 execute_code:run"引导条款**：明确一次性批量场景编辑、层级查询、计算类操作、Unity Editor API 探索等应直接调 `execute_code(action="run")` 传一段 C# 代码块并将最终值赋给 `__result` 变量，不要创建一次性 Editor 脚本（`.cs` 文件触发 Domain Reload、需菜单注册、污染项目）。仅当逻辑需长期复用或需要 `execute_code:run` 无法表达的特性（自定义 Attribute、EditorWindow 类、MenuItem）时才用 `manage_script`。条款末尾列出 run 模式可用的完整命名空间清单。原第 10/11 条重编号为 11/12。
+- **`ExecuteCodeTool.RunUsings` 扩展从 5 个命名空间到 10 个**：新增 `System.IO` / `System.Text` / `System.Text.RegularExpressions` / `UnityEngine.SceneManagement` / `UnityEditor.SceneManagement`，覆盖高频场景（文件 IO、字符串构造、正则匹配、场景操作）。
+- **`ExecuteCodeTool` 对应 `ReferenceAssembly` 注册所在程序集**：新增 5 处 `refAssembly.Invoke` 调用 —— `typeof(System.IO.File).Assembly` / `typeof(System.Text.StringBuilder).Assembly` / `typeof(System.Text.RegularExpressions.Regex).Assembly` / `typeof(UnityEngine.SceneManagement.Scene).Assembly` / `typeof(UnityEditor.SceneManagement.EditorSceneManager).Assembly`，确保 `using` 语句能解析。
+
+### Added
+- **`RunAvailableNamespacesHint` 常量 + 错误信息自纠提示**：在 `ExecuteCodeTool` 中定义一个人类可读的命名空间清单常量，包含（1）可用命名空间列表（2）`__result` 用法示例（3）Mono.CSharp 语法限制提示（不支持 async/await / 顶层 return / 部分 C# 8+ 特性如 records / switch expressions / using declarations）。run 模式失败或返回空值的两处错误分支同时把 hint 拼接到人类可读的错误消息里，并注入到 `data["hint"]` 字段——让 agent 撞墙时能自纠而非退回旧路径（创建 `.cs` → 菜单未注册 → 走 `evaluate` 又失败）。
+
+### Files Modified
+- `Editor/Bootstrap/Resources/SOUL.md`（+1 条款 / 原第 10/11 条重编号为 11/12）
+- `Editor/Tools/Native/Scripting/ExecuteCodeTool.cs`（RunUsings 扩展 + 5 个 ReferenceAssembly 调用 + `RunAvailableNamespacesHint` 常量 + 2 处错误分支拼接）
+
+### Verification (static)
+- 括号平衡：110 `{` / 110 `}`
+- `RunAvailableNamespacesHint` 引用次数：5（1 处常量声明 + 2 处 `data["hint"]` 赋值 + 2 处 message 拼接）
+- 旧 5 命名空间 RunUsings 字符串残留：0
+
 ## [1.7.20] - 2026-07-21
 
 ### Changed

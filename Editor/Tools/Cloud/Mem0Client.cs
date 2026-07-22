@@ -233,6 +233,22 @@ namespace AgentCore.Editor.Cloud
             Dictionary<string, string> metadata = null,
             CancellationToken ct = default)
         {
+            return await AddMemoryAsync(content, userId, metadata, allowAutoRegister: true, ct);
+        }
+
+        /// <summary>
+        /// 添加记忆的内部实现，带自动注册控制。
+        /// 最小可用性修复：OpenMemory 对未注册的 user_id 返回 404 "User not found"。
+        /// 当 add 因用户未注册失败时，自动调用 CreateUserAsync 隐式注册该用户后重试一次，
+        /// 让 add 开箱即用，无需用户手动去服务端注册。allowAutoRegister 防止无限递归。
+        /// </summary>
+        private async Task<Mem0AddResult> AddMemoryAsync(
+            string content,
+            string userId,
+            Dictionary<string, string> metadata,
+            bool allowAutoRegister,
+            CancellationToken ct = default)
+        {
             try
             {
                 var uid = userId ?? _userId;
@@ -308,6 +324,35 @@ namespace AgentCore.Editor.Cloud
             }
             catch (Exception ex)
             {
+                // 最小可用性修复：检测 "用户未注册" 错误（OpenMemory 返回 404 + "User not found"）。
+                // 首次遇到时自动注册用户再重试一次 add，让记忆功能开箱即用。
+                if (allowAutoRegister && IsUserNotFoundError(ex))
+                {
+                    AgentCoreLog.Info($"[AgentCore] AddMemoryAsync: user '{userId ?? _userId}' 未注册，尝试自动注册后重试...");
+                    try
+                    {
+                        var (created, regMsg) = await CreateUserAsync(ct);
+                        if (created)
+                        {
+                            AgentCoreLog.Info($"[AgentCore] AddMemoryAsync: 用户自动注册成功（{regMsg}），重试 add");
+                            // 重试一次，禁止再次自动注册以防无限递归
+                            return await AddMemoryAsync(content, userId, metadata, allowAutoRegister: false, ct);
+                        }
+                        AgentCoreLog.Warning($"[AgentCore] AddMemoryAsync: 自动注册用户失败（{regMsg}）");
+                        return new Mem0AddResult
+                        {
+                            Id = null,
+                            Success = false,
+                            Message = $"用户未注册且自动注册失败: {regMsg}"
+                        };
+                    }
+                    catch (Exception regEx)
+                    {
+                        AgentCoreLog.Warning($"[AgentCore] AddMemoryAsync: 自动注册过程异常: {regEx.Message}");
+                        // 落到下方通用失败返回
+                    }
+                }
+
                 AgentCoreLog.Error($"[AgentCore] Mem0Client.AddMemoryAsync failed: {ex.Message}\n{ex.StackTrace}");
                 return new Mem0AddResult
                 {
@@ -316,6 +361,16 @@ namespace AgentCore.Editor.Cloud
                     Message = ex.Message
                 };
             }
+        }
+
+        /// <summary>
+        /// 判断异常是否为 OpenMemory "用户未注册" 错误（HTTP 404 + "User not found"）。
+        /// </summary>
+        private static bool IsUserNotFoundError(Exception ex)
+        {
+            var msg = ex.Message?.ToLowerInvariant() ?? string.Empty;
+            return msg.Contains("404") &&
+                   (msg.Contains("user not found") || msg.Contains("not found"));
         }
 
         /// <summary>
@@ -575,6 +630,7 @@ namespace AgentCore.Editor.Cloud
             // 方式 1: 通过 REST API 添加初始记忆来隐式创建用户
             try
             {
+                // allowAutoRegister:false — 这是注册流程本身，禁止再触发自动注册以防无限递归
                 var result = await AddMemoryAsync(
                     $"User {_userId} registered via AgentCore Unity plugin.",
                     _userId,
@@ -583,6 +639,7 @@ namespace AgentCore.Editor.Cloud
                         ["source"] = "user_registration",
                         ["created_by"] = "agentcore"
                     },
+                    allowAutoRegister: false,
                     ct: ct);
 
                 if (result.Success)
