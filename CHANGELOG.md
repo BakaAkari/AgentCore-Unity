@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.28] - 2026-07-22
+
+### Context
+
+用户第 6 轮追问"从一致性原理出发再次分析系统缺哪些 Unity 工具模块的覆盖 + 什么时候升到 1.8.0"触发的对抗式校验。校验维度:
+- 用 grep 枚举 47 个 [AgentTool] 属性,对齐 Unity Editor ~35 个常用模块,量化覆盖率 ~85%,余 5 模块(Undo/Post-Processing/RenderFeature/ProjectSettings 其他项/Mesh 编辑)全部能被 execute_code 兜底。
+- 逐个复查历史用户报告"创建 .cs 走菜单项"错误链的 4 类根因 (menu_path 缺失/Domain Reload 时序/action 枚举错/单表达式反射器) 是否在其他工具重演。
+- R2 (action 型 dispatcher default case 是否列出可用 action) 精准正则扫全部 44 个 action-型工具 → 44/44 全绿(v1.7.14~v1.7.25 五连弹已扫干净)。
+- 对抗式定位到唯一两处真实的系统性缺陷:R1 跨调用资源时序 + R3 Undo 缺失。均在 SOUL 引导层,不在工具层。
+
+### Change
+
+- **SOUL §2.10 第 10 条追加 "Undo contract" 子条款** (R3 修复):任何对 scene GameObject/Component 的修改必须前置 `Undo.RecordObject(target, "operation name")`; `new GameObject(...)` 之后必须紧跟 `Undo.RegisterCreatedObjectUndo`; 批量走 `Undo.SetCurrentGroupName + Undo.CollapseUndoOperations`。跳过 Undo 视为静默破坏 Ctrl+Z 契约的输出错误,不是小瑕疵。
+- **SOUL §2.10 第 10 条追加 "Cross-call resource timing" 子条款** (R1 修复):在一次调用内创建/移动 asset,下一次调用按路径引用它是 racy 的——必须在**同一 call** 里显式 `AssetDatabase.SaveAssets(); AssetDatabase.Refresh();` 之后路径才可查询。若新写的 script/shader 类型需要反射(如 `AddComponent<NewClass>()`),必须 Domain Reload,单个 execute_code 块内做不到——拆分工作流:写完即返回让用户等重编译,或调用 `EditorUtility.RequestScriptReload()` 并把下一次调用当作 post-reload 处理。Prefab 编写用 `PrefabUtility.SaveAsPrefabAsset(instance, path)`,不要自造 `File.WriteAllText`。
+- **零代码变更**:纯引导层升级,不改任何 .cs。条款编号 1~12 保持稳定(在第 10 条内追加子条款,不新增第 13 条),避免打断其他文档对 §2.10 的引用。
+
+### 未做的事(留白)
+
+- **R4 (Timeline/Cinemachine 类型 CS0246)**:两个模块有独立工具(`manage_timeline` / `manage_cinemachine`),agent 走独立工具不需要绕 execute_code。除非用户反馈,不追加 ReferenceAssembly。
+- **R5 (Play Mode / Editor 状态耦合)**:罕见,SOUL §4 已有部分 Unity 引擎语义警告,后续按需追加。
+- **v1.8.0 不 bump**:与用户共识,v1.8.0 应锚定 Phase 8 MCP Server 对外可交付首版,而非累积 patch 数量。v1.7.x 系列继续做内部完善收尾。
+
+### Verified
+
+- 覆盖矩阵扫描:47 个原生工具 vs ~35 个 Unity Editor 常用模块 → 覆盖 30 (~85%),余 5 execute_code 全覆盖。
+- R2 精准扫描:44 个 action 型工具的 dispatcher default case,44/44 均包含 "Valid actions: ..." 或等价 hint(GOOD 分类 44,WARN_ONLY_UNKNOWN 0,SILENT 0,UNCLEAR 0)。
+- SOUL.md 语法校验:1~12 条编号连续,§2/§3/§4/§5 章节结构保持,总长 9152→~11500 chars。
+- 无代码 diff,`AgentCore.Editor.dll` 不受影响,老 dll 与新 SOUL 兼容运行(SOUL 是 Resources 里的引导资源,Bootstrap 每次会话开头读取,更新即生效不需 recompile)。
+
+
+
 ## [1.7.27] - 2026-07-22
 
 ### Context
