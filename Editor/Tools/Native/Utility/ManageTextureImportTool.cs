@@ -123,6 +123,10 @@ namespace AgentCore.Editor.Tools.Native.Utility
             var importer = GetTextureImporter(ToolHelpers.GetRequiredString(parameters, "asset_path"), out var path, out var error);
             if (importer == null) return ToolResponse.Fail(error);
 
+            // Record Undo on the importer BEFORE mutating its properties so Ctrl+Z restores
+            // prior settings. The subsequent reimport itself is not undoable, but the
+            // importer property values are.
+            Undo.RecordObject(importer, $"Set TextureImporter Settings on {path}");
             ApplyCommonSettings(importer, parameters);
             importer.SaveAndReimport();
             return ToolResponse.OkWithData(SerializeImporter(importer, path), $"Updated TextureImporter settings for '{path}'.");
@@ -150,6 +154,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
                     try
                     {
+                        Undo.RecordObject(importer, $"Set TextureImporter Settings on {path} (batch)");
                         ApplyCommonSettings(importer, token);
                         importer.SaveAndReimport();
                         succeeded.Add(new JObject { ["asset_path"] = path });
@@ -210,6 +215,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             var importer = GetTextureImporter(ToolHelpers.GetRequiredString(parameters, "asset_path"), out var path, out var error);
             if (importer == null) return ToolResponse.Fail(error);
+            Undo.RecordObject(importer, $"Set TextureImporter Type on {path}");
             importer.textureType = ParseEnum<TextureImporterType>(ToolHelpers.GetRequiredString(parameters, "texture_type"));
             importer.SaveAndReimport();
             return ToolResponse.OkWithData(new JObject { ["asset_path"] = path, ["texture_type"] = importer.textureType.ToString() }, $"Set texture type for '{path}'.");
@@ -221,6 +227,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             if (importer == null) return ToolResponse.Fail(error);
 
             var platform = ToolHelpers.GetRequiredString(parameters, "platform");
+            Undo.RecordObject(importer, $"Set TextureImporter {platform} Platform Settings on {path}");
             var settings = importer.GetPlatformTextureSettings(platform);
             settings.name = platform;
             if (parameters["overridden"] != null) settings.overridden = ToolHelpers.GetOptionalBool(parameters, "overridden", settings.overridden);
@@ -246,6 +253,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             var importer = GetTextureImporter(ToolHelpers.GetRequiredString(parameters, "asset_path"), out var path, out var error);
             if (importer == null) return ToolResponse.Fail(error);
 
+            Undo.RecordObject(importer, $"Set Sprite Import Settings on {path}");
             importer.textureType = TextureImporterType.Sprite;
             var textureSettings = ReadTextureSettings(importer);
             if (parameters["pixels_per_unit"] != null) importer.spritePixelsPerUnit = ToolHelpers.GetOptionalFloat(parameters, "pixels_per_unit", importer.spritePixelsPerUnit);

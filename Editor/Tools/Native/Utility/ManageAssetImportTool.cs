@@ -146,6 +146,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             var asset = GetMainAsset(ToolHelpers.GetRequiredString(parameters, "asset_path"), out var path);
             var labels = ParseLabels(parameters["labels"]);
+            // Undo.RecordObject on the asset itself so Ctrl+Z restores prior label set.
+            Undo.RecordObject(asset, $"Set Labels on {path}");
             AssetDatabase.SetLabels(asset, labels);
             return ToolResponse.OkWithData(new JObject { ["asset_path"] = path, ["labels"] = new JArray(labels) }, $"Set {labels.Length} labels on '{path}'.");
         }
@@ -161,6 +163,10 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             var importer = GetImporter(ToolHelpers.GetRequiredString(parameters, "asset_path"), out var path, out var error);
             if (importer == null) return ToolResponse.Fail(error);
+            // Undo.RecordObject on the importer so Ctrl+Z restores prior bundle assignments.
+            // Note: SaveAndReimport triggers a reimport whose result is NOT undoable — but
+            // the importer property change itself becomes reversible.
+            Undo.RecordObject(importer, $"Set AssetBundle on {path}");
             importer.assetBundleName = ToolHelpers.GetOptionalString(parameters, "assetBundleName", importer.assetBundleName) ?? string.Empty;
             importer.assetBundleVariant = ToolHelpers.GetOptionalString(parameters, "assetBundleVariant", importer.assetBundleVariant) ?? string.Empty;
             importer.SaveAndReimport();

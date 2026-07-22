@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.29] - 2026-07-22
+
+### Context
+
+v1.7.28 SOUL §2.10 R3 引导条款落地后，用户追问"目前所有 agent 操作都能 undo 吗?" — 触发对抗式 Undo 全量审计。
+
+第一轮扫描（只搜 `Undo.RecordObject`/`Undo.RegisterCreatedObjectUndo` 裸调用）判定 34 个 mutating 工具里有 8 个 "mut_no_undo"，属于 false positive：`ToolHelpers.RecordUndo` / `ToolHelpers.RegisterCreatedObject` 包装 API 未被识别。第二轮补正正则（增加 `ToolHelpers.RecordUndo`/`ToolHelpers.RegisterCreatedObject` + `SerializedObject.ApplyModifiedProperties` 三个 Unity 官方等价信号）后 23/34 已合规。真正缺 Undo 的 5 处此版一次性补齐。
+
+审计还发现 `ExecuteCodeTool` 的 `File.Delete`/`File.Move` 是**危险 API 黑名单字符串**，是拒绝执行前的匹配用途，不是实际 mutation — 排除，不需要 Undo。
+
+### Change
+
+**代码层 Undo 补齐 (5 handlers × 4 文件):**
+
+- `ManageAssetTool.HandleDelete`: `AssetDatabase.DeleteAsset` → `AssetDatabase.MoveAssetToTrash`。硬删（不进回收站，用户无法自恢复）→ 移入 OS 回收站（用户可从回收站恢复）。**是本次最严重的可逆性修复**。AgentTool Description 里 delete 语义同步更新为 "move asset to OS recycle bin — recoverable"。
+- `ManageAssetTool.HandleCreateFolder`: `AssetDatabase.CreateFolder` 后追加 `Undo.RegisterCreatedObjectUndo(newFolder, "Create Folder")`，Ctrl+Z 可撤销创建。
+- `ManageAssetTool.HandleMove` / `HandleCopy`: `Undo.RegisterCompleteObjectUndo` 前置录制 + 响应 payload 追加 `reverseHint` 字段引导 agent 反向调用（Move 是无法通过 Ctrl+Z 撤销的原子操作，asset 路径在 Unity 语义里等于身份）。
+- `ManageAssetImportTool.HandleSetLabels`: `AssetDatabase.SetLabels` 前 `Undo.RecordObject(asset, "Set Labels on {path}")`。
+- `ManageAssetImportTool.HandleSetBundle`: 修改 `importer.assetBundleName` / `assetBundleVariant` 前 `Undo.RecordObject(importer, "Set AssetBundle on {path}")`。
+- `ManageTextureImportTool` 全部 5 个 mutation handlers (`HandleSetSettings` / `HandleSetSettingsBatch` / `HandleSetType` / `HandleSetPlatformSettings` / `HandleSetSpriteSettings`)：`.SaveAndReimport()` 前统一前置 `Undo.RecordObject(importer, "Set TextureImporter Settings on {path}")`。批量版加 `(batch)` 后缀区分。
+- `ManageModelImportTool` 全部 4 个 mutation handlers (`HandleSetSettings` / `HandleSetSettingsBatch` / `HandleSetAnimationClips` / `HandleSetRig`)：同上，前置 `Undo.RecordObject(importer, ...)`。
+
+**引导层 non-undoable 白名单 (SOUL §2.10 第 10 条追加):**
+
+明确告知 agent 以下操作 **Ctrl+Z 不可逆**，执行前必须提醒用户 + 优先用工具 dry-run/preview：`manage_asset delete` (走 OS 回收站，Editor Undo 不可回复)、`manage_asset move`/`rename` (响应含 reverseHint，反向调用 = 撤销)、`manage_build` (磁盘构建产物)、`manage_package` (Package Manager 状态)、`manage_script` 文件写入 (磁盘 .cs，回滚靠 VCS)、`manage_scene save`/`create` (场景文件 I/O)。
+
+### 未做的事(留白)
+
+- **`ManageInputTool`**: `SerializedObject.ApplyModifiedProperties()` 官方契约自动记录 Undo，`InputManager.asset` 修改经 Ctrl+Z 可完整撤销 — 无需改。
+- **`ExecuteCodeTool`**: `File.Delete`/`File.Move` 是危险 API 黑名单字符串，不是实际调用 — 无需改；用户在 execute_code 里写自己的代码时的 Undo 责任由 SOUL §2.10 引导条款兜底。
+- **Batch group boundary**: 未引入 `Undo.SetCurrentGroupName + CollapseUndoOperations` 把批量 handler 折叠成单个 Undo step。当前批量操作 Ctrl+Z 会逐项回滚，语义正确但按键次数多。后续若用户反馈按键次数烦人再加。
+- **v1.8.0 范围变更**: 用户明确"MCP拓展不是 1.8.0 的内容，能力覆盖面缺陷才是"。Phase 8 MCP Server 延后到 v1.9.0+ 或后续版本；v1.8.0 主题变更为**能力覆盖缺口补齐**（触发缺口：agent 无法直接抓帧和分析运行时性能阻点；后续需系统性排查 47 工具 vs Unity 官方顶层菜单 × UnityEditor 命名空间双轴矩阵）。详见 ROADMAP §3.x 更新。
+
+### Verified
+
+- 用户 Unity 端编译验证：0 errors 0 warnings（用户 2026-07-22 确认"编译完成没有警告报错"）。
+- Undo 审计三次修正：v1 只扫 `Undo.RecordObject` 裸调用 → 8 false positive；v2 扩正则含 `ToolHelpers.RecordUndo`/`RegisterCreatedObject` 包装 → 23/34 合规；v3 补 `SerializedObject.ApplyModifiedProperties()` 契约识别 → `ManageInputTool` 也归入已合规。最终真需改 = 5 handlers × 4 文件。审计方法教训写入 `references/adversarial-coverage-audit.md`（扫描必须含三个等价信号，避免只扫 `Undo.RecordObject` 的 false positive）。
+- Diff 覆盖矩阵：34 mutating 工具 → 23 已合规 (`ToolHelpers.RecordUndo` 包装 or `SerializedObject.ApplyModifiedProperties`) + 5 已在此版补齐 (`Undo.RecordObject` 前置) + 5 属**语义非 Undo**（`manage_asset delete/move`/`manage_build`/`manage_package`/`manage_script`/`manage_scene save-create`，SOUL §2.10 白名单引导）+ 1 排除项 (`ExecuteCodeTool` 黑名单字符串) = 34 项账目对齐。
+- 最严重可逆性修复：`ManageAssetTool.HandleDelete` 硬删→OS 回收站。
+
+
 ## [1.7.28] - 2026-07-22
 
 ### Context

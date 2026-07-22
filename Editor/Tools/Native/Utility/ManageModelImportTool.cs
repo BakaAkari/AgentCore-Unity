@@ -113,6 +113,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             var importer = GetModelImporter(ToolHelpers.GetRequiredString(parameters, "asset_path"), out var path, out var error);
             if (importer == null) return ToolResponse.Fail(error);
+            Undo.RecordObject(importer, $"Set ModelImporter Settings on {path}");
             ApplyCommonSettings(importer, parameters);
             importer.SaveAndReimport();
             return ToolResponse.OkWithData(SerializeImporter(importer, path), $"Updated ModelImporter settings for '{path}'.");
@@ -139,6 +140,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     }
                     try
                     {
+                        Undo.RecordObject(importer, $"Set ModelImporter Settings on {path} (batch)");
                         ApplyCommonSettings(importer, token);
                         importer.SaveAndReimport();
                         succeeded.Add(new JObject { ["asset_path"] = path });
@@ -243,6 +245,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 };
                 clips.Add(clip);
             }
+            Undo.RecordObject(importer, $"Set Animation Clips on {path}");
             importer.clipAnimations = clips.ToArray();
             importer.SaveAndReimport();
             return ToolResponse.OkWithData(new JObject { ["asset_path"] = path, ["clip_count"] = clips.Count, ["clips"] = new JArray(clips.Select(SerializeClip)) }, $"Set {clips.Count} animation clips for '{path}'.");
@@ -273,6 +276,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
         {
             var importer = GetModelImporter(ToolHelpers.GetRequiredString(parameters, "asset_path"), out var path, out var error);
             if (importer == null) return ToolResponse.Fail(error);
+            Undo.RecordObject(importer, $"Set Model Rig on {path}");
             if (parameters["animationType"] != null) importer.animationType = ParseEnum<ModelImporterAnimationType>(ToolHelpers.GetRequiredString(parameters, "animationType"));
             if (parameters["avatarSetup"] != null) importer.avatarSetup = ParseEnum<ModelImporterAvatarSetup>(ToolHelpers.GetRequiredString(parameters, "avatarSetup"));
             importer.SaveAndReimport();

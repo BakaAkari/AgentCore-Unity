@@ -1,6 +1,6 @@
 # AgentCore Unity 开发路线图 (Roadmap)
 
-> **版本**: v1.7.28 | **更新日期**: 2026-07-22 | **状态**:
+> **版本**: v1.7.29 | **更新日期**: 2026-07-22 | **状态**:
 > Phase 6 验收完成（v1.0.0）；治理层 G.1~G.3 全面完成（v1.1.0）；Phase 7 §3.1 后台增量索引 + §3.2 ThinkingDrawer 可观测性完成（v1.2.0）；Request Enrichment 修复 reasoning 触发（v1.2.1）；v1.3.x 系列稳定性修复；v1.4.0 索引 Scope 层次化；v1.4.1~v1.4.9 VCS 组件修复链 + Phase 9 骨架；v1.5.0-alpha1/2 Phase 9 Self-Challenge 核心 + ADR-17 极简哲学；v1.5.0-alpha4~alpha5 model-tier escape + GLM-5.2 适配；v1.5.6~v1.5.7 稳定性修复；**v1.6.x 系列产品化体验冲刺**（Context Ingest / YOLO 信任模式 / 日志分级 / PendingIndicator / SSE yield 优化 / 消息引用栏 / Play Mode preflight / 多轮思考窗口 / 文件删除视觉反馈 / GLM-5.2 reasoning 参数适配 / 自适应 LLM 配置 / 统一 LLM 管道 / 气泡溢出修复 / 流式 UI 性能优化）；**v1.7.0 Settings v20 死字段清理 + VCS 模块修复**（12 字段删除 / 进程句柄泄漏 / 事件泄漏 / Debug.Log 风暴 / 设置极简化 8→2 / Project 窗口多 VCS 支持）；**v1.7.1 新装路径 + VCS 开机触发 + CS0162 修复**；**v1.7.2 文档整理归档（无代码变化）**；**v1.7.3 老项目升级安装 Preferences 目录 Move 弹窗修复（beforeAssemblyReload 回调）**；**Phase 9 Self-Challenge 收尾**（GLM-5.2 替代 Qwen 后 LLM 自身能力填上缺口）
 > **定位**: 本文件是 AgentCore 后续开发的**主导方向文档**，优先级高于分散的专项计划。
 
@@ -261,7 +261,46 @@ v1.0.0 — Phase 6 完成里程碑（用户实战验收通过；6.5.1 以外部 
 
 ---
 
-## 3.x Phase 8 — MCP 对外互操作（对外 / 与 Phase 7 平行）
+## 3.w Phase 10 — 能力覆盖面补齐（对内 / v1.8.0 主题）
+
+> **状态**: 排查启动中（2026-07-22）。触发缺口：用户提问"agent 帮我抓帧看运行时性能阻点该怎么用"，`manage_profiler` 虽存在但只有单帧 UnityStats 快照 + Profiler.enabled 开关，缺 `ProfilerRecorder` 时序采样 / `ProfilerDriver` 帧遍历 / FrameDebugger draw event / MemoryProfiler snapshot — 用户判定为"非常底层也非常实用的能力"覆盖缺失，属**真实系统性缺陷**（非文档层，非引导层）。
+
+**主题变更说明**: v1.8.0 原计划 = Phase 8 MCP Server 对外首版（详见 §3.x 挂 DEFERRED 后仍作历史保留）。用户明确决策 2026-07-22："MCP拓展不是 1.8.0 的内容，能力覆盖缺陷才是"。MCP 顺延至后续版本（v1.9.0+），v1.8.0 主题重定为**能力覆盖缺口系统性补齐**。
+
+**排查方法（用户对齐 = A+B 双轴）**:
+- **A 轴 · Unity 官方顶层菜单**（File/Edit/Assets/GameObject/Component/Window/Help）× 47 工具 → 用户视角，能一比一映射日常操作
+- **B 轴 · UnityEditor / UnityEngine 命名空间**（AssetDatabase/SceneManagement/Selection/Profiling/Rendering/Physics/...）× 47 工具 → API 视角，能发现只读诊断/反射类漏网
+
+**首轮扫描结果（2026-07-22）**: 44 项候选缺口（33 项全新工具候选 + 11 项现有工具深化候选），按 P0/P1/P2/NOT_A_GAP 分档。摘要:
+
+| 分档 | 项数 | 关键项目 |
+|---|---|---|
+| **P0 Analysis 类** | 5 | ProfilerRecorder 时序 · ProfilerDriver 历史帧 · FrameDebugger draw event · MemoryProfiler snapshot/diff · PhysicsDebugger |
+| **P0 Workflow 类** | 5 | Selection 读写 · CompilationPipeline · EditorPrefs/PlayerPrefs · SceneView 相机 · InputSystem (新 Input 包) |
+| **P1 Rendering** | 6 | VolumeProfile · URP/HDRP RPAsset 深度 · Occlusion Culling · Lightmapping GI 深度 · Sprite Editor · AudioMixer 深度 |
+| **P1 Asset** | 5 | Presets · .unitypackage export · Multi-scene additive · Sibling order · BuildProfile (2023+) |
+| **P1 Meta** | 5 | VersionControl · Unity Search · RevealInFinder · Find References In Scene · Shader variant |
+| **P2 Evaluate** | 7 | Addressables · Localization · Netcode · XR · Video · TMP · IMGUI Debugger |
+| **深化现有工具** | 11 | manage_profiler / manage_workspace_config / manage_graphics / manage_gameobject / manage_camera / manage_scene / manage_input / manage_build / scene_analysis / manage_audio / manage_lighting |
+| **NOT_A_GAP_OR_LOW** | 4 | Undo/Redo (execute_code 已完备) · Preferences GUI · Layouts/Services · Handles/Gizmo |
+
+**下一步**（用户决策 D：先发 v1.7.29 收尾 → 再做深度分析）:
+1. 逐个读源码验证 11 项深化候选的**真实能力**（grep 表面结果可能误判）
+2. 每个 P0/P1 缺口标注根因（NO_TOOL / SHALLOW_TOOL / DISCOVERABILITY / COMPOSITION / NOT_A_GAP），不笼统说"缺"
+3. 44 项预期收敛到 15-20 项**真缺口** + 明确 P0/P1 排序，然后逐项 spec + 实施
+
+**审计方法教训（v1.7.29 已固化）**:
+- 只读工具（如 manage_profiler）不做 mutation 审计时会漏检 — 需**读侧覆盖率单独一轮**
+- Undo 审计三次修正证明单一 grep 信号不够 — 双轴矩阵 + 源码交叉是最低门槛
+- Agent 可发现性 = 隐性缺陷：`manage_profiler` 存在但 Visibility=OnDemand 且描述关键词未触发，主 agent 都没意识到工具存在。v1.8.0 必须一并解决"工具存在 vs 工具被 agent 发现"这层元问题
+
+**参考文档**: `references/adversarial-coverage-audit.md`（v1.7.29 补充 read-side 覆盖率审计方法）、`references/capability-coverage-audit.md`（本 Phase 排查产物，待写）
+
+---
+
+## 3.x Phase 8 — MCP 对外互操作（对外 / **DEFERRED 至 v1.9.0+**）
+
+> **⚠ v1.8.0 范围变更 (2026-07-22)**: 用户明确"MCP拓展不是 1.8.0 的内容"，Phase 8 从 v1.8.0 首版目标顺延，具体版本重新评估。历史内容以下保留作为设计沉淀，实施时机等待 Phase 10（§3.w 能力覆盖面补齐）完成后重新排期。
 
 **主题**: 通过 [Model Context Protocol](https://modelcontextprotocol.io) 把 AgentCore 已有的工具集（Native / Cloud / FileSystem / Indexing / VCS）暴露给外部 IDE / CLI / Agent 平台，**兼容用户原本的开发习惯**。
 **触发原因**: v1.0.0 验收过程中识别——用户希望在不离开自己惯用的 IDE/CLI 工作流的前提下使用 AgentCore 能力。

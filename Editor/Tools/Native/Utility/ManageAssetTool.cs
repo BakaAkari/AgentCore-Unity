@@ -21,7 +21,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "Actions: search (find assets by name/type/label using AssetDatabase.FindAssets with filter syntax: 't:Type', 'l:Label', name), " +
                       "get_info (type, path, GUID, labels, bundle, main asset type, sub-assets), " +
                       "create (create asset from type — Material, RenderTexture, AnimatorController, etc), " +
-                      "delete (permanently remove asset file), move (change asset path), copy (duplicate asset), " +
+                      "delete (move asset to OS recycle bin — recoverable via OS trash, NOT via Ctrl+Z), move (change asset path — NOT Ctrl+Z reversible, response includes reverseHint), copy (duplicate asset — Ctrl+Z reversible), " +
                       "rename (change asset filename). " +
                       "USE FOR: finding assets by type/name, creating new Material/RenderTexture/Shader assets, " +
                       "organizing assets (move/copy/rename), getting asset metadata (GUID, type, sub-assets). " +
@@ -266,7 +266,9 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     return ToolResponse.OkWithData(new JObject { ["path"] = fullPath },
                         $"Folder already exists: {fullPath}");
 
-                // Create intermediate folders if needed
+                // Create intermediate folders if needed. AssetDatabase.CreateFolder is not
+                // tracked by Unity's Undo system natively, so we register each newly created
+                // folder as an Undo entry so Ctrl+Z removes them.
                 var parts = folderName.Split('/');
                 var currentParent = parentFolder;
                 foreach (var part in parts)
@@ -277,6 +279,12 @@ namespace AgentCore.Editor.Tools.Native.Utility
                         var guid = AssetDatabase.CreateFolder(currentParent, part);
                         if (string.IsNullOrEmpty(guid))
                             return ToolResponse.Fail($"Failed to create folder: {nextPath}");
+
+                        // Register the folder asset object with Undo. If Unity refuses to
+                        // load the asset immediately (edge case) we still succeed silently.
+                        var folderAsset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(nextPath);
+                        if (folderAsset != null)
+                            Undo.RegisterCreatedObjectUndo(folderAsset, $"Create Folder {nextPath}");
                     }
                     currentParent = nextPath;
                 }
@@ -302,13 +310,18 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 if (string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(path)))
                     return ToolResponse.Fail($"Asset not found at path: {path}");
 
-                bool success = AssetDatabase.DeleteAsset(path);
+                // Use MoveAssetToTrash instead of DeleteAsset. MoveAssetToTrash routes the
+                // file to the OS recycle bin so the user can manually restore it, unlike
+                // DeleteAsset which permanently removes the file. Unity's Undo system does
+                // not track AssetDatabase deletions, so the recycle bin is the recoverability
+                // guarantee we can offer.
+                bool success = AssetDatabase.MoveAssetToTrash(path);
                 if (!success)
-                    return ToolResponse.Fail($"Failed to delete asset: {path}");
+                    return ToolResponse.Fail($"Failed to delete asset (MoveAssetToTrash returned false): {path}");
 
                 AssetDatabase.Refresh();
 
-                return ToolResponse.Ok($"Deleted asset: {path}");
+                return ToolResponse.Ok($"Moved asset to OS trash (recoverable from recycle bin): {path}");
             }
             catch (Exception ex)
             {
@@ -328,6 +341,9 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 if (string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(path)))
                     return ToolResponse.Fail($"Source asset not found: {path}");
 
+                // AssetDatabase.MoveAsset is not covered by Unity's Undo system. We stash
+                // the original path in the response so an agent can reverse the operation
+                // by calling manage_asset move with sourcePath/destinationPath swapped.
                 var error = AssetDatabase.MoveAsset(path, destinationPath);
                 if (!string.IsNullOrEmpty(error))
                     return ToolResponse.Fail($"Move failed: {error}");
@@ -337,8 +353,9 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["sourcePath"] = path,
-                    ["destinationPath"] = destinationPath
-                }, $"Moved asset from '{path}' to '{destinationPath}'.");
+                    ["destinationPath"] = destinationPath,
+                    ["reverseHint"] = $"Move '{destinationPath}' back to '{path}' to undo (Ctrl+Z will NOT work on AssetDatabase.MoveAsset)"
+                }, $"Moved asset from '{path}' to '{destinationPath}'. (Not Ctrl+Z reversible — see reverseHint.)");
             }
             catch (Exception ex)
             {
@@ -363,6 +380,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     return ToolResponse.Fail($"Failed to copy asset from '{path}' to '{destinationPath}'.");
 
                 AssetDatabase.Refresh();
+
+                // Register the newly copied asset with Undo so Ctrl+Z removes the copy.
+                var copiedAsset = AssetDatabase.LoadMainAssetAtPath(destinationPath);
+                if (copiedAsset != null)
+                    Undo.RegisterCreatedObjectUndo(copiedAsset, $"Copy Asset to {destinationPath}");
 
                 return ToolResponse.OkWithData(new JObject
                 {
