@@ -1,0 +1,162 @@
+# ============================================================================
+# AgentCore Unity — Tag-Triggered GitHub Release Automation
+# ============================================================================
+# Trigger:
+#   Only fires when a tag matching 'v*' is pushed (e.g., v1.8.1, v2.0.0-rc.1).
+#   Regular commits to main do NOT trigger a release — this is intentional.
+#
+# What it does:
+#   1. Checkout the tagged commit.
+#   2. Install Node.js LTS (needed for npm pack + our verify-*.cjs guardrails).
+#   3. Assert tag name matches package.json "version" field (prevents "推错 tag" bugs).
+#   4. Run 'npm pack' — this fires our prepack (verify-meta.cjs) and postpack
+#      (verify-tarball.cjs) guardrails automatically. CI = 3rd OS validation.
+#   5. Extract the CHANGELOG.md section for this version as Release body.
+#   6. Create a GitHub Release for the tag, attach the .tgz as asset.
+#
+# Requirements:
+#   Repository → Settings → Actions → General → Workflow permissions must be
+#   set to "Read and write permissions". Without this, softprops/action-gh-release
+#   fails with 403 on creating the release.
+#
+# Manual test:
+#   You can also trigger this on an existing tag manually via the Actions tab
+#   ("Run workflow" → workflow_dispatch, then pass tag ref).
+# ============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (e.g., v1.8.1)'
+        required: true
+        type: string
+
+# Least-privilege token. 'contents: write' is required to create Releases and
+# upload assets. Everything else stays 'read'.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine tag ref
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            # github.ref is 'refs/tags/vX.Y.Z' on tag push; strip prefix.
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          if [[ -z "$TAG" ]]; then
+            echo "::error::Could not determine tag ref"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Version without leading 'v', for cross-checks and file naming.
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG (version: ${TAG#v})"
+
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          # Full history so any 'git log' or diff-based release notes could
+          # work later; also keeps tag annotation metadata intact.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Node 20 LTS ships everywhere; matches macOS Homebrew default.
+          node-version: '20'
+
+      - name: Assert tag version matches package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.tag.outputs.version }}"
+          echo "package.json version: $PKG_VERSION"
+          echo "tag version:          $TAG_VERSION"
+          if [[ "$PKG_VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::Version mismatch — tag '$TAG_VERSION' does not match package.json '$PKG_VERSION'. Aborting release."
+            echo "::error::Fix: bump package.json to $TAG_VERSION and push a new commit before re-tagging, OR re-tag at the commit that already has $TAG_VERSION in package.json."
+            exit 1
+          fi
+
+      - name: Build UPM tarball (runs prepack + postpack guardrails)
+        run: |
+          # 'npm pack' auto-runs:
+          #   prepack  -> tools/verify-meta.cjs   (source-tree .meta check)
+          #   postpack -> tools/verify-tarball.cjs (tarball structural check)
+          # Both are fail-fast (exit 1); npm pack itself exits non-zero if hooks fail.
+          npm pack
+          # Sanity: exactly one tgz produced, and its name matches the version.
+          EXPECTED="com.agentcore.unity-${{ steps.tag.outputs.version }}.tgz"
+          if [[ ! -f "$EXPECTED" ]]; then
+            echo "::error::Expected artifact '$EXPECTED' not found after npm pack."
+            ls -la *.tgz || true
+            exit 1
+          fi
+          echo "Artifact ready: $EXPECTED"
+          echo "artifact=$EXPECTED" >> "$GITHUB_OUTPUT"
+        id: build
+
+      - name: Extract CHANGELOG section for this version
+        id: notes
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          # Extract the '## [X.Y.Z] - ...' block up to the next '## [' heading.
+          # Uses awk for portability (grep -A/-B can't do "until next section" cleanly).
+          if [[ ! -f CHANGELOG.md ]]; then
+            echo "::warning::CHANGELOG.md not found; release body will fall back to tag annotation."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Multiline output: use heredoc-style GITHUB_OUTPUT delimiter to keep newlines.
+          {
+            echo "body<<AGENTCORE_EOF"
+            awk -v ver="$VERSION" '
+              # Start capturing when we hit "## [<ver>]" (allow " - date" suffix)
+              $0 ~ "^## \\[" ver "\\]" { grab=1; print; next }
+              # Stop when we hit the next "## [" section header
+              grab && /^## \[/ { grab=0 }
+              grab { print }
+            ' CHANGELOG.md
+            echo "AGENTCORE_EOF"
+          } >> "$GITHUB_OUTPUT"
+          # Quick check: did awk emit anything?
+          SIZE=$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { grab=1; c++; next }
+            grab && /^## \[/ { grab=0 }
+            grab { c++ }
+            END { print c+0 }
+          ' CHANGELOG.md)
+          if [[ "$SIZE" -eq 0 ]]; then
+            echo "::warning::No CHANGELOG.md section found for version $VERSION. Release body will fall back to tag annotation."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found CHANGELOG section for $VERSION ($SIZE lines)."
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release with tarball
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          # If CHANGELOG section was extracted, use it; otherwise let action-gh-release
+          # fall back to the tag annotation (git tag -a -m "...") as the body.
+          body: ${{ steps.notes.outputs.found == 'true' && steps.notes.outputs.body || '' }}
+          # Pre-release detection: tags like v1.8.1-rc.1, v2.0.0-beta go as prerelease.
+          prerelease: ${{ contains(steps.tag.outputs.version, '-') }}
+          draft: false
+          fail_on_unmatched_files: true
+          files: |
+            com.agentcore.unity-${{ steps.tag.outputs.version }}.tgz
