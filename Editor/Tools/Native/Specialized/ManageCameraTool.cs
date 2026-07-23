@@ -33,10 +33,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             ""type"": ""object"",
             ""properties"": {
                 ""action"": { ""type"": ""string"", ""enum"": [""create"", ""get_info"", ""configure"", ""look_at"", ""align_to_view"", ""create_render_texture"", ""render_to_texture"", ""list_cameras"", ""set_main_camera""], ""description"": ""Camera action to perform"" },
-                ""name"": { ""type"": ""string"", ""description"": ""Camera GameObject name or hierarchy path"" },
+                ""name"": { ""type"": ""string"", ""description"": ""Camera GameObject name or hierarchy path (e.g. 'MainCamera' or 'Player/PlayerCamera'). For render_to_texture the tool also accepts this via 'target' as a fallback, and falls back to Camera.main when both are omitted."" },
                 ""position"": { ""type"": ""object"", ""description"": ""Vector3 object {x,y,z}; used as transform position or look_at target position"" },
                 ""rotation"": { ""type"": ""object"", ""description"": ""Euler rotation object {x,y,z}"" },
-                ""target"": { ""type"": ""string"", ""description"": ""Target GameObject name/path for look_at"" },
+                ""target"": { ""type"": ""string"", ""description"": ""For look_at: target GameObject name/path to point the camera at. For render_to_texture: fallback camera path when 'name' is not given (accepted for agent convenience)."" },
                 ""fov"": { ""type"": ""number"" },
                 ""near_clip"": { ""type"": ""number"" },
                 ""far_clip"": { ""type"": ""number"" },
@@ -248,10 +248,48 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
         private ToolResponse HandleRenderToTexture(JObject parameters)
         {
-            var camera = ResolveCamera(ToolHelpers.GetRequiredString(parameters, "name"));
-            if (camera == null) return ToolResponse.Fail("Camera not found on the specified GameObject.");
+            // Accept either 'name' (documented) or 'target' (agents often confuse the two).
+            // If neither provided, fall back to Camera.main or a lone scene camera.
+            var cameraId = ToolHelpers.GetOptionalString(parameters, "name");
+            if (string.IsNullOrEmpty(cameraId))
+            {
+                cameraId = ToolHelpers.GetOptionalString(parameters, "target");
+            }
 
-            var outputPath = ToolHelpers.NormalizeAssetPath(ToolHelpers.GetRequiredString(parameters, "output_path"));
+            Camera camera;
+            if (string.IsNullOrEmpty(cameraId))
+            {
+                camera = Camera.main;
+                if (camera == null)
+                {
+                    var allCams = UnityEngine.Object.FindObjectsOfType<Camera>(true);
+                    if (allCams.Length == 1) camera = allCams[0];
+                }
+                if (camera == null)
+                {
+                    return ToolResponse.Fail(
+                        "No camera specified and Camera.main is null. Pass 'name' (or 'target') with the camera GameObject name or hierarchy path (e.g. 'Player/PlayerCamera'). Use list_cameras to enumerate available cameras.");
+                }
+            }
+            else
+            {
+                camera = ResolveCamera(cameraId);
+                if (camera == null)
+                {
+                    return ToolResponse.Fail(
+                        $"Camera not found for '{cameraId}'. Tried GameObject.Find (exact hierarchy path) and by-name scan (including inactive). " +
+                        "The GameObject must have a Camera component. Use list_cameras to see valid camera paths.");
+                }
+            }
+
+            var outputPathRaw = ToolHelpers.GetOptionalString(parameters, "output_path");
+            if (string.IsNullOrEmpty(outputPathRaw))
+            {
+                // Default: Assets/AgentCore/Screenshots/<CameraName>_<timestamp>.png
+                var safeName = System.Text.RegularExpressions.Regex.Replace(camera.gameObject.name, @"[^A-Za-z0-9_]", "_");
+                outputPathRaw = $"Assets/AgentCore/Screenshots/{safeName}_{System.DateTime.Now:yyyyMMdd_HHmmss}.png";
+            }
+            var outputPath = ToolHelpers.NormalizeAssetPath(outputPathRaw);
             var width = ToolHelpers.GetOptionalInt(parameters, "width", 1024);
             var height = ToolHelpers.GetOptionalInt(parameters, "height", 1024);
             ToolHelpers.EnsureDirectoryExists(outputPath);

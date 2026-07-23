@@ -26,9 +26,13 @@ namespace AgentCore.Editor.Tools.Native.Core
         Description = "Read-only analysis of the current scene — does NOT modify anything. " +
             "Actions: summarize (overview stats), health_check (find issues), component_stats (type distribution), find_hotspots (performance bottlenecks), " +
             "hierarchy_tree (visual tree structure), spatial_query (find objects in area/radius), materials_overview (shader/material usage), " +
-            "performance_hints (optimization suggestions), project_info (project-level detection), dependency_analyze (asset dependencies). " +
+            "performance_hints (optimization suggestions), project_info (project-level detection), " +
+            "dependency_analyze (GameObject↔GameObject references within the scene — 'what does this GO reference / what references it'), " +
+            "find_references_in_scene (Asset↔Scene references — 'who in the loaded scenes uses this Material/Prefab/Script/ScriptableObject'). " +
             "Use BEFORE making changes to understand the current state. Use health_check to diagnose reported issues. " +
-            "NOT for: modifying objects (use manage_gameobject/manage_component), profiler data (use manage_profiler), validation with severity reports (use validate).",
+            "For find_references_in_scene: input is an asset path (e.g. 'Assets/Materials/Red.mat'), output is the list of scene GameObject+Component+property that reference it. " +
+            "Pairs with manage_asset:find_references (which scans PROJECT assets); this action scans SCENE contents. " +
+            "NOT for: modifying objects (use manage_gameobject/manage_component), profiler data (use manage_profiler), validation with severity reports (use validate), project-wide asset dependency scans (use manage_asset find_references / get_dependencies).",
         Category = "Core",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.ReadOnly,
@@ -40,7 +44,7 @@ namespace AgentCore.Editor.Tools.Native.Core
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""summarize"", ""health_check"", ""component_stats"", ""find_hotspots"", ""hierarchy_tree"", ""spatial_query"", ""materials_overview"", ""performance_hints"", ""project_info"", ""dependency_analyze""],
+                    ""enum"": [""summarize"", ""health_check"", ""component_stats"", ""find_hotspots"", ""hierarchy_tree"", ""spatial_query"", ""materials_overview"", ""performance_hints"", ""project_info"", ""dependency_analyze"", ""find_references_in_scene""],
                     ""description"": ""Analysis action to perform""
                 },
                 ""topN"": {
@@ -91,6 +95,14 @@ namespace AgentCore.Editor.Tools.Native.Core
                 ""target"": {
                     ""type"": ""string"",
                     ""description"": ""Target object name/path (dependency_analyze)""
+                },
+                ""asset_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""Asset path to find scene references for (find_references_in_scene). E.g. 'Assets/Materials/Red.mat', 'Assets/Prefabs/Enemy.prefab', 'Assets/Scripts/Player.cs'. Any Unity asset with a GUID works.""
+                },
+                ""include_inactive"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""For find_references_in_scene: include inactive GameObjects in scan (default: true — inactive objects still hold references).""
                 }
             },
             ""required"": [""action""]
@@ -158,9 +170,12 @@ namespace AgentCore.Editor.Tools.Native.Core
                     case "dependency_analyze":
                         response = HandleDependencyAnalyze(parameters);
                         break;
+                    case "find_references_in_scene":
+                        response = HandleFindReferencesInScene(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: summarize, health_check, component_stats, find_hotspots, hierarchy_tree, spatial_query, materials_overview, performance_hints, project_info, dependency_analyze");
+                            $"Unknown action: '{action}'. Valid actions: summarize, health_check, component_stats, find_hotspots, hierarchy_tree, spatial_query, materials_overview, performance_hints, project_info, dependency_analyze, find_references_in_scene");
                         break;
                 }
             }
@@ -1454,6 +1469,140 @@ namespace AgentCore.Editor.Tools.Native.Core
 
             return ToolResponse.OkWithData(data,
                 $"Dependency analysis for '{targetName}': {referencedBy.Count} inbound, {referencesTo.Count} outbound references");
+        }
+
+        /// <summary>
+        /// Find every scene GameObject+Component+SerializedProperty that references a given asset.
+        /// Complements manage_asset:find_references (which scans project assets). This action scans
+        /// loaded scenes' Component serialized properties looking for ObjectReferences to the target.
+        /// </summary>
+        private ToolResponse HandleFindReferencesInScene(JObject parameters)
+        {
+            var assetPath = ToolHelpers.GetRequiredString(parameters, "asset_path");
+            assetPath = ToolHelpers.NormalizeAssetPath(assetPath);
+
+            var guid = AssetDatabase.AssetPathToGUID(assetPath);
+            if (string.IsNullOrEmpty(guid))
+                return ToolResponse.Fail($"Asset not found at path: {assetPath}");
+
+            var targetAsset = AssetDatabase.LoadMainAssetAtPath(assetPath);
+            if (targetAsset == null)
+                return ToolResponse.Fail($"Failed to load asset at path: {assetPath} (asset exists but load returned null — corrupt import?)");
+
+            var targetAssetType = targetAsset.GetType().Name;
+
+            // Also collect all sub-assets (e.g. a .fbx has multiple internal Mesh/AnimationClip objects,
+            // a .asset ScriptableObject may host sub-assets, sprite atlas has sub-sprites).
+            // Any of these is a legitimate reference target.
+            var allAssetsAtPath = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+            var targetSet = new HashSet<UnityEngine.Object>();
+            foreach (var o in allAssetsAtPath)
+            {
+                if (o != null) targetSet.Add(o);
+            }
+            if (targetSet.Count == 0) targetSet.Add(targetAsset);
+
+            bool includeInactive = ToolHelpers.GetOptionalBool(parameters, "include_inactive", true);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var references = new JArray();
+            var scenesScanned = new JArray();
+            int totalGameObjects = 0;
+            int totalComponents = 0;
+
+            int loadedSceneCount = SceneManager.sceneCount;
+            for (int si = 0; si < loadedSceneCount; si++)
+            {
+                var scene = SceneManager.GetSceneAt(si);
+                if (!scene.IsValid() || !scene.isLoaded) continue;
+
+                int sceneGameObjects = 0;
+                int sceneRefCount = 0;
+
+                var sceneObjs = GetAllSceneObjects(scene);
+                foreach (var go in sceneObjs)
+                {
+                    if (go == null) continue;
+                    if (!includeInactive && !go.activeInHierarchy) continue;
+                    sceneGameObjects++;
+                    totalGameObjects++;
+
+                    var goPath = GetHierarchyPath(go);
+                    var comps = go.GetComponents<Component>();
+                    foreach (var comp in comps)
+                    {
+                        if (comp == null) continue; // missing script
+                        totalComponents++;
+
+                        SerializedObject so;
+                        try { so = new SerializedObject(comp); }
+                        catch { continue; }
+
+                        var prop = so.GetIterator();
+                        // Enter children on first call — needed to walk composite fields
+                        bool enterChildren = true;
+                        while (prop.NextVisible(enterChildren))
+                        {
+                            enterChildren = false;
+                            if (prop.propertyType != SerializedPropertyType.ObjectReference) continue;
+                            var refVal = prop.objectReferenceValue;
+                            if (refVal == null) continue;
+                            if (!targetSet.Contains(refVal)) continue;
+
+                            sceneRefCount++;
+                            references.Add(new JObject
+                            {
+                                ["scene"] = scene.name,
+                                ["gameObject"] = goPath,
+                                ["component"] = comp.GetType().Name,
+                                ["property"] = prop.propertyPath,
+                                ["propertyDisplay"] = prop.displayName,
+                                ["referencedSubAsset"] = refVal.name,
+                                ["referencedSubAssetType"] = refVal.GetType().Name,
+                                ["isMainAsset"] = refVal == targetAsset,
+                                ["gameObjectActive"] = go.activeInHierarchy
+                            });
+                        }
+                    }
+                }
+
+                scenesScanned.Add(new JObject
+                {
+                    ["name"] = scene.name,
+                    ["path"] = scene.path,
+                    ["isDirty"] = scene.isDirty,
+                    ["gameObjectsScanned"] = sceneGameObjects,
+                    ["referencesFound"] = sceneRefCount
+                });
+            }
+            sw.Stop();
+
+            var data = new JObject
+            {
+                ["asset_path"] = assetPath,
+                ["guid"] = guid,
+                ["asset_type"] = targetAssetType,
+                ["sub_asset_count"] = targetSet.Count,
+                ["include_inactive"] = includeInactive,
+                ["scenes_scanned"] = scenesScanned,
+                ["total_gameobjects_scanned"] = totalGameObjects,
+                ["total_components_scanned"] = totalComponents,
+                ["scan_elapsed_ms"] = sw.ElapsedMilliseconds,
+                ["reference_count"] = references.Count,
+                ["references"] = references
+            };
+            if (references.Count == 0)
+            {
+                data["hint"] = "No scene references found for this asset in the currently loaded scenes. " +
+                    "Note: this action only scans scenes that are currently OPEN in the Editor. " +
+                    "Other scenes must be opened first (manage_scene action=open). " +
+                    "Also does NOT detect: Resources.Load / Addressables / AssetBundle string-based references, " +
+                    "runtime AddComponent, or references embedded inside prefabs not instantiated in the scene.";
+            }
+
+            var msg = $"Found {references.Count} scene reference(s) to '{assetPath}' across {scenesScanned.Count} loaded scene(s) " +
+                     $"({totalGameObjects} GameObjects, {totalComponents} components scanned in {sw.ElapsedMilliseconds} ms).";
+            return ToolResponse.OkWithData(data, msg);
         }
 
         #endregion

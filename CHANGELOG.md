@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-07-23
+
+### Context
+
+**能力覆盖面缺口补齐 milestone。** v1.7.x 系列以 SOUL / Undo / 安全护栏收官后，转入"能不能做 X"的实际覆盖问题。A×B 双轴（工具× action）全量审计发现 28 项真缺口（P0=7 / P1=11 / P2=10），本版本按路径 A 一次性完成全部 P0 7 项 + 2 个副产物 Bug hotfix。MCP-over-tools 延后至 v1.9.0。
+
+**审计成果详见** `skills/software-development/agentcore-development/references/capability-coverage-audit.md`。
+
+### Added — P0 能力覆盖缺口 7 项
+
+**Profiler 三件套（G01/G02/G03）** — `manage_profiler` 从"只能读 aggregate stats"升级为完整 Profiler 数据链路：
+
+- **`list_available_stats`** (G01a): 枚举 `ProfilerRecorderHandle.GetAvailable()` 所有可采样统计名，支持 `category` 过滤（Render/Scripts/Memory/Gui/Physics/Animation/Ai/Audio/Video/Particles/Vr/FileIO/Internal）。之前 agent 想采样但不知合法 stat 名的死循环解决。
+- **`sample_recorder`** (G01b): 用 `ProfilerRecorder` 对指定 stat 做时序采样，`frame_count` 帧 × `capacity` 环形缓冲；返回 min/max/mean/last + 每帧数组。EditorApplication.update 驱动，Play Mode 或重绘中的 Editor 下产出有意义值。
+- **`get_frame_range`** (G02a): 返回 `ProfilerDriver.[firstFrameIndex, lastFrameIndex]` + `profiler_enabled` / `profiler_driver_enabled` 双开关状态，用于诊断"为什么 read_frame 返回空"。
+- **`read_frame`** (G02b): 通过 `ProfilerDriver.GetHierarchyFrameDataView` 读取任一历史帧的 marker hierarchy，支持 `thread_index` 切换（Main / Render / Job Worker）+ 按 self-time 排序返回 top-N marker。**发版实测**：EditorLoop=228ms/帧 = 4.4 FPS，识别到 agent 流式输出阻塞主线程的问题（详见 `plans/perf-issue-agent-streaming-blocks-editor.md`，v1.8.0 后续版本优化）。
+- **`list_draw_events`** / **`get_draw_event`** / **`disable_frame_debugger`** (G03): 反射 `UnityEditorInternal.FrameDebuggerInternal.FrameDebuggerUtility`（Unity 2022.3.x internal API）枚举 GPU 帧事件。`list_draw_events` 支持 `enable_if_needed` 自动开启 FrameDebugger（要 Play Mode）；`get_draw_event` 返回单事件详情（shader/pass/keywords、顶点/索引/实例数、blend/depth/raster/stencil 全套 pipeline state、render target、mesh 信息、batch break cause、compute shader、ray tracing）；`disable_frame_debugger` 退出调试模式恢复 GameView。反射链路已验证（`SetEnabled` 成功、count 正确返回、结构化 hint 提示环境依赖）。
+
+**能力覆盖 P0（G10/G17/G18）** — 三项之前完全缺失的 asset↔scene 查询：
+
+- **`manage_graphics` 新增 `volume_list` / `volume_get` / `volume_set`** (G10): 通过反射 `Volume` / `VolumeProfile` / `VolumeComponent` / `VolumeParameter<T>` 读写 URP/HDRP 后处理效果。**Version Defines 隔离 SRP 依赖** — `AgentCore.Editor.asmdef` 新增 `versionDefines` 条目：包 `com.unity.render-pipelines.core` expression `0.0.0` → 定义宏 `AGENTCORE_HAS_SRP_CORE`。SRP 未安装时 fallback stub 返回结构化错误（"SRP not detected — install URP or HDRP via Window > Package Manager, then recompile"），零硬依赖。built-in 项目实测 fallback 通过；SRP 环境真实链路留待有 URP 的项目验证。
+- **`manage_asset` 新增 `find_references`** (G17): `AssetDatabase.GetDependencies` 反向扫描 —— 遍历项目所有 asset 找出谁引用了目标资产。支持 `filter`（透传 `AssetDatabase.FindAssets` 语法，如 `t:Prefab t:Scene` 缩减扫描面 300×提速）+ `recursive`（间接依赖）。实测：全量 89 asset 301ms，filter 后 5 asset 1ms，recursive 243ms。`get_dependencies`（正向）已存不重复。
+- **`scene_analysis` 新增 `find_references_in_scene`** (G18): 跨 asset↔scene 边界的场景引用查询。输入 asset path，遍历 loaded scenes 每个 GameObject 每个 Component 的 `SerializedObject` walker，命中 `ObjectReference` 属性值等于目标 asset（含 sub-asset）时记录 `GameObject / Component / property / propertyDisplay / referencedSubAsset / isMainAsset / gameObjectActive`。实测精准命中：`Assets/RoadAssets/Generated/mat_curb.mat` → `Road / RoadBuilder.curbMaterial`（不是标准 MeshRenderer.m_Materials，说明能穿透**自定义脚本序列化字段**）。
+
+### Fixed — 副产物 Bug hotfix 2 项
+
+- **`manage_camera action=render_to_texture`**（Bug#1）: 之前调用时报 ImageConversion 引用错误。修复后可产出 PNG 到指定路径。
+- **`execute_code` ImageConversion**（Bug#2）: 编辑器脚本环境下 `Texture2D.EncodeToPNG()` 引用失败。已修复运行时程序集引用。
+
+### DISCOVERABILITY — G27 SOUL 引导
+
+- `manage_profiler` 增加 SOUL `§2.11 Profiler use hints` 明确"什么场景用哪个 action"引导，Extended 类别下的 `AlwaysVisible` visibility 让 agent 一眼看到工具。之前 agent 想诊断性能却因 Profiler 在 OnDemand 类别看不见 → G27 修复。
+
+### Fixed — 反射盲写 pitfall（G02 隐藏依赖）
+
+`ProfilerDriver.enabled`（Editor 帧缓冲开关）与 `Profiler.enabled`（运行时采样开关）是**两个独立开关**。`start_recording` 之前只开 `Profiler.enabled` 导致 `read_frame` 一直返回 0 帧。修复：同时开两个 + `ProfilerDriver.profileEditor=true` 保证 Editor 时段帧被采集；`stop_recording` 对称关闭。`get_frame_range` 的 hint 分层诊断（driver / profiler / 等帧）指出具体哪个开关没开。
+
+### Changed — Docs
+
+- SOUL.md §2.11 新增（G27 Profiler 引导）
+- `plans/perf-issue-agent-streaming-blocks-editor.md` 记录 v1.8.0 期间发现的 agent 流式输出阻塞 Editor 主线程问题（228ms/帧 = 4.4 FPS 现象），归因、三条优化路径（异步/累积 flush / 静默 + 状态栏 / 组合），留待后续版本优化，不阻塞本次发版
+- `plans/ROADMAP.md` Phase 10 v1.8.0 收尾章节
+
+### Skills — 新增（`agentcore-development` 技能配套）
+
+- `references/agentcore-execute-code-constraints.md` — 记录 `execute_code` 工具的 Mono.CSharp.Evaluator 硬约束（无 using 指令、无 top-level return、无 C# 8+ 语法、`Object` 歧义、Scripting 类别 activation gate、反射探测两阶段模式）
+- 若干 references 补齐（详见技能目录）
+
+### Deferred to v1.9.0
+
+- P1 11 项 + P2 10 项能力覆盖缺口
+- MCP-over-tools 集成
+- Agent 流式输出主线程优化
+
 ## [1.7.29] - 2026-07-22
 
 ### Context

@@ -104,6 +104,12 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             "Example returning 42: 'var x = 40; x + 2'. Example returning nothing: 'Debug.Log(\"ok\");'. " +
             "Pre-imported namespaces: System, System.IO, System.Text, System.Text.RegularExpressions, System.Linq, " +
             "System.Collections.Generic, UnityEngine, UnityEngine.SceneManagement, UnityEditor, UnityEditor.SceneManagement. " +
+            "Referenced assemblies (types + extension methods available without extra reference): UnityEngine.CoreModule, " +
+            "UnityEditor.CoreModule, UnityEditor.SceneManagerModule, System.Core (LINQ), UnityEngine.ImageConversionModule " +
+            "(Texture2D.EncodeToPNG/EncodeToJPG/LoadImage), UnityEngine.JSONSerializeModule (JsonUtility), " +
+            "UnityEngine.AssetBundleModule, UnityEngine.PhysicsModule, and UnityEngine.UI when present. " +
+            "'Object' identifier is ambiguous between System.Object and UnityEngine.Object — qualify as 'UnityEngine.Object' " +
+            "(e.g. UnityEngine.Object.DestroyImmediate(x)). " +
             "Mono.CSharp.Evaluator limitations: no async/await, no top-level 'return' outside a method, " +
             "some C# 8+ syntax unsupported (records, switch expressions, using declarations, target-typed new). " +
             "Use classic statements.";
@@ -359,18 +365,35 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                     //     covers: UnityEditor.SceneManagement
                     //   typeof(Enumerable).Assembly              = System.Core
                     //     covers: System.Linq
+                    //   typeof(ImageConversion).Assembly         = UnityEngine.ImageConversionModule
+                    //     covers: Texture2D.EncodeToPNG / EncodeToJPG / LoadImage extension methods
+                    //   typeof(JsonUtility).Assembly             = UnityEngine.JSONSerializeModule
+                    //     covers: JsonUtility.ToJson / FromJson (agents often reach for this)
+                    //   typeof(AssetBundle).Assembly             = UnityEngine.AssetBundleModule
+                    //     covers: AssetBundle load/unload
+                    //   typeof(Physics).Assembly                 = UnityEngine.PhysicsModule
+                    //     covers: Physics.Raycast, Rigidbody, Colliders
+                    //   typeof(UI.Image).Assembly (if present)   = UnityEngine.UI (uGUI package)
+                    //     covers: legacy UGUI Image/Text/Button (probed via reflection because UGUI is a package that may not be installed)
                     //
                     // System / System.IO / System.Text / System.Text.RegularExpressions /
                     // System.Collections.Generic all live in mscorlib.dll + System.dll, both of
                     // which Mono.CSharp's GetDefaultReferences() already loads at Evaluator init.
                     var seen = new HashSet<Assembly>();
-                    var refs = new[]
+                    var refs = new List<Assembly>
                     {
                         typeof(GameObject).Assembly,
                         typeof(EditorApplication).Assembly,
                         typeof(UnityEditor.SceneManagement.EditorSceneManager).Assembly,
                         typeof(Enumerable).Assembly,
+                        typeof(ImageConversion).Assembly,
+                        typeof(JsonUtility).Assembly,
+                        typeof(AssetBundle).Assembly,
+                        typeof(Physics).Assembly,
                     };
+                    // UGUI is an optional package — probe via type-load without hard reference.
+                    var ugui = Type.GetType("UnityEngine.UI.Image, UnityEngine.UI", throwOnError: false);
+                    if (ugui != null) refs.Add(ugui.Assembly);
                     foreach (var asm in refs)
                     {
                         if (asm != null && seen.Add(asm))

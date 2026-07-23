@@ -22,17 +22,22 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "get_info (type, path, GUID, labels, bundle, main asset type, sub-assets), " +
                       "create (create asset from type — Material, RenderTexture, AnimatorController, etc), " +
                       "delete (move asset to OS recycle bin — recoverable via OS trash, NOT via Ctrl+Z), move (change asset path — NOT Ctrl+Z reversible, response includes reverseHint), copy (duplicate asset — Ctrl+Z reversible), " +
-                      "rename (change asset filename). " +
+                      "rename (change asset filename), " +
+                      "get_dependencies (what THIS asset depends on — outgoing edges, direct + transitive), " +
+                      "find_references (what depends on THIS asset — incoming edges, reverse scan; use 'filter' to restrict scan set, 'recursive' for indirect refs). " +
                       "USE FOR: finding assets by type/name, creating new Material/RenderTexture/Shader assets, " +
-                      "organizing assets (move/copy/rename), getting asset metadata (GUID, type, sub-assets). " +
+                      "organizing assets (move/copy/rename), getting asset metadata (GUID, type, sub-assets), " +
+                      "impact analysis before delete/rename (find_references answers 'who breaks if I remove this'), " +
+                      "orphan detection (find_references returning 0 hits = safe to delete). " +
                       "NOT FOR: file content read/write (use manage_file), import settings (use manage_asset_import/manage_texture_import/manage_model_import), " +
-                      "C# script creation (use manage_script), prefab operations (use manage_prefab). " +
+                      "C# script creation (use manage_script), prefab operations (use manage_prefab), " +
+                      "references inside a specific scene (use scene_analysis find_references_in_scene). " +
                       "Returns: asset paths, GUIDs, type info. Search filter syntax: 't:Texture2D' (by type), 'l:MyLabel' (by label), 'Player' (by name).",
         Category = "Asset",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
-        ReadOnlyActions = new[] { "get_dependencies", "get_info", "search" })]
+        ReadOnlyActions = new[] { "get_dependencies", "get_info", "search", "find_references" })]
     public class ManageAssetTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -40,7 +45,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""search"", ""get_info"", ""create_folder"", ""delete"", ""move"", ""copy"", ""import"", ""get_dependencies""],
+                    ""enum"": [""search"", ""get_info"", ""create_folder"", ""delete"", ""move"", ""copy"", ""import"", ""get_dependencies"", ""find_references""],
                     ""description"": ""Action to perform""
                 },
                 ""path"": {
@@ -70,6 +75,14 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 ""maxResults"": {
                     ""type"": ""integer"",
                     ""description"": ""Max search results (default: 50)""
+                },
+                ""filter"": {
+                    ""type"": ""string"",
+                    ""description"": ""Type filter for find_references (default: scans all assets). Uses AssetDatabase.FindAssets syntax, e.g. 't:Prefab', 't:Scene', 't:Material', 't:Prefab t:Scene'. Restricting the filter drastically speeds up scans in large projects.""
+                },
+                ""recursive"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""For find_references: when true, includes indirect references (A refs B refs target = A appears). Default false (direct only). Warning: recursive scans large projects can take seconds.""
                 }
             },
             ""required"": [""action""]
@@ -118,9 +131,12 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     case "get_dependencies":
                         response = HandleGetDependencies(parameters);
                         break;
+                    case "find_references":
+                        response = HandleFindReferences(parameters);
+                        break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: search, get_info, create_folder, delete, move, copy, import, get_dependencies");
+                            $"Unknown action: '{action}'. Valid actions: search, get_info, create_folder, delete, move, copy, import, get_dependencies, find_references");
                         break;
                 }
             }
@@ -470,6 +486,137 @@ namespace AgentCore.Editor.Tools.Native.Utility
             catch (Exception ex)
             {
                 return ToolResponse.Fail($"Get dependencies failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Reverse dependency lookup: find every asset that depends on the given target asset.
+        /// Implemented as a full-project scan using AssetDatabase.GetDependencies against every
+        /// scan-candidate asset. Use the 'filter' parameter to shrink the scan set (e.g. only
+        /// scenes or prefabs) — this dramatically speeds up the operation on large projects.
+        /// </summary>
+        private ToolResponse HandleFindReferences(JObject parameters)
+        {
+            try
+            {
+                var path = ToolHelpers.GetRequiredString(parameters, "path");
+                path = ToolHelpers.NormalizeAssetPath(path);
+
+                var targetGuid = AssetDatabase.AssetPathToGUID(path);
+                if (string.IsNullOrEmpty(targetGuid))
+                    return ToolResponse.Fail($"Asset not found at path: {path}");
+
+                var filter = ToolHelpers.GetOptionalString(parameters, "filter") ?? "";
+                bool recursive = ToolHelpers.GetOptionalBool(parameters, "recursive", false);
+                int maxResults = ToolHelpers.GetOptionalInt(parameters, "maxResults", 500);
+
+                // Build the scan candidate set. Empty filter → every asset under Assets/.
+                string[] guids = string.IsNullOrEmpty(filter)
+                    ? AssetDatabase.FindAssets("", new[] { "Assets" })
+                    : AssetDatabase.FindAssets(filter, new[] { "Assets" });
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var directRefs = new JArray();
+                var indirectRefs = new JArray();
+                int scanned = 0;
+                bool truncated = false;
+
+                foreach (var g in guids)
+                {
+                    scanned++;
+                    var candidatePath = AssetDatabase.GUIDToAssetPath(g);
+                    if (string.IsNullOrEmpty(candidatePath)) continue;
+                    if (candidatePath == path) continue;                 // self
+                    if (AssetDatabase.IsValidFolder(candidatePath)) continue; // folders have no deps
+
+                    // Direct deps (recursive:false) — one hop only
+                    var direct = AssetDatabase.GetDependencies(candidatePath, false);
+                    bool isDirect = false;
+                    for (int i = 0; i < direct.Length; i++)
+                    {
+                        if (direct[i] == path) { isDirect = true; break; }
+                    }
+
+                    if (isDirect)
+                    {
+                        if (directRefs.Count < maxResults)
+                        {
+                            directRefs.Add(new JObject
+                            {
+                                ["path"] = candidatePath,
+                                ["type"] = AssetDatabase.GetMainAssetTypeAtPath(candidatePath)?.Name ?? "Unknown"
+                            });
+                        }
+                        else
+                        {
+                            truncated = true;
+                        }
+                        continue; // direct implies transitive — no need to check recursive set
+                    }
+
+                    if (recursive)
+                    {
+                        var all = AssetDatabase.GetDependencies(candidatePath, true);
+                        bool isIndirect = false;
+                        for (int i = 0; i < all.Length; i++)
+                        {
+                            if (all[i] == path) { isIndirect = true; break; }
+                        }
+                        if (isIndirect)
+                        {
+                            if (indirectRefs.Count < maxResults)
+                            {
+                                indirectRefs.Add(new JObject
+                                {
+                                    ["path"] = candidatePath,
+                                    ["type"] = AssetDatabase.GetMainAssetTypeAtPath(candidatePath)?.Name ?? "Unknown"
+                                });
+                            }
+                            else
+                            {
+                                truncated = true;
+                            }
+                        }
+                    }
+                }
+                sw.Stop();
+
+                var msg = recursive
+                    ? $"References to '{path}': {directRefs.Count} direct, {indirectRefs.Count} indirect (scanned {scanned} assets in {sw.ElapsedMilliseconds} ms)."
+                    : $"References to '{path}': {directRefs.Count} direct (scanned {scanned} assets in {sw.ElapsedMilliseconds} ms).";
+
+                var data = new JObject
+                {
+                    ["path"] = path,
+                    ["guid"] = targetGuid,
+                    ["filter"] = filter,
+                    ["recursive"] = recursive,
+                    ["scanned_asset_count"] = scanned,
+                    ["scan_elapsed_ms"] = sw.ElapsedMilliseconds,
+                    ["direct_reference_count"] = directRefs.Count,
+                    ["direct_references"] = directRefs,
+                    ["truncated"] = truncated,
+                    ["max_results"] = maxResults
+                };
+                if (recursive)
+                {
+                    data["indirect_reference_count"] = indirectRefs.Count;
+                    data["indirect_references"] = indirectRefs;
+                }
+                if (directRefs.Count == 0 && (!recursive || indirectRefs.Count == 0))
+                {
+                    data["hint"] = "No references found. This asset appears to be an orphan — safe to delete unless referenced from code (strings, Resources.Load) or scenes not currently in the scan set. Widen 'filter' or set recursive=true to broaden search.";
+                }
+                else if (truncated)
+                {
+                    data["hint"] = $"Result truncated at maxResults={maxResults}. Increase maxResults or narrow 'filter' to see all references.";
+                }
+
+                return ToolResponse.OkWithData(data, msg);
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"Find references failed: {ex.Message}");
             }
         }
 
