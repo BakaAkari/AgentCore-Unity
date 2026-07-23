@@ -1,7 +1,9 @@
 {
     "name": "AgentCore.Editor",
     "rootNamespace": "AgentCore.Editor",
-    "references": [],
+    "references": [
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
     "includePlatforms": [
         "Editor"
     ],

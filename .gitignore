@@ -48,8 +48,18 @@ desktop.ini
 *.unitypackage
 *.app
 *.exe
+# Roslyn DLLs must be tracked — they are required runtime dependencies of the
+# Indexing subsystem (RoslynSymbolExtractor). Their .meta files are already
+# tracked with fixed GUIDs; the DLLs themselves must be tracked too or new
+# machines / CI clones get an empty Editor/Plugins/Roslyn/ and hit CS0246 on
+# Microsoft.CodeAnalysis.*.
+# NOTE: the '!Packages/**/*.dll' below is a leftover from a host-Unity-project
+# template — it never matches inside this plugin repo (repo root is not
+# 'Packages/...'). Keeping it for future host-integration scenarios but it does
+# NOT rescue Roslyn DLLs on its own; the explicit whitelist below does.
 *.dll
 !Packages/**/*.dll
+!Editor/Plugins/Roslyn/*.dll
 
 # --- Archive ---
 # _archive/ contains historical planning documents (completed phases, deprecated

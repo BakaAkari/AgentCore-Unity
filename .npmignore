@@ -23,6 +23,15 @@ PROJECT-ANALYSIS.md.meta
 AGENTS.md
 AGENTS.md.meta
 
+# --- 内部测试代码（用户不需要） ---
+# Editor/Tests/ 里的都是插件内部单测 (ToolHelpers/JsonHelper/TokenCounter 等),
+# asmdef defineConstraints=UNITY_INCLUDE_TESTS 仅在开发方 Test Runner 时激活.
+# 终端用户装 tgz 后, 这些测试代码不参与编译但会导致 Cecil 输出
+# "Failed to resolve assembly: AgentCore.Tests.Editor" 无害 warning.
+# 排除后 Console 干净, tgz 体积略减, 用户零信息损失.
+Editor/Tests/
+Editor/Tests.meta
+
 # --- AI 开发工具配置（用户不需要） ---
 .agents/
 .roo/
