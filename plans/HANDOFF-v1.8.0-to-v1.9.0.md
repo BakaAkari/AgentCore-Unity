@@ -149,11 +149,19 @@
 
 ## 4. 环境依赖
 
-### 4.1 Unity
+### 4.1 Unity Editor 版本
 
-- **锁定版本**: `2022.3.50f1`
+> **两个不同语义, 不要混淆**
+
+| 维度 | 值 | 来源 | 含义 |
+|---|---|---|---|
+| **项目实际锁定的 Editor 版本** | `2022.3.50f1` | [`ProjectSettings/ProjectVersion.txt`](../../../ProjectSettings/ProjectVersion.txt) | 打开本仓库工程的 Unity Editor 版本, 也是 v1.8.0 反射/内部 API 唯一验证过的版本 |
+| **UPM 包声明的最低兼容 Editor** | `2021.3.0f1` | [`package.json`](../package.json) `"unity": "2021.3"` + `"unityRelease": "0f1"` | 作为 UPM tarball 被安装到外部项目时, Unity Package Manager 拒绝低于此版本 |
+
+- **新 agent 装环境请用 `2022.3.50f1`**, 不要用 2021.3。UPM 的最低声明只是分发面, 不是开发面。
 - **理由**: G03 反射 `UnityEditorInternal.FrameDebuggerInternal.FrameDebuggerUtility` 是 internal API, 签名在不同 Unity 版本会漂移 (2019/2020/2021/2022/2023 之间已改过多次)。v1.8.0 只在 2022.3.50f1 验证过。
-- **升级到 6000.x 时**: 需重跑 §4.4 反射探测脚本, 检查所有 `Type.GetType("UnityEditorInternal.FrameDebuggerInternal.*")` 是否仍解析成功; `AGENTCORE_HAS_SRP_CORE` version defines 表达式也可能需要更新。
+- **升级本工程到 6000.x 时**: 需重跑 §4.4 反射探测脚本, 检查所有 `Type.GetType("UnityEditorInternal.FrameDebuggerInternal.*")` 是否仍解析成功; `AGENTCORE_HAS_SRP_CORE` version defines 表达式也可能需要更新。
+- **若要放宽 UPM 最低支持面**: 修 `package.json` 的 `unity` / `unityRelease` 前必须确认最低版本上所有反射目标 (FrameDebuggerInternal / Volume / ProfilerDriver 等) 仍可用, 否则会给下游用户埋雷。
 
 ### 4.2 项目依赖
 

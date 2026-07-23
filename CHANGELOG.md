@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-07-23
+
+### Context
+
+**跨设备迁移暴露的三处历史坑一次性收敛的 patch 版本。** v1.8.0 在原开发机 (Windows) 上打包/运行完全正常, 迁移到 macOS 新设备并重新 clone 后触发三处编译/打包/结构问题, 表面症状不同但根因都是"旧环境掩盖了配置错位":
+
+1. `com.agentcore.unity` clone 后 [`Editor/Plugins/Roslyn/`](Editor/Plugins/Roslyn) 目录只有 5 个 `.meta`, 5 个 DLL 丢失 → `RoslynSymbolExtractor.cs` 引用 `Microsoft.CodeAnalysis.*` 编译失败
+2. URP 项目下 `manage_graphics` 的 volume_* 三 action 报 `CS0246: VolumeProfile / VolumeComponent could not be found`
+3. macOS `npm pack` 时 PowerShell 打包钩子 (`prepack`/`postpack` → `.ps1`) 因 `powershell` 命令不存在直接失败
+
+### Fixed — 三处配置/代码 bug 定位
+
+- **Roslyn DLL 从未被 git 追踪** ([`.gitignore`](.gitignore) 第 50 行): `*.dll` 后跟 `!Packages/**/*.dll` 白名单, 但插件仓库根不是 `Packages/…` 路径, 反选规则永远不匹配, 导致 5 个 DLL 无条件被忽略. 旧开发机磁盘上 DLL 存在是因手动放入 + 从未 clone 过全新副本, 新机器 clone 后**必然缺 DLL**. 修复: 加显式白名单 `!Editor/Plugins/Roslyn/*.dll`, 5 个 DLL 现纳入 git track (增加约 9 MB, 一劳永逸).
+- **SRP core asmdef 引用缺失** ([`Editor/AgentCore.Editor.asmdef`](Editor/AgentCore.Editor.asmdef)): v1.8.0 G10 用 `versionDefines` 定义 `AGENTCORE_HAS_SRP_CORE` 触发 `#if` 编译分支, 但 asmdef `references` 空数组, 编译器保留了 `#if` 内代码却看不到 `UnityEngine.Rendering.Volume*` 类型 (定义在 `Unity.RenderPipelines.Core.Runtime.dll`). 修复: `references` 加 `"Unity.RenderPipelines.Core.Runtime"`. built-in 项目下 Unity 会为不存在的引用输出一条 warning 但不阻断编译, 符合"SRP 未装则降级"的既定设计意图.
+- **测试代码泄漏进 UPM tarball** ([`.npmignore`](.npmignore)): [`Editor/Tests/`](Editor/Tests) 下的 `ToolHelpers`/`JsonHelper`/`TokenCounter` 等 6 个测试类通过 asmdef `defineConstraints=UNITY_INCLUDE_TESTS` 隔离编译, 但 tarball 打包时未排除. 终端用户装 tgz 后 Cecil 后处理扫描 `Library/ScriptAssemblies/` 找不到 `AgentCore.Tests.Editor.dll` → 一条 "Failed to resolve assembly" warning (无害但污染 Console). 修复: `.npmignore` 加 `Editor/Tests/` 排除, 打包体积略减 (~21 个文件), 用户零信息损失.
+
+### Changed — 打包工具链跨平台 (Node.js port)
+
+- **新增 [`tools/verify-meta.cjs`](tools/verify-meta.cjs)** 和 **[`tools/verify-tarball.cjs`](tools/verify-tarball.cjs)**: PowerShell 打包护栏的 Node.js 等价实现. 零外部依赖 (只用内置 `fs`/`path`/`child_process`), 跨 macOS/Linux/Windows 通用. 保留 v1.4.5 (missing .meta 事故) 和 v1.4.6 (`.npmignore` 无锚点 glob 事故) 的完整防护语义, 参数/退出码/输出结构与 `.ps1` 版本一致.
+- **[`package.json`](package.json) scripts 迁移**: `prepack`/`postpack` 指向 `.cjs`, 原 `.ps1` 入口保留为 `verify-meta:ps1` / `verify-tarball:ps1`. macOS/Linux 上 `npm pack` 现可直接跑, 不再需要 `--ignore-scripts` 绕过钩子.
+
+### Changed — Docs
+
+- [`plans/HANDOFF-v1.8.0-to-v1.9.0.md`](plans/HANDOFF-v1.8.0-to-v1.9.0.md) §4.1 显式区分两个 Unity 版本语义: 项目锁定 Editor (`2022.3.50f1`, 来源 `ProjectSettings/ProjectVersion.txt`, 反射唯一验证版本) vs UPM 声明最低兼容 Editor (`2021.3.0f1`, 来源 `package.json`, tarball 分发准入门槛). 新 agent 装环境用锁定版本, 放宽 UPM 最低支持面必须回归所有反射目标.
+- 补 4 个 `plans/*.md.meta` (Unity 首次导入自动生成, v1.8.0 handoff commit 时机不对导致漏 commit).
+
+### Migration notes
+
+- **v1.8.0 → v1.8.1 无兼容性破坏**: 所有 API 签名不变, tarball 结构不变 (除去掉 `Editor/Tests/`).
+- **新设备接手**: `git clone` 后现在会直接拿到 Roslyn DLL, 不再需要从旧 tgz 抽出. 若历史上手动放过 DLL, 新版 `.gitignore` 白名单让其可 track, 建议 `git add Editor/Plugins/Roslyn/*.dll` 显式提交.
+- **打包环境**: macOS/Linux 直接 `npm pack` 即可, `--ignore-scripts` 不再需要. Windows 上 `npm pack` 走 `.cjs` (需 Node.js), 若坚持 PS 版可 `npm run verify-meta:ps1` / `npm run verify-tarball:ps1`.
+
 ## [1.8.0] - 2026-07-23
 
 ### Context
