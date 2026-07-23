@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.4] - 2026-07-23
+
+### Added — `manage_profiler read_frame` 递归展开子 marker 树
+
+**背景**: v1.8.3 定位阶段揭示: 流式期 EditorLoop 601 ms/帧 + 7.9 MB GC/帧, 但 EditorLoop self_ms=0.22 ms, 99.96% 时间在子调用里. 原 `read_frame` 只返回**根级** marker, 无法看到 EditorLoop 内部谁在花时间/分配内存. 是 v1.8.0 时就已列入 [`plans/perf-issue-agent-streaming-blocks-editor.md §能力洞察`](plans/perf-issue-agent-streaming-blocks-editor.md) 的待增强项.
+
+### 新增 `depth` 参数
+
+- **默认 1** = 只根级 (与 v1.8.3 及以前**完全一致**, 向后兼容)
+- **最大 5** 防止响应体积爆炸
+- 每层保留 top-`max_markers` 个子节点 (按 total_ms 排序), 复用现有 max_markers 参数
+- 返回结构里每个 marker 新增 `depth` 字段 + 可选 `children: []` 数组
+
+### 新增 `min_ms` 参数
+
+- 过滤阈值, 只 emit `total_ms >= min_ms` 的节点 (子孙也不递归)
+- 默认 0 (不过滤). 推荐 depth>=3 时设 0.5 或 1.0 剪掉噪声
+
+### 返回结构变更 (向后兼容)
+
+- 顶层多了 `depth`, `min_ms`, `emitted_markers_total` 三个字段
+- `hint` 文本在 depth>1 时描述递归统计 (emitted / truncated / filtered / max_depth)
+- 消息在 depth>1 时不再报 root markers 数, 改报 emitted 总数
+
+### 使用示例
+
+**旧行为 (默认)**:
+```
+manage_profiler action=read_frame frame_index=-1 max_markers=30
+# → 只根级 markers, 与 v1.8.3 完全一致
+```
+
+**新: 深挖 EditorLoop 内部 (定位性能真因)**:
+```
+manage_profiler action=read_frame frame_index=42 depth=4 max_markers=8 min_ms=1.0
+# → 递归 4 层, 每层 top-8, 只看 >= 1 ms 节点. 应能看到 EditorLoop → GUIView.OnGUI → StreamingTextElement.FlushPending → ... 的完整调用链.
+```
+
+### 实现细节
+
+- 递归 helper: `BuildMarkerChildren` (纯递归调用 HierarchyFrameDataView.GetItemChildren, 每层 top-N + min_ms 过滤)
+- Stats 类: `MarkerBuildStats` 累计 emitted / truncated / filtered / max_depth 供 hint 使用
+- 无反射, 无可选 package 依赖, 纯 Unity 公开 API (HierarchyFrameDataView.GetItemChildren 自 2019.3 起稳定)
+
+### Migration notes
+
+- 无破坏性变更, 未传 depth 时行为与 v1.8.3 完全一致
+- 老 agent workflow 无需改动
+
 ## [1.8.3] - 2026-07-23
 
 ### Reverted — v1.8.2 无效, 恢复 FlushIntervalMs=16

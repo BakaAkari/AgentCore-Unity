@@ -83,7 +83,15 @@ namespace AgentCore.Editor.Tools.Native.Extended
                 },
                 ""max_markers"": {
                     ""type"": ""integer"",
-                    ""description"": ""Maximum top-level markers to return per frame (for read_frame). Default 30, max 200. Markers are sorted by self-time descending.""
+                    ""description"": ""Maximum top-level markers to return per frame (for read_frame). Default 30, max 200. Markers are sorted by self-time descending. Also applies to per-level top-N when depth>1.""
+                },
+                ""depth"": {
+                    ""type"": ""integer"",
+                    ""description"": ""Recursion depth for read_frame marker tree (v1.8.4+). Default 1 (root only, backward-compatible). Max 5 to avoid response bloat. Each level keeps top-max_markers children by total_ms. Use depth=3-4 to drill into EditorLoop / Render / Physics sub-markers.""
+                },
+                ""min_ms"": {
+                    ""type"": ""number"",
+                    ""description"": ""Filter threshold for read_frame (v1.8.4+). Skip markers whose total_ms < min_ms. Default 0 (no filter). Recommended 0.5 or 1.0 when using depth>=3 to cut noise.""
                 },
                 ""event_index"": {
                     ""type"": ""integer"",
@@ -783,6 +791,15 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
             int threadIndex = ToolHelpers.GetOptionalInt(parameters, "thread_index", 0);
             int maxMarkers = Math.Max(1, Math.Min(200, ToolHelpers.GetOptionalInt(parameters, "max_markers", 30)));
+            // v1.8.4: depth = 递归层数 (1 = 只根级, 与 v1.8.3 及以前完全一致; max 5 防爆炸)
+            int depth = Math.Max(1, Math.Min(5, ToolHelpers.GetOptionalInt(parameters, "depth", 1)));
+            // v1.8.4: 只展开 total_ms >= min_ms 的节点子孙, 大幅降低响应体量
+            double minMs = 0.0;
+            var minMsToken = parameters?["min_ms"];
+            if (minMsToken != null && minMsToken.Type != JTokenType.Null)
+            {
+                try { minMs = Math.Max(0.0, minMsToken.Value<double>()); } catch { /* ignore */ }
+            }
 
             UnityEditor.Profiling.HierarchyFrameDataView view = null;
             try
@@ -808,31 +825,33 @@ namespace AgentCore.Editor.Tools.Native.Extended
                 int colSelfTime = (int)UnityEditor.Profiling.HierarchyFrameDataView.columnSelfTime;
                 int colGcAlloc = (int)UnityEditor.Profiling.HierarchyFrameDataView.columnGcMemory;
 
-                var markers = new JArray();
-                int take = Math.Min(childIds.Count, maxMarkers);
-                for (int i = 0; i < take; i++)
-                {
-                    int id = childIds[i];
-                    var name = view.GetItemName(id) ?? "<unknown>";
-                    float totalMs = view.GetItemColumnDataAsFloat(id, colTotalTime);
-                    float selfMs = view.GetItemColumnDataAsFloat(id, colSelfTime);
-                    long calls = view.GetItemMergedSamplesCount(id);
-                    string gcStr = view.GetItemColumnData(id, colGcAlloc); // GC in string form (e.g. "1.2 KB")
-                    var marker = new JObject
-                    {
-                        ["name"] = name,
-                        ["total_ms"] = totalMs,
-                        ["self_ms"] = selfMs,
-                        ["calls"] = calls,
-                        ["gc_alloc"] = gcStr
-                    };
-                    markers.Add(marker);
-                }
+                // v1.8.4: 递归构建 marker 树 (depth 层, 每层 top-max_markers, min_ms 过滤)
+                // 统计计数由 helper 内部累计, 用于 hint / message.
+                var stats = new MarkerBuildStats();
+                var markers = BuildMarkerChildren(
+                    view, rootId,
+                    colTotalTime, colSelfTime, colGcAlloc,
+                    depthRemaining: depth, maxPerLevel: maxMarkers, minMs: minMs, stats: stats);
 
                 var frameFps = view.frameFps;
                 var frameTimeMs = view.frameTimeMs;
                 var threadName = view.threadName ?? $"thread_{threadIndex}";
                 var threadGroup = view.threadGroupName ?? "";
+
+                string hintText;
+                if (depth == 1)
+                {
+                    hintText = childIds.Count > markers.Count
+                        ? $"Truncated to top {markers.Count} of {childIds.Count} root markers by total-time desc. Raise max_markers to see more."
+                        : "All root markers returned.";
+                }
+                else
+                {
+                    hintText = $"Recursive read with depth={depth}, max_markers={maxMarkers} per level, min_ms={minMs}. " +
+                               $"Emitted {stats.EmittedCount} markers total across {stats.MaxDepthSeen} depth levels. " +
+                               (stats.TruncatedByCap > 0 ? $"{stats.TruncatedByCap} nodes had children beyond top-N (see 'children_truncated' hints per marker). " : "") +
+                               (stats.FilteredByMinMs > 0 ? $"{stats.FilteredByMinMs} nodes filtered by min_ms. " : "");
+                }
 
                 var data = new JObject
                 {
@@ -842,15 +861,18 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     ["thread_group"] = threadGroup,
                     ["frame_fps"] = frameFps,
                     ["frame_time_ms"] = frameTimeMs,
+                    ["depth"] = depth,
+                    ["min_ms"] = minMs,
                     ["total_root_markers"] = childIds.Count,
                     ["returned_markers"] = markers.Count,
+                    ["emitted_markers_total"] = stats.EmittedCount,
                     ["markers"] = markers,
-                    ["hint"] = childIds.Count > markers.Count
-                        ? $"Truncated to top {markers.Count} of {childIds.Count} root markers by total-time desc. Raise max_markers to see more."
-                        : "All root markers returned."
+                    ["hint"] = hintText
                 };
                 return ToolResponse.OkWithData(data,
-                    $"Frame {frameIndex} ({threadName}): {frameTimeMs:F2} ms @ {frameFps:F1} FPS, {markers.Count}/{childIds.Count} root markers.");
+                    depth == 1
+                        ? $"Frame {frameIndex} ({threadName}): {frameTimeMs:F2} ms @ {frameFps:F1} FPS, {markers.Count}/{childIds.Count} root markers."
+                        : $"Frame {frameIndex} ({threadName}): {frameTimeMs:F2} ms @ {frameFps:F1} FPS, {stats.EmittedCount} markers over depth={depth}.");
             }
             catch (Exception e)
             {
@@ -896,6 +918,89 @@ namespace AgentCore.Editor.Tools.Native.Extended
             {
                 // Silently ignore reflection failures
             }
+        }
+
+        /// <summary>
+        /// v1.8.4: HierarchyFrameDataView 子节点递归构建 helper.
+        /// Emits top-<paramref name="maxPerLevel"/> children of <paramref name="parentId"/>
+        /// sorted by total-time desc, filtered by min_ms, recurses up to <paramref name="depthRemaining"/> levels.
+        /// </summary>
+        /// <remarks>
+        /// Design: 每层独立 top-N (不做全局 top-N), 因为用户视角是"这个 EditorLoop 内谁最贵",
+        /// 而非"全帧最贵的 N 个 marker" (后者在 depth=1 时已实现). min_ms 过滤在这层判定,
+        /// 过小节点连自己都不 emit (子孙也不递归), 大幅降低响应体积.
+        /// </remarks>
+        private static JArray BuildMarkerChildren(
+            UnityEditor.Profiling.HierarchyFrameDataView view,
+            int parentId,
+            int colTotalTime, int colSelfTime, int colGcAlloc,
+            int depthRemaining, int maxPerLevel, double minMs,
+            MarkerBuildStats stats,
+            int currentDepth = 1)
+        {
+            var result = new JArray();
+            if (depthRemaining <= 0) return result;
+
+            var childIds = new List<int>();
+            view.GetItemChildren(parentId, childIds);
+            if (childIds.Count == 0) return result;
+
+            // childIds 已按 view 的 sortColumn (totalTime desc) 排序; 取前 maxPerLevel.
+            int take = Math.Min(childIds.Count, maxPerLevel);
+            if (childIds.Count > take) stats.TruncatedByCap++;
+
+            for (int i = 0; i < take; i++)
+            {
+                int id = childIds[i];
+                float totalMs = view.GetItemColumnDataAsFloat(id, colTotalTime);
+                // min_ms filter: skip emission entirely (also skips recursion into descendants).
+                if (totalMs < minMs)
+                {
+                    stats.FilteredByMinMs++;
+                    continue;
+                }
+
+                var name = view.GetItemName(id) ?? "<unknown>";
+                float selfMs = view.GetItemColumnDataAsFloat(id, colSelfTime);
+                long calls = view.GetItemMergedSamplesCount(id);
+                string gcStr = view.GetItemColumnData(id, colGcAlloc);
+
+                var marker = new JObject
+                {
+                    ["name"] = name,
+                    ["total_ms"] = totalMs,
+                    ["self_ms"] = selfMs,
+                    ["calls"] = calls,
+                    ["gc_alloc"] = gcStr,
+                    ["depth"] = currentDepth
+                };
+
+                // Recurse into children if we have depth budget left.
+                if (depthRemaining > 1)
+                {
+                    var children = BuildMarkerChildren(
+                        view, id,
+                        colTotalTime, colSelfTime, colGcAlloc,
+                        depthRemaining - 1, maxPerLevel, minMs, stats, currentDepth + 1);
+                    if (children.Count > 0) marker["children"] = children;
+                }
+
+                result.Add(marker);
+                stats.EmittedCount++;
+                if (currentDepth > stats.MaxDepthSeen) stats.MaxDepthSeen = currentDepth;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// v1.8.4: Marker tree build stats — used to enrich the read_frame response hint.
+        /// </summary>
+        private sealed class MarkerBuildStats
+        {
+            public int EmittedCount;       // 总共 emit 的 marker 数
+            public int TruncatedByCap;     // 有多少节点的子节点数 > maxPerLevel (被截断)
+            public int FilteredByMinMs;    // 有多少子节点因 total_ms < min_ms 被过滤
+            public int MaxDepthSeen;       // 实际 emit 到的最深层数
         }
 
         #endregion
