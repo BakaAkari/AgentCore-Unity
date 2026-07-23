@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config;
@@ -142,12 +143,18 @@ namespace AgentCore.Editor.Core
 
                 case StreamChunkType.Done:
                     CompleteReasoningIfNeeded(assistantTurn);
+                    // v1.8.5: UI 逐字流式改批量 flush — 完成时一次性 emit 累积的内容,
+                    // 消除主线程 UnitySynchronizationContext.ExecuteTasks 每帧 200+ ms 阻塞.
+                    // HTTP stream / tool call / reasoning 仍在后台正常流式解析, 只有 UI 显示延迟.
+                    FlushAccumulatedContentIfAny(assistantTurn);
                     // 流式完成，由 SendMessageAsync 的后续逻辑处理
                     AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] Stream completed. Finish reason: {chunk.FinishReason}");
                     break;
 
                 case StreamChunkType.Error:
                     // 流式过程中的解析错误
+                    // v1.8.5: 出错也 flush 已累积内容, 避免用户丢失部分回复
+                    FlushAccumulatedContentIfAny(assistantTurn);
                     AgentCoreLog.Error($"[AgentCore] Stream error: {chunk.Error}");
                     EmitEvent(AgentEvent.ErrorEvent(chunk.Error));
                     break;
@@ -188,9 +195,36 @@ namespace AgentCore.Editor.Core
             {
                 CompleteReasoningIfNeeded(assistantTurn);
                 assistantTurn.Content += delta.VisibleContent;
-                EmitEvent(AgentEvent.StreamToken(delta.VisibleContent, assistantTurn.Id));
+                // v1.8.5: 不再每 token emit StreamToken 事件. 累积到 _pendingStreamContent,
+                // 由 StreamChunkType.Done 时 FlushAccumulatedContentIfAny 一次性 emit.
+                // 消除主线程 200+ ms/帧 阻塞. 副作用: UI 不再逐字显示, 完成时一次性显示.
+                if (_pendingStreamContent == null)
+                    _pendingStreamContent = new StringBuilder();
+                _pendingStreamContent.Append(delta.VisibleContent);
             }
         }
+
+        /// <summary>
+        /// v1.8.5: 一次性 flush 累积的 stream content 到 UI (StreamChunkType.Done 时调用).
+        /// </summary>
+        private void FlushAccumulatedContentIfAny(ConversationTurn assistantTurn)
+        {
+            if (_pendingStreamContent == null || _pendingStreamContent.Length == 0)
+            {
+                return;
+            }
+            var fullContent = _pendingStreamContent.ToString();
+            _pendingStreamContent.Clear();
+            if (assistantTurn != null)
+            {
+                EmitEvent(AgentEvent.StreamToken(fullContent, assistantTurn.Id));
+            }
+        }
+
+        /// <summary>
+        /// v1.8.5: 累积 stream 期的 UI content, 完成时一次性 emit.
+        /// </summary>
+        private StringBuilder _pendingStreamContent;
 
         /// <summary>
         /// 追加 reasoning / planning trace token 到当前 assistant turn。

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.5] - 2026-07-23
+
+### Fixed — Chat 流式期主线程阻塞根治 (方案 A 收敛版)
+
+**问题**: v1.8.3 定位阶段的 Profile 数据显示流式期主线程 601 ms/帧 + 7.9 MB GC/帧, EditorLoop → Application.Tick → UnitySynchronization.ExecuteTasks 256 ms self time. v1.8.4 加了 read_frame depth 参数后, 用户抓的深挖数据证实真凶是 **LLM SSE 每 chunk 都 marshal 一次 UI 事件到 UnitySynchronizationContext, 累积几十上百个 continuation 每帧 ExecuteTasks 一次 flush 全部**.
+
+**根因链**:
+- `ParseStreamAsync.ReadLineAsync().await` 每次 continuation post 到 UnitySynchronizationContext (Unity 默认 SC = 主线程)
+- 每 chunk → `onChunk?.Invoke` → `OnStreamChunkReceived.HandleContentToken` → `EmitEvent(StreamToken)` → `AsyncHelper.RunOnMainThread` (queue 已 batched, 每帧 256 上限)
+- **AsyncHelper 队列本身 batch 得对**, 但每 chunk 一次 `EmitEvent(StreamToken)` 累积到 UI 端后**每 token 都触发 StreamingTextElement.FlushPending 里的整段 DOM 重建**, 每次 rebuild 又发生在主线程 continuation 里 → SC 队列 pending 累积 → ExecuteTasks 200+ ms
+
+**修复策略 (方案 A)**: 不改 HTTP 层 stream, 不改 tool call / reasoning 抽取 (server 层继续 stream), 只**关掉 UI 层的逐字流式**. Content token 累积到 StringBuilder, 在 `StreamChunkType.Done` 时**一次性 emit** `StreamToken(fullContent)`. Error / 异常路径也保证 flush 已累积内容避免用户丢失回复.
+
+**改动**:
+- [`Editor/Core/AgentLoop.LLM.cs`](Editor/Core/AgentLoop.LLM.cs) `HandleContentToken` 不再 emit `StreamToken` 事件, 改累积到 `_pendingStreamContent` (StringBuilder)
+- `OnStreamChunkReceived` 在 `StreamChunkType.Done` 和 `StreamChunkType.Error` 时调 `FlushAccumulatedContentIfAny` 一次性 emit
+- 新增 helper `FlushAccumulatedContentIfAny(ConversationTurn)` + field `_pendingStreamContent`
+- HTTP stream 完全不动, tool_call_delta / reasoning / SelfChallenge extractors / VisiblePlanningTraceExtractor 逻辑不变
+
+**用户可感知的变化**:
+- **UI 流畅性**: 流式期 Editor 不再卡, 主线程 UnitySynchronization.ExecuteTasks 从 200+ ms/帧 应降到接近 0
+- **视觉效果**: 从 "逐字流式追加" 变 "spinner 转 X 秒后一次性显示完整回复". 若 LLM 生成 500 字回复约需 10-30 秒, 期间没有中间进度显示
+- **副作用**: SelfChallenge / reasoning 抽取的实时反馈失效 (但完成时最终 assistantMessage 内容仍然完整正确, 不影响 workflow)
+- **Tool call**: 完全不受影响 (server 继续 stream, tool_call_delta 仍在 OpenAICompatibleClient 里累积到 Done 时返完整 ToolCalls 列表)
+
+**未做**:
+- 保留 UI 逐字体验的方案 (`ConfigureAwait(false)` + 线程安全审查) 归入 v1.10+ 大改造. 当前用户明确表态可以接受 "spinner + 完成后一次性显示" 的体验降级换 UI 流畅度.
+
+### Migration notes
+
+- 无 API 破坏, tarball 结构不变.
+- 用户装 v1.8.5 后立即生效, 无需重启 Unity Editor (但若 Chat 会话正在流式中, 建议完成后再升级).
+- 若日后需恢复"逐字流式"感受, 只需回退 `HandleContentToken` 里的 `EmitEvent(StreamToken)` 调用即可.
+
 ## [1.8.4] - 2026-07-23
 
 ### Added — `manage_profiler read_frame` 递归展开子 marker 树
