@@ -898,15 +898,15 @@ namespace AgentCore.Editor.UI.Components
         // --- v1.6.5 性能优化：token 缓冲 + 帧节流 ---
         // 旧实现：每 token 跑 FilterStreaming(全量文本) + Label.text 赋值 → 高频 UI relayout 卡死主线程
         // 新实现：token 累积到 _pendingBuffer，每帧只 flush 一次
-        // v1.8.2 (2026-07-23): FlushIntervalMs 16 → 120 ms 显著降低 flush 频率.
-        // 原 16ms (~60Hz) 结合 FlushPending 里"整段清空+重解析+重建 DOM"的做法 (RenderTextAsBlocks
-        // 里 _blockContainer.Clear + ContentFilter.FilterCompletedToBlocks + foreach 重建 element)
-        // 导致主线程流式期 228 ms/帧 = 4.4 FPS + 132 KB GC/帧 (见 plans/perf-issue-agent-streaming-blocks-editor.md).
-        // 提到 120ms (~8Hz) 后主线程负载理论上下降到 1/7.5, 用户视觉仍是"流式追加感"仅"节奏"变慢.
-        // 若测试仍不理想, 下一步再考虑增量渲染 (只 append 新 block 不整段重建), 但那是大改造.
+        // v1.8.3 (2026-07-23): 回滚 v1.8.2 的 120ms 改动. 用户实测 v1.8.2 后卡顿零变化, 且
+        // Profile 显示流式期主线程 601ms/帧 + 7.9 MB GC/帧 (远比原 perf 文档记录的 228ms/132KB 严重).
+        // EditorLoop self_ms=0.22ms, 99.96% 时间在子调用里, 但当前 read_frame 只拿根级 marker
+        // 看不到子节点. 结论: 降频率无效, 单次 flush 成本本身就足以卡死, 且 7.9 MB alloc 不是
+        // markdown 重解析能达到的量级, 真因未定位. 恢复原值 16ms, 待 read_frame 增强 depth 参数
+        // 后重新抓真数据定位.
         private StringBuilder _pendingBuffer = new();
         private bool _flushScheduled;
-        private const int FlushIntervalMs = 120;
+        private const int FlushIntervalMs = 16; // ~1 帧
 
         // v1.6.5: 流式阶段文本窗口 — 只显示尾部 N 字符，避免超长文本 Label.text 触发 O(n) layout
         // 最终化时 SetFinalText 会渲染全部内容（block 模式），流式阶段只看尾部足够

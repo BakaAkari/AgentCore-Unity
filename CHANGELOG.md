@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.3] - 2026-07-23
+
+### Reverted — v1.8.2 无效, 恢复 FlushIntervalMs=16
+
+**结论: v1.8.2 定位错误, 已实测无效, 予以回滚.**
+
+**背景**: v1.8.2 把 `StreamingTextElement.FlushIntervalMs` 从 16 提升到 120, 期望通过降低 flush 频率 7.5× 缓解流式期主线程阻塞. 用户实测**卡顿零变化**, 只是流式追加节奏变慢 (副作用负面).
+
+**新数据 (v1.8.3 定位阶段, 用户在 Unity 里跑 manage_profiler 抓的真实 Profile)**:
+
+| 帧 | 帧时间 | GC Alloc |
+|---|---|---|
+| 39 | 547 ms | 7.1 MB |
+| 40 | 562 ms | 7.3 MB |
+| 41 | 563 ms | 7.6 MB |
+| 42 | **601 ms** | **7.9 MB** |
+| 43 (录制刚停) | 5.79 ms | 206 KB (正常) |
+
+**关键发现**:
+
+- 实际卡顿远比 [`plans/perf-issue-agent-streaming-blocks-editor.md`](plans/perf-issue-agent-streaming-blocks-editor.md) v1.8.0 记录的 228 ms/132 KB 严重: **601 ms/帧 + 7.9 MB GC/帧**, 帧时间 ~3×, GC alloc ~60×.
+- EditorLoop self_ms=0.22 ms, 99.96% 时间在**未展开的子调用**里, 当前 `manage_profiler read_frame` 只返回根级 marker.
+- **7.9 MB/帧 alloc 不是 "markdown 重解析" 能达到的量级**, 更可能是每帧序列化大对象 / 大量 UIElement 反复实例化 / 或某处 `AssetDatabase.FindAssets` 全库扫. **真因未定位**.
+
+### Changed — 定位阶段的下一步 (预告)
+
+- **v1.8.4** 增强 `manage_profiler read_frame` 添 `depth` 参数, 支持递归展开子 marker 树 (已在 [`plans/perf-issue-agent-streaming-blocks-editor.md §能力洞察`](plans/perf-issue-agent-streaming-blocks-editor.md) 标记为 v1.9.0 待增强项).
+- **v1.8.5** 用新工具抓 Frame 42 的 EditorLoop 子调用 + GC 分配点, 找到 7.9 MB/帧 的真凶.
+- **v1.8.6** 针对真因修复.
+
+### Migration notes
+
+- 无 API 变更, 装 v1.8.3 后行为与 v1.8.1 完全一致.
+- v1.8.2 tarball 若已装, 建议直接升级到 v1.8.3.
+
 ## [1.8.2] - 2026-07-23
 
 ### Context
