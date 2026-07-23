@@ -10,6 +10,28 @@
 
 ---
 
+## 🚀 新 Agent / 接手开发者 — 请先读这里
+
+**当前版本**: v1.8.0 (2026-07-23, tag `v1.8.0` on GitHub)
+
+如果你是**第一次接手本项目**或**换设备开发**，按以下顺序读文档：
+
+| 顺序 | 文档 | 用途 |
+|---|---|---|
+| **0** | **`plans/HANDOFF-v1.8.0-to-v1.9.0.md`** | **接手指南**（已解决/待解决/遗留 issue + 环境/git 状态 + 8 份必读入口） |
+| 1 | 本文件 (AGENTS.md) | LLM 开发规范, 目录结构, 工具开发模板 |
+| 2 | `plans/ROADMAP.md` §3.w.1 v1.8.0 收尾 | 能力覆盖 milestone 完整上下文 |
+| 3 | `plans/capability-coverage-audit.md` | v1.8.0 立项审计方法论（v1.9.0 P1/P2 必读）|
+| 4 | `plans/adversarial-coverage-audit.md` | Undo/mutating-side 对抗式审计 |
+| 5 | `plans/agentcore-execute-code-constraints.md` | execute_code 反射探测硬约束 |
+| 6 | `CHANGELOG.md` v1.8.0 章节 | 本版每一条改动 |
+| 7 | `Editor/Bootstrap/Resources/SOUL.md` | Agent 行为准则（尤其 §2.10 + §2.11）|
+| 8 | `plans/perf-issue-agent-streaming-blocks-editor.md` | 已知 Editor 主线程阻塞 issue |
+
+**做任何开发前**：确认你已完成 HANDOFF §8 交接确认清单。
+
+---
+
 ## 1. 项目概览
 
 | 属性 | 值 |
