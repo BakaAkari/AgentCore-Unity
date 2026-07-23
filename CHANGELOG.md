@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2026-07-23
+
+### Context
+
+**v1.9.0 迭代首个 patch: Editor 主线程流式期阻塞初步缓解.** [`plans/perf-issue-agent-streaming-blocks-editor.md`](plans/perf-issue-agent-streaming-blocks-editor.md) 记录的 228 ms/帧 = 4.4 FPS 主线程阻塞是 v1.8.0 期间发现但未修的技术债. 定位到根因: [`StreamingTextElement.FlushPending`](Editor/UI/Components/StreamingTextElement.cs) 每 16ms (~60Hz) 触发一次 "清空 block 容器 + 重新 parse 全量文本 + 重建所有 VisualElement" 的整段 DOM 重建, 结合 `_blockContainer.Clear()` + `ContentFilter.FilterCompletedToBlocks(source)` + `foreach block: CreateBlockElement` 每帧撕重建, 是主线程 99.96% 时间和 132 KB/帧 GC 分配的来源.
+
+### Fixed — 流式期主线程负载降低
+
+- **[`StreamingTextElement.FlushIntervalMs`](Editor/UI/Components/StreamingTextElement.cs)** 从 `16` 提升到 `120` (60Hz → 8Hz). 单次 flush 的 DOM 重建成本不变, 但发生频率下降 7.5×, 主线程流式期负载理论上从 100% (溢出) 降到 ≈ 13%.
+- **视觉影响**: 流式追加从"每帧刷" (60Hz 逐字体验) 变成"每 120ms 一段" (8Hz 分段体验). 用户仍能看到实时流式内容, 只是节奏略缓. Full-text finalize 路径未变, 消息完成后视觉与之前完全一致.
+- **未做**: 增量渲染 (只 append 新 block 不整段重建), 需重构 `RenderTextAsBlocks` 路径, 归入 v1.10+.
+
+### Migration notes
+
+- **无 API 变更**, tarball 结构不变, terminal 用户装 v1.8.2 后即刻生效.
+- **回归验证**: 若某种极端 chunk 频率 (LLM 一次输出 500 token 后停 5s 再输出) 用户体验感差, 可临时把 `FlushIntervalMs` 调回 60 (~16Hz). 常量在 [`Editor/UI/Components/StreamingTextElement.cs`](Editor/UI/Components/StreamingTextElement.cs) 明处.
+
 ## [1.8.1] - 2026-07-23
 
 ### Context

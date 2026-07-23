@@ -898,9 +898,15 @@ namespace AgentCore.Editor.UI.Components
         // --- v1.6.5 性能优化：token 缓冲 + 帧节流 ---
         // 旧实现：每 token 跑 FilterStreaming(全量文本) + Label.text 赋值 → 高频 UI relayout 卡死主线程
         // 新实现：token 累积到 _pendingBuffer，每帧只 flush 一次
+        // v1.8.2 (2026-07-23): FlushIntervalMs 16 → 120 ms 显著降低 flush 频率.
+        // 原 16ms (~60Hz) 结合 FlushPending 里"整段清空+重解析+重建 DOM"的做法 (RenderTextAsBlocks
+        // 里 _blockContainer.Clear + ContentFilter.FilterCompletedToBlocks + foreach 重建 element)
+        // 导致主线程流式期 228 ms/帧 = 4.4 FPS + 132 KB GC/帧 (见 plans/perf-issue-agent-streaming-blocks-editor.md).
+        // 提到 120ms (~8Hz) 后主线程负载理论上下降到 1/7.5, 用户视觉仍是"流式追加感"仅"节奏"变慢.
+        // 若测试仍不理想, 下一步再考虑增量渲染 (只 append 新 block 不整段重建), 但那是大改造.
         private StringBuilder _pendingBuffer = new();
         private bool _flushScheduled;
-        private const int FlushIntervalMs = 16; // ~1 帧
+        private const int FlushIntervalMs = 120;
 
         // v1.6.5: 流式阶段文本窗口 — 只显示尾部 N 字符，避免超长文本 Label.text 触发 O(n) layout
         // 最终化时 SetFinalText 会渲染全部内容（block 模式），流式阶段只看尾部足够
