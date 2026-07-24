@@ -113,5 +113,19 @@
   "askUser.title": "AI needs your decision",
   "askUser.hint.customOption": "Describe it myself...",
   "askUser.hint.freeText": "Please type your answer in the input box below and send.",
-  "askUser.meta.noTimeout": "Waiting for your decision · This panel stays until you answer (no timeout)"
+  "askUser.meta.noTimeout": "Waiting for your decision · This panel stays until you answer (no timeout)",
+
+  "help.title": "AgentCore tips",
+  "help.section.shortcuts": "Shortcuts",
+  "help.section.tips": "Tips",
+  "help.section.trust": "Session-level trust",
+  "help.shortcut.openWindow": "Open AgentCore window",
+  "help.shortcut.contextInject": "Global context injection (select any Unity object then press this to auto-capture context into chat)",
+  "help.shortcut.newline": "New line in the input box",
+  "help.shortcut.newSession": "New session",
+  "help.tip.hierarchy": "Select an object in Hierarchy / Project / Console then press Ctrl+Shift+X — the Agent will understand the context automatically",
+  "help.tip.anyPanel": "Press Ctrl+Shift+X over any unfamiliar Unity panel element to auto-capture the window info",
+  "help.tip.autoCompress": "In multi-turn conversations the Agent auto-compresses old messages, no need to clean up manually",
+  "help.trust.lowMed": "Trust Low/Med — this session lets ReadOnly/Low/Medium risk tools through, High/destructive still prompt",
+  "help.trust.yolo": "YOLO (All) — this session lets ALL tools through, including delete / push / compile / other destructive ops. Use with care."
 }

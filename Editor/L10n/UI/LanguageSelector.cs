@@ -28,8 +28,11 @@ namespace AgentCore.Editor.L10n.UI
         public LanguageSelector()
         {
             AddToClassList("agentcore-language-selector");
+            // 不再 flex-grow, 保持固定宽度, 在 toolbar 里靠 spacer 推到最右
             style.flexDirection = FlexDirection.Row;
             style.alignItems = Align.Center;
+            style.flexGrow = 0;
+            style.flexShrink = 0;
 
             _codes = new List<string>();
             _displayNames = new List<string>();
@@ -47,7 +50,18 @@ namespace AgentCore.Editor.L10n.UI
                 tooltip = Loc.Tr("language.tooltip", "Switch UI language"),
             };
             _popup.AddToClassList("agentcore-language-selector__popup");
-            _popup.style.minWidth = 96;
+            // PopupField 默认会预留 label 位置(即使 label 为空), 手动隐藏
+            var labelEl = _popup.Q<Label>(className: "unity-base-field__label");
+            if (labelEl != null)
+            {
+                labelEl.style.display = DisplayStyle.None;
+            }
+            // 固定宽度 (英文 "English" / 中文"简体中文" 都在 96px 内可完整显示)
+            _popup.style.width = 108;
+            _popup.style.minWidth = 108;
+            _popup.style.maxWidth = 108;
+            _popup.style.flexGrow = 0;
+            _popup.style.flexShrink = 0;
             _popup.RegisterValueChangedCallback(OnPopupChanged);
 
             Add(_popup);

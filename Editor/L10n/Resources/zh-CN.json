@@ -113,5 +113,19 @@
   "askUser.title": "AI 需要你的决定",
   "askUser.hint.customOption": "我自己描述...",
   "askUser.hint.freeText": "请在下方输入框输入你的答案并发送",
-  "askUser.meta.noTimeout": "等待你的决定 · 面板会一直保留直到你回答（不会超时）"
+  "askUser.meta.noTimeout": "等待你的决定 · 面板会一直保留直到你回答（不会超时）",
+
+  "help.title": "AgentCore 使用技巧",
+  "help.section.shortcuts": "快捷键",
+  "help.section.tips": "使用技巧",
+  "help.section.trust": "会话级信任",
+  "help.shortcut.openWindow": "打开 AgentCore 窗口",
+  "help.shortcut.contextInject": "全局上下文注入（选中任意 Unity 物体后按此键，自动采集上下文注入聊天）",
+  "help.shortcut.newline": "输入框内换行",
+  "help.shortcut.newSession": "新建会话",
+  "help.tip.hierarchy": "选中 Hierarchy / Project / Console 中的物体后按 Ctrl+Shift+X，Agent 会自动理解上下文",
+  "help.tip.anyPanel": "对任何不认识的 Unity 面板元素按 Ctrl+Shift+X，会自动采集窗口信息",
+  "help.tip.autoCompress": "多轮对话中 Agent 会自动压缩旧消息，无需手动清理",
+  "help.trust.lowMed": "Trust Low/Med — 本会话 ReadOnly/Low/Medium 风险工具直通，High/破坏性操作仍弹窗",
+  "help.trust.yolo": "YOLO (All) — 本会话所有工具直通，含删除/推送/编译等破坏性操作，慎用"
 }

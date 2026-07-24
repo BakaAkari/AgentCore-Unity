@@ -1,3 +1,4 @@
+using AgentCore.Editor.L10n;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -25,6 +26,7 @@ namespace AgentCore.Editor.UI.Components
 
         private readonly Button _questionButton;
         private VisualElement _panel;
+        private VisualElement _content; // v1.9.0: 抽出以支持语言切换热重建
         private VisualElement _mountRoot;   // 面板挂载的 root（USS 作用域内）
         private bool _isShown;
         private bool _mouseOnButton;
@@ -70,9 +72,25 @@ namespace AgentCore.Editor.UI.Components
 
             Add(_questionButton);
 
+            RegisterCallback<AttachToPanelEvent>(OnAttachedToPanel);
             RegisterCallback<DetachFromPanelEvent>(OnDetachedFromPanel);
 
             BuildPanel();
+        }
+
+        private void OnAttachedToPanel(AttachToPanelEvent evt)
+        {
+            LanguageManager.LanguageChanged += OnLanguageChanged;
+        }
+
+        private void OnLanguageChanged(string newLanguage)
+        {
+            // 语言切换热重建 content
+            if (_content != null && _panel != null)
+            {
+                _content.Clear();
+                PopulateContent(_content);
+            }
         }
 
         // ────────────────── 面板构建 ──────────────────
@@ -100,33 +118,48 @@ namespace AgentCore.Editor.UI.Components
             scroll.style.flexGrow = 1;
             scroll.style.flexShrink = 1;
 
-            var content = new VisualElement { name = "help-bubble-content" };
-            content.style.flexShrink = 0;
-            content.style.paddingTop = 14;
-            content.style.paddingBottom = 14;
-            content.style.paddingLeft = 16;
-            content.style.paddingRight = 16;
+            _content = new VisualElement { name = "help-bubble-content" };
+            _content.style.flexShrink = 0;
+            _content.style.paddingTop = 14;
+            _content.style.paddingBottom = 14;
+            _content.style.paddingLeft = 16;
+            _content.style.paddingRight = 16;
 
-            content.Add(MakeTitle("AgentCore 使用技巧"));
+            PopulateContent(_content);
 
-            content.Add(MakeSectionHeader("快捷键"));
-            content.Add(MakeShortcutItem("Ctrl+Shift+Q", "打开 AgentCore 窗口"));
-            content.Add(MakeShortcutItem("Ctrl+Shift+X",
-                "全局上下文注入（选中任意 Unity 物体后按此键，自动采集上下文注入聊天）"));
-            content.Add(MakeShortcutItem("Ctrl+Enter", "输入框内换行"));
-            content.Add(MakeShortcutItem("Ctrl+N", "新建会话"));
-
-            content.Add(MakeSectionHeader("使用技巧"));
-            content.Add(MakeTip("选中 Hierarchy / Project / Console 中的物体后按 Ctrl+Shift+X，Agent 会自动理解上下文"));
-            content.Add(MakeTip("对任何不认识的 Unity 面板元素按 Ctrl+Shift+X，会自动采集窗口信息"));
-            content.Add(MakeTip("多轮对话中 Agent 会自动压缩旧消息，无需手动清理"));
-
-            content.Add(MakeSectionHeader("会话级信任"));
-            content.Add(MakeTip("Trust Low/Med — 本会话 ReadOnly/Low/Medium 风险工具直通，High/破坏性操作仍弹窗"));
-            content.Add(MakeTip("YOLO (All) — 本会话所有工具直通，含删除/推送/编译等破坏性操作，慎用"));
-
-            scroll.Add(content);
+            scroll.Add(_content);
             _panel.Add(scroll);
+        }
+
+        /// <summary>
+        /// v1.9.0+: 内容填充抽出, 便于语言切换时重建.
+        /// 快捷键组合本身(如 Ctrl+Shift+Q)不本地化, 是全局约定, 只有描述文案本地化.
+        /// </summary>
+        private void PopulateContent(VisualElement content)
+        {
+            content.Add(MakeTitle(Loc.Tr("help.title", "AgentCore 使用技巧")));
+
+            content.Add(MakeSectionHeader(Loc.Tr("help.section.shortcuts", "快捷键")));
+            content.Add(MakeShortcutItem("Ctrl+Shift+Q", Loc.Tr("help.shortcut.openWindow", "打开 AgentCore 窗口")));
+            content.Add(MakeShortcutItem("Ctrl+Shift+X",
+                Loc.Tr("help.shortcut.contextInject",
+                    "全局上下文注入（选中任意 Unity 物体后按此键，自动采集上下文注入聊天）")));
+            content.Add(MakeShortcutItem("Ctrl+Enter", Loc.Tr("help.shortcut.newline", "输入框内换行")));
+            content.Add(MakeShortcutItem("Ctrl+N", Loc.Tr("help.shortcut.newSession", "新建会话")));
+
+            content.Add(MakeSectionHeader(Loc.Tr("help.section.tips", "使用技巧")));
+            content.Add(MakeTip(Loc.Tr("help.tip.hierarchy",
+                "选中 Hierarchy / Project / Console 中的物体后按 Ctrl+Shift+X，Agent 会自动理解上下文")));
+            content.Add(MakeTip(Loc.Tr("help.tip.anyPanel",
+                "对任何不认识的 Unity 面板元素按 Ctrl+Shift+X，会自动采集窗口信息")));
+            content.Add(MakeTip(Loc.Tr("help.tip.autoCompress",
+                "多轮对话中 Agent 会自动压缩旧消息，无需手动清理")));
+
+            content.Add(MakeSectionHeader(Loc.Tr("help.section.trust", "会话级信任")));
+            content.Add(MakeTip(Loc.Tr("help.trust.lowMed",
+                "Trust Low/Med — 本会话 ReadOnly/Low/Medium 风险工具直通，High/破坏性操作仍弹窗")));
+            content.Add(MakeTip(Loc.Tr("help.trust.yolo",
+                "YOLO (All) — 本会话所有工具直通，含删除/推送/编译等破坏性操作，慎用")));
         }
 
         // ── 内容元素工厂（USS class + inline 兜底 双保险） ──
@@ -407,6 +440,9 @@ namespace AgentCore.Editor.UI.Components
 
         private void OnDetachedFromPanel(DetachFromPanelEvent evt)
         {
+            // v1.9.0+: 语言事件解注册, 避免野悬挂
+            try { LanguageManager.LanguageChanged -= OnLanguageChanged; } catch { }
+
             HidePanel();
             _panel?.RemoveFromHierarchy();
             _mountRoot = null;
