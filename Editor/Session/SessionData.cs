@@ -15,8 +15,30 @@ namespace AgentCore.Editor.Session
     [Serializable]
     public class SessionData
     {
-        /// <summary>默认会话标题</summary>
+        /// <summary>
+        /// 默认会话标题 (存储层稳定值, 用作"是否默认标题"的判断标记).
+        /// </summary>
+        /// <remarks>
+        /// 保留原字符串 "新会话" 不动是**故意的**:
+        /// 已存盘的历史会话 JSON 里 title 字段可能是这个值, 若改成 L10n 动态返回,
+        /// <c>session.Title == DefaultTitle</c> 判断会永远失败, 破坏 AutoGenerateTitle
+        /// 自动生成标题的逻辑. 展示层应通过 <see cref="GetDisplayTitle"/> 把存储值翻译为本地化标题.
+        /// </remarks>
         public const string DefaultTitle = "新会话";
+
+        /// <summary>
+        /// v1.9.0+: 获取用于展示的会话标题.
+        /// 若传入是空 / <see cref="DefaultTitle"/>, 返回当前语言的本地化"新会话"; 否则原样返回用户/LLM 生成的标题.
+        /// </summary>
+        /// <param name="storedTitle">存储层的原始标题字符串.</param>
+        public static string GetDisplayTitle(string storedTitle)
+        {
+            if (string.IsNullOrEmpty(storedTitle) || storedTitle == DefaultTitle)
+            {
+                return AgentCore.Editor.L10n.Loc.Tr("session.defaultTitle", DefaultTitle);
+            }
+            return storedTitle;
+        }
 
         /// <summary>会话唯一标识（GUID）</summary>
         [JsonProperty("id")]

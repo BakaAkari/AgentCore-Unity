@@ -62,6 +62,7 @@
   "chat.tool.copyButtonFailed": "失败",
   "chat.tool.copyTooltip": "复制完整原始详情到剪贴板",
 
+  "session.defaultTitle": "新会话",
   "session.sidebar.title": "会话列表",
   "session.button.new": "+ 新建",
   "session.button.newTooltip": "新建会话",

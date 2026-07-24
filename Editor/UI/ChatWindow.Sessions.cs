@@ -46,12 +46,8 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
-            // 从 SessionManager 获取最新标题
-            var newTitle = SessionManager.Instance.CurrentSessionTitle;
-            if (string.IsNullOrEmpty(newTitle))
-            {
-                newTitle = SessionData.DefaultTitle;
-            }
+            // 从 SessionManager 获取最新标题, 走 GetDisplayTitle 做本地化 (存储值 = "新会话" 时按当前语言展示)
+            var newTitle = SessionData.GetDisplayTitle(SessionManager.Instance.CurrentSessionTitle);
             if (newTitle.Length > MaxTitleDisplayLength)
             {
                 newTitle = newTitle.Substring(0, MaxTitleDisplayLength) + "...";
@@ -135,12 +131,8 @@ namespace AgentCore.Editor.UI
                 item.AddToClassList("session-active");
             }
 
-            // 会话标题
-            var title = session.Title;
-            if (string.IsNullOrEmpty(title))
-            {
-                title = SessionData.DefaultTitle;
-            }
+            // 会话标题 (走 GetDisplayTitle 本地化)
+            var title = SessionData.GetDisplayTitle(session.Title);
             if (title.Length > MaxTitleDisplayLength)
             {
                 title = title.Substring(0, MaxTitleDisplayLength) + "...";

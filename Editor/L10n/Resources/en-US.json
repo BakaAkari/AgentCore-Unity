@@ -62,6 +62,7 @@
   "chat.tool.copyButtonFailed": "Failed",
   "chat.tool.copyTooltip": "Copy full raw details to clipboard",
 
+  "session.defaultTitle": "New session",
   "session.sidebar.title": "Sessions",
   "session.button.new": "+ New",
   "session.button.newTooltip": "New session",
