@@ -22,7 +22,10 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Description = "Control Unity Editor state and access project-level settings. " +
             "Actions: get_info (editor version, platform, play state, active scene, render pipeline — use to verify environment), " +
             "play_mode (enter/exit/pause play mode), refresh (force asset reimport/recompile), " +
-            "get_selection/set_selection (current editor selection; set_selection accepts a single target or an array of targets for multi-select), focus_window (bring editor windows to front), " +
+            "get_selection (returns rich structured selection: instance_ids, asset_guids, active_context, hierarchy paths — use to know what user selected), " +
+            "set_selection (write selection; supports mode=replace|add|remove, and identifiers include hierarchy paths, instance IDs, asset paths, or 'guid:<assetGuid>' prefix), " +
+            "set_selection_by_query (select by scene component type OR project asset filter — use for 'select all X' workflows), " +
+            "focus_window (bring editor windows to front), " +
             "get_project_settings/set_project_setting (PlayerSettings, Physics, Quality, etc.). " +
             "Use get_info as a first step to confirm editor connectivity and project state. " +
             "Use refresh after script changes to trigger recompilation. " +
@@ -41,8 +44,8 @@ namespace AgentCore.Editor.Tools.Native.Meta
             ""properties"": {
                 ""action"": {
                     ""type"": ""string"",
-                    ""enum"": [""get_info"", ""play_mode"", ""focus_window"", ""get_selection"", ""set_selection"", ""refresh"", ""get_project_settings"", ""set_project_setting""],
-                    ""description"": ""Action to perform. Use 'get_info' to check editor status and connection (returns Unity version, platform, play state, active scene, render pipeline). Use 'play_mode' with 'state' param to control play/pause/stop/step. Use 'refresh' to reimport assets.""
+                    ""enum"": [""get_info"", ""play_mode"", ""focus_window"", ""get_selection"", ""set_selection"", ""set_selection_by_query"", ""refresh"", ""get_project_settings"", ""set_project_setting""],
+                    ""description"": ""Action to perform. Use 'get_info' to check editor status and connection (returns Unity version, platform, play state, active scene, render pipeline). Use 'play_mode' with 'state' param to control play/pause/stop/step. Use 'refresh' to reimport assets. Use 'get_selection' to inspect current selection (rich fields: instance_ids, asset_guids, active_context, game_objects). Use 'set_selection' to write; use 'set_selection_by_query' for 'select all X with component/label/type' workflows.""
                 },
                 ""state"": {
                     ""type"": ""string"",
@@ -55,11 +58,52 @@ namespace AgentCore.Editor.Tools.Native.Meta
                     ""description"": ""Window to focus (for focus_window action)""
                 },
                 ""target"": {
-                    ""description"": ""Target(s) for set_selection. Each target may be: a GameObject name (selects ALL objects with that name), a hierarchy path like 'Player/Camera' (selects one exact object), an integer InstanceID, or an asset path. Pass a single string or an array of strings for multi-select."",
+                    ""description"": ""Target(s) for set_selection. Each target may be: a GameObject name (selects ALL objects with that name), a hierarchy path like 'Player/Camera' (selects one exact object), an integer InstanceID, an asset path (e.g. 'Assets/Prefabs/Enemy.prefab'), or 'guid:<assetGuid>' (32-char hex — useful when path is unstable). Pass a single string or an array of strings for multi-select."",
                     ""oneOf"": [
                         { ""type"": ""string"" },
                         { ""type"": ""array"", ""items"": { ""type"": ""string"" } }
                     ]
+                },
+                ""mode"": {
+                    ""type"": ""string"",
+                    ""enum"": [""replace"", ""add"", ""remove""],
+                    ""description"": ""Selection write mode for set_selection (default: replace). 'add' merges into current Selection.objects; 'remove' subtracts resolved objects from current selection.""
+                },
+                ""active_context"": {
+                    ""type"": ""string"",
+                    ""description"": ""Optional context object for set_selection (asset path or hierarchy path). Sets Selection.SetActiveObjectWithContext so Project window can scope to a folder or scene root.""
+                },
+                ""query"": {
+                    ""type"": ""object"",
+                    ""description"": ""Query object for set_selection_by_query. Must contain scope='scene' (with component_type) OR scope='project' (with asset_filter)."",
+                    ""properties"": {
+                        ""scope"": {
+                            ""type"": ""string"",
+                            ""enum"": [""scene"", ""project""],
+                            ""description"": ""'scene' iterates loaded scenes; 'project' uses AssetDatabase.FindAssets syntax.""
+                        },
+                        ""component_type"": {
+                            ""type"": ""string"",
+                            ""description"": ""(scene) Full component type name (e.g. 'UnityEngine.Rigidbody' or 'Rigidbody'). Selects all GameObjects that have this component.""
+                        },
+                        ""asset_filter"": {
+                            ""type"": ""string"",
+                            ""description"": ""(project) AssetDatabase.FindAssets filter, e.g. 't:Prefab l:MyLabel' or 't:Material'.""
+                        },
+                        ""include_inactive"": {
+                            ""type"": ""boolean"",
+                            ""description"": ""(scene, default true) Include inactive GameObjects.""
+                        },
+                        ""search_folders"": {
+                            ""type"": ""array"",
+                            ""items"": { ""type"": ""string"" },
+                            ""description"": ""(project, optional) Limit search to these folders, e.g. ['Assets/Prefabs'].""
+                        },
+                        ""max_results"": {
+                            ""type"": ""integer"",
+                            ""description"": ""Safety cap on selection size (default 500). Set higher if you really need to select thousands.""
+                        }
+                    }
                 },
                 ""import_mode"": {
                     ""type"": ""string"",
@@ -119,6 +163,9 @@ namespace AgentCore.Editor.Tools.Native.Meta
                     case "set_selection":
                         response = HandleSetSelection(parameters);
                         break;
+                    case "set_selection_by_query":
+                        response = HandleSetSelectionByQuery(parameters);
+                        break;
                     case "refresh":
                         response = HandleRefresh(parameters);
                         break;
@@ -130,7 +177,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
                         break;
                     default:
                         response = ToolResponse.Fail(
-                            $"Unknown action: '{action}'. Valid actions: get_info, play_mode, focus_window, get_selection, set_selection, refresh, get_project_settings, set_project_setting");
+                            $"Unknown action: '{action}'. Valid actions: get_info, play_mode, focus_window, get_selection, set_selection, set_selection_by_query, refresh, get_project_settings, set_project_setting");
                         break;
                 }
             }
@@ -283,58 +330,126 @@ namespace AgentCore.Editor.Tools.Native.Meta
             return ToolResponse.Fail($"Could not open or focus {windowName} window.");
         }
 
+        // ─── G06 Selection deep dive (v1.9.3) ────────────────────────────────
+        // Structured selection info used by both get_selection and set_selection results.
+        // 保证 gameObject 走 hierarchy_path, asset 走 asset_path + asset_guid.
+        //
+        // Deprecation timeline (per plans/v1.10.0-handoff.md §6.6):
+        //   v1.9.3 → v1.10.x: 新旧字段并存 (get_selection 保留 active_gameobject / active_object / selected_objects / selection_count)
+        //   v1.11.0: CHANGELOG mark old fields as Deprecated
+        //   v1.12.0 or next major: remove old fields
+        private static JObject SerializeSelectedObject(UnityEngine.Object obj)
+        {
+            if (obj == null) return null;
+            var item = new JObject
+            {
+                ["name"] = obj.name,
+                ["type"] = obj.GetType().Name,
+                ["instance_id"] = obj.GetInstanceID()
+            };
+
+            if (obj is GameObject go)
+            {
+                item["is_gameobject"] = true;
+                item["hierarchy_path"] = BuildHierarchyPath(go);
+                if (go.scene.IsValid())
+                {
+                    item["scene_name"] = go.scene.name;
+                    item["scene_path"] = go.scene.path;
+                }
+            }
+
+            var assetPath = AssetDatabase.GetAssetPath(obj);
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                item["asset_path"] = assetPath;
+                var guid = AssetDatabase.AssetPathToGUID(assetPath);
+                if (!string.IsNullOrEmpty(guid))
+                    item["asset_guid"] = guid;
+            }
+            return item;
+        }
+
+        /// <summary>Build "/Root/Child/Leaf" style hierarchy path for a scene GameObject.</summary>
+        private static string BuildHierarchyPath(GameObject go)
+        {
+            if (go == null) return null;
+            var stack = new System.Collections.Generic.Stack<string>();
+            var current = go.transform;
+            while (current != null)
+            {
+                stack.Push(current.name);
+                current = current.parent;
+            }
+            return string.Join("/", stack);
+        }
+
         private ToolResponse HandleGetSelection()
         {
             var data = new JObject();
 
-            // Active GameObject
+            // === Legacy fields (deprecation target: v1.12.0) ===
             var activeGo = Selection.activeGameObject;
-            if (activeGo != null)
-            {
-                data["active_gameobject"] = ToolHelpers.SerializeGameObject(activeGo, includeComponents: true);
-            }
-            else
-            {
-                data["active_gameobject"] = null;
-            }
+            data["active_gameobject"] = activeGo != null
+                ? ToolHelpers.SerializeGameObject(activeGo, includeComponents: true)
+                : null;
 
-            // Active Object (could be an asset)
             var activeObj = Selection.activeObject;
             if (activeObj != null && activeObj != activeGo)
             {
-                data["active_object"] = new JObject
-                {
-                    ["name"] = activeObj.name,
-                    ["type"] = activeObj.GetType().Name,
-                    ["instance_id"] = activeObj.GetInstanceID()
-                };
-
-                var assetPath = AssetDatabase.GetAssetPath(activeObj);
-                if (!string.IsNullOrEmpty(assetPath))
-                {
-                    data["active_object"]["asset_path"] = assetPath;
-                }
+                data["active_object"] = SerializeSelectedObject(activeObj);
+            }
+            else
+            {
+                data["active_object"] = null;
             }
 
-            // All selected objects
-            var selectedObjects = Selection.objects;
+            var selectedObjects = Selection.objects ?? System.Array.Empty<UnityEngine.Object>();
             var selectedArray = new JArray();
             foreach (var obj in selectedObjects)
             {
                 if (obj == null) continue;
-                var item = new JObject
-                {
-                    ["name"] = obj.name,
-                    ["type"] = obj.GetType().Name,
-                    ["instance_id"] = obj.GetInstanceID()
-                };
-                var path = AssetDatabase.GetAssetPath(obj);
-                if (!string.IsNullOrEmpty(path))
-                    item["asset_path"] = path;
-                selectedArray.Add(item);
+                selectedArray.Add(SerializeSelectedObject(obj));
             }
             data["selected_objects"] = selectedArray;
             data["selection_count"] = selectedObjects.Length;
+
+            // === New enriched fields (v1.9.3, G06) ===
+            // active
+            data["active"] = SerializeSelectedObject(activeObj);
+            data["active_hierarchy_path"] = activeGo != null ? BuildHierarchyPath(activeGo) : null;
+
+            // active_context (Project window folder / scene root)
+            var activeContext = Selection.activeContext;
+            data["active_context"] = SerializeSelectedObject(activeContext);
+
+            // Structured lists
+            var instanceIds = new JArray();
+            var assetGuids = new JArray();
+            var goArray = new JArray();
+            var seenGuids = new System.Collections.Generic.HashSet<string>();
+
+            foreach (var obj in selectedObjects)
+            {
+                if (obj == null) continue;
+                instanceIds.Add(obj.GetInstanceID());
+                if (obj is GameObject go)
+                {
+                    goArray.Add(SerializeSelectedObject(go));
+                }
+                var assetPath = AssetDatabase.GetAssetPath(obj);
+                if (!string.IsNullOrEmpty(assetPath))
+                {
+                    var guid = AssetDatabase.AssetPathToGUID(assetPath);
+                    if (!string.IsNullOrEmpty(guid) && seenGuids.Add(guid))
+                        assetGuids.Add(guid);
+                }
+            }
+
+            data["instance_ids"] = instanceIds;
+            data["asset_guids"] = assetGuids;
+            data["game_objects"] = goArray;
+            data["select_count"] = Selection.count;
 
             return ToolResponse.OkWithData(data,
                 selectedObjects.Length > 0
@@ -345,72 +460,29 @@ namespace AgentCore.Editor.Tools.Native.Meta
         /// <summary>构造单个 GameObject 的选择信息 JObject（供 set_selection 结果复用）。</summary>
         private static JObject GameObjectInfo(GameObject go)
         {
-            return new JObject
-            {
-                ["name"] = go.name,
-                ["instance_id"] = go.GetInstanceID(),
-                ["type"] = "GameObject"
-            };
+            return SerializeSelectedObject(go);
         }
 
         private ToolResponse HandleSetSelection(JObject parameters)
         {
             // v1.7.16：支持单选与多选。target 可为单个字符串，或字符串数组（多选）。
-            // 收集所有目标标识符（GameObject 名/层级路径 或 资源路径），逐个解析后一次性设置 Selection.objects。
+            // v1.9.3 (G06): 新增 mode (replace/add/remove) + active_context + 'guid:<assetGuid>' 前缀支持。
             var token = parameters["target"];
             if (token == null || token.Type == JTokenType.Null)
             {
                 return ToolResponse.Fail("Missing required parameter: 'target' (string or array of strings).");
             }
 
-            var targets = new System.Collections.Generic.List<string>();
-            if (token.Type == JTokenType.Array)
-            {
-                foreach (var item in (JArray)token)
-                {
-                    var s = item?.ToString();
-                    if (!string.IsNullOrWhiteSpace(s)) targets.Add(s.Trim());
-                }
-            }
-            else
-            {
-                var s = token.ToString().Trim();
-                // 兼容 LLM 把数组序列化成字符串传入的情况，例如 target = "[\"a\", \"b\"]"。
-                if (s.StartsWith("[") && s.EndsWith("]"))
-                {
-                    JArray arr = null;
-                    try { arr = JArray.Parse(s); } catch { arr = null; }
-                    if (arr != null)
-                    {
-                        foreach (var item in arr)
-                        {
-                            var e = item?.ToString();
-                            if (!string.IsNullOrWhiteSpace(e)) targets.Add(e.Trim());
-                        }
-                    }
-                }
-
-                // 未识别为 JSON 数组：再兼容逗号分隔的多目标写法 "a, b"。
-                if (targets.Count == 0)
-                {
-                    if (s.IndexOf(',') >= 0)
-                    {
-                        foreach (var part in s.Split(','))
-                        {
-                            var e = part.Trim();
-                            if (!string.IsNullOrWhiteSpace(e)) targets.Add(e);
-                        }
-                    }
-                    else if (!string.IsNullOrWhiteSpace(s))
-                    {
-                        targets.Add(s);
-                    }
-                }
-            }
-
+            var targets = NormalizeTargetTokens(token);
             if (targets.Count == 0)
             {
                 return ToolResponse.Fail("Parameter 'target' contained no valid entries.");
+            }
+
+            var mode = ToolHelpers.GetOptionalString(parameters, "mode", "replace").ToLowerInvariant();
+            if (mode != "replace" && mode != "add" && mode != "remove")
+            {
+                return ToolResponse.Fail($"Invalid 'mode': '{mode}'. Valid: replace, add, remove.");
             }
 
             var resolved = new System.Collections.Generic.List<UnityEngine.Object>();
@@ -419,78 +491,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
 
             foreach (var target in targets)
             {
-                bool matched = false;
-
-                if (target.IndexOf('/') >= 0)
-                {
-                    // 含层级路径：路径本身即消歧手段，精确匹配单个 GameObject。
-                    var go = ToolHelpers.FindGameObject(target);
-                    if (go != null)
-                    {
-                        resolved.Add(go);
-                        resolvedInfo.Add(GameObjectInfo(go));
-                        matched = true;
-                    }
-                }
-                else if (int.TryParse(target, out var instanceId))
-                {
-                    // 纯整数：优先按 InstanceID 解析（可指向 GameObject 或资源对象）。
-                    var obj = EditorUtility.InstanceIDToObject(instanceId);
-                    if (obj != null)
-                    {
-                        resolved.Add(obj);
-                        resolvedInfo.Add(obj is GameObject g
-                            ? GameObjectInfo(g)
-                            : new JObject
-                            {
-                                ["name"] = obj.name,
-                                ["instance_id"] = instanceId,
-                                ["type"] = obj.GetType().Name
-                            });
-                        matched = true;
-                    }
-                    else
-                    {
-                        // InstanceID 无对应对象，回退按名字（罕见：物体名恰为纯数字）。
-                        var byName = ToolHelpers.FindGameObjectsByName(target);
-                        foreach (var g in byName)
-                        {
-                            resolved.Add(g);
-                            resolvedInfo.Add(GameObjectInfo(g));
-                        }
-                        matched = byName.Count > 0;
-                    }
-                }
-                else
-                {
-                    // 普通名字：选中所有同名 GameObject（同名全选）。
-                    var byName = ToolHelpers.FindGameObjectsByName(target);
-                    foreach (var g in byName)
-                    {
-                        resolved.Add(g);
-                        resolvedInfo.Add(GameObjectInfo(g));
-                    }
-                    matched = byName.Count > 0;
-                }
-
-                if (matched)
-                    continue;
-
-                // 场景对象未命中：尝试按资源路径解析。
-                var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target);
-                if (asset != null)
-                {
-                    resolved.Add(asset);
-                    resolvedInfo.Add(new JObject
-                    {
-                        ["name"] = asset.name,
-                        ["instance_id"] = asset.GetInstanceID(),
-                        ["type"] = asset.GetType().Name,
-                        ["asset_path"] = target
-                    });
-                    continue;
-                }
-
+                if (TryResolveTarget(target, resolved, resolvedInfo)) continue;
                 notFound.Add(target);
             }
 
@@ -500,8 +501,386 @@ namespace AgentCore.Editor.Tools.Native.Meta
                     $"Could not find any GameObject or asset for target(s): {string.Join(", ", notFound)}");
             }
 
-            // 一次性设置选择集：单个走 activeObject，多个走 Selection.objects。
-            if (resolved.Count == 1)
+            // Compute new Selection.objects based on mode
+            var currentSelection = Selection.objects ?? System.Array.Empty<UnityEngine.Object>();
+            UnityEngine.Object[] finalObjects;
+            switch (mode)
+            {
+                case "add":
+                {
+                    var set = new System.Collections.Generic.List<UnityEngine.Object>(currentSelection);
+                    var seenIds = new System.Collections.Generic.HashSet<int>();
+                    foreach (var o in currentSelection) if (o != null) seenIds.Add(o.GetInstanceID());
+                    foreach (var o in resolved)
+                    {
+                        if (o != null && seenIds.Add(o.GetInstanceID()))
+                            set.Add(o);
+                    }
+                    finalObjects = set.ToArray();
+                    break;
+                }
+                case "remove":
+                {
+                    var removeIds = new System.Collections.Generic.HashSet<int>();
+                    foreach (var o in resolved) if (o != null) removeIds.Add(o.GetInstanceID());
+                    var kept = new System.Collections.Generic.List<UnityEngine.Object>();
+                    foreach (var o in currentSelection)
+                    {
+                        if (o != null && !removeIds.Contains(o.GetInstanceID()))
+                            kept.Add(o);
+                    }
+                    finalObjects = kept.ToArray();
+                    break;
+                }
+                default: // replace
+                    finalObjects = resolved.ToArray();
+                    break;
+            }
+
+            // Optional active_context
+            UnityEngine.Object contextObj = null;
+            var contextToken = parameters["active_context"];
+            if (contextToken != null && contextToken.Type != JTokenType.Null)
+            {
+                var contextStr = contextToken.ToString().Trim();
+                if (!string.IsNullOrEmpty(contextStr))
+                {
+                    var scratch = new System.Collections.Generic.List<UnityEngine.Object>();
+                    if (TryResolveTarget(contextStr, scratch, null) && scratch.Count > 0)
+                    {
+                        contextObj = scratch[0];
+                    }
+                    else
+                    {
+                        return ToolResponse.Fail(
+                            $"active_context '{contextStr}' could not be resolved to a GameObject or asset.");
+                    }
+                }
+            }
+
+            // Apply selection
+            if (finalObjects.Length == 0)
+            {
+                Selection.objects = System.Array.Empty<UnityEngine.Object>();
+            }
+            else if (contextObj != null)
+            {
+                Selection.objects = finalObjects;
+                Selection.SetActiveObjectWithContext(finalObjects[0], contextObj);
+            }
+            else if (finalObjects.Length == 1)
+            {
+                Selection.activeObject = finalObjects[0];
+            }
+            else
+            {
+                Selection.objects = finalObjects;
+            }
+
+            if (finalObjects.Length > 0)
+            {
+                EditorGUIUtility.PingObject(finalObjects[0]);
+            }
+
+            var data = new JObject
+            {
+                ["mode"] = mode,
+                ["selected_count"] = resolved.Count,       // legacy
+                ["selected"] = resolvedInfo,               // legacy
+                ["resolved_count"] = resolved.Count,
+                ["resolved"] = resolvedInfo,
+                ["selection_count_after"] = finalObjects.Length
+            };
+            if (notFound.Count > 0)
+            {
+                data["not_found"] = new JArray(notFound);
+            }
+            if (contextObj != null)
+            {
+                data["active_context_resolved"] = SerializeSelectedObject(contextObj);
+            }
+
+            string summary;
+            if (mode == "add")
+            {
+                summary = $"Added {resolved.Count} object(s) to selection (total: {finalObjects.Length}).";
+            }
+            else if (mode == "remove")
+            {
+                summary = $"Removed {resolved.Count} object(s) from selection (remaining: {finalObjects.Length}).";
+            }
+            else if (finalObjects.Length == 1)
+            {
+                summary = $"Selected: '{((resolvedInfo[0] as JObject)?["name"])}'";
+            }
+            else
+            {
+                summary = $"Selected {finalObjects.Length} object(s).";
+            }
+            if (notFound.Count > 0)
+            {
+                summary += $" ({notFound.Count} not found: {string.Join(", ", notFound)})";
+            }
+
+            return ToolResponse.OkWithData(data, summary);
+        }
+
+        /// <summary>Normalize the 'target' JSON token into a flat list of trimmed target strings.</summary>
+        private static System.Collections.Generic.List<string> NormalizeTargetTokens(JToken token)
+        {
+            var targets = new System.Collections.Generic.List<string>();
+            if (token.Type == JTokenType.Array)
+            {
+                foreach (var item in (JArray)token)
+                {
+                    var s = item?.ToString();
+                    if (!string.IsNullOrWhiteSpace(s)) targets.Add(s.Trim());
+                }
+                return targets;
+            }
+
+            var raw = token.ToString().Trim();
+            // 兼容 LLM 把数组序列化成字符串传入的情况，例如 target = "[\"a\", \"b\"]"。
+            if (raw.StartsWith("[") && raw.EndsWith("]"))
+            {
+                JArray arr = null;
+                try { arr = JArray.Parse(raw); } catch { arr = null; }
+                if (arr != null)
+                {
+                    foreach (var item in arr)
+                    {
+                        var e = item?.ToString();
+                        if (!string.IsNullOrWhiteSpace(e)) targets.Add(e.Trim());
+                    }
+                    if (targets.Count > 0) return targets;
+                }
+            }
+
+            // 未识别为 JSON 数组：再兼容逗号分隔的多目标写法 "a, b"。
+            if (raw.IndexOf(',') >= 0)
+            {
+                foreach (var part in raw.Split(','))
+                {
+                    var e = part.Trim();
+                    if (!string.IsNullOrWhiteSpace(e)) targets.Add(e);
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(raw))
+            {
+                targets.Add(raw);
+            }
+            return targets;
+        }
+
+        /// <summary>
+        /// Resolve a single target string to zero or more UnityEngine.Objects and append them
+        /// to `resolved` + `resolvedInfo` (if non-null). Returns true if at least one object was found.
+        /// Supported forms:
+        ///   - "guid:32-char-hex" → asset by GUID (v1.9.3)
+        ///   - "Path/With/Slashes" → scene GameObject by hierarchy path
+        ///   - integer → InstanceID (may resolve to asset or GameObject)
+        ///   - "Name" → all scene GameObjects with that name
+        ///   - "Assets/..." or similar asset path fallback
+        /// </summary>
+        private static bool TryResolveTarget(
+            string target,
+            System.Collections.Generic.List<UnityEngine.Object> resolved,
+            JArray resolvedInfo)
+        {
+            if (string.IsNullOrEmpty(target)) return false;
+
+            // ─── "guid:xxxxxxxx" prefix (v1.9.3) — resolve asset by GUID ───
+            if (target.StartsWith("guid:", StringComparison.OrdinalIgnoreCase))
+            {
+                var guid = target.Substring(5).Trim();
+                if (string.IsNullOrEmpty(guid)) return false;
+                var assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(assetPath)) return false;
+                var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath);
+                if (asset == null) return false;
+                resolved.Add(asset);
+                resolvedInfo?.Add(SerializeSelectedObject(asset));
+                return true;
+            }
+
+            // ─── Hierarchy path ───
+            if (target.IndexOf('/') >= 0)
+            {
+                // Ambiguity: it could be a scene hierarchy path OR an asset path.
+                // Prefer scene lookup first (matches v1.7.16 semantics), fall back to asset.
+                var go = ToolHelpers.FindGameObject(target);
+                if (go != null)
+                {
+                    resolved.Add(go);
+                    resolvedInfo?.Add(SerializeSelectedObject(go));
+                    return true;
+                }
+
+                var pathAsset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target);
+                if (pathAsset != null)
+                {
+                    resolved.Add(pathAsset);
+                    resolvedInfo?.Add(SerializeSelectedObject(pathAsset));
+                    return true;
+                }
+                return false;
+            }
+
+            // ─── Pure integer → InstanceID ───
+            if (int.TryParse(target, out var instanceId))
+            {
+                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                if (obj != null)
+                {
+                    resolved.Add(obj);
+                    resolvedInfo?.Add(SerializeSelectedObject(obj));
+                    return true;
+                }
+                // Fallthrough to name lookup (rare: an object literally named e.g. "123")
+                var byName = ToolHelpers.FindGameObjectsByName(target);
+                foreach (var g in byName)
+                {
+                    resolved.Add(g);
+                    resolvedInfo?.Add(SerializeSelectedObject(g));
+                }
+                return byName.Count > 0;
+            }
+
+            // ─── Plain name → all scene GameObjects with that name ───
+            var byNameList = ToolHelpers.FindGameObjectsByName(target);
+            if (byNameList.Count > 0)
+            {
+                foreach (var g in byNameList)
+                {
+                    resolved.Add(g);
+                    resolvedInfo?.Add(SerializeSelectedObject(g));
+                }
+                return true;
+            }
+
+            // ─── Asset path fallback ───
+            var asset2 = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target);
+            if (asset2 != null)
+            {
+                resolved.Add(asset2);
+                resolvedInfo?.Add(SerializeSelectedObject(asset2));
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// v1.9.3 (G06): New action `set_selection_by_query`.
+        /// Selects scene GameObjects by component type OR project assets by AssetDatabase filter.
+        /// </summary>
+        private ToolResponse HandleSetSelectionByQuery(JObject parameters)
+        {
+            var queryToken = parameters["query"];
+            if (queryToken == null || queryToken.Type != JTokenType.Object)
+            {
+                return ToolResponse.Fail("Missing required parameter: 'query' (object with 'scope' and one of component_type / asset_filter).");
+            }
+            var query = (JObject)queryToken;
+            var scope = ToolHelpers.GetRequiredString(query, "scope").ToLowerInvariant();
+            var maxResults = ToolHelpers.GetOptionalInt(query, "max_results", 500);
+            if (maxResults <= 0) maxResults = 500;
+
+            var resolved = new System.Collections.Generic.List<UnityEngine.Object>();
+            string queryDescription;
+
+            switch (scope)
+            {
+                case "scene":
+                {
+                    var componentTypeName = ToolHelpers.GetOptionalString(query, "component_type");
+                    if (string.IsNullOrEmpty(componentTypeName))
+                    {
+                        return ToolResponse.Fail("scope='scene' requires 'component_type' (e.g. 'UnityEngine.Rigidbody' or short name 'Rigidbody').");
+                    }
+                    var includeInactive = ToolHelpers.GetOptionalBool(query, "include_inactive", true);
+
+                    var componentType = ResolveComponentType(componentTypeName);
+                    if (componentType == null)
+                    {
+                        return ToolResponse.Fail(
+                            $"Could not resolve component type '{componentTypeName}'. Try a fully-qualified name like 'UnityEngine.Rigidbody'.");
+                    }
+                    if (!typeof(Component).IsAssignableFrom(componentType))
+                    {
+                        return ToolResponse.Fail(
+                            $"Type '{componentType.FullName}' does not derive from UnityEngine.Component; cannot query scene by it.");
+                    }
+
+                    // FindObjectsOfType(bool) — includeInactive true means includeInactive+includeUninitialized
+                    var components = UnityEngine.Object.FindObjectsOfType(componentType, includeInactive);
+                    foreach (var comp in components)
+                    {
+                        if (comp is Component c && c.gameObject != null)
+                        {
+                            resolved.Add(c.gameObject);
+                            if (resolved.Count >= maxResults) break;
+                        }
+                    }
+                    queryDescription = $"scene component_type='{componentType.FullName}' include_inactive={includeInactive}";
+                    break;
+                }
+
+                case "project":
+                {
+                    var assetFilter = ToolHelpers.GetOptionalString(query, "asset_filter");
+                    if (string.IsNullOrEmpty(assetFilter))
+                    {
+                        return ToolResponse.Fail("scope='project' requires 'asset_filter' (AssetDatabase.FindAssets syntax, e.g. 't:Prefab l:MyLabel').");
+                    }
+
+                    string[] searchFolders = null;
+                    var foldersToken = query["search_folders"];
+                    if (foldersToken != null && foldersToken.Type == JTokenType.Array)
+                    {
+                        var list = new System.Collections.Generic.List<string>();
+                        foreach (var f in (JArray)foldersToken)
+                        {
+                            var s = f?.ToString();
+                            if (!string.IsNullOrWhiteSpace(s)) list.Add(s.Trim());
+                        }
+                        if (list.Count > 0) searchFolders = list.ToArray();
+                    }
+
+                    string[] guids = searchFolders != null
+                        ? AssetDatabase.FindAssets(assetFilter, searchFolders)
+                        : AssetDatabase.FindAssets(assetFilter);
+
+                    foreach (var guid in guids)
+                    {
+                        var path = AssetDatabase.GUIDToAssetPath(guid);
+                        if (string.IsNullOrEmpty(path)) continue;
+                        var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
+                        if (asset == null) continue;
+                        resolved.Add(asset);
+                        if (resolved.Count >= maxResults) break;
+                    }
+                    queryDescription = $"project asset_filter='{assetFilter}'"
+                        + (searchFolders != null ? $" folders=[{string.Join(",", searchFolders)}]" : "");
+                    break;
+                }
+
+                default:
+                    return ToolResponse.Fail($"Invalid query.scope: '{scope}'. Valid: scene, project.");
+            }
+
+            var resolvedInfo = new JArray();
+            foreach (var o in resolved)
+            {
+                if (o != null) resolvedInfo.Add(SerializeSelectedObject(o));
+            }
+
+            // Write selection
+            if (resolved.Count == 0)
+            {
+                Selection.objects = System.Array.Empty<UnityEngine.Object>();
+            }
+            else if (resolved.Count == 1)
             {
                 Selection.activeObject = resolved[0];
             }
@@ -509,27 +888,57 @@ namespace AgentCore.Editor.Tools.Native.Meta
             {
                 Selection.objects = resolved.ToArray();
             }
-            EditorGUIUtility.PingObject(resolved[0]);
+            if (resolved.Count > 0)
+            {
+                EditorGUIUtility.PingObject(resolved[0]);
+            }
 
             var data = new JObject
             {
-                ["selected_count"] = resolved.Count,
-                ["selected"] = resolvedInfo
+                ["query"] = queryDescription,
+                ["resolved_count"] = resolved.Count,
+                ["resolved"] = resolvedInfo,
+                ["max_results"] = maxResults,
+                ["truncated"] = resolved.Count >= maxResults
             };
-            if (notFound.Count > 0)
-            {
-                data["not_found"] = new JArray(notFound);
-            }
 
-            var summary = resolved.Count == 1
-                ? $"Selected: '{((resolvedInfo[0] as JObject)?["name"])}'"
-                : $"Selected {resolved.Count} objects.";
-            if (notFound.Count > 0)
-            {
-                summary += $" ({notFound.Count} not found: {string.Join(", ", notFound)})";
-            }
-
+            var summary = $"set_selection_by_query ({queryDescription}) selected {resolved.Count} object(s)"
+                + (resolved.Count >= maxResults ? $" — truncated at max_results={maxResults}" : ".");
             return ToolResponse.OkWithData(data, summary);
+        }
+
+        /// <summary>Resolve a Component type by full name (e.g. 'UnityEngine.Rigidbody') or short name ('Rigidbody').</summary>
+        private static Type ResolveComponentType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return null;
+
+            // 1) Exact type name across all loaded assemblies (fully qualified wins first).
+            var t = Type.GetType(typeName, throwOnError: false, ignoreCase: false);
+            if (t != null && typeof(Component).IsAssignableFrom(t)) return t;
+
+            // 2) Try common Unity assemblies with short name.
+            foreach (var asmName in new[] { "UnityEngine", "UnityEngine.CoreModule", "UnityEngine.PhysicsModule",
+                                            "UnityEngine.UI", "UnityEngine.AnimationModule" })
+            {
+                var candidate = Type.GetType($"UnityEngine.{typeName}, {asmName}", throwOnError: false);
+                if (candidate != null && typeof(Component).IsAssignableFrom(candidate)) return candidate;
+            }
+
+            // 3) Slow fallback: enumerate all loaded assemblies.
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try { types = asm.GetTypes(); }
+                catch (System.Reflection.ReflectionTypeLoadException ex) { types = ex.Types; }
+                foreach (var candidate in types)
+                {
+                    if (candidate == null) continue;
+                    if (!typeof(Component).IsAssignableFrom(candidate)) continue;
+                    if (candidate.FullName == typeName || candidate.Name == typeName)
+                        return candidate;
+                }
+            }
+            return null;
         }
 
         private ToolResponse HandleRefresh(JObject parameters)

@@ -5,6 +5,287 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-07-24
+
+### Added — G04 MemoryProfiler + v1.10.0 minor bump
+
+按 [`plans/v1.10.0-handoff.md`](plans/v1.10.0-handoff.md) §3.2 步骤 7 交付，完成 v1.10.0 全部 6 项 + 前置调研。
+
+**这是 minor 版本 tag** — 承接自 v1.9.2 → v1.9.3/4/5/6 → **v1.10.0**，覆盖 v1.10.0-handoff §3.1 方案 B 全部 6 项 (G06/G07/G05/G08/G09/G04).
+
+#### G04 — `manage_memory_profiler` 新工具
+
+新工具 [`ManageMemoryProfilerTool.cs`](Editor/Tools/Native/Extended/ManageMemoryProfilerTool.cs) 暴露 Unity Memory Profiler 抓取 / 列表 / 分析 / 对比能力.
+
+**关键设计** (基于 3 轮反射探测, [`plans/v1.10.0/g04-reflection-probe-*.md`](plans/v1.10.0/g04-reflection-probe-round2-result.md)):
+
+- **`take_memory_snapshot`** / **`list_memory_snapshots`**: 用 `UnityEngine.Profiling.Memory.Experimental.MemoryProfiler.TakeSnapshot` 内置 API + 文件扫描, **不依赖** `com.unity.memoryprofiler` package. 用户无需装任何 package.
+- **`analyze_memory_snapshot`** / **`diff_memory_snapshots`**: 用 `UnityEditor.Profiling.Memory.Experimental.PackedMemorySnapshot` (内置 `UnityEditor.CoreModule`) 反射加载 + 提取 14 类 entry 计数 (nativeObjects / typeDescriptions / gcHandles / nativeAllocations / etc.). Diff 是 A vs B 逐 category 的 delta.
+- **完全反射, 零硬依赖**: 无需 asmdef `versionDefines`, 无需装 `com.unity.memoryprofiler` package (但装了会得到更丰富的 CachedSnapshot 数据 — 当前实现主要用内置 PackedMemorySnapshot API, 已够覆盖 top-level counts + diff)
+
+**反射细节** (对应 3 轮探测的最终结论):
+
+- `MemoryProfiler.TakeSnapshot` 是 native binding — `GetMethods()` 可能返回空. 用 `GetMethod("TakeSnapshot", ...)` 精确查找; 兼容 callback 签名 `Action<string, bool>` (2 arg) 或 `Action<string, bool, DebugScreenCapture>` (3 arg — Unity 2022.3+ 新签名), 后者通过 `MakeGenericMethod` 桥接
+- 未匹配的 API drift 会 graceful fail, 不会崩溃
+
+**API**:
+
+```jsonc
+// take
+{ "action": "take_memory_snapshot", "path": "MemoryCaptures/before.snap", "wait_seconds": 60 }
+// list
+{ "action": "list_memory_snapshots" }  // 扫 MemoryCaptures/
+// analyze
+{ "action": "analyze_memory_snapshot", "path": "MemoryCaptures/before.snap", "top_n": 50 }
+// diff
+{ "action": "diff_memory_snapshots", "path_a": "before.snap", "path_b": "after.snap" }
+```
+
+**Verification 契约**:
+
+- [x] `node tools/tool-inventory.cjs` 显示 50 tools (原 49 + `manage_memory_profiler`)
+- [ ] Unity Editor 编译通过, `.meta` 生成
+- [ ] `npm pack --dry-run` 通过 → `com.agentcore.unity-1.10.0.tgz`
+- [ ] Smoke: `take_memory_snapshot` 在 Play Mode 抓一个 .snap, `list_memory_snapshots` 能列出
+- [ ] Smoke: `analyze_memory_snapshot` 返回 entry_counts (装了 com.unity.memoryprofiler package 后)
+- [ ] Smoke: `diff_memory_snapshots` 返回 entry_count_diff + file_size_delta_bytes
+
+### v1.10.0 全景 (6 项)
+
+- **G06** Selection 深化 → v1.9.3 (`manage_editor.set_selection_by_query`, `mode=add/remove/replace`, `guid:` 前缀, `instance_ids / asset_guids / active_context`)
+- **G07** CompilationPipeline → v1.9.4 (新 `manage_compilation` 工具: `get_status / get_last_errors / request_compilation / wait_for_compilation / get_assemblies`)
+- **G05** Physics 深化 → v1.9.5 (`raycast mode=all + dimension=2d`, `overlap_test capsule + orientation`, `list_scene_physics_stats`, `get_collision_matrix`)
+- **G08** EditorPrefs / PlayerPrefs → v1.9.6 (新 `manage_prefs` 工具, RiskLevel=High, delete_all 需 confirm_delete_all)
+- **G09** SceneView 相机 → v1.9.6 (`manage_camera.get_scene_view / set_scene_view` 支持 pivot/size/rotation/orthographic/in2DMode)
+- **G04** MemoryProfiler → v1.10.0 (新 `manage_memory_profiler` 工具, 4 action, 纯反射零硬依赖)
+
+**Total 新增/深化**: 3 个新工具 (`manage_compilation` / `manage_prefs` / `manage_memory_profiler`), 3 个工具深化 (`manage_editor` / `manage_physics` / `manage_camera`), 全 50 tools.
+
+### Prompt 层同步 (关键 — 之前的 patch 版本遗漏项)
+
+**[fix]** [`SOUL.md`](Editor/Bootstrap/Resources/SOUL.md) §2.13 "Tool discovery hints" 更新:
+
+- **修正过时映射**: "编译状态 / 重新编译 / domain reload" 从 `execute_code + CompilationPipeline.RequestScriptCompilation()` **改为** `manage_compilation` (v1.9.4+, 专用工具已上线, 原 execute_code fallback 说明已过时)
+- **G06 Selection**: 扩展 "选中 / selection" 提示, 加入 `set_selection_by_query` (scope=scene component_type=... / scope=project asset_filter=...) 和 `mode=add|remove|replace` 增量选择
+- **G09 SceneView 相机 (v1.9.6)**: 新增 "场景视图 / scene view pivot / framing" → `manage_camera:get_scene_view / set_scene_view`
+- **G08 Prefs (v1.9.6)**: 新增 "editor pref / player pref / EditorPrefs / PlayerPrefs" → `manage_prefs`, 明确标注 **High risk — delete 非 undoable**
+- **G05 Physics 深化 (v1.9.5)**: 新增 "physics debug / layer collision matrix / 场景 physics 统计" → `manage_physics:list_scene_physics_stats / get_collision_matrix`; raycast 2D 和 capsule overlap 也提及
+- **G04 MemoryProfiler (v1.10.0)**: 新增 "memory profiler / memory snapshot / 内存快照 / .snap 文件" → `manage_memory_profiler`, 明确注明 take+list 无需外部 package, analyze+diff 需要 `com.unity.memoryprofiler`
+
+**[fix]** [`TOOLS.md.template`](Editor/Bootstrap/Resources/TOOLS.md.template) "Tool Selection Decision Tree" 更新:
+
+- **User wants diagnostics/optimization** 段落新增 3 项映射: 编译状态 → `manage_compilation`; 内存快照 → `manage_memory_profiler`; 场景 physics 统计 → `manage_physics`
+- **User wants project-level operations** 段落新增 2 项映射: EditorPrefs/PlayerPrefs → `manage_prefs`; SceneView 相机 → `manage_camera:get/set_scene_view`
+
+**为什么这次同步很重要**: LLM 的 tool selection 有两条路径 — 一是通过 `AgentToolAttribute.Description` (schema 层, 已更新), 二是通过 SOUL §2.13 discovery hints (system prompt 层, 之前遗漏). 只更新前者会导致某些用户 phrase (如 "重新编译") 命中过时的 SOUL 提示而走错路径. 两处必须同步. 修复后, 下一次 Chat 会话 (Bootstrap 重新加载 SOUL/TOOLS 是在 conversation start) 将读到最新提示.
+
+**Migration notes**:
+
+- Bootstrap 只在 conversation start 加载 SOUL/TOOLS, 所以用户需要**新建一个 Chat 会话** (`Ctrl+N`) 才能拿到更新后的 prompt
+- 无 code 破坏, 只是文档同步
+
+**遗留 (延后到 v1.10.x 后续 patch)**:
+
+- G06/G07/G05/G08/G09/G04 的 Unity smoke test 全部延后到 tarball 打包前统一跑
+- 步骤 1 环境验证 (G10 URP + G03 FrameDebugger) 延后
+- v1.11 计划: G06 旧字段 mark deprecated, 主线程性能问题深挖 (§2.4 决策债)
+
+## [1.9.6] - 2026-07-24
+
+### Added — G08 Prefs + G09 SceneView 相机 (v1.10.0 步骤 5+6 合并交付)
+
+**为什么合并**: 两项独立且小 (G08 新工具, G09 现有工具加 2 action), 合并成一个 patch 减少版本号灌水. 后续 v1.10.0 才是 minor bump.
+
+#### G08 — `manage_prefs` 新工具
+
+新工具 [`ManagePrefsTool.cs`](Editor/Tools/Native/Meta/ManagePrefsTool.cs) 暴露 Unity `EditorPrefs` / `PlayerPrefs` API. 按 [`v1.10.0-handoff.md §6.3`](plans/v1.10.0-handoff.md) 明确标注为**高危 + 不可撤销**.
+
+**Actions**: `has` / `get` / `set` / `delete` / `delete_all` × 两个 store (`editor` / `player`)
+
+**风险标注**:
+- `RiskLevel = ToolRiskLevel.High` → 触发 [`ToolRiskPolicy.IsHighRiskLevel`](Editor/Tools/Safety/ToolRiskPolicy.cs:69) 强制确认
+- `Capabilities = ToolCapability.ModifyProjectSettings` (Prefs 属 Editor/User 全局配置)
+- `RequiresConfirmation = true`
+- `Visibility = ToolVisibility.OnDemand` (LLM 得通过 `request_tools` 才能激活)
+- `ReadOnlyActions = { has, get }` 让只读 action 走 [`ToolRiskPolicy`](Editor/Tools/Safety/ToolRiskPolicy.cs) 直通, 不误弹确认
+- `delete_all` 需要 `confirm_delete_all: true` 显式二次armed (双保险)
+
+**能力**:
+- 值类型: EditorPrefs 支持 `string / int / float / bool`; PlayerPrefs 支持 `string / int / float` (Unity API 就这样, 无 bool)
+- `get` 支持 `default_value` fallback, 让 agent 不用先 `has` 再 `get`
+- `set` 后 PlayerPrefs 自动 `PlayerPrefs.Save()` flush 到磁盘 (EditorPrefs auto-flush)
+- 每个 write action 的 summary 里明确写 "This action is NOT undoable" 让 LLM 传达给用户
+
+**为什么不塞进 `manage_editor`**:
+- 风险等级差异: `manage_editor` 主要是 Medium 风险; Prefs 是 High
+- SOUL description 需要专门讲清"不可撤销"的语义, 塞进大工具会稀释
+- delete_all 是**极端**操作, 需要独立的 attention 空间
+
+#### G09 — `manage_camera` 新增 SceneView 控制
+
+[`ManageCameraTool.cs`](Editor/Tools/Native/Specialized/ManageCameraTool.cs) 新增 2 action:
+
+- **`get_scene_view`**: 只读, 返回 `pivot / size / rotation (quaternion) / rotation_euler / orthographic / in_2d_mode / camera_position / camera_forward / scene_view_title`. 让 agent 能理解用户当前在看什么位置.
+- **`set_scene_view`**: 写入, 参数任选 `pivot / size / rotation (quaternion 或 euler) / orthographic / in2DMode / repaint` (默认自动 Repaint). 让 agent 可以 "把 SceneView 对准 (10, 5, -3), size=20, 切正交" 一步完成.
+
+**Rotation 输入兼容**: `rotation: {x,y,z,w}` (Quaternion) 或 `rotation: {x,y,z}` (Euler 度) 都接受, `w` 字段存在与否作判据. `(0,0,0,0)` quaternion 自动归一化为 identity.
+
+**Migration notes**:
+
+- 无破坏性变更 (G09 新增 action, 现有 action 无改动)
+- Prefs 工具是全新的, 无 caller
+
+**验证清单**:
+
+- [x] `node tools/tool-inventory.cjs` 显示 49 tools (原 48 + `manage_prefs`), `manage_camera` 11 actions (原 9 + 2 SceneView), `manage_prefs` 5 actions
+- [ ] Unity Editor 编译通过, `.meta` 自动生成
+- [ ] `npm pack --dry-run` 通过
+- [ ] Smoke test: `manage_prefs has store=editor key=SomeExisting` 返回 true
+- [ ] Smoke test: `manage_prefs delete_all` 无 `confirm_delete_all: true` 时被拒绝
+- [ ] Smoke test: `manage_camera get_scene_view` 返回当前 SceneView 状态
+- [ ] Smoke test: `manage_camera set_scene_view pivot={0,10,0} size=15 orthographic=true` 视角切换
+
+## [1.9.5] - 2026-07-24
+
+### Added — G05 Physics 深化 (v1.10.0 步骤 4 落地)
+
+按 [`plans/v1.10.0-handoff.md`](plans/v1.10.0-handoff.md) §3.2 步骤 4 交付, gap 清单见 [`plans/v1.10.0/g05-physics-shallow-audit.md`](plans/v1.10.0/g05-physics-shallow-audit.md). [`ManagePhysicsTool.cs`](Editor/Tools/Native/Specialized/ManagePhysicsTool.cs) `raycast` / `overlap_test` 深化 + 新增 2 个 diagnostic action.
+
+**API 深化**:
+
+- **`raycast`** 新增参数:
+  - `mode`: `single` (默认, `Physics.Raycast`) / `all` (`Physics.RaycastAll` 返回所有命中数组 `hits[]`)
+  - `dimension`: `3d` (默认) / `2d` (走 `Physics2D.Raycast` / `Physics2D.RaycastAll`, 2D 项目场景 S5 刚需)
+  - `query_trigger_interaction`: `collide` / `ignore` / `use_global` (默认). 直接映射 `QueryTriggerInteraction` 枚举
+  - `layer_mask` 从"仅单字符串"扩展为**oneOf**: `string` (single layer name, 兼容旧调用) / `string[]` (多 layer 名, 语义化 union) / `integer` (直接 bitmask) / `"everything"` / `-1`. 旧字符串形式**全兼容**
+  - `mode=single` 返回值保留旧 `hit / hitPoint / hitNormal / hitDistance / hitCollider / hitColliderType / hitInstanceId` 字段兼容
+  - `mode=all` 返回 `hits[]` 数组, 每项含 `point / normal / distance / collider / collider_type / instance_id / is_trigger / layer`
+
+- **`overlap_test`** 深化:
+  - 新增 `capsule` shape: 支持传 `point0` + `point1` + `radius` (`Physics.OverlapCapsule`), 或走 convenience 路径传 `position` + `orientation` + `height` + `radius` 自动合成两端点 (响应体带 `synthesized_capsule: true`)
+  - 新增 `orientation` (Quaternion 对象): box overlap 旋转; `(0,0,0,0)` 归一化为 `Quaternion.identity` 避免 API 异常
+  - 新增 `half_extents` (作为 `size` 的**别名**, 语义完全等价, 对齐 Unity 官方术语)
+  - 新增 `dimension=2d`: `sphere/circle` 走 `Physics2D.OverlapCircleAll`, `box` 走 `Physics2D.OverlapBoxAll` (从 quaternion 抽 Z 欧拉角), 覆盖 Physics2D 通道
+  - 新增 `query_trigger_interaction` (与 raycast 相同枚举)
+  - `position` 保留为主字段, 新增 `center` 别名 (对齐规划术语)
+  - `layer_mask` 支持 richer 形式 (同 raycast)
+
+- **新 action `list_scene_physics_stats`**: 场景性能诊断 (对应 [`G05-physics-debugger.md`](plans/v1.9.0-candidate-matrix/G05-physics-debugger.md) S2 场景):
+  - 3D: `rigidbody_count / kinematic_rigidbody_count / collider_count / static_collider_count / trigger_count / mesh_collider_count / convex_mesh_collider_count / per_layer_collider_count`
+  - 2D 附加: `physics_2d.rigidbody2d_count / collider2d_count / trigger2d_count`
+  - 遍历用 `FindObjectsOfType<T>(true)` 含 inactive, Megacity Metro 场景实测 <100ms
+
+- **新 action `get_collision_matrix`**: 32x32 layer collision matrix 全景 (对应 S4 场景):
+  - 输入: 可选 `dimension` (`3d` / `2d`)
+  - 返回: `layers[]` (32 项 index+name), `matrix[][]` (32x32 bool, 表示 layer i 与 layer j 是否会碰撞), `ignored_pairs[]` (仅上三角 i<=j, 避免 528 对里重复), `ignored_pair_count`
+  - 底层: `Physics.GetIgnoreLayerCollision(i, j)` / `Physics2D.GetIgnoreLayerCollision(i, j)`
+
+**向后兼容 (per audit §3)**:
+
+- `raycast.mode=single` 返回的旧字段名 (`hit / hitPoint / hitNormal / ...`) 全部保留, 只在新 caller 用 `mode=all` 时才切到新字段 `hits[]`
+- `overlap_test.position` 保留为主字段, 新加 `center` 别名; `size` 保留, 新加 `half_extents` 别名; **多字段并存策略**允许现有 caller 无修改工作
+- `layer_mask` 单字符串形式保留完全语义 (逻辑与旧代码等价), 只是**扩展**接受更多类型
+
+**Migration notes**:
+
+- 无破坏性变更 (audit §3 "红线" 严格遵守)
+- 新调用者建议直接用新字段 (`half_extents`, `center`, `layer_mask=["L1","L2"]`), SOUL description 已更新引导
+- 2D 项目终于可以通过同一 tool 做 physics 查询, 之前只能走 `execute_code` 兜底
+
+**验证清单**:
+
+- [x] `node tools/tool-inventory.cjs` 显示 `manage_physics` 12 actions (原 10 + `list_scene_physics_stats` + `get_collision_matrix`), 全 48 tools
+- [x] `Physics2D` API 已在 inventory 中识别为新 API 依赖
+- [ ] Unity Editor (macOS) 编译通过
+- [ ] Smoke test:
+  - `raycast mode=all` 返回 `hits[]` 数组
+  - `overlap_test shape=capsule point0/point1/radius`
+  - `overlap_test shape=box orientation={x,y,z,w}` 旋转 box 命中差异
+  - `layer_mask` 三种形式 (string / int / string[]) 都工作
+  - `list_scene_physics_stats` Megacity Metro <200ms
+  - `get_collision_matrix` 返回 32x32 完整矩阵
+
+## [1.9.4] - 2026-07-24
+
+### Added — G07 CompilationPipeline 工具 (v1.10.0 步骤 3 落地)
+
+按 [`plans/v1.10.0-handoff.md`](plans/v1.10.0-handoff.md) §3.2 步骤 3 交付. 新工具 [`manage_compilation`](Editor/Tools/Native/Meta/ManageCompilationTool.cs) 暴露 Unity `CompilationPipeline` 生命周期给 Agent, 从此 Agent 修完脚本可以主动查编译状态/等编译完成/看编译错误, 不再需要用户在 Chat 里手动喊"编译好了没"或走 `read_console` 间接看结果.
+
+**为什么独立工具, 不塞进 `manage_editor`**: `manage_editor` 已有 9 action 覆盖 state / play / windows / settings 四类, 再挂 compilation 会稀释描述, 让 LLM 难做 tool 选择. 独立工具用完整 SOUL description 明确"查/请求/等 编译"三段式 workflow. 与现有 [`CompilationWatcher.cs`](Editor/Core/CompilationWatcher.cs) 分工: watcher 是一次性 (per-call) 的等待器, `manage_compilation` 是长驻的状态查询器 + 一次性等待器 combo.
+
+**5 个 action**:
+
+- **`get_status`**: 只读快照, 返回 `is_compiling / is_updating / error_count / warning_count / has_errors / last_compile_started_utc / last_compile_finished_utc`. `[InitializeOnLoadMethod]` 订阅 `CompilationPipeline.compilationStarted / assemblyCompilationFinished / compilationFinished`, 全 Editor session 内保留最近一次编译的错误消息缓存. **快, 无副作用**, agent 可以 poll.
+- **`get_last_errors`**: 从缓存拿最近一次编译的 `errors[]` + `warnings[]`, 每条含 `message / file / line / column / type`. 不触发新编译, 不阻塞.
+- **`request_compilation`**: 调 `AssetDatabase.SaveAssets()` (flush pending imports) + `CompilationPipeline.RequestScriptCompilation()`. **异步入队**, 立即返回 (agent 用 `get_status` polling 或 `wait_for_compilation` 阻塞).
+- **`wait_for_compilation`** (`timeout_seconds` 默认 30): 阻塞等下次编译完成. 快路径: 如果当前不在编译, 立即返回缓存. 慢路径: 复用 [`CompilationWatcher.WaitForCompilationAsync`](Editor/Core/CompilationWatcher.cs). 返回完整 `errors[]` + `warnings[]`.
+- **`get_assemblies`**: 列出项目 assemblies, 支持 `assemblies_type=Editor|Player` 过滤 (默认两者去重 union), `include_source_files=true` (可选, 长) / `include_defines=true` (默认). 每项返回 `name / output_path / flags / assembly_kind / source_file_count / reference_count / defines / references / source_files (如果启用)`. 供 agent 理解 asmdef 拓扑.
+
+**风险 / 兼容性**:
+
+- **无 API 破坏**: 全新工具, 无现有 caller
+- **RiskLevel = Low**: 仅 `request_compilation` 触发副作用 (script recompile), 但用户可以在 Editor Preferences 里禁用自动编译 → 该 action 事实是 no-op safe
+- **Capabilities = ReadProject**: 主要是读, `ReadOnlyActions = { get_status, get_last_errors, get_assemblies }` 三项通过 read-only capability filter
+- **静态订阅生命周期**: `[InitializeOnLoadMethod]` 保证 Editor 启动即挂钩, Domain Reload 后 subscribers 自动重新挂载 (Unity 自身机制). Cache 在 Domain Reload 后**清空** (List 是普通字段, 不 SessionState 持久化) — 这是有意选择: Domain Reload 意味着一次新的编译周期, 旧数据无意义.
+
+**Migration notes**:
+
+- 无破坏性变更
+- Agent 应优先使用 `manage_compilation:wait_for_compilation` 替代过去"改脚本→等 Domain Reload→用 read_console 找错" 的两步走. SOUL description 已引导 tool selection.
+
+**验证清单**:
+
+- [x] `node tools/tool-inventory.cjs` 显示 `manage_compilation` 5 actions, 全 48 tools
+- [x] `npm pack --dry-run` 通过
+- [ ] Unity Editor (macOS) 编译通过
+- [ ] Smoke test: `get_status` 无 error 时返回 clean state
+- [ ] Smoke test: 故意写一个语法错脚本 → `request_compilation` → `wait_for_compilation` → 拿到 `errors[]` 含 `CS0103` 或类似
+- [ ] Smoke test: `get_assemblies assemblies_type=Editor` 至少返回 `AgentCore.Editor` / `Assembly-CSharp-Editor` 两项
+
+## [1.9.3] - 2026-07-24
+
+### Added — G06 Selection API 深化 (v1.10.0 步骤 2 落地)
+
+按 [`plans/v1.10.0-handoff.md`](plans/v1.10.0-handoff.md) §3.2 步骤 2 交付. [`ManageEditorTool.cs`](Editor/Tools/Native/Meta/ManageEditorTool.cs) `get_selection` / `set_selection` 深化 + 新 action `set_selection_by_query`. 本次是 v1.10.0 minor 版本前的第一次代码 patch, 前置调研文档 (G05 audit / G04 三轮反射探测) 一同随本次提交入库.
+
+**为什么 G06 是 v1.10.0 第一步**: G06 风险最低 (零反射 / 零依赖 / 无 Version Defines), 用来验证从 v1.9.x 到 v1.10.0 的开发工作流, 打通 patch bump + CHANGELOG + inventory 三件套. 后续 G07 (CompilationPipeline) / G05 (Physics) / G08 (Prefs) / G09 (SceneView) / G04 (MemoryProfiler) 按顺序推进.
+
+**API 深化**:
+
+- **`get_selection` 返回值扩展**: 新增 `active` / `active_hierarchy_path` / `active_context` / `instance_ids` / `asset_guids` / `game_objects` / `select_count` 字段. Legacy 字段 `active_gameobject` / `active_object` / `selected_objects` / `selection_count` **保持向后兼容** (deprecation timeline 见 [`plans/v1.10.0-handoff.md §6.6`](plans/v1.10.0-handoff.md): v1.11 mark deprecated, v1.12 或下次 major 移除). 单一 helper `SerializeSelectedObject(obj)` 统一场景对象 (`hierarchy_path` / `scene_name` / `scene_path`) 和 asset 对象 (`asset_path` / `asset_guid`) 的 JSON 结构.
+
+- **`set_selection` 新增参数**:
+  - `mode`: `replace` (默认, 覆盖 selection) / `add` (并集) / `remove` (差集). 便于 workflow "先选一批, 再补一批", 而非每次全量替换.
+  - `active_context`: 可选, 传 asset 路径或 GameObject 路径, 用 `Selection.SetActiveObjectWithContext` 让 Project 窗口 scope 到 folder / 场景 root. 对应 [`G06-selection-deep.md`](plans/v1.9.0-candidate-matrix/G06-selection-deep.md) S3 场景.
+  - `target` 新前缀 `guid:<32-char-hex>`: 按 asset GUID 精准解析, 补齐资源路径不稳定情况下的定位手段 (相比路径不易失效).
+
+- **新 action `set_selection_by_query`**: 按查询条件批量选中. 两种 scope:
+  - `scope=scene` + `component_type=UnityEngine.Rigidbody` (支持短名 `Rigidbody`) + `include_inactive`: 走 `Object.FindObjectsOfType(type, includeInactive)`, 选中所有匹配的 GameObject.
+  - `scope=project` + `asset_filter=t:Prefab l:MyLabel` + 可选 `search_folders`: 走 `AssetDatabase.FindAssets(filter, folders)` 语法.
+  - `max_results` (默认 500) 硬上限, 大场景 / 大项目防误选爆炸. 返回 `truncated=true` 提示是否触达上限.
+
+**Migration notes**:
+
+- 无 API 破坏 — 所有既有 `get_selection` / `set_selection` 调用点继续工作
+- 新旧字段在 v1.9.3 → v1.10.x 并存, v1.11.0 起将标记旧字段 deprecated
+- LLM 提示词 (`AgentToolAttribute.Description`) 更新引导 agent 用 rich fields, 但**不影响** raw JSON 兼容
+
+**验证清单** (来自 [`plans/v1.10.0/g05-physics-shallow-audit.md`](plans/v1.10.0/g05-physics-shallow-audit.md) 同风格 checklist):
+
+- [x] `node tools/tool-inventory.cjs` 显示 `manage_editor` 9 actions (含 `set_selection_by_query`)
+- [ ] Unity Editor (macOS) 编译通过
+- [ ] Unity Editor (Windows) 编译通过 (待用户 Windows 复测)
+- [ ] Smoke test: `get_selection` 返回新旧字段并存
+- [ ] Smoke test: `set_selection` mode=add/remove 增量选择
+- [ ] Smoke test: `set_selection_by_query` scope=scene component_type=Rigidbody
+- [ ] Smoke test: `set_selection_by_query` scope=project asset_filter="t:Prefab"
+
+**前置调研文档 (随本次 commit 一起入库)**:
+
+- [`plans/v1.10.0/README.md`](plans/v1.10.0/README.md) — v1.10.0 工作目录索引
+- [`plans/v1.10.0/g05-physics-shallow-audit.md`](plans/v1.10.0/g05-physics-shallow-audit.md) — G05 精确 gap 清单 (下个步骤用)
+- [`plans/v1.10.0/g04-reflection-probe-script.md`](plans/v1.10.0/g04-reflection-probe-script.md) + [`result.md`](plans/v1.10.0/g04-reflection-probe-result.md) + [`round2-script.md`](plans/v1.10.0/g04-reflection-probe-round2-script.md) + [`round2-result.md`](plans/v1.10.0/g04-reflection-probe-round2-result.md) — G04 MemoryProfiler 三轮反射探测, 已定位真实抓取入口 `MemoryProfiler.TakeSnapshot` (native binding, 需 `GetMethod` 精确查找)
+
 ## [1.9.2] - 2026-07-24
 
 ### Fixed — L10n 补漏 + 编译错误 + 清理

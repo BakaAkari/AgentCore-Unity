@@ -16,14 +16,16 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Creates, configures, inspects, aligns, and renders Unity Camera components.
     /// </summary>
     [AgentTool("manage_camera",
-        Description = "Unity Camera component management — create, configure, inspect, align, and render. " +
+        Description = "Unity Camera component management — create, configure, inspect, align, and render, plus SceneView camera control (v1.9.7 G09). " +
                       "Actions: create (new Camera with configurable properties), get_info (FOV/near/far/clear/culling/depth), " +
                       "configure (modify any Camera property), look_at (point camera at world position), " +
                       "align_to_view (match Scene View camera), create_render_texture (create RT asset), " +
-                      "render_to_texture (capture camera output to file), list_cameras (all cameras with priority), set_main_camera (tag as MainCamera). " +
-                      "USE FOR: camera setup, adjusting perspective/orthographic, rendering screenshots, aligning camera to current view. " +
+                      "render_to_texture (capture camera output to file), list_cameras (all cameras with priority), set_main_camera (tag as MainCamera), " +
+                      "get_scene_view (read SceneView pivot/size/rotation/orthographic/in2DMode — the Editor's own viewport camera), " +
+                      "set_scene_view (write SceneView pivot/size/rotation/orthographic/in2DMode — programmatically frame the SceneView on a location). " +
+                      "USE FOR: camera setup, adjusting perspective/orthographic, rendering screenshots, aligning camera to current view, driving SceneView from a script. " +
                       "NOT FOR: Cinemachine virtual cameras (use manage_cinemachine), post-processing effects, camera animation (use Timeline). " +
-                      "ACTIVATE WHEN: user mentions 'camera', 'FOV', 'render texture', 'screenshot', 'camera alignment', 'main camera'.",
+                      "ACTIVATE WHEN: user mentions 'camera', 'FOV', 'render texture', 'screenshot', 'camera alignment', 'main camera', 'scene view', 'frame scene view'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
@@ -32,7 +34,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
             ""type"": ""object"",
             ""properties"": {
-                ""action"": { ""type"": ""string"", ""enum"": [""create"", ""get_info"", ""configure"", ""look_at"", ""align_to_view"", ""create_render_texture"", ""render_to_texture"", ""list_cameras"", ""set_main_camera""], ""description"": ""Camera action to perform"" },
+                ""action"": { ""type"": ""string"", ""enum"": [""create"", ""get_info"", ""configure"", ""look_at"", ""align_to_view"", ""create_render_texture"", ""render_to_texture"", ""list_cameras"", ""set_main_camera"", ""get_scene_view"", ""set_scene_view""], ""description"": ""Camera action to perform"" },
+                ""pivot"": { ""type"": ""object"", ""description"": ""(set_scene_view) Vector3 {x,y,z} — SceneView orbit pivot (world space)."" },
+                ""size"": { ""type"": ""number"", ""description"": ""(set_scene_view) Scalar SceneView zoom (approx camera distance from pivot)."" },
+                ""orthographic"": { ""type"": ""boolean"", ""description"": ""(set_scene_view / create / configure) Toggle orthographic projection. For set_scene_view: toggles SceneView orthographic viewport."" },
+                ""in2DMode"": { ""type"": ""boolean"", ""description"": ""(set_scene_view) Toggle SceneView 2D mode."" },
+                ""repaint"": { ""type"": ""boolean"", ""description"": ""(set_scene_view) Force SceneView.Repaint() after applying changes. Default true."" },
                 ""name"": { ""type"": ""string"", ""description"": ""Camera GameObject name or hierarchy path (e.g. 'MainCamera' or 'Player/PlayerCamera'). For render_to_texture the tool also accepts this via 'target' as a fallback, and falls back to Camera.main when both are omitted."" },
                 ""position"": { ""type"": ""object"", ""description"": ""Vector3 object {x,y,z}; used as transform position or look_at target position"" },
                 ""rotation"": { ""type"": ""object"", ""description"": ""Euler rotation object {x,y,z}"" },
@@ -56,6 +63,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             },
             ""required"": [""action""]
         }");
+
 
         /// <summary>
         /// Tool metadata for auto-discovery registration.
@@ -90,8 +98,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     case "render_to_texture": response = HandleRenderToTexture(parameters); break;
                     case "list_cameras": response = HandleListCameras(parameters); break;
                     case "set_main_camera": response = HandleSetMainCamera(parameters); break;
+                    case "get_scene_view": response = HandleGetSceneView(parameters); break;
+                    case "set_scene_view": response = HandleSetSceneView(parameters); break;
                     default:
-                        response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: create, get_info, configure, look_at, align_to_view, create_render_texture, render_to_texture, list_cameras, set_main_camera");
+                        response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: create, get_info, configure, look_at, align_to_view, create_render_texture, render_to_texture, list_cameras, set_main_camera, get_scene_view, set_scene_view");
                         break;
                 }
             }
@@ -204,6 +214,124 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             camera.transform.LookAt(targetPosition);
             EditorUtility.SetDirty(camera.transform);
             return ToolResponse.OkWithData(SerializeCamera(camera), $"Camera '{camera.gameObject.name}' now looks at {targetPosition}.");
+        }
+
+        // ─── G09 (v1.9.7): SceneView pivot/size/rotation/orthographic/in2DMode read+write ──
+        private ToolResponse HandleGetSceneView(JObject parameters)
+        {
+            var view = SceneView.lastActiveSceneView;
+            if (view == null)
+                return ToolResponse.Fail("No active SceneView. Open a Scene View window in the Editor and try again.");
+            var data = new JObject
+            {
+                ["pivot"] = ToolHelpers.Vector3ToJson(view.pivot),
+                ["size"] = view.size,
+                ["rotation"] = new JObject
+                {
+                    ["x"] = view.rotation.x,
+                    ["y"] = view.rotation.y,
+                    ["z"] = view.rotation.z,
+                    ["w"] = view.rotation.w
+                },
+                ["rotation_euler"] = ToolHelpers.Vector3ToJson(view.rotation.eulerAngles),
+                ["orthographic"] = view.orthographic,
+                ["in_2d_mode"] = view.in2DMode,
+                ["camera_position"] = view.camera != null
+                    ? ToolHelpers.Vector3ToJson(view.camera.transform.position)
+                    : null,
+                ["camera_forward"] = view.camera != null
+                    ? ToolHelpers.Vector3ToJson(view.camera.transform.forward)
+                    : null,
+                ["scene_view_title"] = view.titleContent != null ? view.titleContent.text : "SceneView"
+            };
+            return ToolResponse.OkWithData(data, $"SceneView: pivot={view.pivot}, size={view.size:F2}, orthographic={view.orthographic}, in2DMode={view.in2DMode}.");
+        }
+
+        private ToolResponse HandleSetSceneView(JObject parameters)
+        {
+            var view = SceneView.lastActiveSceneView;
+            if (view == null)
+                return ToolResponse.Fail("No active SceneView. Open a Scene View window in the Editor and try again.");
+
+            bool anyChange = false;
+            var applied = new JObject();
+
+            var pivotToken = parameters["pivot"];
+            if (pivotToken != null && pivotToken.Type != JTokenType.Null)
+            {
+                var newPivot = ToolHelpers.ParseVector3(pivotToken);
+                view.pivot = newPivot;
+                applied["pivot"] = ToolHelpers.Vector3ToJson(newPivot);
+                anyChange = true;
+            }
+
+            if (parameters["size"] != null && parameters["size"].Type != JTokenType.Null)
+            {
+                var newSize = parameters["size"].Value<float>();
+                if (newSize <= 0f)
+                    return ToolResponse.Fail($"SceneView size must be > 0 (got {newSize}).");
+                view.size = newSize;
+                applied["size"] = newSize;
+                anyChange = true;
+            }
+
+            var rotToken = parameters["rotation"];
+            if (rotToken != null && rotToken.Type == JTokenType.Object)
+            {
+                var obj = (JObject)rotToken;
+                // Accept full quaternion {x,y,z,w} OR Euler {x,y,z}.
+                if (obj["w"] != null)
+                {
+                    float qx = obj["x"]?.Value<float>() ?? 0f;
+                    float qy = obj["y"]?.Value<float>() ?? 0f;
+                    float qz = obj["z"]?.Value<float>() ?? 0f;
+                    float qw = obj["w"]?.Value<float>() ?? 1f;
+                    var q = new Quaternion(qx, qy, qz, qw);
+                    if (q == default) q = Quaternion.identity;
+                    view.rotation = q;
+                    applied["rotation_quaternion"] = new JObject { ["x"] = q.x, ["y"] = q.y, ["z"] = q.z, ["w"] = q.w };
+                }
+                else
+                {
+                    var euler = ToolHelpers.ParseVector3(rotToken);
+                    view.rotation = Quaternion.Euler(euler);
+                    applied["rotation_euler"] = ToolHelpers.Vector3ToJson(euler);
+                }
+                anyChange = true;
+            }
+
+            if (parameters["orthographic"] != null && parameters["orthographic"].Type != JTokenType.Null)
+            {
+                var ortho = parameters["orthographic"].Value<bool>();
+                view.orthographic = ortho;
+                applied["orthographic"] = ortho;
+                anyChange = true;
+            }
+
+            if (parameters["in2DMode"] != null && parameters["in2DMode"].Type != JTokenType.Null)
+            {
+                var in2d = parameters["in2DMode"].Value<bool>();
+                view.in2DMode = in2d;
+                applied["in_2d_mode"] = in2d;
+                anyChange = true;
+            }
+
+            if (!anyChange)
+                return ToolResponse.Fail("No SceneView parameters provided. Set at least one of: pivot, size, rotation, orthographic, in2DMode.");
+
+            var repaint = ToolHelpers.GetOptionalBool(parameters, "repaint", true);
+            if (repaint) view.Repaint();
+
+            var data = new JObject
+            {
+                ["applied"] = applied,
+                ["repainted"] = repaint,
+                ["pivot"] = ToolHelpers.Vector3ToJson(view.pivot),
+                ["size"] = view.size,
+                ["orthographic"] = view.orthographic,
+                ["in_2d_mode"] = view.in2DMode
+            };
+            return ToolResponse.OkWithData(data, $"SceneView updated ({applied.Count} field(s) applied).");
         }
 
         private ToolResponse HandleAlignToView(JObject parameters)
