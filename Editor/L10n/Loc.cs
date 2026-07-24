@@ -7,6 +7,11 @@ namespace AgentCore.Editor.L10n
     /// </summary>
     /// <remarks>
     /// <para>
+    /// 命名说明: 类名不能叫 <c>L10n</c>, 因为会跟外层命名空间 <c>AgentCore.Editor.L10n</c> 撞名,
+    /// 导致 <c>AgentCore.Editor.L10n.Loc.Tr</c> 被 C# 解析成 "命名空间内的命名空间" 报错.
+    /// 因此类名用 <c>Loc</c> (localization 缩写).
+    /// </para>
+    /// <para>
     /// 约定:
     /// <list type="bullet">
     ///   <item>Key 用点分层命名 (如 <c>chat.status.idle</c>, <c>session.button.new</c>).</item>
@@ -18,7 +23,7 @@ namespace AgentCore.Editor.L10n
     /// 本地化范围: 仅"用户直接看到的 UI 文本". <b>不</b>本地化 LLM 系统提示 / 工具错误 / 日志.
     /// </para>
     /// </remarks>
-    public static class L10n
+    public static class Loc
     {
         /// <summary>
         /// 获取 key 对应的本地化文本.

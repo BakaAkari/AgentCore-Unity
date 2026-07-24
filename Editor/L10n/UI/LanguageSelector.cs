@@ -44,7 +44,7 @@ namespace AgentCore.Editor.L10n.UI
 
             _popup = new PopupField<string>(_displayNames, currentIndex)
             {
-                tooltip = L10n.Tr("language.tooltip", "Switch UI language"),
+                tooltip = Loc.Tr("language.tooltip", "Switch UI language"),
             };
             _popup.AddToClassList("agentcore-language-selector__popup");
             _popup.style.minWidth = 96;

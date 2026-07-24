@@ -494,7 +494,7 @@ namespace AgentCore.Editor.UI
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"[AgentCore] Failed to initialize ChatWindow: {ex.Message}");
-                UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.initFailed", "初始化失败"), true);
+                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.initFailed", "初始化失败"), true);
             }
         }
 

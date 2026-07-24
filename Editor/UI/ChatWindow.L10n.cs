@@ -13,7 +13,7 @@ namespace AgentCore.Editor.UI
     /// 职责:
     /// <list type="bullet">
     ///   <item>把 <see cref="LanguageSelector"/> 挂到工具栏右侧.</item>
-    ///   <item>把 UXML 里硬编码的中文静态标签, 用 <see cref="L10n.Tr"/> 覆盖.</item>
+    ///   <item>把 UXML 里硬编码的中文静态标签, 用 <see cref="Loc.Tr"/> 覆盖.</item>
     ///   <item>订阅 <see cref="LanguageManager.LanguageChanged"/>, 语言切换时刷新静态标签, 并按当前 AgentState 重新触发一次状态标签更新.</item>
     /// </list>
     /// </para>
@@ -53,36 +53,36 @@ namespace AgentCore.Editor.UI
             // toolbar 标题
             var toolbarTitle = rootVisualElement.Q<Label>("title-label");
             if (toolbarTitle != null)
-                toolbarTitle.text = L10n.Tr("chat.toolbar.title", "AgentCore");
+                toolbarTitle.text = Loc.Tr("chat.toolbar.title", "AgentCore");
 
             // 会话侧栏
             var sidebarTitle = rootVisualElement.Q<Label>("sidebar-title");
             if (sidebarTitle != null)
-                sidebarTitle.text = L10n.Tr("session.sidebar.title", "会话列表");
+                sidebarTitle.text = Loc.Tr("session.sidebar.title", "会话列表");
 
             var newSessionBtn = rootVisualElement.Q<Button>("new-session-button");
             if (newSessionBtn != null)
             {
-                newSessionBtn.text = L10n.Tr("session.button.new", "+ 新建");
-                newSessionBtn.tooltip = L10n.Tr("session.button.newTooltip", "新建会话");
+                newSessionBtn.text = Loc.Tr("session.button.new", "+ 新建");
+                newSessionBtn.tooltip = Loc.Tr("session.button.newTooltip", "新建会话");
             }
 
             // 消息区跳到最新
             var scrollToBottomBtn = rootVisualElement.Q<Button>("scroll-to-bottom-button");
             if (scrollToBottomBtn != null)
             {
-                scrollToBottomBtn.text = L10n.Tr("chat.input.scrollToLatest", "跳到最新");
-                scrollToBottomBtn.tooltip = L10n.Tr("chat.input.scrollToLatestTooltip", "回到最新消息");
+                scrollToBottomBtn.text = Loc.Tr("chat.input.scrollToLatest", "跳到最新");
+                scrollToBottomBtn.tooltip = Loc.Tr("chat.input.scrollToLatestTooltip", "回到最新消息");
             }
 
             // 输入栏按钮
             var sendBtn = rootVisualElement.Q<Button>("send-button");
             if (sendBtn != null)
-                sendBtn.text = L10n.Tr("chat.input.send", "发送");
+                sendBtn.text = Loc.Tr("chat.input.send", "发送");
 
             var cancelBtn = rootVisualElement.Q<Button>("cancel-button");
             if (cancelBtn != null)
-                cancelBtn.text = L10n.Tr("chat.input.cancel", "取消");
+                cancelBtn.text = Loc.Tr("chat.input.cancel", "取消");
         }
 
         /// <summary>

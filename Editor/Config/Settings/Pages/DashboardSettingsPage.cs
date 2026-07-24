@@ -53,8 +53,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawLanguageCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                AgentCore.Editor.L10n.L10n.Tr("settings.language.card.title", "Language"),
-                AgentCore.Editor.L10n.L10n.Tr(
+                AgentCore.Editor.L10n.Loc.Tr("settings.language.card.title", "Language"),
+                AgentCore.Editor.L10n.Loc.Tr(
                     "settings.language.card.description",
                     "UI language for the AgentCore editor plugin. Stored globally across projects. Switching applies immediately to all AgentCore windows."),
                 () =>
@@ -76,7 +76,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                     var newIndex = EditorGUILayout.Popup(
                         new GUIContent(
-                            AgentCore.Editor.L10n.L10n.Tr("settings.language.field.label", "Interface language")),
+                            AgentCore.Editor.L10n.Loc.Tr("settings.language.field.label", "Interface language")),
                         currentIndex,
                         displayNames);
                     if (newIndex != currentIndex && newIndex >= 0 && newIndex < codes.Length)
@@ -91,8 +91,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     var currentFollow = AgentCore.Editor.L10n.LanguageManager.LlmFollowUiLanguage;
                     var newFollow = EditorGUILayout.ToggleLeft(
                         new GUIContent(
-                            AgentCore.Editor.L10n.L10n.Tr("settings.language.llmFollow.label", "LLM replies follow UI language"),
-                            AgentCore.Editor.L10n.L10n.Tr(
+                            AgentCore.Editor.L10n.Loc.Tr("settings.language.llmFollow.label", "LLM replies follow UI language"),
+                            AgentCore.Editor.L10n.Loc.Tr(
                                 "settings.language.llmFollow.tooltip",
                                 "When enabled, the assistant is instructed to reply in the same language as the UI. Disable to let the model decide by user input.")),
                         currentFollow);

@@ -21,7 +21,7 @@ namespace AgentCore.Editor.UI
                 _messageListManager?.AddItem(_pendingIndicator);
             }
 
-            _pendingIndicator.SetActionText(initialText ?? AgentCore.Editor.L10n.L10n.Tr("chat.pending.thinking", "思考中"));
+            _pendingIndicator.SetActionText(initialText ?? AgentCore.Editor.L10n.Loc.Tr("chat.pending.thinking", "思考中"));
             ScrollToBottom(force: true);
         }
 
@@ -56,19 +56,19 @@ namespace AgentCore.Editor.UI
             switch (state)
             {
                 case AgentState.Thinking:
-                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.L10n.Tr("chat.pending.thinking", "思考中"));
+                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.Loc.Tr("chat.pending.thinking", "思考中"));
                     break;
                 case AgentState.ExecutingTool:
-                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.L10n.Tr("chat.pending.executingTool", "调用工具中"));
+                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.Loc.Tr("chat.pending.executingTool", "调用工具中"));
                     break;
                 case AgentState.Streaming:
-                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.L10n.Tr("chat.pending.streaming", "回复中"));
+                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.Loc.Tr("chat.pending.streaming", "回复中"));
                     break;
                 case AgentState.Compressing:
-                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.L10n.Tr("chat.pending.compressing", "压缩上下文"));
+                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.Loc.Tr("chat.pending.compressing", "压缩上下文"));
                     break;
                 case AgentState.ReviewingAnswer:
-                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.L10n.Tr("chat.pending.reviewingAnswer", "审阅答案"));
+                    UpdatePendingIndicatorAction(AgentCore.Editor.L10n.Loc.Tr("chat.pending.reviewingAnswer", "审阅答案"));
                     break;
                 case AgentState.WaitingForClarification:
                 case AgentState.Idle:
