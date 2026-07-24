@@ -64,7 +64,8 @@ namespace AgentCore.Editor.UI.Components
             _dot.style.unityFontStyleAndWeight = FontStyle.Bold;
             Add(_dot);
 
-            _text = new Label("就绪");
+            // v1.9.0+: 走 Loc, 与 ChatWindow.Events.cs 里 AgentState.Idle 分支保持一致的 key
+            _text = new Label(AgentCore.Editor.L10n.Loc.Tr("chat.status.idle", "就绪"));
             _text.style.fontSize = 13;
             _text.style.color = ColorIdle;
             _text.style.flexGrow = 1;
