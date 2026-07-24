@@ -143,6 +143,12 @@
   "contextUsage.compression.none": "暂无压缩",
   "contextUsage.compression.active": "压缩已激活",
 
+  "thinking.tooltip.toggle": "展开 / 折叠 Thinking",
+  "thinking.tooltip.expand": "展开 Thinking",
+  "thinking.tooltip.collapse": "折叠 Thinking",
+  "thinking.title.running": "思考中 · {0}s",
+  "thinking.title.done": "思考完成 · {0}s",
+
   "fileChange.header.empty": "此对话中已更改 0 个文件",
   "fileChange.header.some": "此对话中已更改 {0} 个文件",
   "fileChange.stat.added": "+{0}",

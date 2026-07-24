@@ -118,10 +118,10 @@ namespace AgentCore.Editor.UI.Components
             _toggleButton.style.borderBottomLeftRadius = 3;
             _toggleButton.style.borderBottomRightRadius = 3;
             _toggleButton.style.unityTextAlign = TextAnchor.MiddleCenter;
-            _toggleButton.tooltip = "展开 / 折叠 Thinking";
+            _toggleButton.tooltip = AgentCore.Editor.L10n.Loc.Tr("thinking.tooltip.toggle", "展开 / 折叠 Thinking");
             _header.Add(_toggleButton);
 
-            _titleLabel = new Label("思考中 · 0s");
+            _titleLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("thinking.title.running", "思考中 · {0}s", "0"));
             _titleLabel.style.fontSize = 12;
             _titleLabel.style.color = TextPrimary;
             _titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -172,6 +172,26 @@ namespace AgentCore.Editor.UI.Components
             _reasoningLabel.style.unityTextAlign = TextAnchor.UpperLeft;
             _content.Add(_reasoningLabel);
             Add(_content);
+
+            // v1.9.0+: 订阅语言变化事件, 切语言时刷新 tooltip 和 title
+            RegisterCallback<AttachToPanelEvent>(_ =>
+                AgentCore.Editor.L10n.LanguageManager.LanguageChanged += OnLanguageChanged);
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+                AgentCore.Editor.L10n.LanguageManager.LanguageChanged -= OnLanguageChanged);
+        }
+
+        private void OnLanguageChanged(string _)
+        {
+            // 刷新 tooltip
+            _toggleButton.tooltip = _isExpanded
+                ? AgentCore.Editor.L10n.Loc.Tr("thinking.tooltip.collapse", "折叠 Thinking")
+                : AgentCore.Editor.L10n.Loc.Tr("thinking.tooltip.expand", "展开 Thinking");
+
+            // 刷新 title (running/done 都可能滞留旧语言, 强制走一次 UpdateTitle 逻辑)
+            var seconds = GetDisplaySeconds();
+            _titleLabel.text = _isRunning
+                ? AgentCore.Editor.L10n.Loc.Tr("thinking.title.running", "思考中 · {0}s", seconds)
+                : AgentCore.Editor.L10n.Loc.Tr("thinking.title.done", "思考完成 · {0}s", seconds);
         }
 
         /// <summary>
@@ -283,7 +303,9 @@ namespace AgentCore.Editor.UI.Components
         {
             _isExpanded = expanded;
             _toggleButton.text = expanded ? ArrowExpanded : ArrowCollapsed;
-            _toggleButton.tooltip = expanded ? "折叠 Thinking" : "展开 Thinking";
+            _toggleButton.tooltip = expanded
+                ? AgentCore.Editor.L10n.Loc.Tr("thinking.tooltip.collapse", "折叠 Thinking")
+                : AgentCore.Editor.L10n.Loc.Tr("thinking.tooltip.expand", "展开 Thinking");
             _content.style.display = expanded ? DisplayStyle.Flex : DisplayStyle.None;
             _reasoningLabel.text = expanded ? ContentFilter.SanitizeUnsupportedEmoji(_reasoningText) : string.Empty;
             // 展开时隐藏 preview（避免重复展示），折叠时刷新 preview
@@ -323,7 +345,9 @@ namespace AgentCore.Editor.UI.Components
         private void UpdateTitle()
         {
             var seconds = GetDisplaySeconds();
-            _titleLabel.text = _isRunning ? $"思考中 · {seconds}s" : $"思考完成 · {seconds}s";
+            _titleLabel.text = _isRunning
+                ? AgentCore.Editor.L10n.Loc.Tr("thinking.title.running", "思考中 · {0}s", seconds)
+                : AgentCore.Editor.L10n.Loc.Tr("thinking.title.done", "思考完成 · {0}s", seconds);
         }
 
         private int GetDisplaySeconds()

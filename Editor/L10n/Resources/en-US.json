@@ -143,6 +143,12 @@
   "contextUsage.compression.none": "No compression yet",
   "contextUsage.compression.active": "Compression active",
 
+  "thinking.tooltip.toggle": "Expand / collapse Thinking",
+  "thinking.tooltip.expand": "Expand Thinking",
+  "thinking.tooltip.collapse": "Collapse Thinking",
+  "thinking.title.running": "Thinking · {0}s",
+  "thinking.title.done": "Thought · {0}s",
+
   "fileChange.header.empty": "0 files changed in this conversation",
   "fileChange.header.some": "{0} files changed in this conversation",
   "fileChange.stat.added": "+{0}",
