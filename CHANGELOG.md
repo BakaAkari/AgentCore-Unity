@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-07-24
+
+### Added — L10n 覆盖面全量补齐
+
+用户反馈: v1.9.0 阶段一交付基础设施后, 仍有多个组件的硬编码文本(会话默认标题 / 上下文使用情况 / 使用技巧 / 静默模式提示 / 语言下拉右对齐 / 文件变更面板 / 工具调用组/卡片 / 消息气泡 / AskUser & ToolConfirmation / Domain Reload notification / Knowledge Base / Memory / Self-Challenge verdict). 分 3 批全部替换.
+
+**关键分离**: [`SessionData.DefaultTitle`](Editor/Session/SessionData.cs) 保持存储层稳定值 "新会话" 不变(供 AutoGenerateTitle 判断"是否需要自动重命名"), 新增 [`SessionData.GetDisplayTitle`](Editor/Session/SessionData.cs) helper 在展示层做本地化. 这解决了"存储层 sentinel vs 展示层文案"的双重职责冲突.
+
+**类改名**: `L10n` → `Loc` (避免与命名空间 `AgentCore.Editor.L10n` 撞名, `AgentCore.Editor.L10n.L10n.Tr` 会被 C# 解析成"命名空间内的命名空间"). 迁移 47 处调用点 + 保留 GUID meta.
+
+**批次拆分**:
+- 批 0 (fix/tune): [`d8037f6`](fix Loc rename) + [`7fd8ba4`](HelpBubble 双语 + 下拉宽度) + [`626f1cd`](SilentMode tooltip 双语 + 下拉贴右缘) + [`0d8c61f`](会话默认标题) + [`7f8fcb8`](ContextUsagePanel)
+- 批 1: FileChangeSummaryPanel / ToolCallGroup / ToolCallCard / MessageBubble ([`37f4f4c`])
+- 批 2: AskUserPanel / Confirmation / Messages / DomainReload / Restore ([`a6bd5a4`])
+- 批 3: KnowledgeBasePanel / MemoryPanel / SelfChallengeCard ([`85621b6`])
+
+**未本地化 (决策性保留)**:
+- SelfChallengeCard 详情文本(步骤 1-5 / Node A/B 内容) — 排障用, 保留中文
+- LLM 系统提示词 / 工具错误消息 / 日志
+
+**热切换特性**:
+- 大多数组件订阅 `LanguageManager.LanguageChanged` 事件, 无需重启窗口即可切换. 少数以缓存 (`_lastFileCount` / `_currentBudget`) 支持数值+文案联动
+- 语言变量在中英切换时不受"用户已手动改名的标题"影响 (只有存储值 = DefaultTitle 时才走 Loc)
+
+### Refactored
+
+- `LanguageSelector`: 隐藏 PopupField 默认预留 label 空位, 固定 108px 宽, 挂载点 `marginRight=-8` 抵消 toolbar padding, 视觉贴 toolbar 右缘
+
+### Migration notes
+
+- 无 API 破坏
+- 中文用户依旧默认为 en-US, 需要手动切一次
+
 ## [1.9.0] - 2026-07-24
 
 ### Added — 多语言 (L10n) 支持基础设施 + 中英文切换
