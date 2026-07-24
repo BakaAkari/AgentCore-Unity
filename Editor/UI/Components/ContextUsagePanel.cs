@@ -171,7 +171,8 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         private void RenderCurrent()
         {
-            var budget = _currentBudget ?? new Core.ContextBudgetInfo();
+            // ContextBudgetInfo 是 struct (value type), 未初始化时字段全 0, 直接用即可
+            var budget = _currentBudget;
 
             // Update progress bar
             var percentage = Mathf.Clamp01(budget.UsagePercentage);
