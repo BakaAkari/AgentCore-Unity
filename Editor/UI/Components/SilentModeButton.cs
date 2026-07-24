@@ -1,5 +1,6 @@
 using System;
 using AgentCore.Editor.Core;
+using AgentCore.Editor.L10n;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -26,14 +27,11 @@ namespace AgentCore.Editor.UI.Components
 
         // v1.8.10: 28x28 正方形只能塞下单字符. 用 'S' 表示 Silent, 具体含义由 tooltip 说明.
         private const string BtnText = "S";
-        private const string BtnTooltip =
-            "Silent mode: freeze chat UI during agent execution to avoid interfering with " +
-            "performance measurements. Results appear all at once when the task finishes.";
 
         public SilentModeButton()
         {
             text = BtnText;
-            tooltip = BtnTooltip;
+            ApplyLocalizedTooltip();
 
             // v1.8.10: 与 send/cancel 按钮 (28x60) 完全对齐: 底对齐, 高度 28, 宽度 28 (正方形)
             style.flexShrink = 0;
@@ -68,12 +66,30 @@ namespace AgentCore.Editor.UI.Components
         private void OnAttach(AttachToPanelEvent evt)
         {
             SessionModeState.Changed += OnModeChanged;
+            LanguageManager.LanguageChanged += OnLanguageChanged;
             ApplyVisual(SessionModeState.Current);
+            ApplyLocalizedTooltip();
         }
 
         private void OnDetach(DetachFromPanelEvent evt)
         {
             SessionModeState.Changed -= OnModeChanged;
+            LanguageManager.LanguageChanged -= OnLanguageChanged;
+        }
+
+        private void OnLanguageChanged(string newLanguage)
+        {
+            ApplyLocalizedTooltip();
+        }
+
+        private void ApplyLocalizedTooltip()
+        {
+            // 根据当前 SessionMode 返回对应的本地化 tooltip
+            tooltip = SessionModeState.Current == SessionMode.Silent
+                ? Loc.Tr("silentMode.tooltip.silent",
+                    "静默模式已开启 — 聊天 UI 被冻结。点击切换回批处理(实时)模式。")
+                : Loc.Tr("silentMode.tooltip.batched",
+                    "批处理模式(默认) — 聊天 UI 实时更新。点击开启静默模式(冻结 UI, 更干净的性能剖析)。");
         }
 
         private void OnClicked()
@@ -89,6 +105,7 @@ namespace AgentCore.Editor.UI.Components
         private void OnModeChanged(SessionMode newMode)
         {
             ApplyVisual(newMode);
+            ApplyLocalizedTooltip();
         }
 
         private void ApplyVisual(SessionMode mode)

@@ -127,5 +127,9 @@
   "help.tip.anyPanel": "对任何不认识的 Unity 面板元素按 Ctrl+Shift+X，会自动采集窗口信息",
   "help.tip.autoCompress": "多轮对话中 Agent 会自动压缩旧消息，无需手动清理",
   "help.trust.lowMed": "Trust Low/Med — 本会话 ReadOnly/Low/Medium 风险工具直通，High/破坏性操作仍弹窗",
-  "help.trust.yolo": "YOLO (All) — 本会话所有工具直通，含删除/推送/编译等破坏性操作，慎用"
+  "help.trust.yolo": "YOLO (All) — 本会话所有工具直通，含删除/推送/编译等破坏性操作，慎用",
+
+  "silentMode.tooltip": "静默模式：Agent 执行期间冻结聊天 UI，避免干扰性能测量。任务结束后一次性显示所有结果。",
+  "silentMode.tooltip.silent": "静默模式已开启 — 聊天 UI 被冻结。点击切换回批处理(实时)模式。",
+  "silentMode.tooltip.batched": "批处理模式(默认) — 聊天 UI 实时更新。点击开启静默模式(冻结 UI, 更干净的性能剖析)。"
 }

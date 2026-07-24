@@ -39,7 +39,9 @@ namespace AgentCore.Editor.UI
             }
 
             _languageSelector = new LanguageSelector();
-            _languageSelector.style.marginRight = 6;
+            // 用负 marginRight 抵消 toolbar 的 padding-right (8px), 让下拉贴到 toolbar 最右缘.
+            // 视觉一致性: toolbar 内其他左侧元素受 padding 保护, 只有右侧这个"工具类"控件贴边.
+            _languageSelector.style.marginRight = -8;
             _languageSelector.style.marginLeft = 6;
             toolbar.Add(_languageSelector);
         }
