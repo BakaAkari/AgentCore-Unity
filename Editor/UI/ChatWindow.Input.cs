@@ -61,7 +61,12 @@ namespace AgentCore.Editor.UI
             ScrollToBottom(force: true);
 
             // 立刻显示 pending 占位气泡（解决"点击发送 → 5-30 秒 UI 无反应"的感知问题）
-            ShowPendingIndicator("思考中");
+            // v1.8.8: Silent 模式跳过 PendingIndicator, 避免"思考中"占位气泡出现在消息列表里.
+            // Silent 模式下用户从 send/cancel 按钮 + 状态栏 (StateChanged 白名单) 感知 agent 在跑.
+            if (!SessionModeState.IsSilent)
+            {
+                ShowPendingIndicator("思考中");
+            }
 
             // 异步发送消息
             AsyncHelper.RunAsync(

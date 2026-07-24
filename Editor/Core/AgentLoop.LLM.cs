@@ -209,6 +209,17 @@ namespace AgentCore.Editor.Core
         /// </summary>
         private void FlushAccumulatedContentIfAny(ConversationTurn assistantTurn)
         {
+            // v1.8.6: flush reasoning 累积 (先 emit reasoning, 再 emit content, 顺序与 UI 组织一致)
+            if (_pendingStreamReasoning != null && _pendingStreamReasoning.Length > 0)
+            {
+                var fullReasoning = _pendingStreamReasoning.ToString();
+                _pendingStreamReasoning.Clear();
+                if (assistantTurn != null)
+                {
+                    EmitEvent(AgentEvent.ReasoningToken(fullReasoning, assistantTurn.Id, _pendingStreamReasoningSource));
+                }
+            }
+
             if (_pendingStreamContent == null || _pendingStreamContent.Length == 0)
             {
                 return;
@@ -239,8 +250,65 @@ namespace AgentCore.Editor.Core
 
             BeginReasoningIfNeeded(assistantTurn, source);
             assistantTurn.Reasoning += token;
-            EmitEvent(AgentEvent.ReasoningToken(token, assistantTurn.Id, assistantTurn.ReasoningSource));
+            // v1.8.6 + v1.8.8: reasoning token 累积到 _pendingStreamReasoning, 减少 UI 事件频率.
+            // v1.8.6 曾"全累积到 Done 一次 flush", 实测导致单帧 render 长 markdown 出现 829ms 尖峰.
+            // v1.8.8 改为"分块 flush": 累积到 \n\n 段落边界 或 超过 200 字 时中间 flush 一次,
+            // Done 时无论如何强制 flush 剩余. \n\n 优先 (语义完整分段), 200 字兜底 (防止长段落堆积).
+            if (_pendingStreamReasoning == null)
+                _pendingStreamReasoning = new StringBuilder();
+            _pendingStreamReasoning.Append(token);
+            _pendingStreamReasoningSource = assistantTurn.ReasoningSource;
+
+            // 检查是否触发中间 flush
+            if (ShouldFlushPendingReasoning())
+            {
+                FlushPendingReasoningIfAny(assistantTurn);
+            }
         }
+
+        /// <summary>
+        /// v1.8.8: 判断累积的 reasoning 是否达到中间 flush 阈值.
+        /// 触发条件 (任一先到):
+        /// - buffer 含 "\n\n" (段落边界, 语义完整点)
+        /// - buffer 长度 >= ReasoningFlushCharThreshold (兜底)
+        /// </summary>
+        private bool ShouldFlushPendingReasoning()
+        {
+            if (_pendingStreamReasoning == null || _pendingStreamReasoning.Length == 0) return false;
+            if (_pendingStreamReasoning.Length >= ReasoningFlushCharThreshold) return true;
+            // ToString + IndexOf 每次都 alloc — 但 reasoning append 频率低于 content, 可接受.
+            // 未来若成为热点可改为增量扫描 (记录上次扫描位置).
+            var text = _pendingStreamReasoning.ToString();
+            return text.Contains("\n\n");
+        }
+
+        /// <summary>
+        /// v1.8.8: 只 flush reasoning (不 flush content), 用于中间分块.
+        /// </summary>
+        private void FlushPendingReasoningIfAny(ConversationTurn assistantTurn)
+        {
+            if (_pendingStreamReasoning == null || _pendingStreamReasoning.Length == 0) return;
+            var chunk = _pendingStreamReasoning.ToString();
+            _pendingStreamReasoning.Clear();
+            if (assistantTurn != null)
+            {
+                EmitEvent(AgentEvent.ReasoningToken(chunk, assistantTurn.Id, _pendingStreamReasoningSource));
+            }
+        }
+
+        /// <summary>
+        /// v1.8.6: 累积 stream 期的 UI reasoning, 完成时一次性 emit.
+        /// v1.8.8: 改为分块 flush, 阈值 <see cref="ReasoningFlushCharThreshold"/>.
+        /// </summary>
+        private StringBuilder _pendingStreamReasoning;
+        private ThinkingTraceSource _pendingStreamReasoningSource;
+
+        /// <summary>
+        /// v1.8.8: reasoning 分块 flush 的字符阈值 (兜底). \n\n 优先.
+        /// 200 是权衡点: 太小 (50) 频繁 flush 又变成"逐字流式"; 太大 (500+) 单次 render 长
+        /// markdown 又出现 v1.8.6 那种 829ms 尖峰.
+        /// </summary>
+        private const int ReasoningFlushCharThreshold = 200;
 
         /// <summary>
         /// 标记当前 assistant turn 开始接收 reasoning / planning trace。

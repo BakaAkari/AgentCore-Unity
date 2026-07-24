@@ -5,6 +5,157 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.10] - 2026-07-24
+
+### Changed — Silent 按钮 UI 对齐修正
+
+用户实测 v1.8.9 反馈: Silent 按钮需要**水平对齐输入栏 + 高度对齐 + 正方形**.
+
+**改动**: [`SilentModeButton.cs`](Editor/UI/Components/SilentModeButton.cs) 样式改造:
+- 尺寸: 28×28 (与 send/cancel 按钮 28×60 高度一致, 宽度改为 28 满足正方形要求)
+- 圆角: 6px (与 send/cancel 一致)
+- 文字: 从 "Silent" 改为单字符 "S" — 28×28 塞不下 6 字母. 完整含义由 tooltip 传达
+- 边距: `margin-right=4`, 其余 0
+- padding 全 0
+- fontSize: 14 (单字符居中清晰)
+- alignSelf: FlexEnd (与 input-area 的 flex-end 对齐一致, 与 send/cancel 底对齐)
+
+**未变**: Silent 时黄色前景+半透明黄色背景, Batched 时灰色透明.
+
+## [1.8.9] - 2026-07-24
+
+### Fixed — SessionMode Silent 首次实测反馈修正
+
+用户实测 v1.8.8 报告 3 处 UI 副作用: send 按钮没变灰 + 无 cancel 按钮 + 状态栏没变"思考中" + 消息列表里出现"思考中"占位气泡. 根因: v1.8.8 的 Silent gate 过度激进, 把**状态转换事件也拦了**, 导致用户交互控件失灵.
+
+**改动**:
+
+- [`AgentLoop.Events.cs`](Editor/Core/AgentLoop.Events.cs) `EmitEvent` 加 `IsUserInteractionEvent` 白名单. Silent 模式下白名单事件直接 marshal (不 buffer):
+    - `StateChanged` — send/cancel 按钮 + 状态栏
+    - `Error` — 错误必须立即弹
+    - `ConversationReset` — 用户主动清空反馈
+    - `ToolConfirmationRequested` — 阻塞确认框
+    - `ToolBlocked` — 治理层阻断提示
+- [`ChatWindow.Input.cs`](Editor/UI/ChatWindow.Input.cs) `OnSendClicked` Silent 模式跳过 `ShowPendingIndicator("思考中")` — 元凶是这个"占位气泡"直接加到消息列表.
+
+Silent 模式下用户从 send/cancel 按钮 + 状态栏 (StateChanged 白名单) 感知 agent 在跑, 不需要"思考中"占位.
+
+### Migration notes
+
+- 无 API 破坏, 只调 gate 逻辑
+- 本地未推, 用户手测后决定是否 push
+
+## [1.8.8] - 2026-07-24
+
+### Added — SessionMode Silent/Batched 架构改造
+
+用户跑 `manage_profiler` 等诊断工具时, Chat 面板的 UI 更新会通过 UnitySynchronizationContext 走 EditorLoop tick, 间接触发 Application.UpdateScene, 干扰被测量的性能数据. 这是观测者效应 — 观察行为污染被观察对象.
+
+**新增**:
+
+- [`Editor/Core/SessionMode.cs`](Editor/Core/SessionMode.cs): `SessionMode` 枚举 (Batched/Silent) + `SessionModeState` 全局单例 + `EditorPrefs` 持久化 + `Changed` 事件
+- [`Editor/UI/Components/SilentModeButton.cs`](Editor/UI/Components/SilentModeButton.cs): 输入栏最左侧的 Silent 切换按钮, 自订阅 mode change 更新样式 (黄色/灰色)
+
+**修改**:
+
+- [`AgentLoop.Events.cs`](Editor/Core/AgentLoop.Events.cs): `EmitEvent` 加 SessionMode gate, Silent 模式写入 `_silentBuffer` (ConcurrentQueue) 不 marshal 主线程. 新增 `FlushSilentBuffer()`, `OnSessionModeChanged` (Silent→Batched 立即 flush)
+- [`AgentLoop.LLM.cs`](Editor/Core/AgentLoop.LLM.cs): reasoning 分块 flush — `\n\n` 或 200 字任一先到 emit 中间 flush, Done/Error 强制 flush 剩余 (取代 v1.8.6 "全累积到 Done 一次性 emit" 那种 829ms 尖峰的做法)
+- [`AgentLoop.cs`](Editor/Core/AgentLoop.cs): `SendMessageAsync` 顶层 `finally` 调 `FlushSilentBuffer` 双保险
+- [`AgentLoop.Runner.cs`](Editor/Core/AgentLoop.Runner.cs): `LoopCompleted` 事件后调 `FlushSilentBuffer` — turn 结束时清空 buffer
+- [`ChatWindow.cs`](Editor/UI/ChatWindow.cs): 字段声明加 `_silentModeButton`; UI 初始化时 `Insert(0, silentButton)` 到 `input-area` (不改 UXML)
+
+### 关键设计决策 (基于用户 Q1-Q5 拍板)
+
+- Q1: ChatWindow 单例 → SessionMode 全局单例, EditorPrefs 全项目共享
+- Q3: Silent buffer 只存里程碑事件 (StreamToken/ReasoningToken 已在 v1.8.5/6 上游合并)
+- Q4: 手动切出 flush 走事件通道 (逐个 AsyncHelper.RunOnMainThread)
+- Q5: reasoning `\n\n` 或 200 字任一先到, Done 强制 flush
+
+### 保留不变 (来自任务书 §8)
+
+- v1.8.7 关闭的 4 个 UI 动画: 永不恢复
+- v1.8.5 content flush 到 Done: 保留
+- v1.8.4 read_frame depth/min_ms 参数: 保留
+
+### Known Issue → v1.8.9 修正
+
+首次实测发现 Silent gate 过激, 拦掉了状态转换事件 → v1.8.9 用白名单修正.
+
+## [1.8.7] - 2026-07-23
+
+### Fixed — 全关 UI 动态效果 (定位真凶: schedule.Execute.Every 定时任务累积)
+
+**背景**: v1.8.5 (关 content 流式) + v1.8.6 (关 reasoning 流式) 双管齐下, 实测卡顿依然 (496 → 829 ms/帧, GC 0.6 MB, UpdateSceneIfNeeded 318 ms). 用户提示: "响应过程中有动态效果, 输出过程中也有闪烁的动态内容".
+
+**深挖发现**: 流式期同时跑的 UIToolkit `schedule.Execute(...).Every(...)` 定时任务:
+
+| 组件 | 间隔 | 用途 |
+|---|---|---|
+| `PendingIndicator._dotAnim` | 400 ms | Chat 底部"思考中..."3 点循环动画 |
+| `ThinkingDrawer._timer` | 250 ms | 思维链标题定时刷新 (显示"思考 X 秒"计时) |
+| `StreamingTextElement._cursorBlink` | 530 ms | 流式期光标闪烁动画 |
+| `AgentStatusLine.OnPulseTick` | `PulseIntervalMs` | 状态栏呼吸脉冲 |
+
+每个 `schedule.Execute.Every` 本质是 UIToolkit 内部 post 一个 continuation 到主线程 SynchronizationContext. 累积 4 个定时任务同时跑 = **每帧几十上百个 continuation** 需要 `UnitySynchronizationContext.ExecuteTasks` flush → 500+ ms self time. GC 也是这些定时任务闭包分配.
+
+### 修复
+
+**全关. 流式期 UI 完全静默**:
+
+- [`PendingIndicator.cs`](Editor/UI/Components/PendingIndicator.cs) 注释 `_dotAnim = schedule.Execute(TickDots).Every(400)`
+- [`ThinkingDrawer.cs`](Editor/UI/Components/ThinkingDrawer.cs) `StartTimer` 注释 `_timer = schedule.Execute(UpdateTitle).Every(250)`
+- [`StreamingTextElement.cs`](Editor/UI/Components/StreamingTextElement.cs) `ShowCursor` 注释 cursor blink `schedule.Execute(...).Every(530)`
+- [`AgentStatusLine.cs`](Editor/UI/Components/AgentStatusLine.cs) 注释 pulse `schedule.Execute(OnPulseTick).Every(PulseIntervalMs)`
+
+**field 声明保留** (`_dotAnim` / `_cursorBlink` / `_timer`), 现有 `?.Pause()` / null 检查 null-safe, 不改代码结构.
+
+### 用户可感知的变化
+
+- Chat 底部"思考中..."**不再动**（静态显示，不闪 3 点）
+- 思维链标题**不显示计时器**
+- 流式期**无光标闪烁**
+- 状态栏**无呼吸动画**
+- **UI 整体静默** — 但主线程流式期应真正流畅
+
+### 副作用 & 恢复路径
+
+- 若卡顿修复但用户觉得"缺少进度反馈"太憋屈, 可以在 stream 完成时**一次性重启动画** (`schedule.Execute(...).Every` 恢复), 但这需要 UI 侧订阅 `AgentEvent.Done/Error` 事件. 归入 v1.10+ 精细化.
+- 相关 field 声明保留, 未来若加"精细化开关"可零成本恢复.
+
+### 结合 v1.8.5 + v1.8.6 + v1.8.7 三个 patch 的完整效果
+
+- v1.8.5: content token 累积到 Done 一次性 emit (关内容流式)
+- v1.8.6: reasoning token 累积到 Done 一次性 emit (关思维流式)
+- v1.8.7: 关所有 UI 定时动画
+
+预期: 流式期 Editor 主线程回到 spinner 期"完全静默"状态, 卡顿彻底消除.
+
+## [1.8.6] - 2026-07-23
+
+### Fixed — 思维链 (reasoning token) 也关流式 (v1.8.5 补丁)
+
+**问题**: v1.8.5 装了之后用户实测: GC 从 7.9 MB → 300 KB (降 25×), 但主线程仍 496 ms/帧. 新 Profile 数据显示 `UnitySynchronization.ExecuteTasks` 从 256ms → 212ms 略降但没消失, 新出现 `Application.UpdateSceneIfNeeded 269ms`. 用户反馈: "思维链依然在流式输出". 定位到 v1.8.5 只关了 content token 的 UI 逐字更新, 但 `AppendReasoningToken` 依然每 token EmitEvent(ReasoningToken).
+
+**修复**: 与 v1.8.5 content flush 完全同模式, 把 reasoning token 也累积不 emit, Done/Error 时统一 flush.
+
+- [`AgentLoop.LLM.cs`](Editor/Core/AgentLoop.LLM.cs) `AppendReasoningToken` 累积到 `_pendingStreamReasoning` (StringBuilder) + `_pendingStreamReasoningSource`, 不再每 token emit
+- `FlushAccumulatedContentIfAny` 扩展: 先 emit reasoning 再 emit content (顺序与 UI 组织一致)
+- Done / Error 路径共用同一 flush, 无需重复
+
+### Known Issues (若 v1.8.6 仍卡再上 v1.8.7)
+
+- 若实测卡顿仍然存在 (可能是 UI 一次性 emit 大字符串 render markdown 就够慢, 或 UpdateSceneIfNeeded 是 Megacity Metro 项目自身场景更新, 或 ParseStreamAsync 里 await 未 ConfigureAwait(false) 使 continuation 仍 marshal 主线程):
+    - v1.8.7 计划: 给 `ParseStreamAsync` 里所有 await 加 `ConfigureAwait(false)`, 让 SSE 读取 + parse 完全在线程池. 已做线程安全审查:
+        - SelfChallenge extractors: 实例字段 mutable string 无 static 无 lock, 但一个 AgentLoop 一个时刻只跑一个 stream, chunk 串行到达, 无并发风险 ✓
+        - assistantTurn.Content/Reasoning `+=` 后 UI 侧读: 需要考虑跨线程 sequence 或改用累积字段
+        - AgentCoreLog.Debug: 大概率非线程安全 (Debug.Log 是主线程 API), 需 conditional guard
+    - 该改造工作量较大, 单独作为 v1.8.7 patch
+
+### Migration notes
+
+- 无 API 破坏, 装 v1.8.6 后即生效, 会话中的思维链从"逐字追加"变"完成时一次性显示"
+- 用户明确接受该体验降级 (完成前只看到 spinner, 完成后一次性看到 reasoning + content)
+
 ## [1.8.5] - 2026-07-23
 
 ### Fixed — Chat 流式期主线程阻塞根治 (方案 A 收敛版)

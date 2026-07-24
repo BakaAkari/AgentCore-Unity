@@ -1242,14 +1242,15 @@ namespace AgentCore.Editor.UI.Components
             _cursor.style.display = DisplayStyle.Flex;
             _cursorVisible = true;
 
-            if (_cursorBlink == null)
-            {
-                _cursorBlink = schedule.Execute(() =>
-                {
-                    _cursorVisible = !_cursorVisible;
-                    _cursor.style.opacity = _cursorVisible ? 1f : 0f;
-                }).Every(530);
-            }
+            // v1.8.7: 全关动态效果, 光标闪烁禁用
+            // if (_cursorBlink == null)
+            // {
+            //     _cursorBlink = schedule.Execute(() =>
+            //     {
+            //         _cursorVisible = !_cursorVisible;
+            //         _cursor.style.opacity = _cursorVisible ? 1f : 0f;
+            //     }).Every(530);
+            // }
         }
 
         /// <summary>

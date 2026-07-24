@@ -74,8 +74,8 @@ namespace AgentCore.Editor.UI.Components
             _text.style.unityFontStyleAndWeight = FontStyle.Bold;
             Add(_text);
 
-            // 呼吸动画调度器
-            schedule.Execute(OnPulseTick).Every(PulseIntervalMs);
+            // v1.8.7: 全关动态效果, 状态栏呼吸动画禁用
+            // schedule.Execute(OnPulseTick).Every(PulseIntervalMs);
         }
 
         #region 公开方法

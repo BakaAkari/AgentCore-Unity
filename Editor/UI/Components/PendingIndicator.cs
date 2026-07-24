@@ -65,8 +65,10 @@ namespace AgentCore.Editor.UI.Components
             _actionLabel.style.unityFontStyleAndWeight = FontStyle.Normal;
             Add(_actionLabel);
 
-            // 用 IVisualElementScheduledItem 驱动 3 点动画（UI Toolkit 支持性最好的方式）
-            _dotAnim = schedule.Execute(TickDots).Every(400);
+            // v1.8.7: 流式期 UI 卡顿排查, 全关动态效果 (PendingIndicator 3 点动画禁用).
+            // schedule.Execute.Every 每次触发都往 UnitySynchronizationContext post continuation,
+            // 累积到主线程 SC 队列每帧 flush 200+ ms. 关闭后 UI 静默但主线程流畅.
+            // _dotAnim = schedule.Execute(TickDots).Every(400);
         }
 
         /// <summary>

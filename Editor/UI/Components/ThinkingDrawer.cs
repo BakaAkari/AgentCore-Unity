@@ -310,7 +310,8 @@ namespace AgentCore.Editor.UI.Components
         private void StartTimer()
         {
             StopTimer();
-            _timer = schedule.Execute(UpdateTitle).Every(250);
+            // v1.8.7: 全关动态效果, ThinkingDrawer 标题定时更新禁用
+            // _timer = schedule.Execute(UpdateTitle).Every(250);
         }
 
         private void StopTimer()
