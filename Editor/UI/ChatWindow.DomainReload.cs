@@ -41,34 +41,38 @@ namespace AgentCore.Editor.UI
             headerIcon.AddToClassList("domain-reload-notification__header-icon");
             header.Add(headerIcon);
 
-            var headerText = new Label("检测到 Domain Reload 中断");
+            var headerText = new Label(AgentCore.Editor.L10n.Loc.Tr("domainReload.header", "检测到 Domain Reload 中断"));
             headerText.AddToClassList("domain-reload-notification__header-text");
             header.Add(headerText);
 
             card.Add(header);
 
             // === 详情行：中断原因 ===
-            var reasonRow = CreateDetailRow("中断原因：", "编译触发 Domain Reload");
+            var reasonRow = CreateDetailRow(
+                AgentCore.Editor.L10n.Loc.Tr("domainReload.reasonLabel", "中断原因："),
+                AgentCore.Editor.L10n.Loc.Tr("domainReload.reasonValue", "编译触发 Domain Reload"));
             card.Add(reasonRow);
 
             // === 详情行：中断阶段 ===
             string phaseText = phase switch
             {
-                InterruptPhase.Streaming => "流式响应中 (Streaming)",
-                InterruptPhase.ExecutingTool => "工具执行中 (ExecutingTool)",
-                InterruptPhase.WaitingCompilation => "等待编译 (WaitingCompilation)",
-                _ => "未知阶段"
+                InterruptPhase.Streaming => AgentCore.Editor.L10n.Loc.Tr("domainReload.phase.streaming", "流式响应中 (Streaming)"),
+                InterruptPhase.ExecutingTool => AgentCore.Editor.L10n.Loc.Tr("domainReload.phase.executingTool", "工具执行中 (ExecutingTool)"),
+                InterruptPhase.WaitingCompilation => AgentCore.Editor.L10n.Loc.Tr("domainReload.phase.waitingCompilation", "等待编译 (WaitingCompilation)"),
+                _ => AgentCore.Editor.L10n.Loc.Tr("domainReload.phase.unknown", "未知阶段")
             };
             if (!string.IsNullOrEmpty(toolName))
             {
                 phaseText += $" — {toolName}";
             }
-            var phaseRow = CreateDetailRow("中断阶段：", phaseText);
+            var phaseRow = CreateDetailRow(AgentCore.Editor.L10n.Loc.Tr("domainReload.phaseLabel", "中断阶段："), phaseText);
             card.Add(phaseRow);
 
             // === 详情行：编译结果 ===
             string compileIcon = compilationSucceeded ? "" : "";
-            string compileText = compilationSucceeded ? "编译成功" : "编译失败";
+            string compileText = compilationSucceeded
+                ? AgentCore.Editor.L10n.Loc.Tr("domainReload.compileSuccess", "编译成功")
+                : AgentCore.Editor.L10n.Loc.Tr("domainReload.compileFailed", "编译失败");
             if (!compilationSucceeded && !string.IsNullOrEmpty(compilationErrors))
             {
                 // 截断过长的错误信息
@@ -77,7 +81,7 @@ namespace AgentCore.Editor.UI
                     : compilationErrors;
                 compileText += $" — {errMsg}";
             }
-            var compileRow = CreateDetailRow("编译结果：", $"{compileIcon} {compileText}");
+            var compileRow = CreateDetailRow(AgentCore.Editor.L10n.Loc.Tr("domainReload.compileLabel", "编译结果："), $"{compileIcon} {compileText}");
             // 为编译结果值添加颜色修饰
             var compileValue = compileRow.Q<Label>(className: "domain-reload-notification__detail-value");
             if (compileValue != null)
@@ -98,7 +102,7 @@ namespace AgentCore.Editor.UI
             statusIcon.name = "reload-status-icon";
             statusRow.Add(statusIcon);
 
-            var statusText = new Label("正在恢复会话...");
+            var statusText = new Label(AgentCore.Editor.L10n.Loc.Tr("domainReload.status.recovering", "正在恢复会话..."));
             statusText.AddToClassList("domain-reload-notification__status-text");
             statusText.name = "reload-status-text";
             statusRow.Add(statusText);
@@ -158,7 +162,7 @@ namespace AgentCore.Editor.UI
                 // 恢复成功
                 card.AddToClassList("domain-reload-notification--success");
                 if (statusIcon != null) statusIcon.text = "";
-                if (statusText != null) statusText.text = "会话已恢复，继续执行中";
+                if (statusText != null) statusText.text = AgentCore.Editor.L10n.Loc.Tr("domainReload.status.recovered", "会话已恢复，继续执行中");
             }
             else
             {
@@ -166,12 +170,12 @@ namespace AgentCore.Editor.UI
                 card.AddToClassList("domain-reload-notification--error");
                 if (statusIcon != null) statusIcon.text = "";
 
-                var failText = "恢复失败";
+                var failText = AgentCore.Editor.L10n.Loc.Tr("domainReload.status.failed", "恢复失败");
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
                     failText += $"：{errorMessage}";
                 }
-                failText += "\n 建议：请手动重新发送消息继续操作";
+                failText += AgentCore.Editor.L10n.Loc.Tr("domainReload.hintSuggestion", "\n 建议：请手动重新发送消息继续操作");
 
                 if (statusText != null) statusText.text = failText;
             }

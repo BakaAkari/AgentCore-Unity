@@ -182,7 +182,7 @@ namespace AgentCore.Editor.UI
             // 使用 ErrorDetail 格式化显示内容（如果有）
             var displayMessage = detail != null
                 ? detail.FormatForDisplay()
-                : (errorMessage ?? "未知错误");
+                : (errorMessage ?? AgentCore.Editor.L10n.Loc.Tr("chat.error.unknown", "未知错误"));
 
             var bubble = new MessageBubble(messageId, "error", displayMessage);
             _messageBubbles[messageId] = bubble;
@@ -194,7 +194,7 @@ namespace AgentCore.Editor.UI
                 var stackInfo = detail.GetStackForDisplay();
                 if (!string.IsNullOrEmpty(stackInfo))
                 {
-                    bubble.AddExpandableDetail("堆栈信息", stackInfo);
+                    bubble.AddExpandableDetail(AgentCore.Editor.L10n.Loc.Tr("chat.error.stackInfo", "堆栈信息"), stackInfo);
                 }
             }
 
@@ -234,10 +234,10 @@ namespace AgentCore.Editor.UI
             }
 
             // 更新状态标签
-            UpdateStatusLabel("重试中...");
+            UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.retrying", "重试中..."));
 
             // 添加用户消息气泡（显示重试标记）
-            AddUserMessage($"[重试] {message}");
+            AddUserMessage(AgentCore.Editor.L10n.Loc.Tr("chat.error.retryPrefix", "[重试] {0}", message));
 
             // 异步发送消息
             AsyncHelper.RunAsync(

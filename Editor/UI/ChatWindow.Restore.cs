@@ -70,7 +70,7 @@ namespace AgentCore.Editor.UI
                     bool compilationSucceeded = !EditorUtility.scriptCompilationFailed;
                     string compilationErrors = compilationSucceeded
                         ? null
-                        : "编译失败，请检查 Unity Console 中的错误信息";
+                        : AgentCore.Editor.L10n.Loc.Tr("domainReload.autoRecoverCompileFailedMsg", "编译失败，请检查 Unity Console 中的错误信息");
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Post-reload compilation check: succeeded={compilationSucceeded}");
 
                     reloadState.SetCompilationResult(compilationSucceeded, compilationErrors);
@@ -95,7 +95,7 @@ namespace AgentCore.Editor.UI
                     {
                         AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Domain Reload recovery skipped or failed, continuing normally.");
                         UpdateDomainReloadNotificationStatus(notificationCard, success: false,
-                            errorMessage: "恢复未执行，可能是中断阶段不支持自动恢复");
+                            errorMessage: AgentCore.Editor.L10n.Loc.Tr("domainReload.autoRecoverNotSupportedMsg", "恢复未执行，可能是中断阶段不支持自动恢复"));
                     }
                 }
                 

@@ -237,7 +237,7 @@ namespace AgentCore.Editor.UI
             var buttons = new VisualElement();
             buttons.AddToClassList("tool-confirmation-buttons");
 
-            var reject = new Button(() => ResolvePendingToolConfirmation(pending, false)) { text = "Deny" };
+            var reject = new Button(() => ResolvePendingToolConfirmation(pending, false)) { text = AgentCore.Editor.L10n.Loc.Tr("toolConfirmation.deny", "Deny") };
             reject.AddToClassList("tool-confirmation-button");
             reject.AddToClassList("tool-confirmation-button--reject");
             buttons.Add(reject);
@@ -248,9 +248,11 @@ namespace AgentCore.Editor.UI
             {
                 var trustLowMed = new Button(() => ResolvePendingToolConfirmationWithTrust(pending, ToolConfirmationTrustScope.SessionLowMediumRisk))
                 {
-                    text = "Trust Low/Med for Session"
+                    text = AgentCore.Editor.L10n.Loc.Tr("toolConfirmation.trustLowMed", "Trust Low/Med for Session")
                 };
-                trustLowMed.tooltip = "本会话内所有 ReadOnly/Low/Medium 风险工具直通,High/破坏性操作仍会弹窗";
+                trustLowMed.tooltip = AgentCore.Editor.L10n.Loc.Tr(
+                    "toolConfirmation.trustLowMedTooltip",
+                    "本会话内所有 ReadOnly/Low/Medium 风险工具直通,High/破坏性操作仍会弹窗");
                 trustLowMed.AddToClassList("tool-confirmation-button");
                 trustLowMed.AddToClassList("tool-confirmation-button--trust");
                 buttons.Add(trustLowMed);
@@ -260,9 +262,11 @@ namespace AgentCore.Editor.UI
             {
                 var yolo = new Button(() => ResolvePendingToolConfirmationWithTrust(pending, ToolConfirmationTrustScope.SessionAll))
                 {
-                    text = "YOLO (All)"
+                    text = AgentCore.Editor.L10n.Loc.Tr("toolConfirmation.yolo", "YOLO (All)")
                 };
-                yolo.tooltip = "本会话内所有工具直通,含删除/推送/编译等破坏性操作,慎用";
+                yolo.tooltip = AgentCore.Editor.L10n.Loc.Tr(
+                    "toolConfirmation.yoloTooltip",
+                    "本会话内所有工具直通,含删除/推送/编译等破坏性操作,慎用");
                 yolo.AddToClassList("tool-confirmation-button");
                 yolo.AddToClassList("tool-confirmation-button--yolo");
                 buttons.Add(yolo);
@@ -271,7 +275,7 @@ namespace AgentCore.Editor.UI
             footer.Add(buttons);
             _toolConfirmationPanel.Add(footer);
 
-            UpdateStatusLabel("等待工具确认...");
+            UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.waitingConfirmation", "等待工具确认..."));
             ScrollToBottom(force: true);
         }
 

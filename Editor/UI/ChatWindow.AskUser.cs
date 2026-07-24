@@ -112,7 +112,7 @@ namespace AgentCore.Editor.UI
 
             var header = new VisualElement();
             header.AddToClassList("tool-confirmation-header");
-            var title = new Label("AI 需要你的决定");
+            var title = new Label(AgentCore.Editor.L10n.Loc.Tr("askUser.title", "AI 需要你的决定"));
             title.AddToClassList("tool-confirmation-title");
             header.Add(title);
             _askUserPanel.Add(header);
@@ -144,7 +144,7 @@ namespace AgentCore.Editor.UI
             // 末尾固定「我自己描述」按钮
             var freeText = new Button(BeginFreeTextAnswer)
             {
-                text = "我自己描述..."
+                text = AgentCore.Editor.L10n.Loc.Tr("askUser.customOption", "我自己描述...")
             };
             freeText.AddToClassList("tool-confirmation-button");
             freeText.AddToClassList("ask-user-freetext-button");
@@ -153,11 +153,13 @@ namespace AgentCore.Editor.UI
             _askUserPanel.Add(buttons);
 
             // 无超时、永久阻断：明确告知用户面板会一直等
-            var meta = new Label("等待你的决定 · 面板会一直保留直到你回答（不会超时）");
+            var meta = new Label(AgentCore.Editor.L10n.Loc.Tr(
+                "askUser.waitingMeta",
+                "等待你的决定 · 面板会一直保留直到你回答（不会超时）"));
             meta.AddToClassList("ask-user-meta");
             _askUserPanel.Add(meta);
 
-            UpdateStatusLabel("AI 正在等待你的决定...");
+            UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.waitingUserDecision", "AI 正在等待你的决定..."));
             ScrollToBottom(force: true);
         }
 
@@ -183,7 +185,7 @@ namespace AgentCore.Editor.UI
 
             var header = new VisualElement();
             header.AddToClassList("tool-confirmation-header");
-            var title = new Label("AI 需要你的决定");
+            var title = new Label(AgentCore.Editor.L10n.Loc.Tr("askUser.title", "AI 需要你的决定"));
             title.AddToClassList("tool-confirmation-title");
             header.Add(title);
             _askUserPanel.Add(header);
@@ -195,7 +197,7 @@ namespace AgentCore.Editor.UI
                 _askUserPanel.Add(q);
             }
 
-            var hint = new Label("请在下方输入框输入你的答案并发送");
+            var hint = new Label(AgentCore.Editor.L10n.Loc.Tr("askUser.freeTextHint", "请在下方输入框输入你的答案并发送"));
             hint.AddToClassList("ask-user-meta");
             _askUserPanel.Add(hint);
 
