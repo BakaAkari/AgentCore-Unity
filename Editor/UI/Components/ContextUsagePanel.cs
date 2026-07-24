@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using AgentCore.Editor.L10n;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
@@ -7,6 +8,10 @@ namespace AgentCore.Editor.UI.Components
     /// Context usage visualization panel.
     /// Displays token usage, compression statistics, and budget allocation.
     /// </summary>
+    /// <remarks>
+    /// v1.9.0+: 所有可见文本走 L10n. 订阅 <see cref="LanguageManager.LanguageChanged"/>,
+    /// 语言切换时用最近一次的 budget 重绘 (标签 + 数值一起刷新).
+    /// </remarks>
     public class ContextUsagePanel : VisualElement
     {
         #region USS Class Names
@@ -30,8 +35,11 @@ namespace AgentCore.Editor.UI.Components
         private readonly VisualElement _progressBar;
         private readonly VisualElement _progressFill;
         private readonly Label _usageLabel;
-        private readonly Label _tokenCountLabel;
-        private readonly Label _compressionStatsLabel;
+        private readonly Label _tokenAllocationLabel; // label 部分 (前缀), 用 Loc 本地化
+        private readonly Label _tokenCountLabel;      // value 部分 (数字), 用 Loc format
+        private readonly Label _compressionRowLabel;  // label 部分
+        private readonly Label _compressionStatsLabel;// value 部分
+        private readonly Label _compressionBadgeLabel;
         private readonly VisualElement _compressionBadge;
         #endregion
 
@@ -59,7 +67,7 @@ namespace AgentCore.Editor.UI.Components
             _header.AddToClassList(HeaderClassName);
             _header.RegisterCallback<ClickEvent>(_ => ToggleCollapse());
 
-            _headerLabel = new Label("上下文使用情况");
+            _headerLabel = new Label(Loc.Tr("contextUsage.header", "上下文使用情况"));
             _header.Add(_headerLabel);
 
             // 展开/收起指示符 (只是视觉指示,不再是可独立点击的 Button)
@@ -84,25 +92,23 @@ namespace AgentCore.Editor.UI.Components
             _content.Add(_progressBar);
 
             // Usage label
-            _usageLabel = new Label("0% (0 / 0 tokens)");
+            _usageLabel = new Label();
             _usageLabel.AddToClassList(StatLabelClassName);
             _content.Add(_usageLabel);
 
             // Token count details
-            var tokenRow = CreateStatsRow("Token 分配", "");
-            _tokenCountLabel = tokenRow.Q<Label>(className: StatValueClassName);
+            var tokenRow = CreateStatsRow(out _tokenAllocationLabel, out _tokenCountLabel);
             _content.Add(tokenRow);
 
             // Compression stats
-            var compressionRow = CreateStatsRow("压缩统计", "");
-            _compressionStatsLabel = compressionRow.Q<Label>(className: StatValueClassName);
+            var compressionRow = CreateStatsRow(out _compressionRowLabel, out _compressionStatsLabel);
             _content.Add(compressionRow);
 
             // Compression badge
             _compressionBadge = new VisualElement();
             _compressionBadge.AddToClassList(CompressionBadgeClassName);
-            var badgeLabel = new Label("压缩已激活");
-            _compressionBadge.Add(badgeLabel);
+            _compressionBadgeLabel = new Label();
+            _compressionBadge.Add(_compressionBadgeLabel);
             _compressionBadge.style.display = DisplayStyle.None;
             _content.Add(_compressionBadge);
 
@@ -113,6 +119,10 @@ namespace AgentCore.Editor.UI.Components
 
             // 默认折叠（v1.6.4：占用聊天区空间过大，用户主动展开时再显示详情）
             SetCollapsed(true);
+
+            // v1.9.0+: 订阅语言事件, 切语言时用最近 budget 重绘
+            RegisterCallback<AttachToPanelEvent>(_ => LanguageManager.LanguageChanged += OnLanguageChanged);
+            RegisterCallback<DetachFromPanelEvent>(_ => LanguageManager.LanguageChanged -= OnLanguageChanged);
         }
         #endregion
 
@@ -123,6 +133,45 @@ namespace AgentCore.Editor.UI.Components
         public void UpdateDisplay(Core.ContextBudgetInfo budget)
         {
             _currentBudget = budget;
+            RenderCurrent();
+        }
+
+        /// <summary>
+        /// Collapses or expands the panel.
+        /// </summary>
+        public void SetCollapsed(bool collapsed)
+        {
+            _isCollapsed = collapsed;
+            if (_isCollapsed)
+            {
+                AddToClassList(CollapsedClassName);
+                _toggleIndicator.text = ">";
+                _content.style.display = DisplayStyle.None;
+            }
+            else
+            {
+                RemoveFromClassList(CollapsedClassName);
+                _toggleIndicator.text = "v";
+                _content.style.display = DisplayStyle.Flex;
+            }
+        }
+        #endregion
+
+        #region Private Methods
+
+        private void OnLanguageChanged(string _)
+        {
+            _headerLabel.text = Loc.Tr("contextUsage.header", "上下文使用情况");
+            RenderCurrent();
+        }
+
+        /// <summary>
+        /// v1.9.0+: 抽出的实际渲染方法, 用 _currentBudget 重绘所有本地化文本 + 数值.
+        /// UpdateDisplay 和 OnLanguageChanged 共用.
+        /// </summary>
+        private void RenderCurrent()
+        {
+            var budget = _currentBudget ?? new Core.ContextBudgetInfo();
 
             // Update progress bar
             var percentage = Mathf.Clamp01(budget.UsagePercentage);
@@ -148,66 +197,66 @@ namespace AgentCore.Editor.UI.Components
                 _progressFill.style.backgroundColor = AgentCore.Editor.UI.AgentCoreColors.Danger; // 红
             }
 
-            // Update usage label
-            _usageLabel.text = $"{percentage * 100f:F1}% ({budget.CurrentTokens:N0} / {budget.AvailableTokens:N0} tokens)";
+            // Usage label — 数值使用 CultureInfo.Invariant, 模板本身可本地化
+            _usageLabel.text = Loc.Tr(
+                "contextUsage.usage",
+                "{0}% ({1} / {2} tokens)",
+                $"{percentage * 100f:F1}",
+                $"{budget.CurrentTokens:N0}",
+                $"{budget.AvailableTokens:N0}");
 
-            // Update token count details
-            _tokenCountLabel.text = $"最大: {budget.MaxTokens:N0} | 预留: {budget.ReservedTokens:N0} | 可用: {budget.AvailableTokens:N0}";
+            // Token allocation
+            _tokenAllocationLabel.text = Loc.Tr("contextUsage.tokenAllocation.label", "Token 分配");
+            _tokenCountLabel.text = Loc.Tr(
+                "contextUsage.tokenAllocation.value",
+                "最大: {0} | 预留: {1} | 可用: {2}",
+                $"{budget.MaxTokens:N0}",
+                $"{budget.ReservedTokens:N0}",
+                $"{budget.AvailableTokens:N0}");
 
-            // Update compression stats
+            // Compression stats
+            _compressionRowLabel.text = Loc.Tr("contextUsage.compression.label", "压缩统计");
             if (budget.ToolResultCompressions > 0 || budget.ConversationCompressions > 0)
             {
                 var ratio = budget.CompressionRatio > 0 ? $"{budget.CompressionRatio * 100f:F1}%" : "0%";
-                _compressionStatsLabel.text = $"工具: {budget.ToolResultCompressions} | 对话: {budget.ConversationCompressions} | 节省: {budget.TokensSaved:N0} tokens | 压缩率: {ratio}";
+                _compressionStatsLabel.text = Loc.Tr(
+                    "contextUsage.compression.value",
+                    "工具: {0} | 对话: {1} | 节省: {2} tokens | 压缩率: {3}",
+                    budget.ToolResultCompressions,
+                    budget.ConversationCompressions,
+                    $"{budget.TokensSaved:N0}",
+                    ratio);
             }
             else
             {
-                _compressionStatsLabel.text = "暂无压缩";
+                _compressionStatsLabel.text = Loc.Tr("contextUsage.compression.none", "暂无压缩");
             }
 
-            // Show/hide compression badge
+            // Compression badge
+            _compressionBadgeLabel.text = Loc.Tr("contextUsage.compression.active", "压缩已激活");
             _compressionBadge.style.display = budget.IsCompressionActive ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
-        /// <summary>
-        /// Collapses or expands the panel.
-        /// </summary>
-        public void SetCollapsed(bool collapsed)
-        {
-            _isCollapsed = collapsed;
-            if (_isCollapsed)
-            {
-                AddToClassList(CollapsedClassName);
-                _toggleIndicator.text = ">";
-                _content.style.display = DisplayStyle.None;
-            }
-            else
-            {
-                RemoveFromClassList(CollapsedClassName);
-                _toggleIndicator.text = "v";
-                _content.style.display = DisplayStyle.Flex;
-            }
-        }
-        #endregion
-
-        #region Private Methods
         private void ToggleCollapse()
         {
             SetCollapsed(!_isCollapsed);
         }
 
-        private VisualElement CreateStatsRow(string label, string value)
+        /// <summary>
+        /// v1.9.0+: 拆分 label / value 两个 Label 引用返回, 便于后续单独刷新本地化.
+        /// </summary>
+        private VisualElement CreateStatsRow(out Label labelRef, out Label valueRef)
         {
             var row = new VisualElement();
             row.AddToClassList(StatsRowClassName);
 
-            var labelElement = new Label(label);
-            labelElement.AddToClassList(StatLabelClassName);
-            row.Add(labelElement);
+            labelRef = new Label();
+            labelRef.AddToClassList(StatLabelClassName);
+            row.Add(labelRef);
 
-            var valueElement = new Label(value);
-            valueElement.AddToClassList(StatValueClassName);
-            row.Add(valueElement);
+            valueRef = new Label();
+            valueRef.AddToClassList(StatValueClassName);
+            row.Add(valueRef);
 
             return row;
         }

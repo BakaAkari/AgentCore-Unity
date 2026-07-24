@@ -132,5 +132,14 @@
 
   "silentMode.tooltip": "Silent mode: freeze chat UI during agent execution to avoid interfering with performance measurements. Results appear all at once when the task finishes.",
   "silentMode.tooltip.silent": "Silent mode ON — chat UI is frozen. Click to switch back to Batched (live) mode.",
-  "silentMode.tooltip.batched": "Batched (default) — chat UI updates live. Click to enable Silent mode (freeze UI, cleaner performance profiling)."
+  "silentMode.tooltip.batched": "Batched (default) — chat UI updates live. Click to enable Silent mode (freeze UI, cleaner performance profiling).",
+
+  "contextUsage.header": "Context usage",
+  "contextUsage.usage": "{0}% ({1} / {2} tokens)",
+  "contextUsage.tokenAllocation.label": "Token allocation",
+  "contextUsage.tokenAllocation.value": "Max: {0} | Reserved: {1} | Available: {2}",
+  "contextUsage.compression.label": "Compression stats",
+  "contextUsage.compression.value": "Tools: {0} | Chat: {1} | Saved: {2} tokens | Ratio: {3}",
+  "contextUsage.compression.none": "No compression yet",
+  "contextUsage.compression.active": "Compression active"
 }

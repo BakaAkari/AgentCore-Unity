@@ -132,5 +132,14 @@
 
   "silentMode.tooltip": "静默模式：Agent 执行期间冻结聊天 UI，避免干扰性能测量。任务结束后一次性显示所有结果。",
   "silentMode.tooltip.silent": "静默模式已开启 — 聊天 UI 被冻结。点击切换回批处理(实时)模式。",
-  "silentMode.tooltip.batched": "批处理模式(默认) — 聊天 UI 实时更新。点击开启静默模式(冻结 UI, 更干净的性能剖析)。"
+  "silentMode.tooltip.batched": "批处理模式(默认) — 聊天 UI 实时更新。点击开启静默模式(冻结 UI, 更干净的性能剖析)。",
+
+  "contextUsage.header": "上下文使用情况",
+  "contextUsage.usage": "{0}% ({1} / {2} tokens)",
+  "contextUsage.tokenAllocation.label": "Token 分配",
+  "contextUsage.tokenAllocation.value": "最大: {0} | 预留: {1} | 可用: {2}",
+  "contextUsage.compression.label": "压缩统计",
+  "contextUsage.compression.value": "工具: {0} | 对话: {1} | 节省: {2} tokens | 压缩率: {3}",
+  "contextUsage.compression.none": "暂无压缩",
+  "contextUsage.compression.active": "压缩已激活"
 }
