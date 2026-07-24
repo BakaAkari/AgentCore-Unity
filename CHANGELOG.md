@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-07-24
+
+### Fixed — L10n 补漏 + 编译错误 + 清理
+
+用户在 Windows 实测反馈的 5 类问题, 逐个修补:
+
+- **[编译错误]** [`ContextUsagePanel.cs`](Editor/UI/Components/ContextUsagePanel.cs) CS0019: `_currentBudget ?? new ContextBudgetInfo()` — [`Core.ContextBudgetInfo`](Editor/Core/ContextBudgetInfo.cs) 是 `struct` (value type), 无法用 `??` 空合并. 改为直接取字段(struct 未初始化时字段全 0, 语义等价 "empty data"). commit [`7698a5c`](https://github.com/BakaAkari/agentcore-unity/commit/7698a5c)
+- **[L10n 遗漏]** [`ThinkingDrawer.cs`](Editor/UI/Components/ThinkingDrawer.cs) — "思考中 / 思考完成 / 展开 / 折叠 Thinking" 4 处硬编码中文补上 Loc. 订阅 `LanguageChanged`, 语言切换时**即使思考已结束 (`_isRunning=false`)**, 也强制走一次 UpdateTitle 逻辑, 避免完成态 title 滞留旧语言. commit [`172ed26`](https://github.com/BakaAkari/agentcore-unity/commit/172ed26)
+- **[L10n 遗漏]** [`AgentStatusLine.cs`](Editor/UI/Components/AgentStatusLine.cs) 构造函数 `new Label("就绪")` 硬编码中文, 导致英文语言下窗口首次打开时状态栏滞留"就绪". 改为构造时走 `Loc.Tr("chat.status.idle", "就绪")`, 与 [`ChatWindow.Events.cs`](Editor/UI/ChatWindow.Events.cs) 里 `AgentState.Idle` 分支同 key. commit [`65f8e11`](https://github.com/BakaAkari/agentcore-unity/commit/65f8e11)
+- **[包脏 warning]** 删除悬空 `Archive.meta` (Unity 打开时警告 "meta file exists but folder can't be found" — 历史上删过 `Archive/` 目录但 meta 未同步删). commit [`b7ee4ee`](https://github.com/BakaAkari/agentcore-unity/commit/b7ee4ee)
+
+### Changed
+
+- [`package.json`](package.json) `description` 从单句中文改为紧凑中英双语介绍 (Open/Use/Shortcuts/Language 4 部分), 用户在 Package Manager 侧栏能立刻看到入口和用法. commit [`264e6ce`](https://github.com/BakaAkari/agentcore-unity/commit/264e6ce)
+
+### Migration notes
+
+- 无 API 破坏
+- Windows 用户拿到新 tarball 后, 建议 Package Manager 里 **先 Remove 再 Install** (避免旧缓存)
+
+### Known limitations
+
+- SelfChallengeCard 详情正文 (Node A 步骤 1-5 / Node B 反例) 依旧保持中文(排障文本, 面向开发者)
+- LLM 系统提示词 / 工具错误消息 / 日志 依旧保持英文/原样
+
 ## [1.9.1] - 2026-07-24
 
 ### Added — L10n 覆盖面全量补齐
