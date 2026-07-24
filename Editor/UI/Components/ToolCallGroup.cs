@@ -125,8 +125,8 @@ namespace AgentCore.Editor.UI.Components
             _arrowLabel.style.flexShrink = 0;
             _header.Add(_arrowLabel);
 
-            // 标题文本
-            _titleLabel = new Label("工具执行过程");
+            // 标题文本 (Loc)
+            _titleLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.title", "工具执行过程"));
             _titleLabel.AddToClassList("tool-call-group__title");
             _titleLabel.style.fontSize = 12;
             _titleLabel.style.color = TextPrimary;
@@ -172,6 +172,18 @@ namespace AgentCore.Editor.UI.Components
             Add(_content);
 
             // 初始化摘要
+            UpdateSummaryText();
+
+            // v1.9.0+: 语言热切换 — title + summary 都会用 Loc 重绘
+            RegisterCallback<AttachToPanelEvent>(_ =>
+                AgentCore.Editor.L10n.LanguageManager.LanguageChanged += OnLanguageChanged);
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+                AgentCore.Editor.L10n.LanguageManager.LanguageChanged -= OnLanguageChanged);
+        }
+
+        private void OnLanguageChanged(string _)
+        {
+            _titleLabel.text = AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.title", "工具执行过程");
             UpdateSummaryText();
         }
 
@@ -346,7 +358,8 @@ namespace AgentCore.Editor.UI.Components
             // 轮次信息
             if (_maxRounds > 1 || _currentRound > 1)
             {
-                parts.Add($"第 {_currentRound}/{_maxRounds} 轮");
+                parts.Add(AgentCore.Editor.L10n.Loc.Tr(
+                    "toolCallGroup.round", "第 {0}/{1} 轮", _currentRound, _maxRounds));
             }
 
             // Token 消耗
@@ -361,25 +374,29 @@ namespace AgentCore.Editor.UI.Components
                 var statParts = new List<string>();
 
                 if (_completedCalls > 0)
-                    statParts.Add($"{_completedCalls} 成功");
+                    statParts.Add(AgentCore.Editor.L10n.Loc.Tr(
+                        "toolCallGroup.stats.n", "{0} 成功", _completedCalls));
 
                 if (_failedCalls > 0)
-                    statParts.Add($"{_failedCalls} 失败");
+                    statParts.Add(AgentCore.Editor.L10n.Loc.Tr(
+                        "toolCallGroup.stats.f", "{0} 失败", _failedCalls));
 
                 if (_runningCalls > 0)
                 {
                     // 附加当前正在执行的工具名（第一个 running 的），让折叠状态下用户也能看到进度
                     var runningToolName = FindFirstRunningToolName();
                     statParts.Add(string.IsNullOrEmpty(runningToolName)
-                        ? $"{_runningCalls} 执行中"
-                        : $"{_runningCalls} 执行中: {runningToolName}");
+                        ? AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.stats.r", "{0} 执行中", _runningCalls)
+                        : AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.stats.rNamed", "{0} 执行中: {1}", _runningCalls, runningToolName));
                 }
 
                 var pending = _totalCalls - _completedCalls - _failedCalls - _runningCalls;
                 if (pending > 0)
-                    statParts.Add($"{pending} 等待");
+                    statParts.Add(AgentCore.Editor.L10n.Loc.Tr(
+                        "toolCallGroup.stats.pending", "{0} 等待", pending));
 
-                parts.Add($"{_totalCalls} 个调用: {string.Join(", ", statParts)}");
+                parts.Add(AgentCore.Editor.L10n.Loc.Tr(
+                    "toolCallGroup.stats.summary", "{0} 个调用: {1}", _totalCalls, string.Join(", ", statParts)));
             }
 
             _summaryLabel.text = parts.Count > 0

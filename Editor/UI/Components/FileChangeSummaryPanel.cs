@@ -73,6 +73,7 @@ namespace AgentCore.Editor.UI.Components
         #region 状态
 
         private bool _isExpanded = false;
+        private int _lastFileCount = 0; // v1.9.0+: 缓存以支持语言热切换重绘 title
         private readonly Dictionary<VisualElement, long> _lastClickTimes = new Dictionary<VisualElement, long>();
 
         #endregion
@@ -130,8 +131,8 @@ namespace AgentCore.Editor.UI.Components
             _arrowLabel.style.width = 12;
             _header.Add(_arrowLabel);
 
-            // 标题
-            _titleLabel = new Label("此对话中已更改 0 个文件");
+            // 标题 (Loc)
+            _titleLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("fileChange.header.empty", "此对话中已更改 0 个文件"));
             _titleLabel.style.fontSize = 12;
             _titleLabel.style.color = TextPrimary;
             _titleLabel.style.flexGrow = 1;
@@ -169,6 +170,25 @@ namespace AgentCore.Editor.UI.Components
             _fileListContainer.style.flexGrow = 1;
             _fileListContainer.style.overflow = Overflow.Hidden;
             _content.Add(_fileListContainer);
+
+            // v1.9.0+: 语言热切换 — 仅 title 部分用缓存计数重绘
+            RegisterCallback<AttachToPanelEvent>(_ =>
+                AgentCore.Editor.L10n.LanguageManager.LanguageChanged += OnLanguageChanged);
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+                AgentCore.Editor.L10n.LanguageManager.LanguageChanged -= OnLanguageChanged);
+        }
+
+        private void OnLanguageChanged(string _)
+        {
+            if (_lastFileCount <= 0)
+            {
+                _titleLabel.text = AgentCore.Editor.L10n.Loc.Tr("fileChange.header.empty", "此对话中已更改 0 个文件");
+            }
+            else
+            {
+                _titleLabel.text = AgentCore.Editor.L10n.Loc.Tr(
+                    "fileChange.header.some", "此对话中已更改 {0} 个文件", _lastFileCount);
+            }
         }
 
         #endregion
@@ -199,8 +219,10 @@ namespace AgentCore.Editor.UI.Components
                 totalRemoved += s.TotalLinesRemoved;
             }
 
-            // 更新标题
-            _titleLabel.text = $"此对话中已更改 {summaries.Count} 个文件";
+            // 更新标题 (Loc)
+            _lastFileCount = summaries.Count;
+            _titleLabel.text = AgentCore.Editor.L10n.Loc.Tr(
+                "fileChange.header.some", "此对话中已更改 {0} 个文件", summaries.Count);
 
             // 更新总统计
             _statsLabel.text = FormatLineStats(totalAdded, totalRemoved);
@@ -226,7 +248,8 @@ namespace AgentCore.Editor.UI.Components
         {
             _fileListContainer.Clear();
             _lastClickTimes.Clear();
-            _titleLabel.text = "此对话中已更改 0 个文件";
+            _lastFileCount = 0;
+            _titleLabel.text = AgentCore.Editor.L10n.Loc.Tr("fileChange.header.empty", "此对话中已更改 0 个文件");
             _statsLabel.text = "";
             style.display = DisplayStyle.None;
         }
@@ -285,7 +308,7 @@ namespace AgentCore.Editor.UI.Components
             if (summary.ChangeType == FileChangeType.Deleted)
             {
                 pathLabel.style.color = ColorDeleted;
-                pathLabel.text = $"{displayPath}  (已删除)";
+                pathLabel.text = $"{displayPath}  {AgentCore.Editor.L10n.Loc.Tr("fileChange.deletedSuffix", "(已删除)")}";
             }
             else
             {

@@ -188,8 +188,8 @@ namespace AgentCore.Editor.UI.Components
             _toolNameLabel.style.textOverflow = TextOverflow.Ellipsis;
             headerRow.Add(_toolNameLabel);
 
-            // 状态文本
-            _statusLabel = new Label("等待中...");
+            // 状态文本 (Loc)
+            _statusLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.waiting", "等待中..."));
             _statusLabel.style.fontSize = 11;
             _statusLabel.style.color = TextSecondary;
             _statusLabel.style.marginLeft = 8;
@@ -197,7 +197,7 @@ namespace AgentCore.Editor.UI.Components
             headerRow.Add(_statusLabel);
 
             // 复制按钮（默认隐藏，有详情时才显示，避免 UI 噪音）
-            _copyButton = new Button(OnCopyClicked) { text = "复制" };
+            _copyButton = new Button(OnCopyClicked) { text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.copyButton", "复制") };
             _copyButton.style.fontSize = 10;
             _copyButton.style.color = TextPrimary;
             _copyButton.style.backgroundColor = CopyButtonBg;
@@ -218,7 +218,7 @@ namespace AgentCore.Editor.UI.Components
             _copyButton.style.borderBottomRightRadius = 2;
             _copyButton.style.flexShrink = 0;
             _copyButton.style.display = DisplayStyle.None; // 默认隐藏
-            _copyButton.tooltip = "复制完整原始详情到剪贴板";
+            _copyButton.tooltip = AgentCore.Editor.L10n.Loc.Tr("chat.tool.copyTooltip", "复制完整原始详情到剪贴板");
             // 阻止点击复制按钮时冒泡到卡片本身触发折叠切换
             _copyButton.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
             headerRow.Add(_copyButton);
@@ -287,7 +287,7 @@ namespace AgentCore.Editor.UI.Components
             // 如果有参数，预设详情内容（v1.4.8 起不再截断）
             if (!string.IsNullOrEmpty(arguments))
             {
-                SetDetailsInternal("参数: " + arguments);
+                SetDetailsInternal(AgentCore.Editor.L10n.Loc.Tr("toolCall.card.argsPrefix", "参数: {0}", arguments));
             }
 
             // === 点击事件：展开/折叠详情 ===
@@ -360,7 +360,10 @@ namespace AgentCore.Editor.UI.Components
             {
                 var omitted = _detailsRaw.Length - DetailsDisplayLimit;
                 displayValue = _detailsRaw.Substring(0, DetailsDisplayLimit)
-                    + $"\n\n… [已截断 {omitted:N0} 字符，仅影响此处显示。点击右上角\"复制\"可获取完整内容] …";
+                    + AgentCore.Editor.L10n.Loc.Tr(
+                        "toolCall.card.detailsTruncated",
+                        "\n\n… [已截断 {0} 字符，仅影响此处显示。点击右上角\"复制\"可获取完整内容] …",
+                        $"{omitted:N0}");
             }
 
             _detailsField.SetValueWithoutNotify(displayValue);
@@ -393,7 +396,7 @@ namespace AgentCore.Editor.UI.Components
             // 视觉反馈：按钮短暂变绿 + 文字变"已复制"，1 秒后恢复
             var originalText = _copyButton.text;
             var originalBg = _copyButton.style.backgroundColor;
-            _copyButton.text = "已复制";
+            _copyButton.text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.copyButtonCopied", "已复制");
             _copyButton.style.backgroundColor = CopyButtonBgFlash;
 
             // 使用 schedule 而不是 Coroutine——UI Toolkit VisualElement 自带 schedule 系统，
@@ -451,9 +454,11 @@ namespace AgentCore.Editor.UI.Components
                     _statusIcon.text = IconPending;
                     _statusIcon.style.color = TextSecondary;
                     style.borderLeftColor = BorderBlue;
-                    if (string.IsNullOrEmpty(_statusLabel.text) || _statusLabel.text == "等待中...")
+                    // v1.9.0+: 之前用 == "等待中..." 判断"初始状态", 多语言后失效;
+                    // 改为仅当 label 为空时填默认值 (调用方已传值时不覆盖).
+                    if (string.IsNullOrEmpty(_statusLabel.text))
                     {
-                        _statusLabel.text = "等待中...";
+                        _statusLabel.text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.waiting", "等待中...");
                     }
                     break;
 
@@ -463,7 +468,7 @@ namespace AgentCore.Editor.UI.Components
                     style.borderLeftColor = BorderBlue;
                     if (string.IsNullOrEmpty(_statusLabel.text))
                     {
-                        _statusLabel.text = "执行中...";
+                        _statusLabel.text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.running", "执行中...");
                     }
                     break;
 
@@ -473,7 +478,7 @@ namespace AgentCore.Editor.UI.Components
                     style.borderLeftColor = BorderGreen;
                     if (string.IsNullOrEmpty(_statusLabel.text))
                     {
-                        _statusLabel.text = "完成";
+                        _statusLabel.text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.completed", "完成");
                     }
                     break;
 
@@ -483,7 +488,7 @@ namespace AgentCore.Editor.UI.Components
                     style.borderLeftColor = BorderRed;
                     if (string.IsNullOrEmpty(_statusLabel.text))
                     {
-                        _statusLabel.text = "失败";
+                        _statusLabel.text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.failed", "失败");
                     }
                     break;
             }

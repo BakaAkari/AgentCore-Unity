@@ -376,10 +376,10 @@ namespace AgentCore.Editor.UI.Components
             {
                 // 禁用按钮防止重复点击
                 btn.SetEnabled(false);
-                btn.text = "重试中...";
+                btn.text = AgentCore.Editor.L10n.Loc.Tr("message.retrying", "重试中...");
                 OnRetryClicked?.Invoke();
             });
-            btn.text = " 重试";
+            btn.text = " " + AgentCore.Editor.L10n.Loc.Tr("message.retry", "重试");
             btn.style.paddingLeft = 8;
             btn.style.paddingRight = 8;
             btn.style.paddingTop = 3;
@@ -548,9 +548,9 @@ namespace AgentCore.Editor.UI.Components
         {
             return role switch
             {
-                "user" => "用户",
-                "assistant" => "助手",
-                "error" => "错误",
+                "user" => AgentCore.Editor.L10n.Loc.Tr("message.role.user", "用户"),
+                "assistant" => AgentCore.Editor.L10n.Loc.Tr("message.role.assistant", "助手"),
+                "error" => AgentCore.Editor.L10n.Loc.Tr("message.role.error", "错误"),
                 _ => role
             };
         }
@@ -596,7 +596,7 @@ namespace AgentCore.Editor.UI.Components
                 return;
             }
 
-            _copyButton.text = "复制";
+            _copyButton.text = AgentCore.Editor.L10n.Loc.Tr("message.copy", "复制");
             _copyButton.focusable = false; // 避免抢焦点导致文本选中丢失
 
             _copyButton.clicked += HandleCopyClicked;
@@ -617,18 +617,18 @@ namespace AgentCore.Editor.UI.Components
             catch (Exception ex)
             {
                 AgentCoreLog.Warning($"[AgentCore] Copy to clipboard failed: {ex.Message}");
-                _copyButton.text = "失败";
-                schedule.Execute(() => { if (_copyButton != null) _copyButton.text = "复制"; }).StartingIn(1200);
+                _copyButton.text = AgentCore.Editor.L10n.Loc.Tr("message.copyFailed", "失败");
+                schedule.Execute(() => { if (_copyButton != null) _copyButton.text = AgentCore.Editor.L10n.Loc.Tr("message.copy", "复制"); }).StartingIn(1200);
                 return;
             }
 
-            _copyButton.text = "已复制";
+            _copyButton.text = AgentCore.Editor.L10n.Loc.Tr("message.copyCopied", "已复制");
 
             // 1.2 秒后恢复原文
             _copyResetTask?.Pause();
             _copyResetTask = schedule.Execute(() =>
             {
-                if (_copyButton != null) _copyButton.text = "复制";
+                if (_copyButton != null) _copyButton.text = AgentCore.Editor.L10n.Loc.Tr("message.copy", "复制");
             }).StartingIn(1200);
         }
 
