@@ -57,7 +57,7 @@ namespace AgentCore.Editor.UI.Components
             titleLabel.AddToClassList("memory-panel__title");
             Add(titleLabel);
 
-            var statusSection = CreateSection("状态");
+            var statusSection = CreateSection(AgentCore.Editor.L10n.Loc.Tr("memory.status.section", "状态"));
             Add(statusSection);
 
             _statusEnabledLabel = new Label();
@@ -82,22 +82,22 @@ namespace AgentCore.Editor.UI.Components
             statusButtonRow.AddToClassList("memory-panel__button-row");
             statusSection.Add(statusButtonRow);
 
-            _testConnectionButton = new Button(OnTestConnectionClicked) { text = "测试连接" };
+            _testConnectionButton = new Button(OnTestConnectionClicked) { text = AgentCore.Editor.L10n.Loc.Tr("memory.button.testConnection", "测试连接") };
             _testConnectionButton.AddToClassList("memory-panel__button");
             statusButtonRow.Add(_testConnectionButton);
 
-            _createUserButton = new Button(OnCreateUserClicked) { text = "创建用户" };
+            _createUserButton = new Button(OnCreateUserClicked) { text = AgentCore.Editor.L10n.Loc.Tr("memory.button.createUser", "创建用户") };
             _createUserButton.AddToClassList("memory-panel__button");
             _createUserButton.AddToClassList("memory-panel__button--secondary");
             _createUserButton.style.display = DisplayStyle.None;
             statusButtonRow.Add(_createUserButton);
 
-            _openSettingsButton = new Button(OnOpenSettingsClicked) { text = "打开设置" };
+            _openSettingsButton = new Button(OnOpenSettingsClicked) { text = AgentCore.Editor.L10n.Loc.Tr("memory.button.openSettings", "打开设置") };
             _openSettingsButton.AddToClassList("memory-panel__button");
             _openSettingsButton.AddToClassList("memory-panel__button--secondary");
             statusButtonRow.Add(_openSettingsButton);
 
-            var addSection = CreateSection("添加记忆");
+            var addSection = CreateSection(AgentCore.Editor.L10n.Loc.Tr("memory.section.addMemory", "添加记忆"));
             Add(addSection);
 
             _addMemoryField = new TextField { multiline = true };
@@ -105,11 +105,11 @@ namespace AgentCore.Editor.UI.Components
             _addMemoryField.RegisterValueChangedCallback(_ => UpdateActionButtons());
             addSection.Add(_addMemoryField);
 
-            var addHint = new Label("写入需要长期保存的偏好、约定、架构决策或技术发现。请输入明确、完整的一句话或一段话。");
+            var addHint = new Label(AgentCore.Editor.L10n.Loc.Tr("memory.hint.addMemory", "写入需要长期保存的偏好、约定、架构决策或技术发现。请输入明确、完整的一句话或一段话。"));
             addHint.AddToClassList("memory-panel__hint");
             addSection.Add(addHint);
 
-            _addMemoryButton = new Button(OnAddMemoryClicked) { text = "+ 添加记忆" };
+            _addMemoryButton = new Button(OnAddMemoryClicked) { text = AgentCore.Editor.L10n.Loc.Tr("memory.button.addMemory", "+ 添加记忆") };
             _addMemoryButton.AddToClassList("memory-panel__button");
             _addMemoryButton.AddToClassList("memory-panel__button--primary");
             addSection.Add(_addMemoryButton);
@@ -130,13 +130,13 @@ namespace AgentCore.Editor.UI.Components
             memoriesTitleRow.AddToClassList("memory-panel__list-title-row");
             _memoriesSection.Add(memoriesTitleRow);
 
-            var memoriesTitle = new Label("记忆列表");
+            var memoriesTitle = new Label(AgentCore.Editor.L10n.Loc.Tr("memory.section.memoryList", "记忆列表"));
             memoriesTitle.AddToClassList("memory-panel__section-title");
             memoriesTitle.style.flexGrow = 1;
             memoriesTitle.style.marginBottom = 0;
             memoriesTitleRow.Add(memoriesTitle);
 
-            _refreshMemoriesButton = new Button(OnRefreshMemoriesClicked) { text = "刷新" };
+            _refreshMemoriesButton = new Button(OnRefreshMemoriesClicked) { text = AgentCore.Editor.L10n.Loc.Tr("memory.button.refresh", "刷新") };
             _refreshMemoriesButton.AddToClassList("memory-panel__button");
             _refreshMemoriesButton.AddToClassList("memory-panel__button--secondary");
             _refreshMemoriesButton.AddToClassList("memory-panel__button--small");
@@ -146,7 +146,7 @@ namespace AgentCore.Editor.UI.Components
             _memoriesScrollView.AddToClassList("memory-panel__memories-scroll");
             _memoriesSection.Add(_memoriesScrollView);
 
-            var placeholder = new Label("点击'刷新'加载记忆列表。");
+            var placeholder = new Label(AgentCore.Editor.L10n.Loc.Tr("memory.list.placeholder", "点击'刷新'加载记忆列表。"));
             placeholder.AddToClassList("memory-panel__hint");
             placeholder.name = "memory-placeholder";
             _memoriesScrollView.Add(placeholder);
@@ -177,10 +177,10 @@ namespace AgentCore.Editor.UI.Components
         {
             var settings = AgentCoreSettings.instance;
             bool enabled = settings.mem0Enabled;
-            string endpoint = string.IsNullOrEmpty(settings.mem0Endpoint) ? "未配置" : settings.mem0Endpoint;
+            string endpoint = string.IsNullOrEmpty(settings.mem0Endpoint) ? AgentCore.Editor.L10n.Loc.Tr("memory.status.endpoint.notConfigured", "未配置") : settings.mem0Endpoint;
             string userId = settings.EffectiveUserId;
 
-            _statusEnabledLabel.text = enabled ? "mem0：已启用" : "mem0：未启用";
+            _statusEnabledLabel.text = enabled ? AgentCore.Editor.L10n.Loc.Tr("memory.status.mem0.enabled", "mem0：已启用") : AgentCore.Editor.L10n.Loc.Tr("memory.status.mem0.disabled", "mem0：未启用");
             _statusEnabledLabel.EnableInClassList("memory-panel__status--ok", enabled);
             _statusEnabledLabel.EnableInClassList("memory-panel__status--warn", !enabled);
 
@@ -189,14 +189,14 @@ namespace AgentCore.Editor.UI.Components
 
             if (!enabled)
             {
-                _statusConnectionLabel.text = "连接状态：未启用";
+                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.disabled", "连接状态：未启用");
                 _statusConnectionLabel.EnableInClassList("memory-panel__status--warn", true);
                 _statusConnectionLabel.EnableInClassList("memory-panel__status--ok", false);
                 _statusConnectionLabel.EnableInClassList("memory-panel__status--error", false);
             }
             else
             {
-                _statusConnectionLabel.text = "连接状态：未测试";
+                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.notTested", "连接状态：未测试");
                 _statusConnectionLabel.EnableInClassList("memory-panel__status--warn", false);
                 _statusConnectionLabel.EnableInClassList("memory-panel__status--ok", false);
                 _statusConnectionLabel.EnableInClassList("memory-panel__status--error", false);
@@ -211,13 +211,19 @@ namespace AgentCore.Editor.UI.Components
             var settings = AgentCoreSettings.instance;
             if (!settings.mem0Enabled)
             {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中启用 mem0 服务。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.needEnable", "请先在 AgentCore Settings 中启用 mem0 服务。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
             if (string.IsNullOrEmpty(settings.mem0Endpoint))
             {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中配置 mem0 Endpoint。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.needConfigure", "请先在 AgentCore Settings 中配置 mem0 Endpoint。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
@@ -226,7 +232,7 @@ namespace AgentCore.Editor.UI.Components
 
             _testConnectionButton.SetEnabled(false);
             _createUserButton.style.display = DisplayStyle.None;
-            _statusConnectionLabel.text = "连接状态：测试中...";
+            _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.testing", "连接状态：测试中...");
             SetConnectionStatusClass(false, false, false);
 
             try
@@ -234,7 +240,7 @@ namespace AgentCore.Editor.UI.Components
                 var client = Mem0Client.FromSettings();
                 if (client == null)
                 {
-                    _statusConnectionLabel.text = "连接状态：mem0 未启用";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.mem0Disabled", "连接状态：mem0 未启用");
                     SetConnectionStatusClass(false, true, false);
                     return;
                 }
@@ -242,7 +248,7 @@ namespace AgentCore.Editor.UI.Components
                 var connection = await client.TestConnectionAsync(_statusCts.Token);
                 if (!connection.success)
                 {
-                    _statusConnectionLabel.text = $"连接状态：失败 - {connection.message}";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.failed", "连接状态：失败 - {0}", connection.message);
                     SetConnectionStatusClass(false, false, true);
                     return;
                 }
@@ -250,29 +256,29 @@ namespace AgentCore.Editor.UI.Components
                 var user = await client.CheckUserExistsAsync(_statusCts.Token);
                 if (user.exists)
                 {
-                    _statusConnectionLabel.text = "连接状态：已连接，用户存在";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.userExists", "连接状态：已连接，用户存在");
                     SetConnectionStatusClass(true, false, false);
                 }
                 else if (user.status == Mem0ConnectionStatus.UserNotFound)
                 {
-                    _statusConnectionLabel.text = "连接状态：已连接，但用户不存在";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.userMissing", "连接状态：已连接，但用户不存在");
                     SetConnectionStatusClass(false, true, false);
                     _createUserButton.style.display = DisplayStyle.Flex;
                 }
                 else
                 {
-                    _statusConnectionLabel.text = $"连接状态：{user.message}";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.result", "连接状态：{0}", user.message);
                     SetConnectionStatusClass(false, false, true);
                 }
             }
             catch (OperationCanceledException)
             {
-                _statusConnectionLabel.text = "连接状态：已取消";
+                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.canceled", "连接状态：已取消");
                 SetConnectionStatusClass(false, true, false);
             }
             catch (Exception ex)
             {
-                _statusConnectionLabel.text = $"连接状态：错误 - {ex.Message}";
+                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.error", "连接状态：错误 - {0}", ex.Message);
                 SetConnectionStatusClass(false, false, true);
             }
             finally
@@ -287,7 +293,10 @@ namespace AgentCore.Editor.UI.Components
             var settings = AgentCoreSettings.instance;
             if (!settings.mem0Enabled)
             {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中启用 mem0 服务。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.needEnable", "请先在 AgentCore Settings 中启用 mem0 服务。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
@@ -295,7 +304,7 @@ namespace AgentCore.Editor.UI.Components
             _statusCts = new CancellationTokenSource();
 
             _createUserButton.SetEnabled(false);
-            _statusConnectionLabel.text = "连接状态：正在创建用户...";
+            _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.creatingUser", "连接状态：正在创建用户...");
             SetConnectionStatusClass(false, false, false);
 
             try
@@ -303,7 +312,7 @@ namespace AgentCore.Editor.UI.Components
                 var client = Mem0Client.FromSettings();
                 if (client == null)
                 {
-                    _statusConnectionLabel.text = "连接状态：mem0 未启用";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.mem0Disabled", "连接状态：mem0 未启用");
                     SetConnectionStatusClass(false, true, false);
                     return;
                 }
@@ -311,25 +320,25 @@ namespace AgentCore.Editor.UI.Components
                 var result = await client.CreateUserAsync(_statusCts.Token);
                 if (result.success)
                 {
-                    _statusConnectionLabel.text = $"连接状态：{result.message}";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.result", "连接状态：{0}", result.message);
                     SetConnectionStatusClass(true, false, false);
                     _createUserButton.style.display = DisplayStyle.None;
                 }
                 else
                 {
-                    _statusConnectionLabel.text = $"连接状态：创建用户失败 - {result.message}";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.createUserFailed", "连接状态：创建用户失败 - {0}", result.message);
                     SetConnectionStatusClass(false, false, true);
                     _createUserButton.style.display = DisplayStyle.Flex;
                 }
             }
             catch (OperationCanceledException)
             {
-                _statusConnectionLabel.text = "连接状态：已取消";
+                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.canceled", "连接状态：已取消");
                 SetConnectionStatusClass(false, true, false);
             }
             catch (Exception ex)
             {
-                _statusConnectionLabel.text = $"连接状态：错误 - {ex.Message}";
+                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.error", "连接状态：错误 - {0}", ex.Message);
                 SetConnectionStatusClass(false, false, true);
             }
             finally
@@ -349,14 +358,20 @@ namespace AgentCore.Editor.UI.Components
             string content = _addMemoryField?.value?.Trim();
             if (string.IsNullOrEmpty(content))
             {
-                EditorUtility.DisplayDialog("提示", "请输入要添加的记忆内容。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.inputEmpty", "请输入要添加的记忆内容。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
             var settings = AgentCoreSettings.instance;
             if (!settings.mem0Enabled)
             {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中启用 mem0 服务。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.needEnable", "请先在 AgentCore Settings 中启用 mem0 服务。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
@@ -364,14 +379,14 @@ namespace AgentCore.Editor.UI.Components
             _addCts = new CancellationTokenSource();
 
             _addMemoryButton.SetEnabled(false);
-            ShowAddResult("正在添加记忆...", false, false);
+            ShowAddResult(AgentCore.Editor.L10n.Loc.Tr("memory.status.addingMemory", "正在添加记忆..."), false, false);
 
             try
             {
                 var client = Mem0Client.FromSettings();
                 if (client == null)
                 {
-                    ShowAddResult("添加失败：mem0 未启用或配置无效。", false, true);
+                    ShowAddResult(AgentCore.Editor.L10n.Loc.Tr("memory.status.addFailed.notEnabled", "添加失败：mem0 未启用或配置无效。"), false, true);
                     return;
                 }
 
@@ -385,21 +400,21 @@ namespace AgentCore.Editor.UI.Components
                 if (result.Success)
                 {
                     _addMemoryField.value = string.Empty;
-                    ShowAddResult("记忆已添加。", true, false);
+                    ShowAddResult(AgentCore.Editor.L10n.Loc.Tr("memory.status.added", "记忆已添加。"), true, false);
                     await RefreshMemoriesAsync();
                 }
                 else
                 {
-                    ShowAddResult($"添加失败：{result.Message}", false, true);
+                    ShowAddResult(AgentCore.Editor.L10n.Loc.Tr("memory.status.addFailed", "添加失败：{0}", result.Message), false, true);
                 }
             }
             catch (OperationCanceledException)
             {
-                ShowAddResult("添加已取消。", false, false);
+                ShowAddResult(AgentCore.Editor.L10n.Loc.Tr("memory.status.addCanceled", "添加已取消。"), false, false);
             }
             catch (Exception ex)
             {
-                ShowAddResult($"添加失败：{ex.Message}", false, true);
+                ShowAddResult(AgentCore.Editor.L10n.Loc.Tr("memory.status.addFailed", "添加失败：{0}", ex.Message), false, true);
             }
             finally
             {
@@ -418,7 +433,7 @@ namespace AgentCore.Editor.UI.Components
             var settings = AgentCoreSettings.instance;
             if (!settings.mem0Enabled)
             {
-                RenderMessage("mem0 未启用。请先打开设置并启用 mem0 服务。", true);
+                RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.mem0NotEnabled", "mem0 未启用。请先打开设置并启用 mem0 服务。"), true);
                 return;
             }
 
@@ -426,14 +441,14 @@ namespace AgentCore.Editor.UI.Components
             _listCts = new CancellationTokenSource();
 
             _refreshMemoriesButton.SetEnabled(false);
-            RenderMessage("正在加载记忆列表...", false);
+            RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.loading", "正在加载记忆列表..."), false);
 
             try
             {
                 var client = Mem0Client.FromSettings();
                 if (client == null)
                 {
-                    RenderMessage("mem0 未启用或配置无效。", true);
+                    RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteFailedBody.notEnabled", "mem0 未启用或配置无效。"), true);
                     return;
                 }
 
@@ -442,11 +457,11 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (OperationCanceledException)
             {
-                RenderMessage("加载已取消。", false);
+                RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.loadCanceled", "加载已取消。"), false);
             }
             catch (Exception ex)
             {
-                RenderMessage($"加载记忆列表失败：{ex.Message}", true);
+                RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.loadFailed", "加载记忆列表失败：{0}", ex.Message), true);
             }
             finally
             {
@@ -461,8 +476,8 @@ namespace AgentCore.Editor.UI.Components
 
             if (memories == null || memories.Count == 0)
             {
-                RenderMessage("暂无记忆。", false);
-                _memoriesSummaryLabel.text = "记忆总数：0 条。";
+                RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.empty", "暂无记忆。"), false);
+                _memoriesSummaryLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.summary.total", "记忆总数：0 条。");
                 return;
             }
 
@@ -471,7 +486,7 @@ namespace AgentCore.Editor.UI.Components
                 _memoriesScrollView.Add(BuildMemoryItem(memory));
             }
 
-            _memoriesSummaryLabel.text = $"已加载 {memories.Count} 条记忆。";
+            _memoriesSummaryLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.summary.loaded", "已加载 {0} 条记忆。", memories.Count);
         }
 
         private VisualElement BuildMemoryItem(Mem0Memory memory)
@@ -487,14 +502,14 @@ namespace AgentCore.Editor.UI.Components
             title.AddToClassList("memory-panel__memory-title");
             header.Add(title);
 
-            var deleteButton = new Button(() => OnDeleteMemoryClicked(memory?.Id, memory?.Content)) { text = "删除" };
+            var deleteButton = new Button(() => OnDeleteMemoryClicked(memory?.Id, memory?.Content)) { text = AgentCore.Editor.L10n.Loc.Tr("common.delete", "删除") };
             deleteButton.AddToClassList("memory-panel__button");
             deleteButton.AddToClassList("memory-panel__button--small");
             deleteButton.AddToClassList("memory-panel__button--danger");
             deleteButton.SetEnabled(!string.IsNullOrEmpty(memory?.Id));
             header.Add(deleteButton);
 
-            var content = new Label(string.IsNullOrEmpty(memory?.Content) ? "无内容" : memory.Content);
+            var content = new Label(string.IsNullOrEmpty(memory?.Content) ? AgentCore.Editor.L10n.Loc.Tr("memory.item.noContent", "无内容") : memory.Content);
             content.AddToClassList("memory-panel__memory-content");
             item.Add(content);
 
@@ -509,16 +524,19 @@ namespace AgentCore.Editor.UI.Components
         {
             if (string.IsNullOrEmpty(memoryId))
             {
-                EditorUtility.DisplayDialog("提示", "无法删除：记忆 ID 为空。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.idEmpty", "无法删除：记忆 ID 为空。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
             string preview = Truncate(previewText, PreviewMaxLength);
             bool confirm = EditorUtility.DisplayDialog(
-                "删除记忆",
-                $"确定要删除这条记忆吗？\n\n{preview}",
-                "删除",
-                "取消");
+                AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteTitle", "删除记忆"),
+                AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteBody", "确定要删除这条记忆吗？\n\n{0}", preview),
+                AgentCore.Editor.L10n.Loc.Tr("common.delete", "删除"),
+                AgentCore.Editor.L10n.Loc.Tr("common.cancel", "取消"));
 
             if (!confirm)
                 return;
@@ -531,14 +549,20 @@ namespace AgentCore.Editor.UI.Components
                 var client = Mem0Client.FromSettings();
                 if (client == null)
                 {
-                    EditorUtility.DisplayDialog("删除失败", "mem0 未启用或配置无效。", "确定");
+                    EditorUtility.DisplayDialog(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteFailedTitle", "删除失败"),
+                        AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteFailedBody.notEnabled", "mem0 未启用或配置无效。"),
+                        AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                     return;
                 }
 
                 bool deleted = await client.DeleteMemoryAsync(memoryId, null, _deleteCts.Token);
                 if (!deleted)
                 {
-                    EditorUtility.DisplayDialog("删除失败", "mem0 服务未确认删除成功。", "确定");
+                    EditorUtility.DisplayDialog(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteFailedTitle", "删除失败"),
+                        AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteFailedBody.serviceReject", "mem0 服务未确认删除成功。"),
+                        AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                     return;
                 }
 
@@ -546,11 +570,14 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (OperationCanceledException)
             {
-                RenderMessage("删除已取消。", false);
+                RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.deleteCanceled", "删除已取消。"), false);
             }
             catch (Exception ex)
             {
-                EditorUtility.DisplayDialog("删除失败", ex.Message, "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.dialog.deleteFailedTitle", "删除失败"),
+                    ex.Message,
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
             }
         }
 
@@ -613,13 +640,13 @@ namespace AgentCore.Editor.UI.Components
 
             var parts = new List<string>();
             if (!string.IsNullOrEmpty(memory.CreatedAt))
-                parts.Add($"创建：{FormatDateTime(memory.CreatedAt)}");
+                parts.Add(AgentCore.Editor.L10n.Loc.Tr("memory.item.created", "创建：{0}", FormatDateTime(memory.CreatedAt)));
             if (!string.IsNullOrEmpty(memory.UpdatedAt) && memory.UpdatedAt != memory.CreatedAt)
-                parts.Add($"更新：{FormatDateTime(memory.UpdatedAt)}");
+                parts.Add(AgentCore.Editor.L10n.Loc.Tr("memory.item.updated", "更新：{0}", FormatDateTime(memory.UpdatedAt)));
             if (!string.IsNullOrEmpty(memory.State))
-                parts.Add($"状态：{memory.State}");
+                parts.Add(AgentCore.Editor.L10n.Loc.Tr("memory.item.state", "状态：{0}", memory.State));
 
-            return parts.Count > 0 ? string.Join("  ", parts) : "无元数据";
+            return parts.Count > 0 ? string.Join("  ", parts) : AgentCore.Editor.L10n.Loc.Tr("memory.item.emptyMeta", "无元数据");
         }
 
         private static string FormatDateTime(string value)
@@ -632,7 +659,7 @@ namespace AgentCore.Editor.UI.Components
         private static string Truncate(string text, int maxLength)
         {
             if (string.IsNullOrEmpty(text))
-                return "无内容";
+                return AgentCore.Editor.L10n.Loc.Tr("memory.item.noContent", "无内容");
             if (text.Length <= maxLength)
                 return text;
             return text.Substring(0, maxLength) + "...";

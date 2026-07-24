@@ -85,7 +85,7 @@ namespace AgentCore.Editor.UI.Components
             _verdictIcon.style.unityFontStyleAndWeight = FontStyle.Bold;
             header.Add(_verdictIcon);
 
-            _verdictText = new Label("自挑战");
+            _verdictText = new Label(AgentCore.Editor.L10n.Loc.Tr("selfChallenge.title", "自挑战"));
             _verdictText.style.color = TextPrimary;
             _verdictText.style.unityFontStyleAndWeight = FontStyle.Bold;
             _verdictText.style.marginRight = 8;
@@ -170,9 +170,9 @@ namespace AgentCore.Editor.UI.Components
             {
                 switch (data.NodeBVerdict)
                 {
-                    case NodeBVerdict.PASS: return (IconPass, VerdictPassColor, "通过");
-                    case NodeBVerdict.REVISE: return (IconRevise, VerdictReviseColor, "已修正");
-                    case NodeBVerdict.BLOCK: return (IconBlock, VerdictBlockColor, "已阻止");
+                    case NodeBVerdict.PASS: return (IconPass, VerdictPassColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.pass", "通过"));
+                    case NodeBVerdict.REVISE: return (IconRevise, VerdictReviseColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.revise", "已修正"));
+                    case NodeBVerdict.BLOCK: return (IconBlock, VerdictBlockColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.block", "已阻止"));
                 }
             }
 
@@ -180,17 +180,17 @@ namespace AgentCore.Editor.UI.Components
             if (data.NodeATriggered)
             {
                 if (data.TriggeredClarification)
-                    return (IconWaiting, VerdictRunningColor, "等待澄清");
+                    return (IconWaiting, VerdictRunningColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.waitingClarification", "等待澄清"));
                 if (data.NodeBTriggered)
-                    return (IconRunning, VerdictRunningColor, "自审中...");
-                return (IconPass, VerdictPassColor, "意图明确");
+                    return (IconRunning, VerdictRunningColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.running", "自审中..."));
+                return (IconPass, VerdictPassColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.intentClear", "意图明确"));
             }
 
             // Skip
             if (!string.IsNullOrEmpty(data.NodeASkipReason))
-                return (IconSkipped, VerdictSkippedColor, $"已跳过 ({data.NodeASkipReason})");
+                return (IconSkipped, VerdictSkippedColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.skipped", "已跳过 ({0})", data.NodeASkipReason));
 
-            return (IconSkipped, VerdictSkippedColor, "未触发");
+            return (IconSkipped, VerdictSkippedColor, AgentCore.Editor.L10n.Loc.Tr("selfChallenge.verdict.notTriggered", "未触发"));
         }
 
         private static bool ShouldAutoExpand(SelfChallengeData data)

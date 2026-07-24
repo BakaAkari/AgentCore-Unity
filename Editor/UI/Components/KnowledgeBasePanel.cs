@@ -142,7 +142,7 @@ namespace AgentCore.Editor.UI.Components
             Add(titleLabel);
 
             // ── Status 区块 ──
-            var statusSection = CreateSection("状态");
+            var statusSection = CreateSection(AgentCore.Editor.L10n.Loc.Tr("knowledge.status.section", "状态"));
             Add(statusSection);
 
             _statusEnabledLabel = new Label();
@@ -163,25 +163,25 @@ namespace AgentCore.Editor.UI.Components
             actionRow.AddToClassList("kb-panel__button-row");
             statusSection.Add(actionRow);
 
-            _testConnectionButton = new Button(OnTestConnectionClicked) { text = "测试连接" };
+            _testConnectionButton = new Button(OnTestConnectionClicked) { text = AgentCore.Editor.L10n.Loc.Tr("knowledge.button.testConnection", "测试连接") };
             _testConnectionButton.AddToClassList("kb-panel__button");
             actionRow.Add(_testConnectionButton);
 
-            _openSettingsButton = new Button(OnOpenSettingsClicked) { text = "打开设置" };
+            _openSettingsButton = new Button(OnOpenSettingsClicked) { text = AgentCore.Editor.L10n.Loc.Tr("knowledge.button.openSettings", "打开设置") };
             _openSettingsButton.AddToClassList("kb-panel__button");
             _openSettingsButton.AddToClassList("kb-panel__button--secondary");
             actionRow.Add(_openSettingsButton);
 
             // ── Add Knowledge 区块 ──
-            var addSection = CreateSection("添加知识");
+            var addSection = CreateSection(AgentCore.Editor.L10n.Loc.Tr("knowledge.section.addKnowledge", "添加知识"));
             Add(addSection);
 
-            _indexDocumentButton = new Button(OnIndexDocumentClicked) { text = "+ 索引文档..." };
+            _indexDocumentButton = new Button(OnIndexDocumentClicked) { text = AgentCore.Editor.L10n.Loc.Tr("knowledge.button.indexDocument", "+ 索引文档...") };
             _indexDocumentButton.AddToClassList("kb-panel__button");
             _indexDocumentButton.AddToClassList("kb-panel__button--primary");
             addSection.Add(_indexDocumentButton);
 
-            var hintLabel = new Label("支持 .md .txt .cs .json .xml .yaml 等格式，最大 5MB");
+            var hintLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.hint.supportedFormats", "支持 .md .txt .cs .json .xml .yaml 等格式，最大 5MB"));
             hintLabel.AddToClassList("kb-panel__hint");
             addSection.Add(hintLabel);
 
@@ -201,13 +201,13 @@ namespace AgentCore.Editor.UI.Components
             docsTitleRow.style.marginBottom = 8;
             _documentsSection.Add(docsTitleRow);
 
-            var docsSectionTitle = new Label("知识库文档");
+            var docsSectionTitle = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.section.docsTitle", "知识库文档"));
             docsSectionTitle.AddToClassList("kb-panel__section-title");
             docsSectionTitle.style.flexGrow = 1;
             docsSectionTitle.style.marginBottom = 0; // 覆盖 section-title 的 margin-bottom，由父容器控制
             docsTitleRow.Add(docsSectionTitle);
 
-            _refreshDocumentsButton = new Button(OnRefreshDocumentsClicked) { text = "↻ 刷新" };
+            _refreshDocumentsButton = new Button(OnRefreshDocumentsClicked) { text = AgentCore.Editor.L10n.Loc.Tr("knowledge.button.refresh", "↻ 刷新") };
             _refreshDocumentsButton.AddToClassList("kb-panel__button");
             _refreshDocumentsButton.AddToClassList("kb-panel__button--secondary");
             _refreshDocumentsButton.AddToClassList("kb-panel__button--small");
@@ -220,7 +220,7 @@ namespace AgentCore.Editor.UI.Components
             _documentsSection.Add(_documentsScrollView);
 
             // 初始占位提示
-            var docsPlaceholder = new Label("点击「↻ 刷新」加载文档列表");
+            var docsPlaceholder = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.placeholder", "点击「↻ 刷新」加载文档列表"));
             docsPlaceholder.AddToClassList("kb-panel__hint");
             docsPlaceholder.name = "docs-placeholder";
             _documentsScrollView.Add(docsPlaceholder);
@@ -231,15 +231,15 @@ namespace AgentCore.Editor.UI.Components
             _documentsSection.Add(_documentsSummaryLabel);
 
             // ── Last Index Result 区块 ──
-            _lastResultSection = CreateSection("上次索引结果");
+            _lastResultSection = CreateSection(AgentCore.Editor.L10n.Loc.Tr("knowledge.section.lastResult", "上次索引结果"));
             _lastResultSection.style.display = DisplayStyle.None;
             Add(_lastResultSection);
 
-            _lastResultLabel = new Label("尚未索引任何文档。");
+            _lastResultLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.lastResult.none", "尚未索引任何文档。"));
             _lastResultLabel.AddToClassList("kb-panel__result-label");
             _lastResultSection.Add(_lastResultLabel);
 
-            _askAgentButton = new Button(OnAskAgentClicked) { text = "向 Agent 询问此文档" };
+            _askAgentButton = new Button(OnAskAgentClicked) { text = AgentCore.Editor.L10n.Loc.Tr("knowledge.button.askAgent", "向 Agent 询问此文档") };
             _askAgentButton.AddToClassList("kb-panel__button");
             _askAgentButton.AddToClassList("kb-panel__button--accent");
             _askAgentButton.style.display = DisplayStyle.None;
@@ -250,7 +250,7 @@ namespace AgentCore.Editor.UI.Components
             _progressOverlay.AddToClassList("kb-panel__progress-overlay");
             _progressOverlay.style.display = DisplayStyle.None;
 
-            _progressLabel = new Label("处理中...");
+            _progressLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.progress.processing", "处理中..."));
             _progressLabel.AddToClassList("kb-panel__progress-label");
             _progressOverlay.Add(_progressLabel);
             Add(_progressOverlay);
@@ -286,15 +286,15 @@ namespace AgentCore.Editor.UI.Components
 
             // 启用状态
             _statusEnabledLabel.text = enabled
-                ? "LightRAG:  已启用"
-                : "LightRAG:  未启用";
+                ? AgentCore.Editor.L10n.Loc.Tr("knowledge.status.lightRAG.enabled", "LightRAG:  已启用")
+                : AgentCore.Editor.L10n.Loc.Tr("knowledge.status.lightRAG.disabled", "LightRAG:  未启用");
             _statusEnabledLabel.EnableInClassList("kb-panel__status--enabled", enabled);
             _statusEnabledLabel.EnableInClassList("kb-panel__status--disabled", !enabled);
 
             // Endpoint
             _statusEndpointLabel.text = string.IsNullOrEmpty(endpoint)
-                ? "Endpoint: (未配置)"
-                : $"Endpoint: {endpoint}";
+                ? AgentCore.Editor.L10n.Loc.Tr("knowledge.status.endpoint.notConfigured", "Endpoint: (未配置)")
+                : AgentCore.Editor.L10n.Loc.Tr("knowledge.status.endpoint", "Endpoint: {0}", endpoint);
 
             // 连接状态
             UpdateConnectionStatusLabel();
@@ -308,7 +308,7 @@ namespace AgentCore.Editor.UI.Components
 
             if (!enabled)
             {
-                _statusConnectionLabel.text = "连接: — (服务未启用)";
+                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.status.connection.disabled", "连接: — (服务未启用)");
                 _statusConnectionLabel.RemoveFromClassList("kb-panel__status--connected");
                 _statusConnectionLabel.RemoveFromClassList("kb-panel__status--failed");
             }
@@ -319,25 +319,25 @@ namespace AgentCore.Editor.UI.Components
             switch (_connectionStatus)
             {
                 case ConnectionStatus.Unknown:
-                    _statusConnectionLabel.text = "连接: 未测试";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.status.connection.unknown", "连接: 未测试");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--connected");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--failed");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--testing");
                     break;
                 case ConnectionStatus.Testing:
-                    _statusConnectionLabel.text = "连接: 测试中...";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.status.connection.testing", "连接: 测试中...");
                     _statusConnectionLabel.AddToClassList("kb-panel__status--testing");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--connected");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--failed");
                     break;
                 case ConnectionStatus.Connected:
-                    _statusConnectionLabel.text = "连接:  已连接";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.status.connection.connected", "连接:  已连接");
                     _statusConnectionLabel.AddToClassList("kb-panel__status--connected");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--failed");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--testing");
                     break;
                 case ConnectionStatus.Failed:
-                    _statusConnectionLabel.text = "连接:  连接失败";
+                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.status.connection.failed", "连接:  连接失败");
                     _statusConnectionLabel.AddToClassList("kb-panel__status--failed");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--connected");
                     _statusConnectionLabel.RemoveFromClassList("kb-panel__status--testing");
@@ -354,7 +354,10 @@ namespace AgentCore.Editor.UI.Components
             var settings = AgentCoreSettings.instance;
             if (!settings.lightragEnabled || string.IsNullOrEmpty(settings.lightragEndpoint))
             {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中启用 LightRAG 并配置 Endpoint。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.needEnable", "请先在 AgentCore Settings 中启用 LightRAG 并配置 Endpoint。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
@@ -403,19 +406,25 @@ namespace AgentCore.Editor.UI.Components
             var settings = AgentCoreSettings.instance;
             if (!settings.lightragEnabled)
             {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中启用 LightRAG 服务。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.needEnableService", "请先在 AgentCore Settings 中启用 LightRAG 服务。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
             if (string.IsNullOrEmpty(settings.lightragEndpoint))
             {
-                EditorUtility.DisplayDialog("提示", "请先在 AgentCore Settings 中配置 LightRAG Endpoint。", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.tipTitle", "提示"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.needEndpoint", "请先在 AgentCore Settings 中配置 LightRAG Endpoint。"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
             // 打开文件选择对话框
             string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             string filePath = EditorUtility.OpenFilePanel(
-                "选择要索引的文档",
+                AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.selectFile", "选择要索引的文档"),
                 projectRoot,
                 string.Join(",", AllowedExtensions).Replace(".", ""));
 
@@ -427,11 +436,12 @@ namespace AgentCore.Editor.UI.Components
             string normalizedRoot = projectRoot.Replace('\\', '/').TrimEnd('/') + "/";
             if (!normalizedFile.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
             {
-                EditorUtility.DisplayDialog("安全限制",
-                    "只允许索引项目根目录内的文件。\n\n" +
-                    $"项目根目录：{projectRoot}\n" +
-                    $"选择的文件：{filePath}",
-                    "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.securityLimit", "安全限制"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.securityLimitBody",
+                        "只允许索引项目根目录内的文件。\n\n项目根目录：{0}\n选择的文件：{1}",
+                        projectRoot, filePath),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
@@ -444,10 +454,12 @@ namespace AgentCore.Editor.UI.Components
             }
             if (!extAllowed)
             {
-                EditorUtility.DisplayDialog("不支持的文件类型",
-                    $"文件类型 '{ext}' 不在支持列表中。\n\n" +
-                    $"支持的类型：{string.Join(", ", AllowedExtensions)}",
-                    "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.unsupportedType", "不支持的文件类型"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.unsupportedTypeBody",
+                        "文件类型 '{0}' 不在支持列表中。\n\n支持的类型：{1}",
+                        ext, string.Join(", ", AllowedExtensions)),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
@@ -455,16 +467,21 @@ namespace AgentCore.Editor.UI.Components
             var fileInfo = new FileInfo(filePath);
             if (!fileInfo.Exists)
             {
-                EditorUtility.DisplayDialog("错误", $"文件不存在：{filePath}", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("common.error", "错误"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.fileNotExist", "文件不存在：{0}", filePath),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
             if (fileInfo.Length > MaxFileSizeBytes)
             {
                 float sizeMB = fileInfo.Length / (1024f * 1024f);
-                EditorUtility.DisplayDialog("文件过大",
-                    $"文件大小 {sizeMB:F1}MB 超过限制（最大 5MB）。\n\n" +
-                    "请选择较小的文件，或将大文件拆分后分批索引。",
-                    "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.fileTooLarge", "文件过大"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.dialog.fileTooLargeBody",
+                        "文件大小 {0}MB 超过限制（最大 5MB）。\n\n请选择较小的文件，或将大文件拆分后分批索引。",
+                        $"{sizeMB:F1}"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 return;
             }
 
@@ -483,7 +500,7 @@ namespace AgentCore.Editor.UI.Components
             // ── 阶段一：上传 ──
             _indexStatus = IndexStatus.Uploading;
             // 不禁用按钮，不显示进度遮罩，让上传在后台执行
-            _progressLabel.text = $"正在上传：{fileName}...";
+            _progressLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.upload.uploading", "正在上传：{0}...", fileName);
             // 不显示进度遮罩，不阻塞用户交互
             _lastResultSection.style.display = DisplayStyle.None;
             _askAgentButton.style.display = DisplayStyle.None;
@@ -502,7 +519,7 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (OperationCanceledException)
             {
-                errorMessage = "上传超时（60秒）";
+                errorMessage = AgentCore.Editor.L10n.Loc.Tr("knowledge.upload.timeoutMsg", "上传超时（60秒）");
             }
             catch (Exception ex)
             {
@@ -517,8 +534,8 @@ namespace AgentCore.Editor.UI.Components
                 _indexStatus = IndexStatus.Failed;
 
                 _lastResultSection.style.display = DisplayStyle.Flex;
-                string reason = uploadResult?.ErrorMessage ?? errorMessage ?? "请检查 LightRAG 服务状态";
-                _lastIndexSummary = $" 上传失败：{fileName}\n原因：{reason}";
+                string reason = uploadResult?.ErrorMessage ?? errorMessage ?? AgentCore.Editor.L10n.Loc.Tr("knowledge.reason.lightRAGCheckStatus", "请检查 LightRAG 服务状态");
+                _lastIndexSummary = AgentCore.Editor.L10n.Loc.Tr("knowledge.upload.failed", " 上传失败：{0}\n原因：{1}", fileName, reason);
                 _lastResultLabel.text = _lastIndexSummary;
                 _lastResultLabel.AddToClassList("kb-panel__result--failed");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
@@ -536,7 +553,7 @@ namespace AgentCore.Editor.UI.Components
                 _indexStatus = IndexStatus.Success;
 
                 _lastResultSection.style.display = DisplayStyle.Flex;
-                _lastIndexSummary = $" 已上传：{fileName}（无法追踪处理进度）";
+                _lastIndexSummary = AgentCore.Editor.L10n.Loc.Tr("knowledge.upload.unknown", " 已上传：{0}（无法追踪处理进度）", fileName);
                 _lastResultLabel.text = _lastIndexSummary;
                 _lastResultLabel.AddToClassList("kb-panel__result--success");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
@@ -549,11 +566,11 @@ namespace AgentCore.Editor.UI.Components
 
             // 有 track_id，进入轮询阶段
             _indexStatus = IndexStatus.Processing;
-            _progressLabel.text = $"LightRAG 处理中：{fileName}...";
+            _progressLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.lightRAGProcessing", "LightRAG 处理中：{0}...", fileName);
 
             // 显示"处理中"的上次结果（让用户知道进度）
             _lastResultSection.style.display = DisplayStyle.Flex;
-            _lastIndexSummary = $"处理中：{fileName}";
+            _lastIndexSummary = AgentCore.Editor.L10n.Loc.Tr("knowledge.processing", "处理中：{0}", fileName);
             _lastResultLabel.text = _lastIndexSummary;
             _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
             _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
@@ -595,7 +612,7 @@ namespace AgentCore.Editor.UI.Components
                         _indexStatus = IndexStatus.Success;
                         _indexDocumentButton.SetEnabled(true);
 
-                        _lastIndexSummary = $" 索引完成：{fileName}";
+                        _lastIndexSummary = AgentCore.Editor.L10n.Loc.Tr("knowledge.indexed", " 索引完成：{0}", fileName);
                         _lastResultLabel.text = _lastIndexSummary;
                         _lastResultLabel.AddToClassList("kb-panel__result--success");
                         _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
@@ -612,8 +629,8 @@ namespace AgentCore.Editor.UI.Components
                         _indexStatus = IndexStatus.Failed;
                         _indexDocumentButton.SetEnabled(true);
 
-                        string errMsg = status.ErrorMsg ?? "LightRAG 处理失败";
-                        _lastIndexSummary = $" 索引失败：{fileName}\n原因：{errMsg}";
+                        string errMsg = status.ErrorMsg ?? AgentCore.Editor.L10n.Loc.Tr("knowledge.errorMsg.processFailed", "LightRAG 处理失败");
+                        _lastIndexSummary = AgentCore.Editor.L10n.Loc.Tr("knowledge.indexFailed", " 索引失败：{0}\n原因：{1}", fileName, errMsg);
                         _lastResultLabel.text = _lastIndexSummary;
                         _lastResultLabel.AddToClassList("kb-panel__result--failed");
                         _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
@@ -623,8 +640,10 @@ namespace AgentCore.Editor.UI.Components
                     else
                     {
                         // 仍在处理中（pending / processing）
-                        _progressLabel.text = $"LightRAG 处理中：{fileName}（{status.Status}）...";
-                        _lastIndexSummary = $"处理中：{fileName}（{status.Status}）";
+                        _progressLabel.text = AgentCore.Editor.L10n.Loc.Tr(
+                            "knowledge.lightRAGProcessingWithStatus", "LightRAG 处理中：{0}（{1}）...", fileName, status.Status);
+                        _lastIndexSummary = AgentCore.Editor.L10n.Loc.Tr(
+                            "knowledge.processingWithStatus", "处理中：{0}（{1}）", fileName, status.Status);
                         _lastResultLabel.text = _lastIndexSummary;
                     }
                 }
@@ -644,7 +663,8 @@ namespace AgentCore.Editor.UI.Components
                 _indexStatus = IndexStatus.Idle;
                 _indexDocumentButton.SetEnabled(true);
 
-                _lastIndexSummary = $" 处理超时：{fileName}\n请稍后点击「↻ 刷新」查看文档列表确认结果。";
+                _lastIndexSummary = AgentCore.Editor.L10n.Loc.Tr("knowledge.processTimeout",
+                    " 处理超时：{0}\n请稍后点击「↻ 刷新」查看文档列表确认结果。", fileName);
                 _lastResultLabel.text = _lastIndexSummary;
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
@@ -669,7 +689,7 @@ namespace AgentCore.Editor.UI.Components
             if (!settings.lightragEnabled || string.IsNullOrEmpty(settings.lightragEndpoint))
             {
                 _documentsScrollView.Clear();
-                var hint = new Label("请先启用 LightRAG 并配置 Endpoint");
+                var hint = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.list.pleaseEnable", "请先启用 LightRAG 并配置 Endpoint"));
                 hint.AddToClassList("kb-panel__hint");
                 _documentsScrollView.Add(hint);
                 _documentsSummaryLabel.text = "";
@@ -684,7 +704,7 @@ namespace AgentCore.Editor.UI.Components
             _refreshDocumentsButton?.SetEnabled(false);
             _documentsScrollView.Clear();
 
-            var loadingLabel = new Label("加载中...");
+            var loadingLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loading", "加载中..."));
             loadingLabel.AddToClassList("kb-panel__hint");
             _documentsScrollView.Add(loadingLabel);
             _documentsSummaryLabel.text = "";
@@ -699,7 +719,7 @@ namespace AgentCore.Editor.UI.Components
             }
             catch (OperationCanceledException)
             {
-                errorMsg = "加载超时";
+                errorMsg = AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loadTimeout", "加载超时");
             }
             catch (Exception ex)
             {
@@ -715,7 +735,7 @@ namespace AgentCore.Editor.UI.Components
 
             if (errorMsg != null)
             {
-                var errLabel = new Label($"加载失败：{errorMsg}");
+                var errLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loadFailed", "加载失败：{0}", errorMsg));
                 errLabel.AddToClassList("kb-panel__hint");
                 _documentsScrollView.Add(errLabel);
                 _documentsSummaryLabel.text = "";
@@ -724,7 +744,7 @@ namespace AgentCore.Editor.UI.Components
 
             if (docs == null || docs.Count == 0)
             {
-                var emptyLabel = new Label("知识库中暂无文档");
+                var emptyLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.list.empty", "知识库中暂无文档"));
                 emptyLabel.AddToClassList("kb-panel__hint");
                 _documentsScrollView.Add(emptyLabel);
                 _documentsSummaryLabel.text = "";
@@ -759,11 +779,12 @@ namespace AgentCore.Editor.UI.Components
             }
 
             var parts = new System.Collections.Generic.List<string>();
-            if (processed > 0) parts.Add($"{processed} 已处理");
-            if (pending > 0)   parts.Add($"{pending} 处理中");
-            if (failed > 0)    parts.Add($"{failed} 失败");
+            if (processed > 0) parts.Add(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.stat.processed", "{0} 已处理", processed));
+            if (pending > 0)   parts.Add(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.stat.pending", "{0} 处理中", pending));
+            if (failed > 0)    parts.Add(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.stat.failed", "{0} 失败", failed));
 
-            _documentsSummaryLabel.text = $"共 {docs.Count} 个文档（{string.Join("，", parts)}）";
+            _documentsSummaryLabel.text = AgentCore.Editor.L10n.Loc.Tr(
+                "knowledge.docs.summary", "共 {0} 个文档（{1}）", docs.Count, string.Join("，", parts));
         }
 
         /// <summary>
@@ -783,7 +804,7 @@ namespace AgentCore.Editor.UI.Components
 
             // 文件名
             string displayName = string.IsNullOrEmpty(doc.FilePath)
-                ? doc.Id ?? "(未知)"
+                ? doc.Id ?? AgentCore.Editor.L10n.Loc.Tr("knowledge.unknownDoc", "(未知)")
                 : Path.GetFileName(doc.FilePath);
 
             var nameLabel = new Label(displayName);
@@ -814,7 +835,7 @@ namespace AgentCore.Editor.UI.Components
             if (!string.IsNullOrEmpty(doc.ErrorMsg) &&
                 string.Equals(doc.Status, "failed", StringComparison.OrdinalIgnoreCase))
             {
-                var errLabel = new Label($"错误：{doc.ErrorMsg}");
+                var errLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.stat.error", "错误: {0}", doc.ErrorMsg));
                 errLabel.AddToClassList("kb-panel__doc-item__error");
                 item.Add(errLabel);
             }
@@ -828,7 +849,7 @@ namespace AgentCore.Editor.UI.Components
 
             if (doc.ChunksCount > 0)
             {
-                var chunksLabel = new Label($"{doc.ChunksCount} 块");
+                var chunksLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.stat.chunks", "{0} 块", doc.ChunksCount));
                 chunksLabel.AddToClassList("kb-panel__doc-item__meta");
                 chunksLabel.style.flexGrow = 1;
                 bottomRow.Add(chunksLabel);
@@ -843,7 +864,7 @@ namespace AgentCore.Editor.UI.Components
             // 删除按钮（捕获 doc 变量）
             string docId = doc.Id;
             string fileName = displayName;
-            var deleteBtn = new Button(() => OnDeleteDocumentClicked(docId, fileName)) { text = "删除" };
+            var deleteBtn = new Button(() => OnDeleteDocumentClicked(docId, fileName)) { text = AgentCore.Editor.L10n.Loc.Tr("common.delete", "删除") };
             deleteBtn.AddToClassList("kb-panel__button");
             deleteBtn.AddToClassList("kb-panel__button--danger");
             deleteBtn.AddToClassList("kb-panel__button--small");
@@ -856,11 +877,11 @@ namespace AgentCore.Editor.UI.Components
         {
             switch (status?.ToLowerInvariant())
             {
-                case "processed":  return "已处理";
-                case "pending":    return "等待中";
-                case "processing": return "处理中";
-                case "failed":     return "失败";
-                default:           return status ?? "未知";
+                case "processed":  return AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.status.processed", "已处理");
+                case "pending":    return AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.status.pending", "等待中");
+                case "processing": return AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.status.processing", "处理中");
+                case "failed":     return AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.status.failed", "失败");
+                default:           return status ?? AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.status.unknown", "未知");
             }
         }
 
@@ -883,9 +904,10 @@ namespace AgentCore.Editor.UI.Components
         private async void OnDeleteDocumentClicked(string docId, string fileName)
         {
             bool confirm = EditorUtility.DisplayDialog(
-                "确认删除",
-                $"确定要从知识库中删除文档「{fileName}」吗？\n\n此操作不可撤销。",
-                "删除", "取消");
+                AgentCore.Editor.L10n.Loc.Tr("knowledge.deleteDialog.title", "确认删除"),
+                AgentCore.Editor.L10n.Loc.Tr("knowledge.deleteDialog.body", "确定要从知识库中删除文档「{0}」吗？\n\n此操作不可撤销。", fileName),
+                AgentCore.Editor.L10n.Loc.Tr("common.delete", "删除"),
+                AgentCore.Editor.L10n.Loc.Tr("common.cancel", "取消"));
 
             if (!confirm) return;
 
@@ -902,15 +924,19 @@ namespace AgentCore.Editor.UI.Components
                 }
                 else
                 {
-                    EditorUtility.DisplayDialog("删除失败",
-                        $"无法删除文档「{fileName}」，请检查 LightRAG 服务状态。", "确定");
+                    EditorUtility.DisplayDialog(
+                        AgentCore.Editor.L10n.Loc.Tr("knowledge.deleteFailed", "删除失败"),
+                        AgentCore.Editor.L10n.Loc.Tr("knowledge.deleteFailedBody", "无法删除文档「{0}」，请检查 LightRAG 服务状态。", fileName),
+                        AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
                 }
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Warning($"[AgentCore] KnowledgeBasePanel.DeleteDocument failed: {ex.Message}");
-                EditorUtility.DisplayDialog("删除失败",
-                    $"删除文档时发生错误：{ex.Message}", "确定");
+                EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.deleteFailed", "删除失败"),
+                    AgentCore.Editor.L10n.Loc.Tr("knowledge.deleteFailedException", "删除文档时发生错误：{0}", ex.Message),
+                    AgentCore.Editor.L10n.Loc.Tr("common.ok", "确定"));
             }
         }
 
@@ -924,7 +950,10 @@ namespace AgentCore.Editor.UI.Components
                 return;
 
             string fileName = Path.GetFileName(_lastIndexedFile);
-            string prompt = $"请基于刚刚索引的文档「{fileName}」，总结关键内容和可执行建议。";
+            string prompt = AgentCore.Editor.L10n.Loc.Tr(
+                "knowledge.askAgentPrompt",
+                "请基于刚刚索引的文档「{0}」，总结关键内容和可执行建议。",
+                fileName);
             OnAskAgentRequested?.Invoke(prompt);
         }
 
