@@ -1,6 +1,6 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-07-15 | **当前版本**: v1.7.7 | **下一目标**: P0 自演化知识 Tier 1 (Init Project) + Phase 8 MCP Server | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-07-24 | **当前版本**: v1.10.0 | **下一目标**: v1.10.x (ProfilerRecorder 时序 / FrameDebugger / URP) + Phase 8 MCP Server | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
@@ -11,6 +11,10 @@
 | 文档 | 用途 | 状态 |
 |------|------|------|
 | [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — Phase 6~9 路线图、任务清单、ADR 记录 | 活跃维护 |
+| [**v1.10.0-adversarial-audit.md**](v1.10.0-adversarial-audit.md) | **v1.10.0 对抗性闭环校验** — 54 工具 × Unity 域覆盖矩阵、历史根因复查、认知层一致性 (95% 闭环) | ✅ 2026-07-24 完成 |
+| [**v1.10.0-handoff.md**](v1.10.0-handoff.md) | **v1.10.0 开发交接文档** — 6 个 P1 工具增强 (G04/G05/G06/G07/G08/G09) | ✅ 已发布 |
+| [**adversarial-coverage-audit.md**](adversarial-coverage-audit.md) | **对抗性审计方法论** — 三步矩阵校验流程 (覆盖/根因/版本) | 方法论基线 |
+| [**capability-coverage-audit.md**](capability-coverage-audit.md) | **能力覆盖面审计方法** — A 轴 (Unity 菜单) + B 轴 (API 命名空间) | 方法论基线 |
 | [**adr-17-minimalism.md**](adr-17-minimalism.md) | **产品哲学基线** — 极简即开即用：默认最优、一件事一开关、术语白话 | 已定稿 |
 | [**adr-18-skill-loading-mechanism.md**](adr-18-skill-loading-mechanism.md) | **Skill 加载机制 ADR** — 运行时按需检索，Tier 2 自演化知识 | Draft，待实施 |
 | [**agent-prompt-guidelines.md**](agent-prompt-guidelines.md) | **Agent Prompt 层通用准则** — LLM-based agent system prompt 基础框架 | 活跃维护 |
