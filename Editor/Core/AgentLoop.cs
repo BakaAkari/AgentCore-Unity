@@ -251,6 +251,15 @@ namespace AgentCore.Editor.Core
                 _deferredContext = null;
             }
 
+            // v1.9.0+: 追加 UI 语言指令到 system prompt (LlmFollowUiLanguage=true 时).
+            // 关闭跟随时返回空串, 由模型按用户输入语言自行判断.
+            // 语言切换在新会话/重启窗口后生效, 不在运行中会话动态改写 messages[0].
+            var langInstruction = AgentCore.Editor.L10n.LanguageManager.GetLlmLanguageInstruction();
+            if (!string.IsNullOrEmpty(langInstruction))
+            {
+                systemPrompt = systemPrompt + "\n\n" + langInstruction;
+            }
+
             _messages.Add(ChatMessage.System(systemPrompt));
 
             // Phase 2 Step 11: 初始化错误收集与自我纠错基础设施

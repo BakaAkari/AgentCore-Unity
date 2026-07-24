@@ -39,9 +39,68 @@ namespace AgentCore.Editor.Config.Settings.Pages
             // v1.4.2: package info merged into the bottom of Setup Status to save a full card.
             DrawSetupStatusCard(context);
             EditorGUILayout.Space(8);
+            DrawLanguageCard(context);
+            EditorGUILayout.Space(8);
             DrawQuickActionsCard(context);
             EditorGUILayout.Space(8);
             DrawLogVerbosityCard(context);
+        }
+
+        /// <summary>
+        /// v1.9.0+: 语言 (Language) 设置卡片.
+        /// UI 语言用 EditorPrefs 全局持久化, 独立于 AgentCoreSettings.
+        /// </summary>
+        private static void DrawLanguageCard(AgentCoreSettingsContext context)
+        {
+            context.Ui.DrawCard(
+                AgentCore.Editor.L10n.L10n.Tr("settings.language.card.title", "Language"),
+                AgentCore.Editor.L10n.L10n.Tr(
+                    "settings.language.card.description",
+                    "UI language for the AgentCore editor plugin. Stored globally across projects. Switching applies immediately to all AgentCore windows."),
+                () =>
+                {
+                    var supported = AgentCore.Editor.L10n.LanguageManager.SupportedLanguages;
+
+                    // 构建下拉选项 (display name)
+                    var displayNames = new string[supported.Count];
+                    var codes = new string[supported.Count];
+                    var current = AgentCore.Editor.L10n.LanguageManager.CurrentLanguage;
+                    int currentIndex = 0;
+                    for (int i = 0; i < supported.Count; i++)
+                    {
+                        displayNames[i] = supported[i].DisplayName;
+                        codes[i] = supported[i].Code;
+                        if (string.Equals(supported[i].Code, current, StringComparison.OrdinalIgnoreCase))
+                            currentIndex = i;
+                    }
+
+                    var newIndex = EditorGUILayout.Popup(
+                        new GUIContent(
+                            AgentCore.Editor.L10n.L10n.Tr("settings.language.field.label", "Interface language")),
+                        currentIndex,
+                        displayNames);
+                    if (newIndex != currentIndex && newIndex >= 0 && newIndex < codes.Length)
+                    {
+                        AgentCore.Editor.L10n.LanguageManager.SetLanguage(codes[newIndex]);
+                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] UI language changed to {codes[newIndex]}");
+                    }
+
+                    EditorGUILayout.Space(4);
+
+                    // LLM 语言跟随开关
+                    var currentFollow = AgentCore.Editor.L10n.LanguageManager.LlmFollowUiLanguage;
+                    var newFollow = EditorGUILayout.ToggleLeft(
+                        new GUIContent(
+                            AgentCore.Editor.L10n.L10n.Tr("settings.language.llmFollow.label", "LLM replies follow UI language"),
+                            AgentCore.Editor.L10n.L10n.Tr(
+                                "settings.language.llmFollow.tooltip",
+                                "When enabled, the assistant is instructed to reply in the same language as the UI. Disable to let the model decide by user input.")),
+                        currentFollow);
+                    if (newFollow != currentFollow)
+                    {
+                        AgentCore.Editor.L10n.LanguageManager.LlmFollowUiLanguage = newFollow;
+                    }
+                });
         }
 
         /// <summary>

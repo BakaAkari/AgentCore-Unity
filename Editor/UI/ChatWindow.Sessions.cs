@@ -88,7 +88,7 @@ namespace AgentCore.Editor.UI
 
             if (sessions == null || sessions.Count == 0)
             {
-                var emptyLabel = new Label("暂无会话");
+                var emptyLabel = new Label(AgentCore.Editor.L10n.L10n.Tr("session.empty", "暂无会话"));
                 emptyLabel.style.color = new StyleColor(new Color(0.5f, 0.5f, 0.5f));
                 emptyLabel.style.fontSize = 12;
                 emptyLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
@@ -310,31 +310,31 @@ namespace AgentCore.Editor.UI
         {
             var menu = new GenericMenu();
 
-            menu.AddItem(new GUIContent("自动重命名"), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.L10n.Tr("session.menu.autoRename", "自动重命名")), false, () =>
             {
                 AutoRenameSession(sessionId, itemElement);
             });
 
-            menu.AddItem(new GUIContent("重命名"), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.L10n.Tr("session.menu.rename", "重命名")), false, () =>
             {
                 BeginRenameSession(sessionId, currentTitle, itemElement);
             });
 
             menu.AddSeparator("");
 
-            menu.AddItem(new GUIContent("导出/Markdown (.md)"), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.L10n.Tr("session.menu.exportMarkdown", "导出/Markdown (.md)")), false, () =>
             {
                 ExportSession(sessionId, SessionExporter.ExportFormat.Markdown);
             });
 
-            menu.AddItem(new GUIContent("导出/JSON (.json)"), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.L10n.Tr("session.menu.exportJson", "导出/JSON (.json)")), false, () =>
             {
                 ExportSession(sessionId, SessionExporter.ExportFormat.Json);
             });
 
             menu.AddSeparator("");
 
-            menu.AddItem(new GUIContent("删除"), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.L10n.Tr("common.delete", "删除")), false, () =>
             {
                 DeleteSessionWithConfirm(sessionId);
             });
@@ -360,7 +360,7 @@ namespace AgentCore.Editor.UI
             string originalText = titleLabel?.text;
             if (titleLabel != null)
             {
-                titleLabel.text = "正在生成标题…";
+                titleLabel.text = AgentCore.Editor.L10n.L10n.Tr("session.autoRename.inProgress", "正在生成标题…");
             }
 
             string newTitle = null;
@@ -487,10 +487,10 @@ namespace AgentCore.Editor.UI
         private void DeleteSessionWithConfirm(string sessionId)
         {
             var confirmed = EditorUtility.DisplayDialog(
-                "删除会话",
-                "确定要删除此会话吗？此操作不可撤销。",
-                "删除",
-                "取消");
+                AgentCore.Editor.L10n.L10n.Tr("session.dialog.deleteTitle", "删除会话"),
+                AgentCore.Editor.L10n.L10n.Tr("session.dialog.deleteBody", "确定要删除此会话吗？此操作不可撤销。"),
+                AgentCore.Editor.L10n.L10n.Tr("common.delete", "删除"),
+                AgentCore.Editor.L10n.L10n.Tr("common.cancel", "取消"));
 
             if (!confirmed) return;
 
@@ -531,17 +531,17 @@ namespace AgentCore.Editor.UI
             var diff = now - utcTime;
 
             if (diff.TotalSeconds < 60)
-                return "刚刚";
+                return AgentCore.Editor.L10n.L10n.Tr("session.time.justNow", "刚刚");
             if (diff.TotalMinutes < 60)
-                return $"{(int)diff.TotalMinutes}分钟前";
+                return AgentCore.Editor.L10n.L10n.Tr("session.time.minutesAgo", "{0}分钟前", (int)diff.TotalMinutes);
             if (diff.TotalHours < 24)
-                return $"{(int)diff.TotalHours}小时前";
+                return AgentCore.Editor.L10n.L10n.Tr("session.time.hoursAgo", "{0}小时前", (int)diff.TotalHours);
             if (diff.TotalDays < 2)
-                return "昨天";
+                return AgentCore.Editor.L10n.L10n.Tr("session.time.yesterday", "昨天");
             if (diff.TotalDays < 7)
-                return $"{(int)diff.TotalDays}天前";
+                return AgentCore.Editor.L10n.L10n.Tr("session.time.daysAgo", "{0}天前", (int)diff.TotalDays);
             if (diff.TotalDays < 30)
-                return $"{(int)(diff.TotalDays / 7)}周前";
+                return AgentCore.Editor.L10n.L10n.Tr("session.time.weeksAgo", "{0}周前", (int)(diff.TotalDays / 7));
 
             return utcTime.ToLocalTime().ToString("MM/dd");
         }
@@ -559,11 +559,11 @@ namespace AgentCore.Editor.UI
             }
 
             var menu = new GenericMenu();
-            menu.AddItem(new GUIContent("导出为 Markdown (.md)"), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.L10n.Tr("session.menu.exportMarkdown.short", "导出为 Markdown (.md)")), false, () =>
             {
                 ExportSession(sessionId, SessionExporter.ExportFormat.Markdown);
             });
-            menu.AddItem(new GUIContent("导出为 JSON (.json)"), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.L10n.Tr("session.menu.exportJson.short", "导出为 JSON (.json)")), false, () =>
             {
                 ExportSession(sessionId, SessionExporter.ExportFormat.Json);
             });
@@ -591,7 +591,7 @@ namespace AgentCore.Editor.UI
                 var filterDisplay = format == SessionExporter.ExportFormat.Markdown ? "Markdown files" : "JSON files";
 
                 var path = EditorUtility.SaveFilePanel(
-                    "导出会话",
+                    AgentCore.Editor.L10n.L10n.Tr("session.dialog.exportTitle", "导出会话"),
                     "",
                     defaultName,
                     extension

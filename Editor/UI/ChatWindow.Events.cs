@@ -141,7 +141,7 @@ namespace AgentCore.Editor.UI
             switch (state)
             {
                 case AgentState.Idle:
-                    UpdateStatusLabel("就绪");
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.idle", "就绪"), isError: false, isActive: false);
                     SetSendEnabled(true);
                     SetCancelVisible(false);
                     // Idle 表示本轮已彻底结束（正常/取消/错误），清理 pending 保险
@@ -149,7 +149,7 @@ namespace AgentCore.Editor.UI
                     break;
 
                 case AgentState.Thinking:
-                    UpdateStatusLabel("思考中...");
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.thinking", "思考中..."));
                     SetSendEnabled(false);
                     SetCancelVisible(true);
                     // 创建助手消息气泡占位（流式模式）
@@ -159,38 +159,38 @@ namespace AgentCore.Editor.UI
                     break;
 
                 case AgentState.Streaming:
-                    UpdateStatusLabel("回复中...");
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.streaming", "回复中..."));
                     SetSendEnabled(false);
                     SetCancelVisible(true);
                     break;
 
                 case AgentState.WaitingForClarification:
-                    UpdateStatusLabel("等待你的澄清...");
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.waitingClarification", "等待你的澄清..."), isError: false, isActive: false);
                     SetSendEnabled(true);
                     SetCancelVisible(false);
                     break;
 
                 case AgentState.ReviewingAnswer:
                     // ADR: self-challenge-model-tier-escape §3.4 B1 — Node B 运行中
-                    UpdateStatusLabel("审阅答案中...");
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.reviewingAnswer", "审阅答案中..."));
                     SetSendEnabled(false);
                     SetCancelVisible(true);
                     break;
 
                 case AgentState.ExecutingTool:
-                    UpdateStatusLabel("执行工具...");
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.executingTool", "执行工具..."));
                     SetSendEnabled(false);
                     SetCancelVisible(true);
                     break;
 
                 case AgentState.Compressing:
-                    UpdateStatusLabel("压缩上下文中...");
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.compressing", "压缩上下文中..."));
                     SetSendEnabled(false);
                     SetCancelVisible(true);
                     break;
 
                 case AgentState.Error:
-                    UpdateStatusLabel("错误", true);
+                    UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.error", "错误"), true);
                     DismissPendingIndicator();
                     break;
             }

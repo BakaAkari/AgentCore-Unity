@@ -65,7 +65,7 @@ namespace AgentCore.Editor.UI
             // Silent 模式下用户从 send/cancel 按钮 + 状态栏 (StateChanged 白名单) 感知 agent 在跑.
             if (!SessionModeState.IsSilent)
             {
-                ShowPendingIndicator("思考中");
+                ShowPendingIndicator(AgentCore.Editor.L10n.L10n.Tr("chat.pending.thinking", "思考中"));
             }
 
             // 异步发送消息

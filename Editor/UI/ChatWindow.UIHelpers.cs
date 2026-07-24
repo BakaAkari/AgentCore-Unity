@@ -14,14 +14,28 @@ namespace AgentCore.Editor.UI
         /// <summary>
         /// 更新状态行文本和样式。
         /// </summary>
-        /// <param name="text">状态文本</param>
+        /// <param name="text">状态文本 (通常已本地化)</param>
         /// <param name="isError">是否为错误状态（红色）</param>
+        /// <remarks>
+        /// v1.9.0+: 之前依赖硬编码中文文本("就绪" / "等待...")判断活跃与否, 多语言后失效.
+        /// 改为默认视作活跃状态; 调用方需在明确处于 Idle/WaitingClarification 时使用
+        /// <see cref="UpdateStatusLabel(string, bool, bool)"/> 重载并传 isActive=false.
+        /// </remarks>
         private void UpdateStatusLabel(string text, bool isError = false)
         {
+            UpdateStatusLabel(text, isError, isActive: !isError);
+        }
+
+        /// <summary>
+        /// 更新状态行文本和样式 (显式指定是否活跃).
+        /// </summary>
+        /// <param name="text">状态文本 (通常已本地化)</param>
+        /// <param name="isError">是否为错误状态（红色）</param>
+        /// <param name="isActive">是否为活跃状态 (显示动画等). Idle / Waiting-类应传 false.</param>
+        private void UpdateStatusLabel(string text, bool isError, bool isActive)
+        {
             if (_agentStatusLine == null) return;
-            // 非活跃状态：就绪、等待澄清、错误
-            var isIdle = text == "就绪" || text.StartsWith("等待");
-            _agentStatusLine.SetStatus(text, isError, isActive: !isError && !isIdle);
+            _agentStatusLine.SetStatus(text, isError, isActive: isActive && !isError);
         }
 
         /// <summary>

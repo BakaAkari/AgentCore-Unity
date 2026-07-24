@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-07-24
+
+### Added — 多语言 (L10n) 支持基础设施 + 中英文切换
+
+用户需求: 插件所有文本一份中文一份英文, ChatWindow 顶部右侧和 Settings Dashboard 提供语言切换.
+
+**范围决策 (务实两阶段)**: 本版本交付**基础设施 + 高价值区**(约 80 个 key, 覆盖用户 80% 时间可见的界面); 剩余低频组件(HelpBubble / MemoryPanel / KnowledgeBasePanel / SelfChallengeCard 等)后续小版本逐步补齐. 一次性替换 300+ 处硬编码会导致 PR 不可控.
+
+**架构** (自研, 零依赖):
+
+- [`Editor/L10n/LanguageManager.cs`](Editor/L10n/LanguageManager.cs): 单例状态管理, EditorPrefs 全局持久化(`AgentCore.L10n.Language`), `LanguageChanged` 事件驱动热刷新, 支持 `en-US` / `zh-CN`
+- [`Editor/L10n/LanguageResourceLoader.cs`](Editor/L10n/LanguageResourceLoader.cs): JSON 语言包加载器, 缺 key 兜底链 (当前语言 → 英文 → fallback → key 本身), 语言切换时 `Reload()` 失效缓存
+- [`Editor/L10n/L10n.cs`](Editor/L10n/L10n.cs): 静态门面 `L10n.Tr(key, fallback[, args])`, 用 `CultureInfo.InvariantCulture` 保证格式化跨语言稳定
+- [`Editor/L10n/Resources/en-US.json`](Editor/L10n/Resources/en-US.json) + [`zh-CN.json`](Editor/L10n/Resources/zh-CN.json): ~80 个 key, 覆盖 common / language / chat.status / chat.pending / chat.input / chat.tool / session / settings.dashboard / settings.language / domainReload / askUser
+- [`Editor/L10n/UI/LanguageSelector.cs`](Editor/L10n/UI/LanguageSelector.cs): UI Toolkit 语言下拉控件, AttachToPanel 时订阅 `LanguageChanged` 保证多处切换同步
+
+**接入**:
+
+- [`ChatWindow.L10n.cs`](Editor/UI/ChatWindow.L10n.cs) 新分部类, 挂载 `LanguageSelector` 到 toolbar 右侧, 语言切换事件回调刷新静态标签 + 按当前 `AgentState` 重放一次状态标签更新, 无需重建窗口
+- [`DashboardSettingsPage.cs`](Editor/Config/Settings/Pages/DashboardSettingsPage.cs) 新增"Language"卡片, 语言下拉 + "LLM 回复跟随 UI 语言"开关(独立于 AgentCoreSettings, 走 EditorPrefs)
+- [`ChatWindow.Events.cs`](Editor/UI/ChatWindow.Events.cs) / [`ChatWindow.PendingIndicator.cs`](Editor/UI/ChatWindow.PendingIndicator.cs) / [`ChatWindow.Tools.cs`](Editor/UI/ChatWindow.Tools.cs) / [`ChatWindow.Sessions.cs`](Editor/UI/ChatWindow.Sessions.cs) / [`ChatWindow.Input.cs`](Editor/UI/ChatWindow.Input.cs) / [`ChatWindow.cs`](Editor/UI/ChatWindow.cs): 所有 AgentState 状态标签 / PendingIndicator / 工具卡片状态 / 会话侧栏 / 会话右键菜单 / 相对时间格式 / 初始化失败提示替换为 `L10n.Tr(...)`
+
+**LLM 语言指令 (可开关, 默认开)**:
+
+- [`LanguageManager.GetLlmLanguageInstruction()`](Editor/L10n/LanguageManager.cs): 按当前 UI 语言 + `LlmFollowUiLanguage` 生成"用相同语言回复"的英文指令(避免在指令本身用中英文两版, 让模型接收统一格式)
+- [`AgentLoop.cs`](Editor/Core/AgentLoop.cs) `Initialize()`: 把 language instruction 追加到 system prompt 末尾. **注意**: 语言切换后需要新建会话或重启窗口才能让 LLM 感知新语言 — 运行中会话不动态改写 `messages[0]`, 避免中途改历史造成 KV cache 失效
+
+### Refactored
+
+- [`ChatWindow.UIHelpers.cs`](Editor/UI/ChatWindow.UIHelpers.cs) `UpdateStatusLabel(string, bool)`: 之前用硬编码中文 `"就绪"` / `text.StartsWith("等待")` 判断"活跃与否", 多语言后失效. 新增 `UpdateStatusLabel(string, bool, bool)` 重载显式传 `isActive`, Idle / WaitingForClarification 明确传 `isActive: false`. 老重载保留但改为默认 `isActive: !isError`.
+
+### 不本地化的部分 (故意保留原状)
+
+- LLM 系统提示词 / 工具错误消息 / `AgentCoreLog` 日志 / CHANGELOG / 文档 — 这些用来喂给 LLM 或供开发者排障, 本地化会降低模型效果和排查效率
+- Bootstrap SOUL 里的 "你是一个 Unity 开发助手。请用中文回复。" 兜底文本 — 用户可编辑的模板, 不动
+
+### Migration notes
+
+- 无 API 破坏
+- `UpdateStatusLabel` 老签名(2 参)行为微调: 之前会隐式识别中文"就绪"/"等待"文案自动切非活跃; 新版视为活跃. 如果外部有直接传中文的调用点, 请改用 3 参重载显式声明 `isActive`
+- 首次启动语言 = `en-US`(默认). 中文用户需手动切一次到"简体中文"
+
+### Known limitations
+
+- HelpBubble / MemoryPanel / KnowledgeBasePanel / ToolCallGroup / SelfChallengeCard / FileChangeSummaryPanel / ContextUsagePanel / MessageBubble 等组件的硬编码中文尚未替换, 下一小版本(v1.9.1+)分批补
+- 语言切换对已存在的运行中会话, 只切 UI, LLM 部分要在新会话生效
+
 ## [1.8.10] - 2026-07-24
 
 ### Changed — Silent 按钮 UI 对齐修正

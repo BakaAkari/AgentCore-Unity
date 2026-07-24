@@ -298,6 +298,11 @@ namespace AgentCore.Editor.UI
             InitializeHubPanels();
             MountToolbarStatusContributions();
 
+            // 3.6.5 挂载语言切换下拉到工具栏右侧 (v1.9.0+, 多语言支持)
+            //       同时用 L10n 覆盖 UXML 里的硬编码中文标签, 保证语言切换后 UI 一致.
+            MountLanguageSelector();
+            ApplyLocalizedStaticLabels();
+
             // 3.7 创建 Hub Rail 并插入到 main-body 首位
             _hubRail = new HubRail(CreateHubModuleDefinitions(), ChatModuleId);
             var mainBody = rootVisualElement.Q<VisualElement>("main-body");
@@ -317,6 +322,10 @@ namespace AgentCore.Editor.UI
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());
             _cancelButton?.RegisterCallback<ClickEvent>(_ => OnCancelClicked());
             _scrollToBottomButton?.RegisterCallback<ClickEvent>(_ => OnScrollToBottomClicked());
+
+            // 4.1 订阅语言切换事件, 语言变化时刷新静态标签
+            //     动态状态标签依赖 AgentLoop 的 StateChanged 事件, 不需要在此处刷新
+            AgentCore.Editor.L10n.LanguageManager.LanguageChanged += OnLanguageChanged;
 
             // 4.5 绑定会话侧边栏按钮事件
             _newSessionButton?.RegisterCallback<ClickEvent>(_ => OnNewSessionClicked());
@@ -426,6 +435,13 @@ namespace AgentCore.Editor.UI
                 _agentLoop = null;
             }
 
+            // 取消订阅语言变更事件 (v1.9.0+)
+            try
+            {
+                AgentCore.Editor.L10n.LanguageManager.LanguageChanged -= OnLanguageChanged;
+            }
+            catch { }
+
             // 取消订阅设置变更事件
             UnsubscribeHubSettingsChanged();
 
@@ -478,7 +494,7 @@ namespace AgentCore.Editor.UI
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"[AgentCore] Failed to initialize ChatWindow: {ex.Message}");
-                UpdateStatusLabel("初始化失败", true);
+                UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.initFailed", "初始化失败"), true);
             }
         }
 

@@ -89,7 +89,7 @@ namespace AgentCore.Editor.UI
             var group = EnsureToolCallGroup();
 
             var card = new ToolCallCard(evt.ToolName, evt.ToolArguments);
-            card.SetStatus(ToolCallStatus.Running, "执行中...");
+            card.SetStatus(ToolCallStatus.Running, AgentCore.Editor.L10n.L10n.Tr("chat.tool.status.running", "执行中..."));
             group.AddToolCard(card);
 
             // 用 ToolCallId 作为 key（支持同名工具多次调用）
@@ -98,7 +98,7 @@ namespace AgentCore.Editor.UI
             AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore.UI] HandleToolCallStarted: card 已添加, key={key}, _activeToolCards.Count={_activeToolCards.Count}");
 
             // 更新状态行：显示当前执行的工具名
-            UpdateStatusLabel($"执行工具: {evt.ToolName}");
+            UpdateStatusLabel(AgentCore.Editor.L10n.L10n.Tr("chat.status.executingToolNamed", "执行工具: {0}", evt.ToolName));
 
             ScrollToBottom(force: true); // 新工具调用卡片添加，强制滚动到底部
         }
@@ -114,10 +114,10 @@ namespace AgentCore.Editor.UI
 
             if (key != null && _activeToolCards.TryGetValue(key, out var card))
             {
-                var timeText = evt.ExecutionTimeMs > 0
-                    ? $" ({evt.ExecutionTimeMs:F0}ms)"
-                    : "";
-                card.SetStatus(ToolCallStatus.Completed, $"完成{timeText}");
+                var completedText = evt.ExecutionTimeMs > 0
+                    ? AgentCore.Editor.L10n.L10n.Tr("chat.tool.status.completedWithTime", "完成 ({0})", $"{evt.ExecutionTimeMs:F0}ms")
+                    : AgentCore.Editor.L10n.L10n.Tr("chat.tool.status.completed", "完成");
+                card.SetStatus(ToolCallStatus.Completed, completedText);
 
                 if (!string.IsNullOrEmpty(evt.ToolResult))
                 {
@@ -149,7 +149,7 @@ namespace AgentCore.Editor.UI
 
             if (key != null && _activeToolCards.TryGetValue(key, out var card))
             {
-                card.SetStatus(ToolCallStatus.Failed, "失败");
+                card.SetStatus(ToolCallStatus.Failed, AgentCore.Editor.L10n.L10n.Tr("chat.tool.status.failed", "失败"));
 
                 if (!string.IsNullOrEmpty(evt.ToolResult))
                 {
