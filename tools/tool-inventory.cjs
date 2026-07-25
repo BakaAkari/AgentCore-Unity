@@ -19,11 +19,17 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = 'Editor/Tools/Native';
+const ROOTS = [
+    'Editor/Tools/Native',
+    'Editor/Tools/Cloud',
+    'Editor/Tools/FileSystem',
+    'Editor/Tools/Interaction',
+];
 const JSON_MODE = process.argv.includes('--json');
 
-// ---------- Recursively find *.cs under ROOT ---------------------------------
+// ---------- Recursively find *.cs under ROOTS --------------------------------
 function walk(dir, out) {
+    if (!fs.existsSync(dir)) return out;
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) walk(full, out);
@@ -134,7 +140,7 @@ function extractApiTouchpoints(src) {
 }
 
 // ---------- Main --------------------------------------------------------------
-const files = walk(ROOT, []);
+const files = ROOTS.reduce((acc, r) => walk(r, acc), []);
 const inventory = [];
 for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');
