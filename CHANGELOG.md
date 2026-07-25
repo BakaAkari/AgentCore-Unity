@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] - 2026-07-25
+
+### Fixed — Windows smoke test 发现的 2 个 bug
+
+按 [`plans/v1.10.1/v1.10.1-patch-plan.md`](plans/v1.10.1/v1.10.1-patch-plan.md) 交付.
+
+#### B1 — `batch_execute` sub-tool output 截断到 500 chars, 现在默认 8000
+
+`BatchExecuteTool.TruncateOutput` 原硬编码 `maxLength=500`, 对 v1.10.0 新增的结构化输出工具 (get_collision_matrix, get_assemblies, list_scene_physics_stats) 明显不足. LLM 拿到截断输出后可能用消息 summary 做 plausible reconstruction, 违反诚实性原则.
+
+- Default max chars 从 500 → 8000, 覆盖 99% 场景
+- 新增 schema 参数 `max_output_chars_per_op` 可显式调整 (硬顶 50000)
+- 截断时 hint 明确指出规避路径 (直接调工具或提高上限)
+
+#### B2 — Windows 路径反斜杠未 normalize, 跨平台一致性坏了
+
+`manage_memory_profiler.list_memory_snapshots` 在 Windows 上返回 `folder: "D:\\Unity Project\\..."` (反斜杠), 与 `manage_editor.scene_path` (`Assets/Scenes/Main.unity`, 正斜杠) 语义不一致. 同 issue 在 `manage_workspace_config` 里也存在.
+
+- 新增 `AgentCore.Editor.Tools.Infrastructure.PathUtils` (含 `ToUnityPath` / `ProjectRoot` / `ToProjectRelative`) 作为统一 helper
+- 修 `ManageMemoryProfilerTool` 8 处 + `ManageWorkspaceConfigTool` 2-3 处
+- SOUL §2.14 加规则强制新工具走 `PathUtils.ToUnityPath`
+- 保留其他工具现有的手动 `Replace("\\", "/")` (CleanerTool / ManageScriptTool / LightRAGTool 等) 不动 — 已经是正确行为, 迁移到 helper 是清理性重构, 拉到未来版本
+
+### Testing
+
+- Windows 侧 P0 只读冒烟 6/6 通过 (见 `plans/v1.10.0/windows-smoke-test-p0-readonly.md`)
+- Bug 1 修完 batch_execute 输出完整
+- Bug 2 修完 memory profiler `folder` 字段使用正斜杠
+
 ## [1.10.0] - 2026-07-24
 
 ### Added — G04 MemoryProfiler + v1.10.0 minor bump

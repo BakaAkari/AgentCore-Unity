@@ -28,6 +28,12 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Capabilities = ToolCapability.BatchExecute)]
     public class BatchExecuteTool : IAgentTool
     {
+        /// <summary>Default max chars per sub-tool output before truncation (from 500 in v1.10.0, raised in v1.10.1).</summary>
+        private const int DefaultMaxOutputChars = 8000;
+
+        /// <summary>Hard upper bound to prevent runaway context bloat, even when caller passes a huge number.</summary>
+        private const int MaxAllowedOutputChars = 50000;
+
         #region Schema
 
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -63,6 +69,10 @@ namespace AgentCore.Editor.Tools.Native.Meta
                 ""transaction"": {
                     ""type"": ""boolean"",
                     ""description"": ""If true and any operation fails, undo all executed operations (default: false)""
+                },
+                ""max_output_chars_per_op"": {
+                    ""type"": ""integer"",
+                    ""description"": ""Max chars per sub-tool output before truncation. Default 8000 (v1.10.1). Set to -1 to disable truncation (bounded by 50000 hard cap). Use higher values when sub-tool outputs are structured JSON (collision matrices, assembly lists, physics stats).""
                 }
             },
             ""required"": [""operations""]
@@ -93,6 +103,10 @@ namespace AgentCore.Editor.Tools.Native.Meta
 
                 var stopOnError = ToolHelpers.GetOptionalBool(parameters, "stop_on_error", true);
                 var transaction = ToolHelpers.GetOptionalBool(parameters, "transaction", false);
+
+                var maxOutputChars = ToolHelpers.GetOptionalInt(parameters, "max_output_chars_per_op", DefaultMaxOutputChars);
+                if (maxOutputChars < 0) maxOutputChars = MaxAllowedOutputChars;
+                if (maxOutputChars > MaxAllowedOutputChars) maxOutputChars = MaxAllowedOutputChars;
 
                 // Get tool registry
                 var registry = ToolRegistry.Instance;
@@ -216,7 +230,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
                                 ["tool"] = toolName,
                                 ["status"] = "success",
                                 ["execution_time_ms"] = Math.Round(opSw.Elapsed.TotalMilliseconds, 2),
-                                ["output"] = TruncateOutput(result.Output, 500)
+                                ["output"] = TruncateOutput(result.Output, maxOutputChars)
                             });
                         }
                         else
@@ -318,12 +332,16 @@ namespace AgentCore.Editor.Tools.Native.Meta
 
         /// <summary>
         /// Truncate output string to avoid oversized responses.
+        /// When truncation happens, appends an explicit hint so the LLM knows to call the tool directly if it needs the full output.
         /// </summary>
         private static string TruncateOutput(string output, int maxLength)
         {
             if (string.IsNullOrEmpty(output)) return output;
             if (output.Length <= maxLength) return output;
-            return output.Substring(0, maxLength) + "...(truncated)";
+            var omitted = output.Length - maxLength;
+            return output.Substring(0, maxLength) +
+                $"\n...(truncated by batch_execute: {omitted} chars omitted. " +
+                $"Call this tool directly outside batch_execute, or increase max_output_chars_per_op to see full output.)";
         }
 
         #endregion

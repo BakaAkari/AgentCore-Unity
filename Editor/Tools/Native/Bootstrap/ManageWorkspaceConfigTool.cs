@@ -137,7 +137,7 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
             {
                 ["file_name"] = fileName,
                 ["exists"] = true,
-                ["path"] = filePath,
+                ["path"] = PathUtils.ToUnityPath(filePath),
                 ["line_count"] = lineCount,
                 ["content"] = content
             };
@@ -168,7 +168,7 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
             var data = new JObject
             {
                 ["file_name"] = fileName,
-                ["path"] = filePath,
+                ["path"] = PathUtils.ToUnityPath(filePath),
                 ["lines_written"] = lineCount,
                 ["created"] = isNew
             };
@@ -183,7 +183,7 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
         /// </summary>
         private static ToolResponse HandleGetConfigPaths()
         {
-            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? "(unknown)";
+            var projectRoot = PathUtils.ToUnityPath(Directory.GetParent(Application.dataPath)?.FullName) ?? "(unknown)";
 
             var projectMdPath = BootstrapLoader.FindUserFilePath("PROJECT.md");
             var projectMdDefault = BootstrapLoader.GetDefaultUserFilePath("PROJECT.md");

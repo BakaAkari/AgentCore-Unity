@@ -88,7 +88,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
         private static string GetProjectRoot()
         {
-            return Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            return PathUtils.ProjectRoot;
         }
 
         private static string ResolveSnapshotPath(string path, bool ensureExtension)
@@ -112,7 +112,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
         private static string GetDefaultSnapshotFolder()
         {
-            return Path.Combine(GetProjectRoot(), DefaultSnapshotSubdir);
+            return PathUtils.ToUnityPath(Path.Combine(GetProjectRoot(), DefaultSnapshotSubdir));
         }
 
         // ─────────────── take_memory_snapshot ────────────────
@@ -177,7 +177,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
             var (finalPath, success) = tcs.Task.Result;
             var data = new JObject
             {
-                ["path"] = finalPath ?? path,
+                ["path"] = PathUtils.ToUnityPath(finalPath ?? path),
                 ["success"] = success,
                 ["captured_at_utc"] = DateTime.UtcNow.ToString("o")
             };
@@ -269,7 +269,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
             var data = new JObject
             {
-                ["folder"] = folder,
+                ["folder"] = PathUtils.ToUnityPath(folder),
                 ["exists"] = Directory.Exists(folder)
             };
             var arr = new JArray();
@@ -281,7 +281,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     arr.Add(new JObject
                     {
                         ["name"] = fi.Name,
-                        ["path"] = fi.FullName,
+                        ["path"] = PathUtils.ToUnityPath(fi.FullName),
                         ["size_bytes"] = fi.Length,
                         ["last_modified_utc"] = fi.LastWriteTimeUtc.ToString("o")
                     });
@@ -309,7 +309,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
             var data = new JObject
             {
-                ["path"] = path,
+                ["path"] = PathUtils.ToUnityPath(path),
                 ["top_n"] = topN,
                 ["snapshot_type"] = snapshot.GetType().FullName
             };
@@ -360,8 +360,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
             var data = new JObject
             {
-                ["path_a"] = pathA,
-                ["path_b"] = pathB,
+                ["path_a"] = PathUtils.ToUnityPath(pathA),
+                ["path_b"] = PathUtils.ToUnityPath(pathB),
                 ["entry_count_diff"] = diff,
                 ["file_size_a_bytes"] = new FileInfo(pathA).Length,
                 ["file_size_b_bytes"] = new FileInfo(pathB).Length,
