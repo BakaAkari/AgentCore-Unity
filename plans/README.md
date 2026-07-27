@@ -1,6 +1,6 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-07-24 | **当前版本**: v1.10.0 | **下一目标**: v1.10.x (ProfilerRecorder 时序 / FrameDebugger / URP) + Phase 8 MCP Server | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-07-27 | **当前版本**: v1.10.3 | **下一目标**: v1.11.0 (修复 Windows 测试发现的 14 个遗留 bug) | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
@@ -11,15 +11,26 @@
 | 文档 | 用途 | 状态 |
 |------|------|------|
 | [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — Phase 6~9 路线图、任务清单、ADR 记录 | 活跃维护 |
-| [**v1.10.0-adversarial-audit.md**](v1.10.0-adversarial-audit.md) | **v1.10.0 对抗性闭环校验** — 54 工具 × Unity 域覆盖矩阵、历史根因复查、认知层一致性 (95% 闭环) | ✅ 2026-07-24 完成 |
+| [**v1.10.0/smoke-test-findings.md**](v1.10.0/smoke-test-findings.md) | **v1.10.x Windows 测试发现汇总** — 21 bugs (A~U)，5 已修 (v1.10.1/2/3)，14 待修 (v1.11 backlog) | ✅ 2026-07-27 完成 |
+| [**v1.10.0-system-capability-assessment.md**](v1.10.0-system-capability-assessment.md) | **v1.10.0 系统能力评估** — 92→89/100 (Windows 测试后下调)，包含 Part 9 修订 | ⚠️ 2026-07-27 修订 |
+| [**v1.10.0-adversarial-audit.md**](v1.10.0-adversarial-audit.md) | **v1.10.0 对抗性闭环校验** — 95%→85% (Windows 测试后下调)，包含附录 C 修订 | ⚠️ 2026-07-27 修订 |
 | [**v1.10.0-handoff.md**](v1.10.0-handoff.md) | **v1.10.0 开发交接文档** — 6 个 P1 工具增强 (G04/G05/G06/G07/G08/G09) | ✅ 已发布 |
-| [**adversarial-coverage-audit.md**](adversarial-coverage-audit.md) | **对抗性审计方法论** — 三步矩阵校验流程 (覆盖/根因/版本) | 方法论基线 |
+| [**adversarial-coverage-audit.md**](adversarial-coverage-audit.md) | **对抗性审计方法论** — 三步矩阵校验流程 (覆盖/根因/版本)，**需补 Step 4~7** (Windows 教训) | 方法论基线 |
 | [**capability-coverage-audit.md**](capability-coverage-audit.md) | **能力覆盖面审计方法** — A 轴 (Unity 菜单) + B 轴 (API 命名空间) | 方法论基线 |
 | [**adr-17-minimalism.md**](adr-17-minimalism.md) | **产品哲学基线** — 极简即开即用：默认最优、一件事一开关、术语白话 | 已定稿 |
 | [**adr-18-skill-loading-mechanism.md**](adr-18-skill-loading-mechanism.md) | **Skill 加载机制 ADR** — 运行时按需检索，Tier 2 自演化知识 | Draft，待实施 |
 | [**agent-prompt-guidelines.md**](agent-prompt-guidelines.md) | **Agent Prompt 层通用准则** — LLM-based agent system prompt 基础框架 | 活跃维护 |
 | [**llm-agent-architecture-remediation-plan.md**](llm-agent-architecture-remediation-plan.md) | **LLM/Agent 架构安全治理准则** — Tool Risk Policy / WorkspacePathPolicy / Lazy Tool Discovery；Phase 7/8 前置依据 | 活跃维护，长期治理约束 |
 | [**mcp-server-feasibility.md**](mcp-server-feasibility.md) | **MCP Server 可行性方案（Phase 8）** — 外部 IDE / CLI 通过 MCP 调用 Unity 工具 | 设计基线完成，待启动 |
+
+### v1.10.x Patch 历史
+
+| 版本 | 发布日期 | 主要变更 | 文档 |
+|------|---------|---------|------|
+| **v1.10.3** | 2026-07-27 | Bug S — MemoryProfiler API drift 4-tier fallback | [CHANGELOG.md](../CHANGELOG.md#v1103) |
+| **v1.10.2** | 2026-07-27 | Bug E/K — GLM provider 类型转换双层防御 (Validator + Handler) | [CHANGELOG.md](../CHANGELOG.md#v1102) |
+| **v1.10.1** | 2026-07-25 | Bug B1/B2 — batch_execute 截断 + Windows 路径规范化 (PathUtils) | [CHANGELOG.md](../CHANGELOG.md#v1101) |
+| **v1.10.0** | 2026-07-24 | G04 MemoryProfiler + 6 P1 工具增强 (G05/G06/G07/G08/G09) | [v1.10.0-handoff.md](v1.10.0-handoff.md) |
 
 ---
 
