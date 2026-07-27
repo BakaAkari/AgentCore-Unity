@@ -100,19 +100,11 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         /// limitations — appended to error messages so the agent can self-correct without guessing.
         /// </summary>
         private const string EnvironmentHint =
-            "Return-value semantics: the last item of your block is returned iff it is an EXPRESSION with no trailing ';'. " +
-            "Example returning 42: 'var x = 40; x + 2'. Example returning nothing: 'Debug.Log(\"ok\");'. " +
-            "Pre-imported namespaces: System, System.IO, System.Text, System.Text.RegularExpressions, System.Linq, " +
-            "System.Collections.Generic, UnityEngine, UnityEngine.SceneManagement, UnityEditor, UnityEditor.SceneManagement. " +
-            "Referenced assemblies (types + extension methods available without extra reference): UnityEngine.CoreModule, " +
-            "UnityEditor.CoreModule, UnityEditor.SceneManagerModule, System.Core (LINQ), UnityEngine.ImageConversionModule " +
-            "(Texture2D.EncodeToPNG/EncodeToJPG/LoadImage), UnityEngine.JSONSerializeModule (JsonUtility), " +
-            "UnityEngine.AssetBundleModule, UnityEngine.PhysicsModule, and UnityEngine.UI when present. " +
-            "'Object' identifier is ambiguous between System.Object and UnityEngine.Object — qualify as 'UnityEngine.Object' " +
-            "(e.g. UnityEngine.Object.DestroyImmediate(x)). " +
-            "Mono.CSharp.Evaluator limitations: no async/await, no top-level 'return' outside a method, " +
-            "some C# 8+ syntax unsupported (records, switch expressions, using declarations, target-typed new). " +
-            "Use classic statements.";
+            "Return-value: last item returned only if expression WITHOUT trailing ';' (e.g. 'var x=40; x+2' returns 42; 'Debug.Log(\"ok\");' returns nothing). " +
+            "Pre-imported: System, System.IO, System.Text, System.Text.RegularExpressions, System.Linq, System.Collections.Generic, UnityEngine, UnityEngine.SceneManagement, UnityEditor, UnityEditor.SceneManagement. " +
+            "Assemblies referenced: UnityEngine.CoreModule/AssetBundle/JSONSerialize/ImageConversion/Physics, UnityEditor.CoreModule/SceneManagerModule, System.Core, UnityEngine.UI (if present), URP/HDRP/PostProcessing packages (if present — use fully-qualified names like UnityEngine.Rendering.Universal.Bloom). " +
+            "'Object' is ambiguous: qualify as UnityEngine.Object (e.g. UnityEngine.Object.DestroyImmediate(x)). " +
+            "Mono.CSharp limits: no async/await, no top-level return, no C#8+ (records/switch expressions/using declarations/target-typed new). Use classic statements.";
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "execute_code",
@@ -394,6 +386,25 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                     // UGUI is an optional package — probe via type-load without hard reference.
                     var ugui = Type.GetType("UnityEngine.UI.Image, UnityEngine.UI", throwOnError: false);
                     if (ugui != null) refs.Add(ugui.Assembly);
+
+                    // Bug Y (v1.11+): probe URP/HDRP/PostProcessing packages so agents can call
+                    // Volume/Bloom/Camera post-processing APIs directly without Assembly.Load boilerplate.
+                    // Each is optional — probe via Type.GetType so uninstalled packages are silently skipped.
+                    // Agents should use fully-qualified names (e.g. UnityEngine.Rendering.Universal.Bloom)
+                    // since DefaultUsings intentionally does NOT import these namespaces.
+                    var urpProbes = new[]
+                    {
+                        "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset, Unity.RenderPipelines.Universal.Runtime",
+                        "UnityEngine.Rendering.Volume, Unity.RenderPipelines.Core.Runtime",
+                        "UnityEngine.Rendering.HighDefinition.HDRenderPipelineAsset, Unity.RenderPipelines.HighDefinition.Runtime",
+                        "UnityEngine.Rendering.PostProcessing.PostProcessVolume, Unity.Postprocessing.Runtime",
+                    };
+                    foreach (var probe in urpProbes)
+                    {
+                        var probedType = Type.GetType(probe, throwOnError: false);
+                        if (probedType != null) refs.Add(probedType.Assembly);
+                    }
+
                     foreach (var asm in refs)
                     {
                         if (asm != null && seen.Add(asm))

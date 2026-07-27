@@ -176,6 +176,16 @@ namespace AgentCore.Editor.Config
         [HideInInspector]
         public int toolResultTargetTokens = 500;
 
+        /// <summary>
+        /// Hard cap for tool result content in characters (v1.11+, Bug C).
+        /// Absolute upper bound applied to ALL tool output after compression/short-path,
+        /// preventing LLM-compression itself from returning oversized output (observed
+        /// GLM reasoning-explosion returning 800k+ chars). Default 20000 chars.
+        /// Set to 0 to disable.
+        /// </summary>
+        [HideInInspector]
+        public int toolResultHardCapChars = 20000;
+
         [HideInInspector]
         [Range(0.3f, 0.95f)]
         public float conversationCompressionTrigger = 0.7f;

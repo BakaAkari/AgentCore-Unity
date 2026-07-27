@@ -61,6 +61,10 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     ""type"": ""string"",
                     ""description"": ""ProfilerCategory name (for list_available_stats filter or sample_recorder). Common: Render, Scripts, Memory, Gui, Physics, Animation, Ai, Audio, Video, Particles, Vr, FileIO, Internal. Case-insensitive.""
                 },
+                ""limit"": {
+                    ""type"": ""integer"",
+                    ""description"": ""Max stats to return per category (for list_available_stats, v1.11+). Default 100, use higher value to see more. Prevents oversized output (some Unity versions expose 500+ stats).""
+                },
                 ""stat_name"": {
                     ""type"": ""string"",
                     ""description"": ""ProfilerRecorder stat name to sample (for sample_recorder). Examples: 'Main Thread', 'CPU Total Frame Time', 'GC.Alloc', 'Draw Calls Count', 'Triangles Count', 'System Used Memory'. Use list_available_stats to discover valid names.""
@@ -413,11 +417,16 @@ namespace AgentCore.Editor.Tools.Native.Extended
         private ToolResponse HandleListAvailableStats(JObject parameters)
         {
             var categoryFilter = ToolHelpers.GetOptionalString(parameters, "category");
+            // Bug C (v1.11+): per-category limit to prevent oversized output.
+            // Some Unity versions expose 500+ stats per category → full dump = 800k+ chars.
+            var limit = ToolHelpers.GetOptionalInt(parameters, "limit", 100);
+            if (limit <= 0) limit = 100;
 
             var handles = new List<ProfilerRecorderHandle>();
             ProfilerRecorderHandle.GetAvailable(handles);
 
             var byCategory = new Dictionary<string, List<JObject>>();
+            var truncatedCategories = new Dictionary<string, int>(); // category -> total count before limit
 
             foreach (var handle in handles)
             {
@@ -438,6 +447,15 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     byCategory[catName] = list;
                 }
 
+                // Track full count even beyond limit for truncation notice
+                if (list.Count >= limit)
+                {
+                    if (!truncatedCategories.ContainsKey(catName))
+                        truncatedCategories[catName] = list.Count;
+                    truncatedCategories[catName]++;
+                    continue;
+                }
+
                 list.Add(new JObject
                 {
                     ["name"] = desc.Name,
@@ -452,12 +470,19 @@ namespace AgentCore.Editor.Tools.Native.Extended
             foreach (var kvp in byCategory)
             {
                 totalFiltered += kvp.Value.Count;
-                catsArr.Add(new JObject
+                var catObj = new JObject
                 {
                     ["category"] = kvp.Key,
                     ["stat_count"] = kvp.Value.Count,
                     ["stats"] = new JArray(kvp.Value)
-                });
+                };
+                if (truncatedCategories.TryGetValue(kvp.Key, out var totalInCat))
+                {
+                    catObj["truncated"] = true;
+                    catObj["total_stats_in_category"] = totalInCat;
+                    catObj["truncation_hint"] = $"Category has {totalInCat} stats, only first {limit} shown. Pass 'limit' parameter with a higher value to see more, or use 'category' filter to narrow.";
+                }
+                catsArr.Add(catObj);
             }
 
             var data = new JObject

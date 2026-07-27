@@ -213,7 +213,10 @@ namespace AgentCore.Editor.Session
             {
                 foreach (var tc in msg.ToolCalls)
                 {
-                    sb.AppendLine($"> **工具调用**: `{tc.FunctionName}`");
+                    // Bug F' (v1.11+): tool call function name 从嵌套 Function.Name 读取，
+                    // 兼容旧 v1.10.x 存档 (向后兼容 setter 会将平铺 function_name 映射到 Function.Name)
+                    var name = tc.Function?.Name ?? "(unknown)";
+                    sb.AppendLine($"> **工具调用**: `{name}`");
                 }
                 sb.AppendLine();
             }

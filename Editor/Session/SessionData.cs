@@ -272,6 +272,11 @@ namespace AgentCore.Editor.Session
 
     /// <summary>
     /// 可序列化的 ToolCall — 用于 JSON 持久化。
+    ///
+    /// v1.11+ (Bug F'): JSON 结构改为 OpenAI 标准嵌套形式
+    /// <c>{ id, type, function: { name, arguments } }</c>，
+    /// 保留 <see cref="FunctionName"/> / <see cref="Arguments"/> 平铺属性作为向后兼容
+    /// setter（读取旧 v1.10.x 存档时依然能反序列化）。
     /// </summary>
     [Serializable]
     public class SerializableToolCall
@@ -284,13 +289,44 @@ namespace AgentCore.Editor.Session
         [JsonProperty("type")]
         public string Type { get; set; } = "function";
 
-        /// <summary>函数名</summary>
-        [JsonProperty("function_name")]
-        public string FunctionName { get; set; }
+        /// <summary>
+        /// 嵌套 function 对象（OpenAI 标准结构，v1.11+）。
+        /// 主写入路径 — 新导出的 JSON 使用此字段。
+        /// </summary>
+        [JsonProperty("function", NullValueHandling = NullValueHandling.Ignore)]
+        public SerializableFunctionCall Function { get; set; }
 
-        /// <summary>JSON 参数字符串</summary>
-        [JsonProperty("arguments")]
-        public string Arguments { get; set; }
+        /// <summary>
+        /// [向后兼容 v1.10.x] 平铺函数名字段。
+        /// 反序列化旧 JSON 时使用；新导出不会写入（NullValueHandling.Ignore）。
+        /// </summary>
+        [JsonProperty("function_name", NullValueHandling = NullValueHandling.Ignore)]
+        public string FunctionName
+        {
+            get => null; // 不写入
+            set
+            {
+                if (string.IsNullOrEmpty(value)) return;
+                Function ??= new SerializableFunctionCall();
+                Function.Name = value;
+            }
+        }
+
+        /// <summary>
+        /// [向后兼容 v1.10.x] 平铺参数字段。
+        /// 反序列化旧 JSON 时使用；新导出不会写入（NullValueHandling.Ignore）。
+        /// </summary>
+        [JsonProperty("arguments", NullValueHandling = NullValueHandling.Ignore)]
+        public string Arguments
+        {
+            get => null; // 不写入
+            set
+            {
+                if (value == null) return;
+                Function ??= new SerializableFunctionCall();
+                Function.Arguments = value;
+            }
+        }
 
         /// <summary>
         /// 从运行时 ToolCall 创建可序列化版本。
@@ -303,8 +339,11 @@ namespace AgentCore.Editor.Session
             {
                 Id = tc.Id,
                 Type = tc.Type ?? "function",
-                FunctionName = tc.Function?.Name,
-                Arguments = tc.Function?.Arguments
+                Function = new SerializableFunctionCall
+                {
+                    Name = tc.Function?.Name,
+                    Arguments = tc.Function?.Arguments
+                }
             };
         }
 
@@ -319,11 +358,26 @@ namespace AgentCore.Editor.Session
                 Type = Type ?? "function",
                 Function = new FunctionCall
                 {
-                    Name = FunctionName,
-                    Arguments = Arguments
+                    Name = Function?.Name,
+                    Arguments = Function?.Arguments
                 }
             };
         }
+    }
+
+    /// <summary>
+    /// OpenAI 标准 function call 嵌套结构（v1.11+, Bug F'）。
+    /// </summary>
+    [Serializable]
+    public class SerializableFunctionCall
+    {
+        /// <summary>函数名</summary>
+        [JsonProperty("name")]
+        public string Name { get; set; }
+
+        /// <summary>JSON 参数字符串</summary>
+        [JsonProperty("arguments")]
+        public string Arguments { get; set; }
     }
 
     /// <summary>

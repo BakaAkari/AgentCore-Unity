@@ -75,17 +75,18 @@ namespace AgentCore.Editor.Core.Compression
             // 检查是否启用压缩
             if (!settings.compressionEnabled)
             {
-                return content;
+                // 压缩关闭时也应用 hard cap (Bug C, v1.11+)
+                return ApplyHardCap(content, settings.toolResultHardCapChars, toolName, "compression disabled");
             }
 
             // 估算 token 数
             int tokenCount = TokenCounter.EstimateTokens(content);
 
-            // 未超阈值，直接返回
+            // 未超阈值，直接返回 (但依然应用 hard cap 防御异常大 tool output)
             if (tokenCount <= settings.toolResultCompressionThreshold)
             {
                 _metrics.RecordToolResultCompressionSkipped();
-                return content;
+                return ApplyHardCap(content, settings.toolResultHardCapChars, toolName, "under threshold");
             }
 
             AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Tool result from '{toolName}' exceeds threshold " +
@@ -104,7 +105,9 @@ namespace AgentCore.Editor.Core.Compression
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Tool result compressed: {tokenCount} → {compressedTokens} tokens " +
                               $"(saved {tokenCount - compressedTokens}, ratio: {(float)compressedTokens / tokenCount:P0})");
 
-                    return CompressionPrompts.CompressedToolResultPrefix + compressed;
+                    // Hard cap on LLM output too (Bug C: GLM sometimes returns oversized "compressed" output)
+                    var prefixed = CompressionPrompts.CompressedToolResultPrefix + compressed;
+                    return ApplyHardCap(prefixed, settings.toolResultHardCapChars, toolName, "post-LLM-compression");
                 }
             }
             catch (OperationCanceledException)
@@ -117,8 +120,41 @@ namespace AgentCore.Editor.Core.Compression
                 _metrics.RecordToolResultCompressionFailure();
             }
 
-            // 降级：简单截断
-            return FallbackTruncate(content, settings.toolResultTargetTokens);
+            // 降级：简单截断 (FallbackTruncate 已经自带 targetTokens 限制, 再应用 hard cap 双保险)
+            var truncated = FallbackTruncate(content, settings.toolResultTargetTokens);
+            return ApplyHardCap(truncated, settings.toolResultHardCapChars, toolName, "post-fallback-truncate");
+        }
+
+        /// <summary>
+        /// Hard cap absolute upper bound on tool result content (Bug C, v1.11+).
+        /// <para>
+        /// Applied AFTER compression/truncation as a defensive final gate.
+        /// Prevents oversized output from any path: (a) compression disabled, (b) under threshold
+        /// but tool returned huge output, (c) LLM compression returned oversized "summary".
+        /// </para>
+        /// </summary>
+        private static string ApplyHardCap(string content, int hardCapChars, string toolName, string source)
+        {
+            if (hardCapChars <= 0 || string.IsNullOrEmpty(content) || content.Length <= hardCapChars)
+                return content;
+
+            int keepChars = hardCapChars - 400; // reserve 400 chars for truncation notice
+            if (keepChars <= 0) keepChars = hardCapChars / 2;
+
+            int headChars = (int)(keepChars * 0.8);
+            int tailChars = keepChars - headChars;
+            int omittedChars = content.Length - headChars - tailChars;
+
+            AgentCoreLog.Warning($"[AgentCore] Tool result from '{toolName}' hit hard cap ({content.Length} → {hardCapChars} chars, source: {source}). " +
+                                 $"Use tool filter/limit parameters to narrow output.");
+
+            var head = content.Substring(0, headChars);
+            var tail = content.Substring(content.Length - tailChars);
+
+            return head +
+                   $"\n\n... [HARD CAP: {omittedChars} chars omitted; original was {content.Length} chars. " +
+                   $"Use filter/limit/pagination parameters on '{toolName}' to narrow output.] ...\n\n" +
+                   tail;
         }
 
         /// <summary>
