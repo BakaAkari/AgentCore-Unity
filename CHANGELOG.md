@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.3] - 2026-07-27
+
+### Fixed — Windows smoke test W11 发现的 MemoryProfiler API drift (P0 回归)
+
+Windows 侧 W11 实测暴露 `manage_memory_profiler take_memory_snapshot` 完全不可用: 工具反射查找 `UnityEngine.Profiling.Memory.Experimental.MemoryProfiler` 类型时该类型仍存在 (Unity 保留兼容包装), 但 `TakeSnapshot` method 在该类型上 `GetMethods()` 已返回空.
+
+#### Bug S — MemoryProfiler.TakeSnapshot API 从 `Experimental` 迁到正式 namespace (P0)
+
+Unity 2022.2+ 已把 `UnityEngine.Profiling.Memory.Experimental.MemoryProfiler.TakeSnapshot` 迁移为 `Unity.Profiling.Memory.MemoryProfiler.TakeSnapshot` (un-Experimental'd), signature 完全一致, 旧 API 保留但打 `[Obsolete]` 且 `GetMethods()` 返回空.
+
+- `ManageMemoryProfilerTool.TakeSnapshotAction` 反射入口改为**四段 fallback 链**: 优先 `Unity.Profiling.Memory.MemoryProfiler` (Unity 2022.2+ 新 API) → fallback assembly qualifier → 旧 `Experimental.MemoryProfiler` (Unity 2021 兼容) → 旧 assembly qualifier
+- 错误消息更新为覆盖两个 namespace 的说明
+- 影响面: 仅 take snap 路径, 不动 `list_memory_snapshots` / `analyze_memory_snapshot` (analyze 用的是 `UnityEditor.Profiling.Memory.Experimental.PackedMemorySnapshot`, 不同 namespace, 未受影响)
+
+#### 实测验证 (Megacity Metro 场景)
+
+- Take snap 成功: 1.54 GB `.snap` 文件生成
+- List: 正斜杠路径, `count:1`
+- Analyze: 14 类 entry_counts (`nativeObjects:166457, gcHandles:94083, managedHeapSections:435396, connections:595050`) 均合理
+
+### Documentation
+
+- `plans/v1.10.0/smoke-test-findings.md`: 追加 W6-W11 观察 + v1.11 prompt 治理战略动作 (checklist 参数名/触发方式/意图澄清 3 类系统治理)
+- 记录 v1.11 backlog: Bug P (确认面板 vs 参数校验顺序), Bug Q (per-action ReadOnly gate), Bug T (path normalize 遗漏 message 字段), Bug U (analyze top_n 未实现)
+
 ## [1.10.2] - 2026-07-27
 
 ### Fixed — Windows smoke test P0 遗留验证发现的 2 个类型转换 bug

@@ -126,12 +126,17 @@ namespace AgentCore.Editor.Tools.Native.Extended
             var waitSeconds = ToolHelpers.GetOptionalFloat(parameters, "wait_seconds", 60f);
             if (waitSeconds <= 0f) waitSeconds = 60f;
 
-            // Reflect UnityEngine.Profiling.Memory.Experimental.MemoryProfiler.TakeSnapshot
-            var mpType = Type.GetType("UnityEngine.Profiling.Memory.Experimental.MemoryProfiler, UnityEngine");
+            // Reflect Unity.Profiling.Memory.MemoryProfiler.TakeSnapshot (Unity 2022.2+ modern API)
+            // Fallback to UnityEngine.Profiling.Memory.Experimental.MemoryProfiler for older Unity versions.
+            // The modern API was un-Experimental'd; signatures are identical, only namespace changed.
+            var mpType = Type.GetType("Unity.Profiling.Memory.MemoryProfiler, UnityEngine.CoreModule")
+                      ?? Type.GetType("Unity.Profiling.Memory.MemoryProfiler, UnityEngine")
+                      ?? Type.GetType("UnityEngine.Profiling.Memory.Experimental.MemoryProfiler, UnityEngine.CoreModule")
+                      ?? Type.GetType("UnityEngine.Profiling.Memory.Experimental.MemoryProfiler, UnityEngine");
             if (mpType == null)
             {
                 sw.Stop();
-                return ToolResponse.Fail("UnityEngine.Profiling.Memory.Experimental.MemoryProfiler type not found. Is this a supported Unity version?")
+                return ToolResponse.Fail("Neither Unity.Profiling.Memory.MemoryProfiler nor UnityEngine.Profiling.Memory.Experimental.MemoryProfiler type found. Is this a supported Unity version?")
                     .ToToolResult(sw.Elapsed.TotalMilliseconds);
             }
 
