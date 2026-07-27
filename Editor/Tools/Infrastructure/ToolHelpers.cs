@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -66,8 +67,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
         public static int GetOptionalInt(JObject parameters, string key, int defaultValue = 0)
         {
             var token = parameters?[key];
-            if (token == null) return defaultValue;
-            return token.Value<int>();
+            if (token == null || token.Type == JTokenType.Null) return defaultValue;
+            return TryCoerceInt(token, key, out var v) ? v : defaultValue;
         }
 
         /// <summary>
@@ -76,8 +77,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
         public static float GetOptionalFloat(JObject parameters, string key, float defaultValue = 0f)
         {
             var token = parameters?[key];
-            if (token == null) return defaultValue;
-            return token.Value<float>();
+            if (token == null || token.Type == JTokenType.Null) return defaultValue;
+            return TryCoerceFloat(token, key, out var v) ? v : defaultValue;
         }
 
         /// <summary>
@@ -86,8 +87,125 @@ namespace AgentCore.Editor.Tools.Infrastructure
         public static bool GetOptionalBool(JObject parameters, string key, bool defaultValue = false)
         {
             var token = parameters?[key];
-            if (token == null) return defaultValue;
-            return token.Value<bool>();
+            if (token == null || token.Type == JTokenType.Null) return defaultValue;
+            return TryCoerceBool(token, key, out var v) ? v : defaultValue;
+        }
+
+        /// <summary>
+        /// 尝试将 <see cref="JToken"/> 强制转换为 float。
+        /// <para>
+        /// 兼容：
+        /// <list type="bullet">
+        ///   <item><see cref="JTokenType.Float"/> / <see cref="JTokenType.Integer"/> — 直接返回 (fast path)</item>
+        ///   <item><see cref="JTokenType.String"/> — 用 <see cref="CultureInfo.InvariantCulture"/> parse (provider bug workaround，对称 Bug E)</item>
+        ///   <item><see cref="JTokenType.Boolean"/> — false→0, true→1</item>
+        /// </list>
+        /// 触发 String coercion 时写一条 warn log，便于后续判断能否撤除。
+        /// </para>
+        /// </summary>
+        public static bool TryCoerceFloat(JToken token, string paramName, out float value)
+        {
+            value = 0f;
+            if (token == null || token.Type == JTokenType.Null) return false;
+            switch (token.Type)
+            {
+                case JTokenType.Float:
+                case JTokenType.Integer:
+                    value = token.Value<float>();
+                    return true;
+                case JTokenType.String:
+                    if (float.TryParse(token.Value<string>(), NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+                    {
+                        AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                            $"[AgentCore] Parameter '{paramName}' arrived as JSON string \"{token.Value<string>()}\" but expected number. " +
+                            $"Auto-parsed to {value}. Provider may be misserializing numeric values.");
+                        return true;
+                    }
+                    return false;
+                case JTokenType.Boolean:
+                    value = token.Value<bool>() ? 1f : 0f;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// 尝试将 <see cref="JToken"/> 强制转换为 int。字符串会被 parse；float 会被 truncate。
+        /// </summary>
+        public static bool TryCoerceInt(JToken token, string paramName, out int value)
+        {
+            value = 0;
+            if (token == null || token.Type == JTokenType.Null) return false;
+            switch (token.Type)
+            {
+                case JTokenType.Integer:
+                    value = token.Value<int>();
+                    return true;
+                case JTokenType.Float:
+                    value = (int)token.Value<double>();
+                    return true;
+                case JTokenType.String:
+                    var s = token.Value<string>();
+                    if (int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                    {
+                        AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                            $"[AgentCore] Parameter '{paramName}' arrived as JSON string \"{s}\" but expected integer. " +
+                            $"Auto-parsed to {value}. Provider may be misserializing numeric values.");
+                        return true;
+                    }
+                    // 兜底：允许 "1.0" -> 1
+                    if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+                    {
+                        value = (int)d;
+                        AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                            $"[AgentCore] Parameter '{paramName}' arrived as JSON string \"{s}\" (float-form) but expected integer. " +
+                            $"Auto-truncated to {value}. Provider may be misserializing numeric values.");
+                        return true;
+                    }
+                    return false;
+                case JTokenType.Boolean:
+                    value = token.Value<bool>() ? 1 : 0;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// 尝试将 <see cref="JToken"/> 强制转换为 bool。字符串 "true"/"false"/"1"/"0" 可 parse。
+        /// </summary>
+        public static bool TryCoerceBool(JToken token, string paramName, out bool value)
+        {
+            value = false;
+            if (token == null || token.Type == JTokenType.Null) return false;
+            switch (token.Type)
+            {
+                case JTokenType.Boolean:
+                    value = token.Value<bool>();
+                    return true;
+                case JTokenType.String:
+                    var s = token.Value<string>().Trim();
+                    if (bool.TryParse(s, out value))
+                    {
+                        AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                            $"[AgentCore] Parameter '{paramName}' arrived as JSON string \"{s}\" but expected boolean. " +
+                            $"Auto-parsed to {value}. Provider may be misserializing boolean values.");
+                        return true;
+                    }
+                    // 数值 fallback: "0" -> false, "1" -> true
+                    if (s == "0") { value = false; return true; }
+                    if (s == "1") { value = true; return true; }
+                    return false;
+                case JTokenType.Integer:
+                    value = token.Value<int>() != 0;
+                    return true;
+                case JTokenType.Float:
+                    value = token.Value<double>() != 0.0;
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         /// <summary>

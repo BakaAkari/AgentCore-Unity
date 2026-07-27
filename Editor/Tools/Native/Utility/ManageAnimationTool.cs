@@ -428,13 +428,16 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 switch (param.type)
                 {
                     case AnimatorControllerParameterType.Float:
-                        param.defaultFloat = valueToken.Value<float>();
+                        if (!ToolHelpers.TryCoerceFloat(valueToken, "value", out var _fv)) throw new ArgumentException($"value expected float, got {valueToken.Type}");
+                        param.defaultFloat = _fv;
                         break;
                     case AnimatorControllerParameterType.Int:
-                        param.defaultInt = valueToken.Value<int>();
+                        if (!ToolHelpers.TryCoerceInt(valueToken, "value", out var _iv)) throw new ArgumentException($"value expected int, got {valueToken.Type}");
+                        param.defaultInt = _iv;
                         break;
                     case AnimatorControllerParameterType.Bool:
-                        param.defaultBool = valueToken.Value<bool>();
+                        if (!ToolHelpers.TryCoerceBool(valueToken, "value", out var _bv)) throw new ArgumentException($"value expected bool, got {valueToken.Type}");
+                        param.defaultBool = _bv;
                         break;
                     case AnimatorControllerParameterType.Trigger:
                         // Triggers don't have a persistent default value

@@ -245,14 +245,14 @@ namespace AgentCore.Editor.Tools.Native.Meta
                 }
                 case "int":
                 {
-                    var v = valueToken.Value<int>();
+                    if (!ToolHelpers.TryCoerceInt(valueToken, "value", out var v)) throw new ArgumentException($"value expected int, got {valueToken.Type}");
                     if (isEditor) EditorPrefs.SetInt(key, v); else PlayerPrefs.SetInt(key, v);
                     data["value"] = v;
                     break;
                 }
                 case "float":
                 {
-                    var v = valueToken.Value<float>();
+                    if (!ToolHelpers.TryCoerceFloat(valueToken, "value", out var v)) throw new ArgumentException($"value expected float, got {valueToken.Type}");
                     if (isEditor) EditorPrefs.SetFloat(key, v); else PlayerPrefs.SetFloat(key, v);
                     data["value"] = v;
                     break;
@@ -261,7 +261,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
                 {
                     if (!isEditor)
                         return ToolResponse.Fail("bool value_type is only supported for EditorPrefs. For PlayerPrefs, use int 0/1.");
-                    var v = valueToken.Value<bool>();
+                    if (!ToolHelpers.TryCoerceBool(valueToken, "value", out var v)) throw new ArgumentException($"value expected bool, got {valueToken.Type}");
                     EditorPrefs.SetBool(key, v);
                     data["value"] = v;
                     break;

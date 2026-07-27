@@ -600,7 +600,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 {
                     return ToolResponse.Fail("Parameter 'active' requires a boolean value.");
                 }
-                target.active = valueToken.Value<bool>();
+                if (!ToolHelpers.TryCoerceBool(valueToken, "value", out var _activeV)) throw new ArgumentException($"value expected bool, got {valueToken.Type}");
+                target.active = _activeV;
                 EditorUtility.SetDirty(profile);
                 return ToolResponse.OkWithData(SerializeVolumeComponent(target),
                     $"{target.GetType().Name}.active = {target.active} on profile '{profile.name}'.");
@@ -864,15 +865,35 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         /// <summary>
         /// Coerce a JToken to the expected .NET type of a VolumeParameter&lt;T&gt;.value property.
         /// Sets <paramref name="error"/> to a message when coercion is impossible; returns null in that case.
+        /// <para>
+        /// Primitive branches (float/double/int/bool) delegate to <see cref="AgentCore.Editor.Tools.Infrastructure.ToolHelpers"/>
+        /// which tolerates provider misserialization (e.g. GLM sending "0.5" as JSON string instead of number — Bug K).
+        /// </para>
         /// </summary>
         private static object CoerceJTokenToType(JToken token, Type targetType, out string error)
         {
             error = null;
 
-            if (targetType == typeof(float)) return token.Type == JTokenType.Float || token.Type == JTokenType.Integer ? (float)token.ToObject<double>() : Fail<float>(token, targetType, out error);
-            if (targetType == typeof(double)) return token.Type == JTokenType.Float || token.Type == JTokenType.Integer ? token.ToObject<double>() : Fail<double>(token, targetType, out error);
-            if (targetType == typeof(int)) return token.Type == JTokenType.Integer || token.Type == JTokenType.Float ? token.ToObject<int>() : Fail<int>(token, targetType, out error);
-            if (targetType == typeof(bool)) return token.Type == JTokenType.Boolean ? token.ToObject<bool>() : Fail<bool>(token, targetType, out error);
+            if (targetType == typeof(float))
+            {
+                if (AgentCore.Editor.Tools.Infrastructure.ToolHelpers.TryCoerceFloat(token, "value", out var f)) return f;
+                return Fail<float>(token, targetType, out error);
+            }
+            if (targetType == typeof(double))
+            {
+                if (AgentCore.Editor.Tools.Infrastructure.ToolHelpers.TryCoerceFloat(token, "value", out var f)) return (double)f;
+                return Fail<double>(token, targetType, out error);
+            }
+            if (targetType == typeof(int))
+            {
+                if (AgentCore.Editor.Tools.Infrastructure.ToolHelpers.TryCoerceInt(token, "value", out var i)) return i;
+                return Fail<int>(token, targetType, out error);
+            }
+            if (targetType == typeof(bool))
+            {
+                if (AgentCore.Editor.Tools.Infrastructure.ToolHelpers.TryCoerceBool(token, "value", out var b)) return b;
+                return Fail<bool>(token, targetType, out error);
+            }
             if (targetType == typeof(string)) return token.ToObject<string>();
 
             if (targetType == typeof(Color))

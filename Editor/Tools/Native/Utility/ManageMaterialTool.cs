@@ -427,12 +427,12 @@ namespace AgentCore.Editor.Tools.Native.Utility
                         break;
 
                     case "float":
-                        var floatVal = valueToken.Value<float>();
+                        if (!ToolHelpers.TryCoerceFloat(valueToken, "value", out var floatVal)) throw new ArgumentException($"value expected float, got {valueToken.Type}");
                         material.SetFloat(propertyName, floatVal);
                         break;
 
                     case "int":
-                        var intVal = valueToken.Value<int>();
+                        if (!ToolHelpers.TryCoerceInt(valueToken, "value", out var intVal)) throw new ArgumentException($"value expected int, got {valueToken.Type}");
                         material.SetInt(propertyName, intVal);
                         break;
 
@@ -456,7 +456,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                         break;
 
                     case "keyword":
-                        var keywordValue = valueToken.Value<bool>();
+                        if (!ToolHelpers.TryCoerceBool(valueToken, "value", out var keywordValue)) throw new ArgumentException($"value expected bool, got {valueToken.Type}");
                         if (keywordValue)
                             material.EnableKeyword(propertyName);
                         else
@@ -898,10 +898,10 @@ namespace AgentCore.Editor.Tools.Native.Utility
                                 material.SetColor(propName, color);
                                 break;
                             case "float":
-                                material.SetFloat(propName, valueToken.Value<float>());
+                                if (!ToolHelpers.TryCoerceFloat(valueToken, "value", out var _mfv)) throw new ArgumentException($"value expected float, got {valueToken.Type}"); material.SetFloat(propName, _mfv);
                                 break;
                             case "int":
-                                material.SetInt(propName, valueToken.Value<int>());
+                                if (!ToolHelpers.TryCoerceInt(valueToken, "value", out var _miv)) throw new ArgumentException($"value expected int, got {valueToken.Type}"); material.SetInt(propName, _miv);
                                 break;
                             case "vector":
                                 var vec = new Vector4(
@@ -923,7 +923,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                                 material.SetTexture(propName, texture);
                                 break;
                             case "keyword":
-                                var keywordEnabled = valueToken.Value<bool>();
+                                if (!ToolHelpers.TryCoerceBool(valueToken, "value", out var keywordEnabled)) throw new ArgumentException($"value expected bool, got {valueToken.Type}");
                                 if (keywordEnabled)
                                     material.EnableKeyword(propName);
                                 else

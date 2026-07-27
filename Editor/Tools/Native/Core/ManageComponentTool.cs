@@ -778,15 +778,18 @@ namespace AgentCore.Editor.Tools.Native.Core
             switch (prop.propertyType)
             {
                 case SerializedPropertyType.Integer:
-                    prop.intValue = value.Value<int>();
+                    if (!ToolHelpers.TryCoerceInt(value, "value", out var _intV)) throw new ArgumentException($"value expected int, got {value.Type}");
+                    prop.intValue = _intV;
                     return true;
 
                 case SerializedPropertyType.Boolean:
-                    prop.boolValue = value.Value<bool>();
+                    if (!ToolHelpers.TryCoerceBool(value, "value", out var _boolV)) throw new ArgumentException($"value expected bool, got {value.Type}");
+                    prop.boolValue = _boolV;
                     return true;
 
                 case SerializedPropertyType.Float:
-                    prop.floatValue = value.Value<float>();
+                    if (!ToolHelpers.TryCoerceFloat(value, "value", out var _floatV)) throw new ArgumentException($"value expected float, got {value.Type}");
+                    prop.floatValue = _floatV;
                     return true;
 
                 case SerializedPropertyType.String:
@@ -844,7 +847,8 @@ namespace AgentCore.Editor.Tools.Native.Core
                     }
                     else if (value.Type == JTokenType.Integer)
                     {
-                        prop.enumValueIndex = value.Value<int>();
+                        if (!ToolHelpers.TryCoerceInt(value, "value", out var _enumV)) throw new ArgumentException($"value expected int (enum index), got {value.Type}");
+                        prop.enumValueIndex = _enumV;
                         return true;
                     }
                     return false;
