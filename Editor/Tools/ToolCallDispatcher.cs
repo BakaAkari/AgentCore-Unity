@@ -224,6 +224,7 @@ namespace AgentCore.Editor.Tools
 
                 // 2. 解析参数
                 var parameters = ParseArguments(toolCall.Function?.Arguments);
+
                 if (parameters == null)
                 {
                     stopwatch.Stop();

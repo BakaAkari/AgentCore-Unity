@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Tools.Infrastructure
 {
@@ -21,6 +22,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
     ///   <item>空 schema 或无 properties 时保持宽松，允许执行</item>
     ///   <item>未声明的额外字段默认允许（不校验 additionalProperties）</item>
     ///   <item>不引入第三方 JSON Schema 库，保持轻量</item>
+    ///   <item>Provider 宽容修复：某些模型（如 GLM）会把嵌套 object / number / boolean 序列化成 JSON 字符串，
+    ///         校验前尝试将 string 值 JToken.Parse 恢复为期望类型，避免上游 provider bug 阻断工具调用</item>
     /// </list>
     /// </para>
     /// </summary>
@@ -74,8 +77,28 @@ namespace AgentCore.Editor.Tools.Infrastructure
                 if (paramValue == null || paramValue.Type == JTokenType.Null)
                     continue;
 
-                // 校验类型
                 var expectedType = fieldSchema["type"]?.ToString();
+
+                // Provider 宽容修复（Bug E, GLM）：
+                // 某些 LLM 会把嵌套 object / number / boolean 值序列化成 JSON 字符串
+                // 例如 pivot 本应传 { "x":0, "y":10, "z":0 }，但被序列化成了 "{\"x\":0,\"y\":10,\"z\":0}"
+                // 如果 schema 期望非 string 类型但拿到 string，尝试 JToken.Parse 恢复原始类型
+                if (!string.IsNullOrEmpty(expectedType)
+                    && paramValue.Type == JTokenType.String
+                    && expectedType != "string")
+                {
+                    var coerced = TryCoerceStringToken(paramValue, expectedType);
+                    if (coerced != null)
+                    {
+                        AgentCoreLog.Warning(
+                            $"Parameter '{fieldName}' arrived as JSON string but schema expects '{expectedType}'. " +
+                            $"Auto-parsed successfully — provider may be misserializing nested values.");
+                        parameters[fieldName] = coerced;
+                        paramValue = coerced;
+                    }
+                }
+
+                // 校验类型
                 if (!string.IsNullOrEmpty(expectedType))
                 {
                     if (!ValidateType(paramValue, expectedType, out var typeError))
@@ -98,6 +121,49 @@ namespace AgentCore.Editor.Tools.Infrastructure
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 尝试将 String 类型的 JToken 反序列化为期望类型。
+        /// </summary>
+        /// <param name="stringToken">String 类型 JToken</param>
+        /// <param name="expectedType">期望的 JSON Schema 类型</param>
+        /// <returns>成功且类型匹配时返回新 JToken，否则返回 null</returns>
+        private static JToken TryCoerceStringToken(JToken stringToken, string expectedType)
+        {
+            var stringValue = stringToken.Value<string>();
+            if (string.IsNullOrEmpty(stringValue))
+                return null;
+
+            try
+            {
+                var parsed = JToken.Parse(stringValue);
+                if (TypeMatches(parsed.Type, expectedType))
+                    return parsed;
+            }
+            catch
+            {
+                // Parse 失败，返回 null，让下游严格校验按 String 拒绝
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 判断 JTokenType 是否匹配 JSON Schema 期望类型。
+        /// </summary>
+        private static bool TypeMatches(JTokenType actualType, string expectedType)
+        {
+            switch (expectedType)
+            {
+                case "object": return actualType == JTokenType.Object;
+                case "array": return actualType == JTokenType.Array;
+                case "integer": return actualType == JTokenType.Integer;
+                case "number": return actualType == JTokenType.Integer || actualType == JTokenType.Float;
+                case "boolean": return actualType == JTokenType.Boolean;
+                case "string": return actualType == JTokenType.String;
+                default: return false;
+            }
         }
 
         /// <summary>
