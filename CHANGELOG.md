@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.2] - 2026-07-27
+
+### Fixed — Windows smoke test P0 遗留验证发现的 2 个类型转换 bug
+
+Windows 侧 W4 (`set_scene_view`) 和 R2 (`volume_set`) 实测暴露 GLM provider 的参数序列化问题, 两处修复对称覆盖 schema 层和 handler 层.
+
+#### Bug E — `set_scene_view` 复合参数被降为 string (P0)
+
+GLM 把嵌套 object / 数字 / 布尔字段序列化成 JSON string 字面量 (`pivot: "{\"x\":0,\"y\":10,\"z\":0}"`, `size: "20"`, `orthographic: "false"`), Validator 层直接报 `Parameter 'pivot' expected object but got string.`.
+
+- `ToolParameterValidator` 主循环加宽容 coercion: `expected != "string"` 且 `token.Type == String` 时尝试 `JToken.Parse(str)` + `TypeMatches` 双重校验, 成功则 in-place 写回 parameters
+- 触发时 `AgentCoreLog.Warning` 记录, 便于后续判断能否撤除
+- 对合规 provider (OpenAI/Anthropic) 0 影响 (fast path 不变)
+- `ManageCameraTool` / `ManageProBuilderTool` schema 补全 nested `properties` 字段 (虽对 Validator 不递归但对 LLM tool schema 描述更清晰)
+
+#### Bug K — Handler 层多态 value 参数字符串化 (P1)
+
+Bug E 修完 Validator 层后, R2 `manage_graphics volume_set` (URP Bloom.intensity) 仍报 `Cannot coerce JToken (String: 0.5) to Single.` — Validator 只处理 schema-typed 参数, 多态 `value` 字段 (int/float/bool/color/vector 都可能) 走 handler 内部反射, 那里直接 `token.Value<T>()` 会在 String 类型上抛异常.
+
+- 新增 `ToolHelpers.TryCoerceFloat` / `TryCoerceInt` / `TryCoerceBool` (`InvariantCulture` parse + `AgentCoreLog.Warning`, `Bool↔Number` 互转)
+- `ToolHelpers.GetOptional{Float,Int,Bool}` 内部改用 `TryCoerce*`, 所有已经调用 helper 的 handler 自动受益 (20+ 文件)
+- `ManageGraphicsTool.CoerceJTokenToType` (URP `volume_set` 直接爆炸点) 改用 `TryCoerce*`
+- 21 处 handler 裸调 `.Value<T>()` 全部改用 `TryCoerce*` + `throw ArgumentException`, 覆盖:
+  - `ManageComponentTool.SetSerializedPropertyValue` (Integer/Boolean/Float/Enum 4 处)
+  - `ManageScriptableObjectTool.SetSerializedPropertyValue` (Integer/Boolean/Float/Enum 4 处)
+  - `ManagePrefsTool` set/get_or_default int/float/bool value (3 处)
+  - `ManageGraphicsTool.HandleSetActive` bool value (1 处)
+  - `ManageAnimationTool` param default int/float/bool (3 处)
+  - `ManageMaterialTool` set_property + material.SetFloat/SetInt + keyword bool (6 处)
+- 未修 (明确不影响): Vector/Color 内部 `Value<float?>` 已由 Bug E fix 上游修好, LayerMask 分支已被 `JTokenType.Integer` gate, InstanceID lookup 非 LLM 直传参数
+
+### Testing
+
+- W4 (`set_scene_view` quaternion): Bug E fix 后一次成功, `pivot`/`size`/`rotation_quaternion`/`orthographic` 4 fields applied 无 retry
+- W5 (`set_scene_view` Euler + 2D): Bug E fix 后一次成功, `rotation_euler`/`in_2d_mode` 分支同样通过
+- R2 (`volume_get` URP): 8 VolumeComponent 反射完整解析, `full_type = UnityEngine.Rendering.Universal.*` 证实 URP 路径命中, G10 URP 读侧验证完全收尾 (v1.10.0 handoff §2.6 遗留)
+
+### Not Fixed (记录到 backlog, 非本版本目标)
+
+- Bug A — `set_selection_by_query` 缺 `final_selection_count` (P1)
+- Bug B — `max_results` 触发无分页 (P1)
+- Bug C — Response compression 需审计 (P2)
+- Bug D — `t:Material` 命中 `.shadergraph` sub-asset (P1)
+- Bug F — 会话导出吞 `tool_call.arguments` (P1)
+- Bug G' — GLM 幻觉性工具失明 (P3, 非 AgentCore bug, 明确 prompt 可绕过)
+- Bug H — Play Mode 写拦截规则过宽 (P1, 阻断 R1 FrameDebugger 采集)
+- Bug I — FrameDebugger 采集时序不适合 LLM 单调用 (P1, v1.10.0 handoff §2.5 遗留)
+- Bug J — 工具 hint 面向人类不面向 LLM (P3)
+
 ## [1.10.1] - 2026-07-25
 
 ### Fixed — Windows smoke test 发现的 2 个 bug
