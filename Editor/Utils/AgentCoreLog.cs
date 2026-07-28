@@ -17,10 +17,10 @@ namespace AgentCore.Editor.Utils
         /// <summary>仅输出 Error。</summary>
         Error = 1,
 
-        /// <summary>输出 Warning + Error。</summary>
+        /// <summary>输出 Warning + Error (默认)。</summary>
         Warning = 2,
 
-        /// <summary>输出 Info + Warning + Error (默认)。</summary>
+        /// <summary>输出 Info + Warning + Error。</summary>
         Info = 3,
 
         /// <summary>输出 Debug + Info + Warning + Error (含流式 token、每 event 细节等高频日志)。</summary>
@@ -37,7 +37,7 @@ namespace AgentCore.Editor.Utils
     /// 迁移指引:
     /// <list type="bullet">
     ///   <item><description><c>Debug.Log</c> 里高频 (每 token/每 event) → <see cref="Debug"/></description></item>
-    ///   <item><description><c>Debug.Log</c> 里 turn 级 (每 tool call/每 turn) → <see cref="Info"/> (默认可见)</description></item>
+    ///   <item><description><c>Debug.Log</c> 里 turn 级 (每 tool call/每 turn) → <see cref="Info"/></description></item>
     ///   <item><description><c>Debug.LogWarning</c> → <see cref="Warning"/></description></item>
     ///   <item><description><c>Debug.LogError</c> → <see cref="Error"/></description></item>
     /// </list>
@@ -46,7 +46,7 @@ namespace AgentCore.Editor.Utils
     public static class AgentCoreLog
     {
         /// <summary>缓存日志级别,避免每次 Debug.Log 都访问 ScriptableSingleton (性能优化)。</summary>
-        private static LogLevel _cachedLevel = LogLevel.Info;
+        private static LogLevel _cachedLevel = LogLevel.Warning;
 
         /// <summary>缓存是否已初始化 (延迟从 Settings 读一次)。</summary>
         private static bool _cacheInitialized;
@@ -79,18 +79,18 @@ namespace AgentCore.Editor.Utils
             try
             {
                 var settings = AgentCore.Editor.Config.AgentCoreSettings.instance;
-                _cachedLevel = settings != null ? settings.logLevel : LogLevel.Info;
+                _cachedLevel = settings != null ? settings.logLevel : LogLevel.Warning;
             }
             catch
             {
-                _cachedLevel = LogLevel.Info;
+                _cachedLevel = LogLevel.Warning;
             }
             _cacheInitialized = true;
         }
 
         /// <summary>
         /// Debug 级日志:高频细节 (流式 token、每 event、每 chunk)。
-        /// 默认 Info 级不显示,需切到 Debug 才可见。
+        /// 默认 Warning 级不显示,需切到 Debug 才可见。
         /// </summary>
         public static void Debug(string message)
         {

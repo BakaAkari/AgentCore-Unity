@@ -118,7 +118,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     var newLevel = (AgentCore.Editor.Utils.LogLevel)EditorGUILayout.EnumPopup(
                         new GUIContent(
                             "Log Level",
-                            "Silent: fully silent (use with caution) · Error: errors only · Warning: warnings + errors · Info: default, key business events · Debug: everything, incl. streaming token / per-event high-frequency logs"),
+                            "Silent: fully silent (use with caution) · Error: errors only · Warning: default, warnings + errors · Info: key business events · Debug: everything, incl. streaming token / per-event high-frequency logs"),
                         current);
                     if (newLevel != current)
                     {
