@@ -536,11 +536,6 @@ namespace AgentCore.Editor.Core
                 {
                     // 正常完成，不需要额外操作
                 }
-
-                // v1.8.8: SendMessageAsync 顶层 finally, 确保 Silent buffer 无论正常/异常/取消
-                // 都会 flush. Runner.cs 里的 LoopCompleted 路径也已挂 FlushSilentBuffer, 二者叠加
-                // 是幂等的 (buffer 空时短路). 双保险防止 buffer 残留.
-                FlushSilentBuffer();
             }
         }
 

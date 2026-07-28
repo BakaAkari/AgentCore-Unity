@@ -39,21 +39,27 @@ namespace AgentCore.Editor.Utils
 
         private static void DrainMainThreadQueue()
         {
-            // 每帧最多处理 256 个回调，防止极端积压下卡死一帧
-            int processed = 0;
-            const int MaxPerFrame = 256;
+            // fast-path: 队列空时不进 marker, 避免每帧无谓 sample
+            if (_mainThreadQueue.IsEmpty) return;
 
-            while (processed < MaxPerFrame && _mainThreadQueue.TryDequeue(out var action))
+            using (AgentCoreProfilerMarkers.DrainQueue.Auto())
             {
-                try
+                // 每帧最多处理 256 个回调，防止极端积压下卡死一帧
+                int processed = 0;
+                const int MaxPerFrame = 256;
+
+                while (processed < MaxPerFrame && _mainThreadQueue.TryDequeue(out var action))
                 {
-                    action();
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        AgentCoreLog.Error($"[AgentCore] Main thread callback error: {ex}");
+                    }
+                    processed++;
                 }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Error($"[AgentCore] Main thread callback error: {ex}");
-                }
-                processed++;
             }
         }
 

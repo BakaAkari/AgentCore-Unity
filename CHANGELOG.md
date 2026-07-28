@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0-alpha.4] - 2026-07-28
+
+### Fixed — Perf-Critical: Chat 卡顿根因修复
+
+`Editor/LLM/StreamingResponseParser.cs` 的 SSE 消费循环从 `while (!reader.EndOfStream)` 改为 `while (!ct.IsCancellationRequested)` + 依赖 `ReadLineAsync() == null` 判定 stream 结束。
+
+`StreamReader.EndOfStream` 属性 getter 在 `NetworkStream` 上会同步阻塞主线程 peek 一字符。SSE 慢吐字下实测每次 ~7ms，一帧 28 次调用累计 199ms/帧（334ms 一帧的 60%）。这是 Editor 主线程被 SSE 循环拖住的元凶。
+
+修复后 agent 回复期间 Editor 主线程不再被 SSE 循环拖住。
+
+### Removed — Silent 模式彻底移除
+
+v1.8.8 引入 Silent 模式（S 按钮）时基于错误的观察者效应认知：以为 "Chat UI 更新会通过 UnitySynchronizationContext 走 EditorLoop tick, 干扰 profiler 数据"。
+
+2026-07-28 Profiler 实测证明：Chat UI 更新的所有 marker（`AgentCore.UI.HandleAgentEvent` / `UpdateContextPanel` / `Emit.SilentBuffered` / `Emit.Marshalled`）在卡顿帧里**全为 0**，真正 199ms 全在 `StreamReader.EndOfStream` 阻塞（见上）。
+
+Silent 模式从未真正缓解它想解决的问题，保留是负债。删除内容：
+
+- `Editor/Core/SessionMode.cs` (整个文件, `SessionMode` enum + `SessionModeState` + `EditorPrefs` key)
+- `Editor/UI/Components/SilentModeButton.cs` (整个文件, S 按钮 UI Toolkit 组件)
+- `Editor/Core/AgentLoop.Events.cs` 里的 Silent gate / `_silentBuffer` / `IsUserInteractionEvent` 白名单 / `FlushSilentBuffer` 方法 / `SessionModeState.Changed` 订阅
+- `Editor/Core/AgentLoop.Runner.cs` 和 `AgentLoop.cs` 里两处 `FlushSilentBuffer()` 调用
+- `Editor/UI/ChatWindow.cs` 里 `_silentModeButton` 字段 + 动态插入逻辑
+- `Editor/UI/ChatWindow.Input.cs` 里 `if (!SessionModeState.IsSilent)` PendingIndicator gate（改为无条件显示）
+- `Editor/Utils/AgentCoreProfilerMarkers.cs` 里 `EmitSilentBuffered` marker（其他 5 个诊断 marker 保留）
+- `Editor/L10n/Resources/{en-US,zh-CN}.json` 里 `silentMode.tooltip.*` 三个键
+- `EditorPrefs` key `AgentCore.ChatWindow.SessionMode` 不再读写（残留 key 对功能无影响，不做主动 migration）
+
 ## [1.12.0-alpha.3] - 2026-07-28
 
 ### Added — Session Organization Phase 3: UI 分组重构 + 右键菜单 + 归档区

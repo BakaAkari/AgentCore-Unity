@@ -140,10 +140,6 @@
   "help.trust.lowMed": "Trust Low/Med — this session lets ReadOnly/Low/Medium risk tools through, High/destructive still prompt",
   "help.trust.yolo": "YOLO (All) — this session lets ALL tools through, including delete / push / compile / other destructive ops. Use with care.",
 
-  "silentMode.tooltip": "Silent mode: freeze chat UI during agent execution to avoid interfering with performance measurements. Results appear all at once when the task finishes.",
-  "silentMode.tooltip.silent": "Silent mode ON — chat UI is frozen. Click to switch back to Batched (live) mode.",
-  "silentMode.tooltip.batched": "Batched (default) — chat UI updates live. Click to enable Silent mode (freeze UI, cleaner performance profiling).",
-
   "contextUsage.header": "Context usage",
   "contextUsage.usage": "{0}% ({1} / {2} tokens)",
   "contextUsage.tokenAllocation.label": "Token allocation",

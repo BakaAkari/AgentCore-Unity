@@ -536,6 +536,13 @@ namespace AgentCore.Editor.Tools
             CancellationToken ct,
             TaskCompletionSource<ToolResult> tcs)
         {
+            // v1.12.0-alpha.4: 此处曾用 ProfilerMarker.Begin/End 包裹 await tool.ExecuteAsync,
+            // 意图观测工具执行耗时. 但 ProfilerMarker 按 frame 校验 Begin/End 配对, 跨 await 到下一帧
+            // 会污染 Console:
+            //   [Error] Missing Profiler.EndSample: AgentCore.ToolExec
+            //   [Error] Non-matching Profiler.EndSample: AgentCore.ToolExec
+            // 因此移除. 工具执行耗时可从 Unity Profiler 内建的 UnitySynchronizationContext.ExecuteTasks
+            // 采样观测, 不需要自定义 marker.
             try
             {
                 var result = await tool.ExecuteAsync(parameters, ct);

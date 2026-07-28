@@ -319,12 +319,6 @@ namespace AgentCore.Editor.Core
             // 发送循环结束事件
             EmitEvent(AgentEvent.LoopCompleted(currentRound));
 
-            // v1.8.8: turn 结束时 flush Silent buffer.
-            // Silent 模式下, 上面所有 EmitEvent 已被写入 _silentBuffer 而没 marshal 到主线程.
-            // FlushSilentBuffer 会把 buffer 内容 (含刚 emit 的 LoopCompleted) 逐个 RunOnMainThread,
-            // 一波集中送到 UI. Batched 模式下 buffer 是空的, FlushSilentBuffer 短路返回.
-            FlushSilentBuffer();
-
             // 自动保存会话
             try
             {

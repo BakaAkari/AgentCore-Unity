@@ -16,6 +16,8 @@ namespace AgentCore.Editor.UI
         /// <param name="evt">Agent 事件</param>
         private void HandleAgentEvent(AgentEvent evt)
         {
+            using var _hae = AgentCore.Editor.Utils.AgentCoreProfilerMarkers.UIHandleAgentEvent.Auto();
+
             // 诊断日志：追踪工具调用相关事件
             if (evt.Type == AgentEventType.ToolCallStarted ||
                 evt.Type == AgentEventType.ToolCallCompleted ||
@@ -210,6 +212,8 @@ namespace AgentCore.Editor.UI
         {
             if (_contextUsagePanel == null || _agentLoop == null)
                 return;
+
+            using var _ucp = AgentCore.Editor.Utils.AgentCoreProfilerMarkers.UIUpdateContextPanel.Auto();
 
             try
             {

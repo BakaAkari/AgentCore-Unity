@@ -128,8 +128,6 @@ namespace AgentCore.Editor.UI
         /// <summary>取消按钮</summary>
         private Button _cancelButton;
 
-        /// <summary>v1.8.8: Silent 模式切换按钮 (输入栏最左侧, 动态添加)</summary>
-        private Components.SilentModeButton _silentModeButton;
 
         /// <summary>Agent 状态行（消息流底部，文件变更面板上方）</summary>
         private AgentStatusLine _agentStatusLine;
@@ -278,16 +276,6 @@ namespace AgentCore.Editor.UI
             _sendButton = rootVisualElement.Q<Button>("send-button");
             _cancelButton = rootVisualElement.Q<Button>("cancel-button");
             _scrollToBottomButton = rootVisualElement.Q<Button>("scroll-to-bottom-button");
-
-            // v1.8.8: 输入栏最左侧插入 Silent 按钮 (动态添加, 不改 UXML 避免 GUID 变化).
-            // input-area 在 UXML 里是 flex row 容器 (input-scroll-view + send-button + cancel-button),
-            // Insert(0, ...) 放在最左. SilentModeButton 自订阅 SessionModeState.Changed 更新样式.
-            var inputAreaForSilentBtn = rootVisualElement.Q<VisualElement>("input-area");
-            if (inputAreaForSilentBtn != null && _silentModeButton == null)
-            {
-                _silentModeButton = new Components.SilentModeButton();
-                inputAreaForSilentBtn.Insert(0, _silentModeButton);
-            }
 
             // 3.5 查询 Hub 导航与面板 UI 元素引用
             _contextSidebar = rootVisualElement.Q<VisualElement>("context-sidebar");

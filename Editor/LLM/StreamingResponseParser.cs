@@ -50,7 +50,7 @@ namespace AgentCore.Editor.LLM
             //   不同吞吐场景下要么过频（吐字慢）要么过疏（Hold on 复现）。
             var yieldTimer = System.Diagnostics.Stopwatch.StartNew();
 
-            while (!reader.EndOfStream && !ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested)
             {
                 string line;
                 try
@@ -63,6 +63,10 @@ namespace AgentCore.Editor.LLM
                     return;
                 }
 
+                // ReadLineAsync 返回 null 即流真正结束 (原实现依赖 reader.EndOfStream
+                // 作为 loop 条件, 但 EndOfStream 属性 getter 在 NetworkStream 上会同步
+                // 阻塞主线程做 peek — Profiler 实测 28 次调用共 199ms/帧 (334ms 一帧
+                // 里的 60%). 改为仅通过 ReadLineAsync 返回值判定 stream 结束, 语义等价.
                 if (line == null) break;
 
                 // 空行跳过（SSE 格式中的事件分隔符）
