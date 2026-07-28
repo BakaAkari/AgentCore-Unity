@@ -67,6 +67,9 @@ namespace AgentCore.Editor.UI
         /// <summary>Agent Loop 实例，管理对话逻辑</summary>
         private AgentLoop _agentLoop;
 
+        /// <summary>会话自动命名控制器（每轮对话结束后 debounce 触发 LLM 智能命名）</summary>
+        private SessionAutoTitleController _autoTitleController;
+
         /// <summary>最后一条用户消息（用于错误重试）</summary>
         private string _lastUserMessage;
 
@@ -429,6 +432,10 @@ namespace AgentCore.Editor.UI
                     AgentCoreLog.Warning($"[AgentCore] Failed to save session on window close: {ex.Message}");
                 }
 
+                // v1.12.0 Phase 2: 停止并释放自动命名控制器（取消订阅 + 取消挂起的生成）。
+                _autoTitleController?.Stop();
+                _autoTitleController = null;
+
                 _agentLoop.OnAgentEvent -= HandleAgentEvent;
                 _agentLoop.OnUserQueryRaised -= HandleUserQueryRaised;
                 _agentLoop.Dispose(); // P1-1 fix: 调用 Dispose() 释放 ConsoleErrorCapture、CompilationWatcher 等资源
@@ -485,6 +492,12 @@ namespace AgentCore.Editor.UI
                 _agentLoop = new AgentLoop(llmClient, confirmationProvider);
                 _agentLoop.OnAgentEvent += HandleAgentEvent;
                 _agentLoop.OnUserQueryRaised += HandleUserQueryRaised;
+
+                // v1.12.0 Phase 2: 挂载会话自动命名控制器（每轮对话结束后 debounce 触发智能命名）。
+                // 命中重命名时刷新侧栏标题，控制器本身不依赖 UI。
+                _autoTitleController = new SessionAutoTitleController(_agentLoop);
+                _autoTitleController.TitleAutoUpdated += _ => { EditorApplication.delayCall += () => UpdateCurrentSessionTitle(); };
+                _autoTitleController.Start();
 
                 // 初始化（加载 Bootstrap 上下文）
                 _agentLoop.Initialize();

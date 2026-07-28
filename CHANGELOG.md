@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0-alpha.2] - 2026-07-28
+
+### Added — Session Organization Phase 2: 自动命名 debounce
+
+在 Phase 1 数据模型基础上，把 LLM 自动命名从"手动右键触发"升级为"每轮对话结束后 debounce 自动触发"。用户实测通过：会话话题演化时标题自动跟进。
+
+#### 新增 `SessionAutoTitleController`
+
+`Editor/Session/SessionAutoTitleController.cs`（+291 行）：订阅 `AgentLoop.OnAgentEvent` + `EditorApplication.update` 主线程 tick，实现 3 秒 debounce。
+
+关键行为：
+- **触发条件**：状态从非 Idle → Idle（一轮对话完成），启动 3 秒计时器；期间若新一轮开始则取消计时器。
+- **前置校验**：`TitleManuallySet=true` 跳过（尊重用户手动命名意图）；`MessageCount < 2` 跳过（内容太少不值得命名）。
+- **重入保护**：一次生成进行中时，新触发直接跳过（不排队，避免抖动 LLM）。
+- **取消传播**：`Stop()` / 新触发都会 cancel 上一次的 CTS，避免竞态。
+- **UI 解耦**：命中重命名时通过 `TitleAutoUpdated` 事件通知 UI，控制器不依赖任何 UI 类型。
+
+#### `SessionAutoTitleService.GenerateTitleAsync` 升级
+
+- 新增可选参数 `string currentTitle = null` + `bool allowKeep = false`。既有调用点（右键→自动重命名）默认参数生效，行为完全不变。
+- 新增哨兵常量 `KEEP_TITLE_SENTINEL`：`allowKeep=true` 且 LLM 判定当前标题仍准确时返回。
+- Prompt 追加 KEEP 判定分支：`当前标题：「{currentTitle}」。若当前标题仍能准确概括最近对话主题，直接输出 KEEP 三个字符即可；否则输出新标题`。
+- KEEP 检测：LLM 显式返回 `KEEP`（大小写不敏感）或原样吐回当前标题都视为"无需更新"。
+
+#### `ChatWindow` 集成
+
+- 在 `InitializeAgentLoop` 里挂载控制器：`_autoTitleController = new SessionAutoTitleController(_agentLoop);` + 订阅 `TitleAutoUpdated` 事件刷新侧栏标题。
+- 在窗口关闭 / AgentLoop 释放路径调用 `_autoTitleController.Stop()` 取消订阅 + 挂起的生成。
+
+#### 手动重命名保护
+
+`ChatWindow.Sessions.cs` 的 `BeginRenameSession → commitRename` 现在调用 `RenameSession(sessionId, newTitle, manuallySet: true)`，用户手动输入的标题被永久保护，debounce 后续跳过该会话。
+
+**右键→"自动重命名"路径不受影响**（用户主动要 LLM 命名，不算"手动"）。
+
+### 实测结果
+
+- ✅ 每轮对话后 3 秒 debounce 触发生效
+- ✅ 话题漂移场景下标题自动跟进（e.g. GameObject 生命周期话题 → shader UV 翻转话题 → 标题自动切换）
+- ✅ Windows / Unity Editor 编译通过
+
 ## [1.12.0-alpha.1] - 2026-07-28
 
 ### Added — Session Organization Phase 1: 数据模型 + 存储层

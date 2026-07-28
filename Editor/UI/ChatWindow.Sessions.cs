@@ -426,7 +426,8 @@ namespace AgentCore.Editor.UI
                 var newTitle = renameField.value?.Trim();
                 if (!string.IsNullOrEmpty(newTitle) && newTitle != currentTitle)
                 {
-                    SessionManager.Instance.RenameSession(sessionId, newTitle);
+                    // 用户手动输入标题：标记 TitleManuallySet=true，让自动命名 debounce 不再覆盖（尊重用户意图）。
+                    SessionManager.Instance.RenameSession(sessionId, newTitle, manuallySet: true);
                 }
 
                 // 清理：移除 TextField，恢复 Label

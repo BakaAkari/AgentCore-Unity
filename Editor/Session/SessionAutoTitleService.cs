@@ -25,6 +25,12 @@ namespace AgentCore.Editor.Session
     {
         private const string LogPrefix = "[SessionAutoTitle] ";
 
+        /// <summary>
+        /// 特殊哨兵值：当 <c>allowKeep=true</c> 且 LLM 判定当前标题仍能准确概括最近话题时返回。
+        /// 调用方识别此值后应「保留当前标题、不做任何修改」。
+        /// </summary>
+        public const string KEEP_TITLE_SENTINEL = "__KEEP_TITLE__";
+
         /// <summary>参与标题生成的最近对话消息条数上限（user+assistant，跳过 system/tool）。</summary>
         public const int RecentMessageWindow = 12;
 
@@ -41,9 +47,24 @@ namespace AgentCore.Editor.Session
         /// 为指定会话生成一个反映最近上下文主话题的标题。
         /// </summary>
         /// <param name="sessionId">目标会话 ID。</param>
+        /// <param name="currentTitle">
+        /// 当前标题。仅在 <paramref name="allowKeep"/>=true 时用于让 LLM 判断是否需要更新。
+        /// </param>
+        /// <param name="allowKeep">
+        /// 是否允许 LLM 返回「保留当前标题」。true 时 prompt 追加 KEEP 判定分支，
+        /// 命中则返回 <see cref="KEEP_TITLE_SENTINEL"/>。
+        /// 手动触发（右键→自动重命名）保持 false，走原逻辑永远生成新标题。
+        /// </param>
         /// <param name="ct">取消令牌。</param>
-        /// <returns>生成的标题；失败或无足够上下文时返回 null。</returns>
-        public static async Task<string> GenerateTitleAsync(string sessionId, CancellationToken ct = default)
+        /// <returns>
+        /// 生成的标题；命中 KEEP 判定时返回 <see cref="KEEP_TITLE_SENTINEL"/>；
+        /// 失败或无足够上下文时返回 null。
+        /// </returns>
+        public static async Task<string> GenerateTitleAsync(
+            string sessionId,
+            string currentTitle = null,
+            bool allowKeep = false,
+            CancellationToken ct = default)
         {
             if (string.IsNullOrEmpty(sessionId))
             {
@@ -87,12 +108,23 @@ namespace AgentCore.Editor.Session
                     return null;
                 }
 
+                var systemPrompt =
+                    "你是一个会话标题生成器。根据给定的对话内容，生成一个能准确概括**当前主要话题**的简短中文标题。" +
+                    "要求：(1) 不超过 " + TitleCharCap + " 个字；(2) 只输出标题本身，不要引号、不要标点结尾、不要任何解释或前缀；" +
+                    "(3) 若对话涉及多个话题，以最近的话题为主。";
+
+                // allowKeep=true 且有当前标题时，追加 KEEP 判定分支。
+                var useKeep = allowKeep && !string.IsNullOrWhiteSpace(currentTitle);
+                if (useKeep)
+                {
+                    systemPrompt +=
+                        $"\n当前标题：「{currentTitle}」。若当前标题仍能准确概括最近对话主题，直接输出 KEEP 三个字符即可；" +
+                        "否则输出新标题（不含引号、不含标点、不含前缀）。";
+                }
+
                 var prompt = new List<ChatMessage>
                 {
-                    ChatMessage.System(
-                        "你是一个会话标题生成器。根据给定的对话内容，生成一个能准确概括**当前主要话题**的简短中文标题。" +
-                        "要求：(1) 不超过 " + TitleCharCap + " 个字；(2) 只输出标题本身，不要引号、不要标点结尾、不要任何解释或前缀；" +
-                        "(3) 若对话涉及多个话题，以最近的话题为主。"),
+                    ChatMessage.System(systemPrompt),
                     ChatMessage.User("对话内容：\n\n" + contextText + "\n\n请生成标题：")
                 };
 
@@ -102,6 +134,21 @@ namespace AgentCore.Editor.Session
                 if (response?.Choices != null && response.Choices.Count > 0)
                 {
                     var raw = response.Choices[0].Message?.Content;
+
+                    // KEEP 判定（仅在 allowKeep 模式下生效）：
+                    // (1) 模型显式返回 "KEEP"（大小写不敏感）；
+                    // (2) 模型把当前标题原样吐回来（视为「无需更新」）。
+                    if (useKeep && !string.IsNullOrWhiteSpace(raw))
+                    {
+                        var trimmed = raw.Trim();
+                        if (trimmed.Equals("KEEP", StringComparison.OrdinalIgnoreCase)
+                            || trimmed == currentTitle.Trim())
+                        {
+                            AgentCoreLog.Info($"{LogPrefix}Title kept for {sessionId} (LLM judged current title still accurate).");
+                            return KEEP_TITLE_SENTINEL;
+                        }
+                    }
+
                     var title = SanitizeTitle(raw);
                     if (!string.IsNullOrWhiteSpace(title))
                     {
