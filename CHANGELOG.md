@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0-alpha.3] - 2026-07-28
+
+### Added — Session Organization Phase 3: UI 分组重构 + 右键菜单 + 归档区
+
+在 Phase 1/2 数据 + 自动命名基础上，把 session 列表从「时间倒序平铺」重构为「按 tag 分组 Foldout + 独立归档区」。用户实测通过。
+
+#### 主列表分组渲染
+
+- `RefreshSessionList` 重构：先按 `Archived` 分成活动/归档两组，活动组再按 `Tag` GroupBy 渲染。
+- 每个 tag 一个 `Foldout`，组头文本 `{tag} ({count})`。空 tag 归入「未分类」组，排在最后。
+- 组内会话按 `UpdatedAt` 降序。
+- 新增 `BuildSessionGroupFoldout` 辅助方法统一渲染路径。
+
+#### 归档区
+
+- 独立 Foldout「已归档 ({count})」置于列表底部，**仅在有归档会话时渲染**。
+- 默认折叠（Foldout state EditorPrefs 记 `__archived__`）。
+- 组内扁平时间倒序（不再按时间二级分组）。
+- 归档 session item **前缀 tag chip**（蓝底 Label），便于在时间排序下识别 tag。
+
+#### Foldout 状态持久化
+
+- EditorPrefs key 格式：`AgentCore.SessionOrg.Foldout.{key}`。
+- 未分类组 key = `__uncategorized__`，归档组 key = `__archived__`，其他直接用 tag 名。
+- 用户折叠状态跨 Unity Editor 重启保留（per-user / per-machine）。
+- Default state：所有 tag 组默认展开，仅归档组默认折叠。
+
+#### 右键菜单扩展
+
+`ShowSessionContextMenu` 在既有「自动重命名 / 重命名」之后、「导出 / 删除」之前新增两组菜单：
+
+- **Tag 子菜单**（`设置 tag` 或 `修改 tag`，取决于当前 tag 状态）：
+  - 列出所有已存在的 tag（复用促进归一化，勾选态标记当前 tag）
+  - 分隔线 + `新建 tag...` → 弹 `SessionTagInputDialog` 输入
+  - 若当前有 tag，末尾加 `移除 tag`
+- **归档 / 取消归档**（顶层，根据 `Archived` 状态切换标签）
+
+#### `SessionTagInputDialog`
+
+`Editor/UI/SessionTagInputDialog.cs`（新文件）：`EditorWindow` 模态对话框，居中显示 320×110，包含 Prompt Label + TextField + OK/Cancel。Enter 提交，Escape 取消。自动 focus 输入框。
+
+#### CreateSessionItem 加 `showTagChip` 参数
+
+- 新签名：`CreateSessionItem(SessionSummary session, bool isActive, bool showTagChip = false)`
+- `showTagChip=true` 且 session 有 tag 时，在 item 最前 `Insert(0, ...)` 一个 tag chip Label。
+- 默认参数保持向后兼容，主列表分组渲染路径不显示 chip（tag 组头已隐含信息）。
+
+#### 样式
+
+`ChatWindow.uss` 追加：
+- `.session-group-header`：组头字体加粗、11px、灰色。
+- `.session-item-tag-chip`：蓝底白字 chip，10px。
+
+#### L10n 新增 10 个键（zh-CN + en-US）
+
+`session.group.uncategorized / archived`、`session.menu.setTag / changeTag / newTag / removeTag / archive / unarchive`、`session.dialog.newTagTitle / newTagPrompt`。
+
+### 实测结果
+
+- ✅ 分组渲染 + Foldout 折叠状态持久化
+- ✅ 设置 tag / 新建 tag / 复用已有 tag / 移除 tag / 修改 tag 全链路正常
+- ✅ 归档 / 取消归档、归档区 tag chip、勾选态标记当前 tag
+- ✅ 手动重命名 + tag 组合正常（Phase 2 保护机制不受影响）
+- ✅ Windows / Unity Editor 编译通过
+
+### Not yet
+
+- Phase 4（辅助任务模型独立配置）+ Phase 5（老 session 后台补名）后续跟进。
+- 用户反馈有若干体验优化点待讨论，先做完规划内容再统一处理。
+
 ## [1.12.0-alpha.2] - 2026-07-28
 
 ### Added — Session Organization Phase 2: 自动命名 debounce

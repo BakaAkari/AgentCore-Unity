@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
@@ -94,10 +95,36 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
-            foreach (var session in sessions)
+            // v1.12.0：分组渲染。活动会话按 tag 分组（Foldout），已归档会话收进单独的归档 Foldout。
+            var active = sessions.Where(s => !s.Archived).ToList();
+            var archived = sessions.Where(s => s.Archived).ToList();
+
+            // 活动会话按 tag 分组：null/空 tag 归入"未分类"（排在最后），其余按 tag 名称字典序。
+            var groups = active
+                .GroupBy(s => string.IsNullOrEmpty(s.Tag) ? null : s.Tag)
+                .OrderBy(g => g.Key == null ? 1 : 0)
+                .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in groups)
             {
-                var item = CreateSessionItem(session, session.Id == currentId);
-                _sessionListContainer.Add(item);
+                var tagKey = group.Key;
+                var prefKey = tagKey ?? "__uncategorized__";
+                var tagDisplay = tagKey ?? AgentCore.Editor.L10n.Loc.Tr("session.group.uncategorized", "未分类");
+                var ordered = group.OrderByDescending(s => s.UpdatedAt).ToList();
+                var headerText = $"{tagDisplay} ({ordered.Count})";
+
+                var foldout = BuildSessionGroupFoldout(prefKey, headerText, defaultExpanded: true, ordered, currentId, showTagChip: false);
+                _sessionListContainer.Add(foldout);
+            }
+
+            // 归档区：仅在存在已归档会话时渲染；扁平时间倒序；默认折叠；会话项显示 tag chip。
+            if (archived.Count > 0)
+            {
+                var orderedArchived = archived.OrderByDescending(s => s.UpdatedAt).ToList();
+                var headerText = $"{AgentCore.Editor.L10n.Loc.Tr("session.group.archived", "已归档")} ({orderedArchived.Count})";
+
+                var foldout = BuildSessionGroupFoldout("__archived__", headerText, defaultExpanded: false, orderedArchived, currentId, showTagChip: true);
+                _sessionListContainer.Add(foldout);
             }
 
             // 恢复滚动位置（延迟一帧，确保布局已更新）
@@ -113,13 +140,59 @@ namespace AgentCore.Editor.UI
             }
         }
 
+        /// <summary>EditorPrefs 中存储分组 Foldout 折叠状态的 key 前缀（per-user / per-machine，跨 Unity 重启保留）。</summary>
+        private const string FoldoutPrefPrefix = "AgentCore.SessionOrg.Foldout.";
+
+        /// <summary>读取分组 Foldout 的展开状态。</summary>
+        private static bool LoadFoldoutState(string key, bool defaultValue)
+        {
+            return EditorPrefs.GetBool(FoldoutPrefPrefix + key, defaultValue);
+        }
+
+        /// <summary>持久化分组 Foldout 的展开状态。</summary>
+        private static void SaveFoldoutState(string key, bool value)
+        {
+            EditorPrefs.SetBool(FoldoutPrefPrefix + key, value);
+        }
+
+        /// <summary>
+        /// 构建一个分组 Foldout（组头 + 组内会话项）。
+        /// 折叠状态从 EditorPrefs 恢复并在变更时持久化。
+        /// </summary>
+        /// <param name="prefKey">EditorPrefs 折叠状态 key（不含前缀）。</param>
+        /// <param name="headerText">组头文本（含 count）。</param>
+        /// <param name="defaultExpanded">无持久化记录时的默认展开状态。</param>
+        /// <param name="items">组内会话摘要（调用方已排序）。</param>
+        /// <param name="currentId">当前活动会话 ID（用于高亮）。</param>
+        /// <param name="showTagChip">组内会话项是否显示 tag chip（归档区为 true）。</param>
+        private Foldout BuildSessionGroupFoldout(
+            string prefKey, string headerText, bool defaultExpanded,
+            IEnumerable<SessionSummary> items, string currentId, bool showTagChip)
+        {
+            var foldout = new Foldout { text = headerText };
+            foldout.AddToClassList("session-group-header");
+            foldout.value = LoadFoldoutState(prefKey, defaultExpanded);
+
+            // 记住每个用户对该组的折叠选择。组内会话项无 bool 值控件，不存在事件冒泡混淆。
+            foldout.RegisterValueChangedCallback(evt => SaveFoldoutState(prefKey, evt.newValue));
+
+            foreach (var session in items)
+            {
+                var item = CreateSessionItem(session, session.Id == currentId, showTagChip);
+                foldout.Add(item);
+            }
+
+            return foldout;
+        }
+
         /// <summary>
         /// 创建单个会话列表项 VisualElement。
         /// </summary>
         /// <param name="session">会话摘要数据</param>
         /// <param name="isActive">是否为当前活动会话</param>
+        /// <param name="showTagChip">是否在标题前显示 tag chip（归档区按时间分组，需要 chip 辨识 tag）。</param>
         /// <returns>会话列表项 VisualElement</returns>
-        private VisualElement CreateSessionItem(SessionSummary session, bool isActive)
+        private VisualElement CreateSessionItem(SessionSummary session, bool isActive, bool showTagChip = false)
         {
             var item = new VisualElement();
             item.name = $"session-item-{session.Id}";
@@ -129,6 +202,14 @@ namespace AgentCore.Editor.UI
             if (isActive)
             {
                 item.AddToClassList("session-active");
+            }
+
+            // tag chip（仅归档区显示）：置于最前，方便在按时间分组的归档区辨识会话 tag。
+            if (showTagChip && !string.IsNullOrEmpty(session.Tag))
+            {
+                var tagChip = new Label(session.Tag);
+                tagChip.AddToClassList("session-item-tag-chip");
+                item.Insert(0, tagChip);
             }
 
             // 会话标题 (走 GetDisplayTitle 本地化)
@@ -300,6 +381,9 @@ namespace AgentCore.Editor.UI
         /// <param name="itemElement">会话列表项 VisualElement</param>
         private void ShowSessionContextMenu(string sessionId, string currentTitle, VisualElement itemElement)
         {
+            var currentSummary = SessionManager.Instance.GetSessionList().FirstOrDefault(s => s.Id == sessionId);
+            if (currentSummary == null) return;
+
             var menu = new GenericMenu();
 
             menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.autoRename", "自动重命名")), false, () =>
@@ -311,6 +395,72 @@ namespace AgentCore.Editor.UI
             {
                 BeginRenameSession(sessionId, currentTitle, itemElement);
             });
+
+            // v1.12.0：tag 分组 / 归档管理
+            menu.AddSeparator("");
+
+            // tag 子菜单：现有 tag 列表 + 新建 tag + 移除 tag
+            var existingTags = SessionManager.Instance.GetSessionList()
+                .Where(s => !string.IsNullOrEmpty(s.Tag))
+                .Select(s => s.Tag)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var setTagLabel = string.IsNullOrEmpty(currentSummary.Tag)
+                ? AgentCore.Editor.L10n.Loc.Tr("session.menu.setTag", "设置 tag")
+                : AgentCore.Editor.L10n.Loc.Tr("session.menu.changeTag", "修改 tag");
+
+            foreach (var tag in existingTags)
+            {
+                var capturedTag = tag;
+                menu.AddItem(new GUIContent($"{setTagLabel}/{capturedTag}"), currentSummary.Tag == capturedTag, () =>
+                {
+                    SessionManager.Instance.SetSessionTag(sessionId, capturedTag);
+                    RefreshSessionList();
+                });
+            }
+
+            menu.AddSeparator($"{setTagLabel}/");
+
+            menu.AddItem(new GUIContent($"{setTagLabel}/{AgentCore.Editor.L10n.Loc.Tr("session.menu.newTag", "新建 tag...")}"), false, () =>
+            {
+                SessionTagInputDialog.Show(
+                    AgentCore.Editor.L10n.Loc.Tr("session.dialog.newTagTitle", "新建 tag"),
+                    AgentCore.Editor.L10n.Loc.Tr("session.dialog.newTagPrompt", "输入 tag 名称："),
+                    newTag =>
+                    {
+                        SessionManager.Instance.SetSessionTag(sessionId, newTag);
+                        RefreshSessionList();
+                    });
+            });
+
+            if (!string.IsNullOrEmpty(currentSummary.Tag))
+            {
+                menu.AddItem(new GUIContent($"{setTagLabel}/{AgentCore.Editor.L10n.Loc.Tr("session.menu.removeTag", "移除 tag")}"), false, () =>
+                {
+                    SessionManager.Instance.SetSessionTag(sessionId, null);
+                    RefreshSessionList();
+                });
+            }
+
+            // 归档 / 取消归档（顶层）
+            if (!currentSummary.Archived)
+            {
+                menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.archive", "归档")), false, () =>
+                {
+                    SessionManager.Instance.SetSessionArchived(sessionId, true);
+                    RefreshSessionList();
+                });
+            }
+            else
+            {
+                menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.unarchive", "取消归档")), false, () =>
+                {
+                    SessionManager.Instance.SetSessionArchived(sessionId, false);
+                    RefreshSessionList();
+                });
+            }
 
             menu.AddSeparator("");
 
