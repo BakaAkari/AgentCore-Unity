@@ -254,7 +254,10 @@ namespace AgentCore.Editor.Tools
                 }
 
                 // 3.5 Play Mode preflight（D3）—— write 类工具在 Play Mode 中一律 Block
-                if (Safety.PlayModePreflight.IsBlockedInPlayMode(tool.Metadata.Capabilities, out var playModeReason))
+                //   v1.11+ (Bug X): 提前提取 action 以支持 ReadOnlyActions 白名单跳过
+                //   (对齐 ToolRiskPolicy 只读白名单粒度修复)。
+                var preflightAction = ExtractActionFromParameters(parameters);
+                if (Safety.PlayModePreflight.IsBlockedInPlayMode(tool.Metadata, preflightAction, out var playModeReason))
                 {
                     stopwatch.Stop();
                     AgentCoreLog.Warning($"{LogPrefix}Tool '{toolName}' blocked by Play Mode preflight.");
@@ -267,7 +270,7 @@ namespace AgentCore.Editor.Tools
                 }
 
                 // 4. 治理层策略评估 (G.1)
-                var action = ExtractActionFromParameters(parameters);
+                var action = preflightAction;
                 var paramSummary = BuildParameterSummary(parameters);
                 var pathRisk = ToolPathRiskResolver.Resolve(parameters, tool.Metadata, out var pathTargets);
                 var decision = ToolRiskPolicy.Evaluate(

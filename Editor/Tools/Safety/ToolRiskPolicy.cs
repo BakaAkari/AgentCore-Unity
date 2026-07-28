@@ -178,10 +178,19 @@ namespace AgentCore.Editor.Tools.Safety
                 return ToolPolicyDecision.Block(risk, reasons);
             }
 
+            // v1.11+ (Bug Q): 提前计算 isReadOnlyAction, 让 RequiresConfirmation 判定也能享受
+            // 只读白名单跳过 (对齐 line 209 / 228 的粒度修复语义).
+            bool isReadOnlyAction = metadata.IsReadOnlyAction(action);
+
             // v1.6.5: UI 端信任粒度改为 SessionLowMediumRisk / SessionAll (YOLO)。
             // 工具通过 [AgentTool(RequiresConfirmation = true)] 显式声明需要审批;
             // 用户可选择"本会话内 Low/Medium 直通"或"本会话全部直通 (YOLO)"。
-            if (metadata.RequiresConfirmation)
+            //
+            // v1.11+ (Bug Q): 只读白名单 action 跳过。混合读写工具 (如 manage_prefs 声明
+            // RequiresConfirmation=true 用于 set/delete, 但 has/get 是纯读) 如果不 gate,
+            // 只读 action 会被工具级 flag 连坐。声明 ReadOnlyActions 白名单的意图正是
+            // "这些 action 是纯读, 不需要 gate"。
+            if (!isReadOnlyAction && metadata.RequiresConfirmation)
             {
                 reasons.Add("Tool declared RequiresConfirmation=true; explicit user approval required.");
                 var confirmation = BuildConfirmationRequest(
@@ -201,7 +210,7 @@ namespace AgentCore.Editor.Tools.Safety
             // 工具级 Capabilities / RiskLevel 会把只读 action（get_hierarchy/list/...）一并连坐。
             // 若当前 action 在工具的只读白名单内，则跳过 RiskLevel / 能力位主判据，
             // 只保留破坏性 token 兜底（防止工具误把带破坏性动词的 action 标进只读列表）。
-            bool isReadOnlyAction = metadata.IsReadOnlyAction(action);
+            // (isReadOnlyAction 已在上方提前算出, v1.11+ Bug Q)
 
             // v1.7.16 主判据 1：高危风险等级（High/Destructive/External/CodeExecution）一律确认。
             // 此前风险分级几乎不参与"弹不弹"决策（只在 Trust Low/Med 过滤时用），导致声明了

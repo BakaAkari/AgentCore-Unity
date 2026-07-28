@@ -5,6 +5,110 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.5] - 2026-07-28
+
+### Fixed — v1.11 hardening 阶段 B: Play Mode + 治理层只读白名单粒度修复
+
+延续 v1.10.4 (阶段 A) 的 hardening 循环, 阶段 B 修复 Play Mode preflight 与治理层 (ToolRiskPolicy) 里遗漏的两处"只读 action 白名单跳过"分支, 让声明了 `ReadOnlyActions` 的多 action 混合读写工具真正做到只读子分支不被工具级 flag 连坐。
+
+#### Bug Q — `ToolRiskPolicy.RequiresConfirmation` 分支未 gate `isReadOnlyAction` (P1)
+
+**现象**: `manage_prefs action=has` (纯读) 依然弹确认面板。
+
+**根因**: `ToolRiskPolicy.Evaluate` 里 `RequiresConfirmation=true` 的判定 (line 184) 早于 `isReadOnlyAction` 的计算 (line 204), 声明了 `RequiresConfirmation=true` 的工具即便 action 在 `ReadOnlyActions` 白名单里也被弹面板 — 与 line 209/228/242 已有的只读白名单粒度修复语义不一致。
+
+**修法**: 提前计算 `isReadOnlyAction`, `RequiresConfirmation` 判定加 `!isReadOnlyAction &&` gate, 保持与 RiskLevel / Capabilities 分支同一粒度语义。
+
+**顺带受益**: `ManageBuildTool` (`get_player_settings` 等 4 个 action), `ManagePackageTool` (`list`/`search` 等 6 个 action), `ManagePrefsTool` (`has`/`get`) 共 12 个只读 action 从此不再弹确认面板。
+
+**验证**: Play Mode 外 `manage_prefs action=has key=UnityEditor store=editor` 无面板直接返回 `{"exists":false}`.
+
+#### Bug X — `PlayModePreflight.IsBlockedInPlayMode` 忽略 `ReadOnlyActions` (P1)
+
+**现象**: Play Mode 中 `manage_editor action=get_info` (纯读) 被 preflight 拦截, 因为 `manage_editor` 声明了 `ModifyProjectSettings` capability。
+
+**根因**: `PlayModePreflight.IsBlockedInPlayMode` 旧签名只接受 `ToolCapability` bitmask, 没有工具元数据也没有 action 参数, 无法区分同一工具的读写子分支。`ToolCallDispatcher.cs:257` 传入时也就只传了 capability。
+
+**修法**:
+1. `PlayModePreflight.IsBlockedInPlayMode` 加新签名 `(ToolMetadata metadata, string action, out string reason)`, 检查 `metadata.IsReadOnlyAction(action)` 若命中则放行; 保留旧 `(ToolCapability, out string)` 签名做后向兼容
+2. `ToolCallDispatcher.cs` 把 `ExtractActionFromParameters` 从第 4 步提前到第 3.5 步 (preflight 之前), 让 preflight 也能拿到 action
+
+**验证**: Play Mode 下 (is_playing=true) `manage_editor action=get_info` 放行返回完整 editor 状态; scene write 类 action 仍照常拦截。
+
+#### Bug P — 参数校验错序 (P2) — **驳回, 非 bug**
+
+代码审计: `ToolCallDispatcher.cs` line 243 (`ToolParameterValidator.Validate`) 本来就在 line 273 (`ToolRiskPolicy.Evaluate` 弹面板) 之前, 参数校验失败直接 fail-fast, 不会走到确认面板。
+
+### Changed
+
+- `Editor/Tools/Safety/PlayModePreflight.cs` — 新增 `IsBlockedInPlayMode(ToolMetadata, string, out string)` 重载 (旧签名保留)
+- `Editor/Tools/Safety/ToolRiskPolicy.cs` — `isReadOnlyAction` 提前到 `RequiresConfirmation` 判定之前
+- `Editor/Tools/ToolCallDispatcher.cs` — `preflightAction` 提前提取, `PlayModePreflight` 消费新签名
+
+---
+
+## [1.10.4] - 2026-07-28
+
+### Fixed — v1.11 hardening 阶段 A: 信号放大器 (compression / tool_call JSON / execute_code 生态)
+
+Windows 侧 v1.10.3 smoke test 暴露的三个高影响面向"信号质量"的 bug, 独立无耦合, 一起打包为阶段 A 让后续 bug 的诊断输出可用。
+
+#### Bug C — `manage_profiler list_available_stats` 返回压爆 GLM context (P1)
+
+**现象**: 返回 201391 tokens, 超过 GLM 200000 context limit → HTTP 400 → LLM compression 兜底也失败。
+
+**根因**: `ManageProfilerTool.HandleListAvailableStats` 无默认 limit; `ToolResultCompressor` 有 LLM 压缩逻辑但无绝对 hard cap, 极端大 tool result 走 LLM 压缩前就已经压爆 context。
+
+**修法** (三层防护):
+1. `ManageProfilerTool` schema 加 `limit` 参数 (int, default 100), handler 逐 category truncate 并加提示 `... (100 of 1142)`
+2. `AgentCoreSettings` 加 `toolResultHardCapChars = 20000` 字段
+3. `ToolResultCompressor` 未超阈值分支加绝对 hard cap; LLM 压缩后若仍超 `targetTokens×4` 走 FallbackTruncate
+
+**验证**: 默认 limit=100 输出 ~2654 chars, 7 categories truncated; limit=99999 触发 hard cap 从 822550 chars 压到 1489 chars via FallbackTruncate。
+
+#### Bug F' — `SessionExporter` 导出 JSON `tool_calls` 结构偏离 OpenAI 标准 (P2)
+
+**现象**: 导出 JSON 里 tool_calls 用平铺 `function_name` + `arguments`, 不符合 OpenAI chat completion 消息 schema (期望嵌套 `function: {name, arguments}`)。
+
+**根因**: `SessionData.SerializableToolCall` 直接用 `[JsonProperty("function_name")]` 平铺, 未按 OpenAI schema 嵌套。
+
+**修法**: `SerializableToolCall` 改嵌套 `function: SerializableFunctionCall {name, arguments}` 结构, 保留 `FunctionName` / `Arguments` 属性做向后兼容 setter。`SessionExporter` Markdown 导出改用 `tc.Function?.Name`。
+
+**注**: `OpenAICompatibleClient.cs:211` 的 `builder.FunctionName` 是独立的 `ToolCallBuilder` 类型 (LLM 侧流式中间态), 与 `SerializableToolCall` 无关, 无需改。
+
+**验证**: 导出 JSON `tool_calls[0]` keys = `['id','type','function']`, 嵌套结构干净, 无平铺字段。
+
+#### Bug Y — `execute_code` 生态不友好: URP/HDRP 未预引用 + Environment hint 冗余 (P1)
+
+**现象**: `execute_code` 里直接用 `Bloom`, `Volume` 等 URP 类型编译不过 (`CS0246`), 需要 agent 6 轮反射 fallback。
+
+**根因**: `ExecuteCodeTool` 只加载核心 UnityEngine assembly, 不动态探测 URP/HDRP/PostProcessing 是否安装; EnvironmentHint 1250 chars 太冗余但没告诉 agent 该怎么写 URP 代码。
+
+**修法**:
+1. `ExecuteCodeTool.LoadAdditionalAssemblies` 加 4 个 probe 点: URP Volume/Bloom, HDRP, PostProcessing v1/v2 — 检测到 assembly 存在则动态加载 reference (DefaultUsings 不改, 避免非 URP 项目加载报错)
+2. `EnvironmentHint` 从 ~1250 chars 压到 ~750 chars (省 40%), 加 URP 全限定名使用示例
+
+**验证**: v1.11 里 `execute_code` 用 `UnityEngine.Rendering.Universal.Bloom` 全限定名一枪编译过 (`Bloom.intensity = 2`), 无 CS0246/CS0234, 无需反射; v1.10.3 时需 6 轮反射 fallback。
+
+#### Bug H — Play Mode write 拦截 (P1) — **驳回, 非 bug**
+
+`ManageProfilerTool` 是 `ReadProject` 能力, 不触发 write 拦截。旧 audit 里的 "Play Mode 写拦截" 现象实为 Bug C compression 失败后的表现。
+
+#### Bug F — 导出吞 arguments (P0) — **驳回, 非 bug**
+
+Agent 之前假设 JSON tool_calls 是 OpenAI 嵌套 `function: {name, arguments}` 结构, 用错 key 读取导致误判为"arguments 被吞"; 实际 AgentCore v1.10.x 一直用平铺 `function_name` + `arguments`, 数据完整。此发现推动 Bug F' 归一 OpenAI schema。
+
+### Changed
+
+- `Editor/Config/AgentCoreSettings.cs` — 新增 `toolResultHardCapChars` 字段
+- `Editor/Core/Compression/ToolResultCompressor.cs` — hard cap 逻辑
+- `Editor/Tools/Native/Extended/ManageProfilerTool.cs` — `limit` 参数 + per-category truncation
+- `Editor/Session/SessionData.cs` — `SerializableToolCall` 嵌套化 + `SerializableFunctionCall` 新类
+- `Editor/Session/SessionExporter.cs` — Markdown 导出用嵌套 accessor
+- `Editor/Tools/Native/Scripting/ExecuteCodeTool.cs` — URP/HDRP 动态 probe + Environment hint 压缩
+
+---
+
 ## [1.10.3] - 2026-07-27
 
 ### Fixed — Windows smoke test W11 发现的 MemoryProfiler API drift (P0 回归)
