@@ -160,7 +160,10 @@ namespace AgentCore.Editor.Session
                                 Id = id,
                                 Title = obj.Value<string>("title") ?? "未命名会话",
                                 UpdatedAt = obj.Value<DateTime?>("updated_at") ?? DateTime.MinValue,
-                                MessageCount = obj.Value<int?>("message_count") ?? 0
+                                MessageCount = obj.Value<int?>("message_count") ?? 0,
+                                Tag = obj.Value<string>("tag"),
+                                Archived = obj.Value<bool?>("archived") ?? false,
+                                TitleManuallySet = obj.Value<bool?>("title_manually_set") ?? false
                             });
                         }
                     }
@@ -254,5 +257,17 @@ namespace AgentCore.Editor.Session
         /// <summary>消息总数</summary>
         [JsonProperty("message_count")]
         public int MessageCount { get; set; }
+
+        /// <summary>用户手动打的 tag（单 tag，null=未分类）</summary>
+        [JsonProperty("tag", NullValueHandling = NullValueHandling.Ignore)]
+        public string Tag { get; set; }
+
+        /// <summary>是否已归档</summary>
+        [JsonProperty("archived", NullValueHandling = NullValueHandling.Ignore, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool Archived { get; set; }
+
+        /// <summary>用户是否手动设置过标题</summary>
+        [JsonProperty("title_manually_set", NullValueHandling = NullValueHandling.Ignore, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool TitleManuallySet { get; set; }
     }
 }

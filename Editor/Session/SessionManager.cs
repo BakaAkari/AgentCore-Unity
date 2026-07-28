@@ -204,8 +204,13 @@ namespace AgentCore.Editor.Session
         /// </summary>
         /// <param name="sessionId">会话 ID</param>
         /// <param name="newTitle">新标题</param>
+        /// <param name="manuallySet">
+        /// 是否为用户手动重命名。true 时置 <see cref="SessionData.TitleManuallySet"/>=true，
+        /// 供后续自动命名逻辑跳过（尊重用户意图）。
+        /// 自动命名 / 后台补名等非手动路径应保持默认 false，不改变该标记。
+        /// </param>
         /// <returns>是否重命名成功</returns>
-        public bool RenameSession(string sessionId, string newTitle)
+        public bool RenameSession(string sessionId, string newTitle, bool manuallySet = false)
         {
             if (string.IsNullOrEmpty(sessionId))
             {
@@ -230,12 +235,20 @@ namespace AgentCore.Editor.Session
 
                 session.Title = newTitle.Trim();
                 session.UpdatedAt = DateTime.UtcNow;
+                if (manuallySet)
+                {
+                    session.TitleManuallySet = true;
+                }
                 SessionStorage.Save(session);
 
                 // 如果是当前活动会话，同步更新内存缓存
                 if (CurrentSessionId == sessionId && _currentSession != null)
                 {
                     _currentSession.Title = session.Title;
+                    if (manuallySet)
+                    {
+                        _currentSession.TitleManuallySet = true;
+                    }
                 }
 
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session renamed: {sessionId} -> \"{newTitle}\"");
@@ -244,6 +257,132 @@ namespace AgentCore.Editor.Session
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"{LogPrefix}Failed to rename session {sessionId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 设置会话的 tag（单 tag）。传入 null 或空字符串表示清除 tag（回到未分类）。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="tag">tag 文本；null / 空字符串 = 清除</param>
+        /// <returns>是否成功</returns>
+        public bool SetSessionTag(string sessionId, string tag)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                AgentCoreLog.Warning($"{LogPrefix}Cannot set tag on session with empty Id.");
+                return false;
+            }
+
+            try
+            {
+                var session = SessionStorage.Load(sessionId);
+                if (session == null)
+                {
+                    AgentCoreLog.Warning($"{LogPrefix}Session not found for set tag: {sessionId}");
+                    return false;
+                }
+
+                // null / 空字符串归一化为 null（未分类）
+                var normalized = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim();
+                session.Tag = normalized;
+                SessionStorage.Save(session);
+
+                if (CurrentSessionId == sessionId && _currentSession != null)
+                {
+                    _currentSession.Tag = normalized;
+                }
+
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session tag set: {sessionId} -> {(normalized ?? "<none>")}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Failed to set tag on session {sessionId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 设置会话归档状态。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="archived">true=归档，false=取消归档</param>
+        /// <returns>是否成功</returns>
+        public bool SetSessionArchived(string sessionId, bool archived)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                AgentCoreLog.Warning($"{LogPrefix}Cannot set archived on session with empty Id.");
+                return false;
+            }
+
+            try
+            {
+                var session = SessionStorage.Load(sessionId);
+                if (session == null)
+                {
+                    AgentCoreLog.Warning($"{LogPrefix}Session not found for set archived: {sessionId}");
+                    return false;
+                }
+
+                session.Archived = archived;
+                SessionStorage.Save(session);
+
+                if (CurrentSessionId == sessionId && _currentSession != null)
+                {
+                    _currentSession.Archived = archived;
+                }
+
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session archived set: {sessionId} -> {archived}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Failed to set archived on session {sessionId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 设置会话的"标题已手动设置"标记。
+        /// true 时自动命名逻辑应跳过该会话，尊重用户意图。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="manually">是否手动设置过标题</param>
+        /// <returns>是否成功</returns>
+        public bool MarkTitleManuallySet(string sessionId, bool manually)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                AgentCoreLog.Warning($"{LogPrefix}Cannot mark title-manually-set on session with empty Id.");
+                return false;
+            }
+
+            try
+            {
+                var session = SessionStorage.Load(sessionId);
+                if (session == null)
+                {
+                    AgentCoreLog.Warning($"{LogPrefix}Session not found for mark title-manually-set: {sessionId}");
+                    return false;
+                }
+
+                session.TitleManuallySet = manually;
+                SessionStorage.Save(session);
+
+                if (CurrentSessionId == sessionId && _currentSession != null)
+                {
+                    _currentSession.TitleManuallySet = manually;
+                }
+
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session title-manually-set: {sessionId} -> {manually}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Failed to mark title-manually-set on session {sessionId}: {ex.Message}");
                 return false;
             }
         }

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0-alpha.1] - 2026-07-28
+
+### Added — Session Organization Phase 1: 数据模型 + 存储层
+
+v1.12.0 引入 session 组织功能（tag / 归档 / 自动命名 debounce）以降低会话列表视觉密度。Alpha.1 只落地最底层数据模型改动，UI + 自动命名逻辑分阶段跟进。
+
+#### 数据模型新增字段（`SessionData` + `SessionSummary`）
+
+- `Tag` (string, JSON `tag`): 用户手动打的单 tag，`null` = 未分类。`NullValueHandling.Ignore` 避免污染老会话 JSON。
+- `Archived` (bool, JSON `archived`): 归档标志，`DefaultValueHandling.Ignore` 保证 `false` 时不写入。
+- `TitleManuallySet` (bool, JSON `title_manually_set`): 用户是否手动改过标题；后续自动命名 debounce 会跳过 `true` 的会话，尊重用户意图。
+
+#### SessionManager 新增 API
+
+- `SetSessionTag(id, tag)`: 设置 tag，`null`/空/纯空白视为清除。
+- `SetSessionArchived(id, archived)`: 归档 / 取消归档。
+- `MarkTitleManuallySet(id, manually)`: 显式设置手动标记。
+- `RenameSession(id, title, bool manuallySet = false)`: 加可选参数，手动重命名路径传 `true`，自动路径保持默认 `false` 不改变标记。
+
+#### 向后兼容
+
+- 三个新字段都用 `NullValueHandling.Ignore` / `DefaultValueHandling.Ignore`：默认值不写入磁盘，老 session JSON 反序列化后拿到 `null` / `false`，零迁移成本。
+- `SessionSummary` 在 `ListSessions()` 里通过 `JObject.Value<bool?>() ?? false` 与 `Value<string>()` 读取，缺字段安全。
+- `SessionManager` 所有新 setter 都同步更新 `_currentSession` 内存缓存，与既有 `RenameSession` 一致，避免磁盘/内存分裂。
+
+### Not yet — 后续 Phase
+
+- Phase 2: 自动命名 debounce（订阅 AgentLoop.StateChanged，`SessionAutoTitleService.GenerateTitleAsync` 加 `allowKeep` 参数支持 KEEP 判断）
+- Phase 3: UI 分组重构（主列表按 tag 分组，归档区按时间分组，右键菜单加归档/设置 tag）
+- Phase 4: 老 session 后台补名 + 辅助任务模型独立配置（可选，可能拆到 v1.12.1）
+
 ## [1.10.6] - 2026-07-28
 
 ### Fixed — v1.11 hardening 阶段 C: 剩余瑕疵批处理 (path normalize / no-op 明示 / fail counting / total_matches / asset filter 语义)

@@ -72,6 +72,18 @@ namespace AgentCore.Editor.Session
         [JsonProperty("compression_metrics", NullValueHandling = NullValueHandling.Ignore)]
         public SerializableCompressionMetrics CompressionMetrics { get; set; }
 
+        /// <summary>用户手动打的 tag（单 tag，null=未分类）</summary>
+        [JsonProperty("tag", NullValueHandling = NullValueHandling.Ignore)]
+        public string Tag { get; set; }
+
+        /// <summary>是否已归档</summary>
+        [JsonProperty("archived", NullValueHandling = NullValueHandling.Ignore, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool Archived { get; set; }
+
+        /// <summary>用户是否手动设置过标题（true 则自动命名跳过，尊重用户意图）</summary>
+        [JsonProperty("title_manually_set", NullValueHandling = NullValueHandling.Ignore, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool TitleManuallySet { get; set; }
+
         /// <summary>
         /// 从 AgentLoop 的运行时数据创建 SessionData。
         /// </summary>
@@ -99,7 +111,11 @@ namespace AgentCore.Editor.Session
                 CreatedAt = existingSession?.CreatedAt ?? DateTime.UtcNow,
                 UpdatedAt = updateTimestamp ? DateTime.UtcNow : (existingSession?.UpdatedAt ?? DateTime.UtcNow),
                 MessageCount = messages?.Count ?? 0,
-                CompressionMetrics = SerializableCompressionMetrics.FromCompressionMetrics(compressionMetrics)
+                CompressionMetrics = SerializableCompressionMetrics.FromCompressionMetrics(compressionMetrics),
+                // v1.12.0: 保留会话组织字段（tag / 归档 / 手动命名标记），与 Id/Title 一样从已有会话继承
+                Tag = existingSession?.Tag,
+                Archived = existingSession?.Archived ?? false,
+                TitleManuallySet = existingSession?.TitleManuallySet ?? false
             };
 
             // 转换 ChatMessage -> SerializableChatMessage
