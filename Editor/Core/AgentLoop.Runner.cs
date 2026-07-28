@@ -710,6 +710,19 @@ namespace AgentCore.Editor.Core
 
                 if (!callInfo.Success)
                 {
+                    // Bug V (v1.11+): 区分 validation error 与真正的 tool failure。
+                    // validation error 是 LLM 生成的参数不符合 schema (JSON parse fail / schema mismatch),
+                    // 属于 LLM 侧一次性错误, 下一轮 LLM 会自我修正; 不应算入"这个工具持续坏了"
+                    // 的连续失败计数, 否则连续几次 LLM 参数手滑会误触发工具级熔断。
+                    // signature: ToolCallDispatcher.cs 里参数校验失败时的错误前缀。
+                    if (IsValidationError(callInfo.Result))
+                    {
+                        AgentCoreLog.Warning($"[AgentCore] Tool '{toolName}' rejected with validation error " +
+                                         $"(not counted toward consecutive-fail budget): " +
+                                         $"{Truncate(callInfo.Result, 200)}");
+                        continue;
+                    }
+
                     // 失败：增加该工具的连续失败计数
                     if (perToolFailCount.ContainsKey(toolName))
                         perToolFailCount[toolName]++;
@@ -726,6 +739,25 @@ namespace AgentCore.Editor.Core
                         perToolFailCount[toolName] = 0;
                 }
             }
+        }
+
+        /// <summary>
+        /// Bug V (v1.11+): 判断 tool result 是否为 dispatcher 层的参数校验失败。
+        /// 签名对齐 <c>ToolCallDispatcher.cs</c> ExecuteAsync 里两处 validation fail 分支的错误前缀。
+        /// </summary>
+        private static bool IsValidationError(string result)
+        {
+            if (string.IsNullOrEmpty(result)) return false;
+            // 与 ToolCallDispatcher.cs:231 / :246 保持一致
+            return result.StartsWith("Invalid arguments for tool '", StringComparison.Ordinal)
+                || result.StartsWith("Invalid JSON arguments for tool '", StringComparison.Ordinal)
+                || result.StartsWith("Unknown tool '", StringComparison.Ordinal);
+        }
+
+        private static string Truncate(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s) || s.Length <= max) return s;
+            return s.Substring(0, max) + "...";
         }
 
         /// <summary>

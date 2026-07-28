@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.6] - 2026-07-28
+
+### Fixed — v1.11 hardening 阶段 C: 剩余瑕疵批处理 (path normalize / no-op 明示 / fail counting / total_matches / asset filter 语义)
+
+阶段 C 处理与治理层/Play Mode 无关的 5 个独立瑕疵, 每个都是小改但直接影响 agent 交互质量。
+
+#### Bug T — `manage_memory_profiler take_memory_snapshot` success message 路径含 `\\` (P2)
+
+**现象**: `success=true` 时 message 里的 path 是 Windows 反斜杠原样, 而 `data.path` 已通过 `PathUtils.ToUnityPath` normalize 成正斜杠, 造成同一响应里两条路径格式不一致 (Bug S 只修了 data.path 没修 message)。
+
+**修法**: `ManageMemoryProfilerTool.cs:196-197` message 里改用 `data["path"]` (已 normalize) 而非 raw `finalPath`。
+
+#### Bug U — `manage_memory_profiler analyze_memory_snapshot top_n` 无实际效果 (P2)
+
+**现象**: schema 声明 `top_n` 参数存在, tool description 说 "top-N objects", 但 handler 只把 topN 值原样回写到 response 里, 没参与任何计算 (返回的只是 entry_counts 全量摘要)。
+
+**根因**: 真正的 top-N size ranking 需要反射 `CachedSnapshot` 深水区 (com.unity.memoryprofiler 包提供), 之前只做了一半就落了。
+
+**修法**: schema description + tool-level Description 明示 top_n 当前是 no-op ("currently a no-op — only entry counts are returned; top-N size ranking requires the CachedSnapshot API and is not yet implemented"), 让 LLM 从 schema 阶段就不依赖它 (line 327 handler 内已有的诚实告知保留)。
+
+**注**: 保留 `top_n` 参数 slot, 未来真做 CachedSnapshot 反射时无需再改 schema。
+
+#### Bug V — `AgentLoop.UpdatePerToolFailCounts` 混淆 validation error 与 tool failure (P2)
+
+**现象**: LLM 生成的参数不符合 schema (dispatcher 里 `ToolParameterValidator.Validate` 失败) 也被算作 tool consecutive fail, 连续 3 次参数手滑会误触发工具级熔断阈值。
+
+**修法**: `AgentLoop.Runner.cs` 加 `IsValidationError(result)` helper — 匹配 dispatcher 里 3 个已知 validation error 前缀 (`"Invalid arguments for tool '"`, `"Invalid JSON arguments for tool '"`, `"Unknown tool '"`)。命中则只 log warning 不递增计数; 真正的 tool 内部错误 (execution exception / API drift / 业务失败) 依然记入 fail count 保留熔断保护。
+
+#### Bug B — `set_selection_by_query` `truncated=true` 时无 `total_matches` 字段 (P1)
+
+**现象**: 大场景下 `max_results` 触发上限, 只知道 truncated 但拿不到全量规模, agent 无法判断是否需要更精细的 filter。
+
+**修法**: `ManageEditorTool.cs` `set_selection_by_query` 加 `total_matches` 字段, scene scope 用 `components.Length`, project scope 用 `guids.Length`。`resolved_count`/`total_matches` 差值就是被截掉的候选数。
+
+#### Bug D — `asset_filter='t:Material'` 泄漏 Shader (`.shadergraph` sub-asset 命中问题) (P1)
+
+**现象**: `AssetDatabase.FindAssets("t:Material")` 会命中 `.shadergraph` 文件里的 Material sub-asset, 但 `LoadAssetAtPath<UnityEngine.Object>` 加载的是主 asset (`Shader`), 结果 agent 拿到 Shader 却以为查到的是 Material — 严重语义泄漏。
+
+**根因**: FindAssets 按 sub-asset type 匹配, LoadAssetAtPath 只加载主 asset, 两者语义不一致。
+
+**修法**: 加两个 helper `ExtractTypeFilters(assetFilter)` (从 filter 字符串提取所有 `t:<Type>` token) 和 `MatchesAnyType(asset, typeFilters)` (检查 `asset.GetType()` 及基类链是否命中任一 filter, 大小写不敏感, 支持 `t:Texture` 匹配 Texture2D/Texture3D 派生类型)。project scope 分支加载主 asset 后二次过滤, 命中 sub-asset 的复合 asset 会在此丢弃 (保守但语义准确, 对齐 findings.md 推荐的"方案 A 严格")。
+
+### Changed
+
+- `Editor/Tools/Native/Extended/ManageMemoryProfilerTool.cs` — Bug T (path in message) + Bug U (top_n no-op 明示)
+- `Editor/Core/AgentLoop.Runner.cs` — Bug V (`IsValidationError` gate + `Truncate` helper)
+- `Editor/Tools/Native/Meta/ManageEditorTool.cs` — Bug B (`total_matches` 字段) + Bug D (`ExtractTypeFilters` / `MatchesAnyType` 二次过滤)
+
+---
+
 ## [1.10.5] - 2026-07-28
 
 ### Fixed — v1.11 hardening 阶段 B: Play Mode + 治理层只读白名单粒度修复

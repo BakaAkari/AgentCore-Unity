@@ -787,6 +787,9 @@ namespace AgentCore.Editor.Tools.Native.Meta
             if (maxResults <= 0) maxResults = 500;
 
             var resolved = new System.Collections.Generic.List<UnityEngine.Object>();
+            // Bug B (v1.11+): total_matches 记录 filter 匹配全量, 而 resolved.Count 受 max_results 上限限制。
+            // truncated=true 时 total_matches - resolved.Count 就是被截掉的候选数, 让 agent 知道规模。
+            int totalMatches = 0;
             string queryDescription;
 
             switch (scope)
@@ -814,6 +817,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
 
                     // FindObjectsOfType(bool) — includeInactive true means includeInactive+includeUninitialized
                     var components = UnityEngine.Object.FindObjectsOfType(componentType, includeInactive);
+                    totalMatches = components.Length;
                     foreach (var comp in components)
                     {
                         if (comp is Component c && c.gameObject != null)
@@ -850,6 +854,14 @@ namespace AgentCore.Editor.Tools.Native.Meta
                     string[] guids = searchFolders != null
                         ? AssetDatabase.FindAssets(assetFilter, searchFolders)
                         : AssetDatabase.FindAssets(assetFilter);
+                    totalMatches = guids.Length;
+
+                    // Bug D (v1.11+): AssetDatabase.FindAssets("t:Material") 会命中 .shadergraph 等
+                    // 复合 asset 里的 Material sub-asset, 但 LoadAssetAtPath 加载的是主 asset (Shader),
+                    // 造成语义泄漏 (agent 拿到 Shader 却以为是 Material).
+                    // 策略: 从 assetFilter 里解析出 t:<Type> token, 加载主 asset 后按 GetType().Name 二次过滤。
+                    // 命中 sub-asset 的复合 asset 会在此处被丢弃 — 保守但语义准确 (推荐"方案 A严格").
+                    var typeFilters = ExtractTypeFilters(assetFilter);
 
                     foreach (var guid in guids)
                     {
@@ -857,6 +869,11 @@ namespace AgentCore.Editor.Tools.Native.Meta
                         if (string.IsNullOrEmpty(path)) continue;
                         var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
                         if (asset == null) continue;
+
+                        // Bug D: 类型二次过滤
+                        if (typeFilters.Count > 0 && !MatchesAnyType(asset, typeFilters))
+                            continue;
+
                         resolved.Add(asset);
                         if (resolved.Count >= maxResults) break;
                     }
@@ -899,12 +916,59 @@ namespace AgentCore.Editor.Tools.Native.Meta
                 ["resolved_count"] = resolved.Count,
                 ["resolved"] = resolvedInfo,
                 ["max_results"] = maxResults,
+                ["total_matches"] = totalMatches,
                 ["truncated"] = resolved.Count >= maxResults
             };
 
             var summary = $"set_selection_by_query ({queryDescription}) selected {resolved.Count} object(s)"
                 + (resolved.Count >= maxResults ? $" — truncated at max_results={maxResults}" : ".");
             return ToolResponse.OkWithData(data, summary);
+        }
+
+        /// <summary>
+        /// Bug D (v1.11+): 从 AssetDatabase filter 字符串里提取所有 t:&lt;Type&gt; token。
+        /// 用于对 <c>FindAssets(assetFilter)</c> 结果做类型二次过滤 — 因为 FindAssets 会命中
+        /// sub-asset (如 .shadergraph 里的 Material sub-asset), 但 LoadAssetAtPath 加载主 asset,
+        /// 造成语义泄漏 (返回 Shader 却说是 Material).
+        /// 例: "t:Material l:MyLabel" → { "Material" }; "t:Prefab t:Mesh" → { "Prefab", "Mesh" }.
+        /// </summary>
+        private static System.Collections.Generic.List<string> ExtractTypeFilters(string assetFilter)
+        {
+            var result = new System.Collections.Generic.List<string>();
+            if (string.IsNullOrWhiteSpace(assetFilter)) return result;
+            var tokens = assetFilter.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var tok in tokens)
+            {
+                if (tok.StartsWith("t:", StringComparison.OrdinalIgnoreCase) && tok.Length > 2)
+                {
+                    var typeName = tok.Substring(2);
+                    if (!string.IsNullOrWhiteSpace(typeName))
+                        result.Add(typeName.Trim());
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Bug D (v1.11+): 检查 asset 是否命中任一 type filter (短名或全名匹配, 大小写不敏感)。
+        /// 匹配语义: <c>asset.GetType().Name</c> == filter (短名), 或 <c>FullName</c> == filter (全名).
+        /// 还检查基类链, 使得 <c>t:Texture</c> 能匹配 Texture2D / Texture3D 等派生类型 —
+        /// 对齐 Unity Asset Search 的 <c>t:</c> 类型层级语义。
+        /// </summary>
+        private static bool MatchesAnyType(UnityEngine.Object asset, System.Collections.Generic.List<string> typeFilters)
+        {
+            if (asset == null || typeFilters == null || typeFilters.Count == 0) return false;
+            var t = asset.GetType();
+            while (t != null && t != typeof(object))
+            {
+                foreach (var filter in typeFilters)
+                {
+                    if (string.Equals(t.Name, filter, StringComparison.OrdinalIgnoreCase)) return true;
+                    if (string.Equals(t.FullName, filter, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+                t = t.BaseType;
+            }
+            return false;
         }
 
         /// <summary>Resolve a Component type by full name (e.g. 'UnityEngine.Rigidbody') or short name ('Rigidbody').</summary>

@@ -17,7 +17,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
     [AgentTool("manage_memory_profiler",
         Description = "Unity Memory Profiler: capture / list / analyze / diff .snap files. " +
                       "Actions: take_memory_snapshot (async, no package needed), list_memory_snapshots (scan MemoryCaptures/), " +
-                      "analyze_memory_snapshot (top-N objects — REQUIRES com.unity.memoryprofiler), " +
+                      "analyze_memory_snapshot (entry-count summary — REQUIRES com.unity.memoryprofiler; top-N size ranking not yet implemented, see top_n schema note), " +
                       "diff_memory_snapshots (compare two — REQUIRES com.unity.memoryprofiler). " +
                       "PREREQUISITE for analyze/diff: install com.unity.memoryprofiler via Package Manager. " +
                       "ACTIVATE WHEN: user mentions 'memory profiler', 'memory snapshot', '.snap file'.",
@@ -41,7 +41,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                 ""path"": { ""type"": ""string"", ""description"": ""File path (relative to project root or absolute). For take: output .snap file. For analyze/diff: input .snap file(s).""  },
                 ""path_a"": { ""type"": ""string"" },
                 ""path_b"": { ""type"": ""string"" },
-                ""top_n"": { ""type"": ""integer"", ""description"": ""(analyze/diff) Top-N entries by size. Default 50."" },
+                ""top_n"": { ""type"": ""integer"", ""description"": ""(analyze/diff) Top-N entries by size. Default 50. NOTE (v1.11+): currently a no-op — only entry counts are returned; top-N size ranking requires the CachedSnapshot API and is not yet implemented. Value is echoed back in response but does not affect output."" },
                 ""wait_seconds"": { ""type"": ""number"", ""description"": ""(take) Max wait for snapshot completion. Default 60."" },
                 ""include_hierarchy_info"": { ""type"": ""boolean"" }
             },
@@ -193,8 +193,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
             }
             sw.Stop();
             var resp = success
-                ? ToolResponse.OkWithData(data, $"Memory snapshot captured: {finalPath}")
-                : ToolResponse.Fail($"Snapshot callback returned success=false. Path: {finalPath}");
+                ? ToolResponse.OkWithData(data, $"Memory snapshot captured: {data["path"]}")
+                : ToolResponse.Fail($"Snapshot callback returned success=false. Path: {data["path"]}");
             return resp.ToToolResult(sw.Elapsed.TotalMilliseconds);
         }
 
