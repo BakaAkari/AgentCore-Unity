@@ -73,6 +73,9 @@ namespace AgentCore.Editor.UI.Context
         /// <summary>
         /// 给一个 EditorWindow 的 root 挂 MouseMoveEvent。
         /// 用 root 的 GetHashCode 作为唯一标识（VisualElement 生命周期跟窗口一致，域重载后会重建）。
+        /// v1.12.0-alpha.6 (#5): 挂 DetachFromPanelEvent 在窗口关闭时清理 _hookedRoots 条目，
+        /// 防止 HashSet 无界增长（虽然 rootId 只是 int，但长时间使用会累积数千 entry）。
+        /// UI Toolkit 保证 root 脱离 panel 时会自动释放所有子 callback，无需手动 Unregister。
         /// </summary>
         private static void EnsureHooked(EditorWindow win)
         {
@@ -89,6 +92,10 @@ namespace AgentCore.Editor.UI.Context
             root.RegisterCallback<MouseMoveEvent>(evt => OnMouseMove(winRef, evt.localMousePosition));
             root.RegisterCallback<MouseEnterEvent>(evt => OnMouseMove(winRef, evt.localMousePosition));
             root.RegisterCallback<PointerMoveEvent>(evt => OnMouseMove(winRef, (Vector2)evt.localPosition));
+
+            // #5: root 脱离 panel（窗口关闭 / Domain reload）时从 HashSet 移除对应 rootId。
+            // rootId 是值类型副本，闭包内引用不会 hold 住 root。
+            root.RegisterCallback<DetachFromPanelEvent>(_ => _hookedRoots.Remove(rootId));
         }
 
         private static void OnMouseMove(WeakReference<EditorWindow> winRef, Vector2 localPos)

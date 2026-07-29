@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -17,7 +18,11 @@ namespace AgentCore.Editor.Utils
         // 旧实现：每 token 注册一个 EditorApplication.delayCall → 高频下主线程被 delayCall 队列淹没
         // 新实现：ConcurrentQueue + EditorApplication.update 每帧批量执行
         private static readonly ConcurrentQueue<Action> _mainThreadQueue = new();
-        private static bool _updateHookRegistered;
+
+        // v1.12.0-alpha.6 (#7): 用 int + Interlocked.CompareExchange 代替 bool，
+        // 防止后台线程首次并发调用 RunOnMainThread 时重复注册 EditorApplication.update。
+        // 0 = 未注册, 1 = 已注册。
+        private static int _updateHookRegistered;
 
         /// <summary>
         /// 将操作调度到 Unity 主线程执行。
@@ -32,8 +37,8 @@ namespace AgentCore.Editor.Utils
 
         private static void EnsureUpdateHook()
         {
-            if (_updateHookRegistered) return;
-            _updateHookRegistered = true;
+            // Interlocked.CompareExchange 原子地把 0 换 1，返回旧值。仅当旧值为 0 时执行注册。
+            if (Interlocked.CompareExchange(ref _updateHookRegistered, 1, 0) != 0) return;
             EditorApplication.update += DrainMainThreadQueue;
         }
 
