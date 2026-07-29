@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0-alpha.5] - 2026-07-29
+
+### Added — Session Tag 元数据管理
+
+`Editor/Session/SessionTagRegistry.cs` (新增)：session tag 排序与元数据仓库，存储于 `{ProjectRoot}/Library/AgentCore/session-tags.json`。
+
+Session 侧栏 tag 组头（Foldout header）新增右键菜单：
+- **重命名 tag** — 弹窗输入新名称，批量更新所有该 tag 的 session
+- **置顶** — 把 tag 组移到最前
+- **上移 / 下移** — 微调 tag 显示顺序
+- **删除 tag** — 弹窗确认，删除后所有该 tag 的 session 变为"未分类"
+
+### Changed
+
+- `Editor/UI/ChatWindow.Sessions.cs`：session 分组排序改为三桶体系
+  - Bucket 0：已登记 tag（按 registry order）
+  - Bucket 1：未登记 tag（字典序，即从未在 registry 出现过的 tag）
+  - Bucket 2：null/空 tag（未分类，排最后）
+  - `BuildSessionGroupFoldout` 新增 `tagName` 可选参数，非空时在 Foldout 的 Toggle 行挂右键菜单
+- L10n：新增 9 个 tag 菜单相关键（en-US.json + zh-CN.json 对称）
+
+### Compatibility
+
+- Registry 缺失时（首次使用或未使用 tag 管理功能），所有 tag 落入 bucket 1，行为等同旧版
+- 单个 tag registry 文件损坏时，`LoadOrderMap` 返回空字典，UI 降级为字典序
+
 ## [1.12.0-alpha.4] - 2026-07-28
 
 ### Fixed — Perf-Critical: Chat 卡顿根因修复

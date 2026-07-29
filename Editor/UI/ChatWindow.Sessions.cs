@@ -99,10 +99,13 @@ namespace AgentCore.Editor.UI
             var active = sessions.Where(s => !s.Archived).ToList();
             var archived = sessions.Where(s => s.Archived).ToList();
 
-            // 活动会话按 tag 分组：null/空 tag 归入"未分类"（排在最后），其余按 tag 名称字典序。
+            // 活动会话按 tag 分组：已登记 tag 按 registry 顺序（bucket 0）；未登记 tag 字典序（bucket 1）；
+            // null/空 tag 归入"未分类"（bucket 2，排在最后）。registry 缺失时所有 tag 落入 bucket 1，行为等同旧版。
+            var registryOrder = SessionTagRegistry.LoadOrderMap();
             var groups = active
                 .GroupBy(s => string.IsNullOrEmpty(s.Tag) ? null : s.Tag)
-                .OrderBy(g => g.Key == null ? 1 : 0)
+                .OrderBy(g => g.Key == null ? 2 : (registryOrder.ContainsKey(g.Key) ? 0 : 1))
+                .ThenBy(g => g.Key != null && registryOrder.TryGetValue(g.Key, out var o) ? o : int.MaxValue)
                 .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
 
             foreach (var group in groups)
@@ -113,7 +116,7 @@ namespace AgentCore.Editor.UI
                 var ordered = group.OrderByDescending(s => s.UpdatedAt).ToList();
                 var headerText = $"{tagDisplay} ({ordered.Count})";
 
-                var foldout = BuildSessionGroupFoldout(prefKey, headerText, defaultExpanded: true, ordered, currentId, showTagChip: false);
+                var foldout = BuildSessionGroupFoldout(prefKey, headerText, defaultExpanded: true, ordered, currentId, showTagChip: false, tagName: tagKey);
                 _sessionListContainer.Add(foldout);
             }
 
@@ -165,9 +168,13 @@ namespace AgentCore.Editor.UI
         /// <param name="items">组内会话摘要（调用方已排序）。</param>
         /// <param name="currentId">当前活动会话 ID（用于高亮）。</param>
         /// <param name="showTagChip">组内会话项是否显示 tag chip（归档区为 true）。</param>
+        /// <param name="tagName">
+        /// 该组对应的实际 tag 名称。仅 tagged 组传入非空值；"未分类" / "已归档" 传 null。
+        /// 非空时在组头（Foldout 的 Toggle 行）挂右键菜单以管理 tag（重命名 / 排序 / 删除）。
+        /// </param>
         private Foldout BuildSessionGroupFoldout(
             string prefKey, string headerText, bool defaultExpanded,
-            IEnumerable<SessionSummary> items, string currentId, bool showTagChip)
+            IEnumerable<SessionSummary> items, string currentId, bool showTagChip, string tagName = null)
         {
             var foldout = new Foldout { text = headerText };
             foldout.AddToClassList("session-group-header");
@@ -175,6 +182,20 @@ namespace AgentCore.Editor.UI
 
             // 记住每个用户对该组的折叠选择。组内会话项无 bool 值控件，不存在事件冒泡混淆。
             foldout.RegisterValueChangedCallback(evt => SaveFoldoutState(prefKey, evt.newValue));
+
+            // tag 组头右键菜单：把回调挂在 Foldout 的 Toggle（可见的组头行）上，而非整个 Foldout，
+            // 避免右键组内会话项时误触发（会话项自身已有 ContextClickEvent 菜单）。
+            if (tagName != null)
+            {
+                var headerToggle = foldout.Q<Toggle>();
+                var hookTarget = (VisualElement)headerToggle ?? foldout;
+                hookTarget.RegisterCallback<MouseDownEvent>(evt =>
+                {
+                    if (evt.button != 1) return; // 只响应右键，左键保留 Foldout 展开/折叠
+                    ShowTagGroupContextMenu(tagName);
+                    evt.StopPropagation();
+                });
+            }
 
             foreach (var session in items)
             {
@@ -479,6 +500,76 @@ namespace AgentCore.Editor.UI
             menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("common.delete", "删除")), false, () =>
             {
                 DeleteSessionWithConfirm(sessionId);
+            });
+
+            menu.ShowAsContext();
+        }
+
+        /// <summary>
+        /// tag 组头右键菜单：重命名 / 置顶 / 上移 / 下移 / 删除 tag。
+        /// 所有操作都会 RefreshSessionList 立即刷新。
+        /// </summary>
+        private void ShowTagGroupContextMenu(string tagName)
+        {
+            if (string.IsNullOrEmpty(tagName)) return;
+
+            var menu = new GenericMenu();
+
+            // 重命名 tag（当前名称拼在提示语后，避免 L10n 依赖格式占位符）
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.rename", "重命名 tag")), false, () =>
+            {
+                SessionTagInputDialog.Show(
+                    AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.renameTitle", "重命名 tag"),
+                    AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.renamePrompt", "输入新的 tag 名称：") + $" ({tagName})",
+                    newName =>
+                    {
+                        if (string.IsNullOrWhiteSpace(newName)) return;
+                        SessionTagRegistry.RenameTag(tagName, newName);
+                        RefreshSessionList();
+                    });
+            });
+
+            menu.AddSeparator("");
+
+            // 置顶
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.pinTop", "置顶")), false, () =>
+            {
+                SessionTagRegistry.PinTagToTop(tagName);
+                RefreshSessionList();
+            });
+
+            // 上移
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.moveUp", "上移")), false, () =>
+            {
+                SessionTagRegistry.MoveTagUp(tagName);
+                RefreshSessionList();
+            });
+
+            // 下移
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.moveDown", "下移")), false, () =>
+            {
+                SessionTagRegistry.MoveTagDown(tagName);
+                RefreshSessionList();
+            });
+
+            menu.AddSeparator("");
+
+            // 删除 tag（把所有该 tag 的 session 变未分类）
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.delete", "删除 tag")), false, () =>
+            {
+                var affectedCount = SessionManager.Instance.GetSessionList().Count(s => string.Equals(s.Tag, tagName, StringComparison.OrdinalIgnoreCase));
+                var confirmMsg = string.Format(
+                    AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.deleteConfirm", "确认删除 tag \"{0}\"？{1} 个会话将变为未分类。"),
+                    tagName, affectedCount);
+                if (UnityEditor.EditorUtility.DisplayDialog(
+                    AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.deleteTitle", "删除 tag"),
+                    confirmMsg,
+                    AgentCore.Editor.L10n.Loc.Tr("common.confirm", "确认"),
+                    AgentCore.Editor.L10n.Loc.Tr("common.cancel", "取消")))
+                {
+                    SessionTagRegistry.DeleteTag(tagName);
+                    RefreshSessionList();
+                }
             });
 
             menu.ShowAsContext();
