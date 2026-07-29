@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0-alpha.6] - 2026-07-29
+
+### Fixed — Performance & Concurrency (10-issue cleanup)
+
+Following v1.12.0-alpha.4's `StreamReader.EndOfStream` fix, a full-code-base bug sweep identified 10 remaining perf/stability issues. All fixed in this release across 3 commits (batch A / B / C).
+
+#### 批 A: Quick wins
+- **#2 CRITICAL** `OpenAICompatibleClient.ChatCompletionStreamAsync` — HTTP `response` and `stream` were never `Dispose`d, causing latent connection-pool leakage on every LLM streaming call. Added `using` on both.
+- **#3 HIGH** `ManagePackageTool.WaitForRequest` — main-thread `Thread.Sleep(50)` polling up to 30 seconds froze the Editor. Rewritten with `EditorApplication.update` + `TaskCompletionSource`.
+- **#4 MEDIUM** `ManageProfilerTool` — main-thread `Thread.Sleep(50)` waiting for the next frame → `EditorApplication.delayCall` + `TaskCompletionSource`.
+
+#### 批 B: Async propagation
+- **#1 CRITICAL** `SessionStorage.LoadAsync` — session switch previously did synchronous `File.ReadAllText` + `JsonConvert.Deserialize` on multi-MB session files, blocking main thread 50-200 ms. Now fully async via `File.ReadAllTextAsync`.
+- **#8 HIGH** `SessionStorage.ListSessions` — sidebar refresh no longer reads every session file in full; header fields are streamed.
+- **#9 HIGH** `FileChangeTracker` — line counting no longer allocates the whole file via `ReadAllLines`; streaming `\n` count.
+- **#10 HIGH** `BootstrapLoader.LoadAsync` + `ProjectContextCollector.CollectHeavyAsync` used consistently, eliminating 50-200 ms hang when opening ChatWindow.
+
+#### 批 C: Concurrency safety
+- **#5 HIGH** `MouseTracker._hookedRoots` — no longer grows unboundedly; `DetachFromPanelEvent` cleans up entries + unregisters callbacks when windows close.
+- **#6 MEDIUM** `VcsRemoteStatusMonitor` — `_isChecking`/`_isSyncing` now guarded by `Interlocked.CompareExchange`; `_cts` operations race-guarded.
+- **#7 LOW** `AsyncHelper._updateHookRegistered` — `Interlocked.CompareExchange` prevents duplicate `EditorApplication.update` subscription on concurrent first-time invocations.
+
+### Testing
+
+- Manual: chat streaming during long sessions, session switching (large sessions), Editor ChatWindow open time, `manage_package` install/list operations no longer freeze Editor.
+- Static: `grep -rn "Thread.Sleep\|.Result\|.Wait()" Editor/` returns only intentional sleeps in background workers.
+
 ## [1.12.0-alpha.5] - 2026-07-29
 
 ### Added — Session Tag 元数据管理

@@ -162,7 +162,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                         response = HandleReadFrame(parameters);
                         break;
                     case "list_draw_events":
-                        response = HandleListDrawEvents(parameters);
+                        response = await HandleListDrawEvents(parameters);
                         break;
                     case "get_draw_event":
                         response = HandleGetDrawEvent(parameters);
@@ -1151,7 +1151,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// Enumerate GPU frame events captured by the Unity FrameDebugger.
         /// If no events are captured yet and enable_if_needed=true, auto-enables the debugger (requires Play Mode).
         /// </summary>
-        private ToolResponse HandleListDrawEvents(JObject parameters)
+        private async Task<ToolResponse> HandleListDrawEvents(JObject parameters)
         {
             if (!FrameDebuggerSupported(out var reason)) return ToolResponse.Fail(reason);
 
@@ -1174,10 +1174,12 @@ namespace AgentCore.Editor.Tools.Native.Extended
                     return ToolResponse.Fail($"Failed to enable FrameDebugger: {err}");
                 }
                 didEnable = true;
-                // The frame debugger captures the NEXT frame after being enabled. Force a repaint so events populate.
+                // The frame debugger captures the NEXT frame after being enabled. Force a repaint so events populate,
+                // then yield to the Editor for one tick (via delayCall) instead of blocking the main thread with a sleep.
                 UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
-                System.Threading.Thread.Sleep(50);
-                count = GetFrameDebuggerCount();
+                var tcs = new TaskCompletionSource<int>();
+                EditorApplication.delayCall += () => tcs.TrySetResult(GetFrameDebuggerCount());
+                count = await tcs.Task;
                 enableNote = didEnable ? "FrameDebugger auto-enabled — GameView is now in debug mode until disable_frame_debugger is called. Events may not populate until the next Editor repaint." : null;
             }
 

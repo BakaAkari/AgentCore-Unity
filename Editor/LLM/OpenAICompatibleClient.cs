@@ -56,7 +56,7 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model
             using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
             httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await client.SendAsync(httpRequest, ct);
+            using var response = await client.SendAsync(httpRequest, ct);
             var responseBody = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
@@ -118,7 +118,7 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url
             httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
             // 使用 ResponseHeadersRead 以便尽早开始读取流
-            var response = await client.SendAsync(
+            using var response = await client.SendAsync(
                 httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
 
             if (!response.IsSuccessStatusCode)
@@ -129,7 +129,7 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url
             }
 
             // 读取 SSE 流
-            var stream = await response.Content.ReadAsStreamAsync();
+            using var stream = await response.Content.ReadAsStreamAsync();
 
             // 用于拼接完整的 assistant 消息
             var contentBuilder = new StringBuilder();

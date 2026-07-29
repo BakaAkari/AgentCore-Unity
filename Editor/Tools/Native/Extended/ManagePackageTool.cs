@@ -84,14 +84,9 @@ namespace AgentCore.Editor.Tools.Native.Extended
         private const int MaxWaitTimeMs = 30000;
 
         /// <summary>
-        /// Polling interval in milliseconds for Package Manager requests.
-        /// </summary>
-        private const int PollIntervalMs = 50;
-
-        /// <summary>
         /// Execute a package management action.
         /// </summary>
-        public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
+        public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
         {
             var sw = Stopwatch.StartNew();
             ToolResponse response;
@@ -103,31 +98,31 @@ namespace AgentCore.Editor.Tools.Native.Extended
                 switch (action)
                 {
                     case "list":
-                        response = HandleList(parameters);
+                        response = await HandleListAsync(parameters, cancellationToken);
                         break;
                     case "search":
-                        response = HandleSearch(parameters);
+                        response = await HandleSearchAsync(parameters, cancellationToken);
                         break;
                     case "get_info":
-                        response = HandleGetInfo(parameters);
+                        response = await HandleGetInfoAsync(parameters, cancellationToken);
                         break;
                     case "install":
-                        response = HandleInstall(parameters);
+                        response = await HandleInstallAsync(parameters, cancellationToken);
                         break;
                     case "remove":
-                        response = HandleRemove(parameters);
+                        response = await HandleRemoveAsync(parameters, cancellationToken);
                         break;
                     case "get_versions":
-                        response = HandleGetVersions(parameters);
+                        response = await HandleGetVersionsAsync(parameters, cancellationToken);
                         break;
                     case "check_installed":
-                        response = HandleCheckInstalled(parameters);
+                        response = await HandleCheckInstalledAsync(parameters, cancellationToken);
                         break;
                     case "get_dependencies":
-                        response = HandleGetDependencies(parameters);
+                        response = await HandleGetDependenciesAsync(parameters, cancellationToken);
                         break;
                     case "refresh":
-                        response = HandleRefresh();
+                        response = await HandleRefreshAsync(cancellationToken);
                         break;
                     default:
                         response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: list, search, get_info, install, remove, get_versions, check_installed, get_dependencies, refresh");
@@ -140,23 +135,50 @@ namespace AgentCore.Editor.Tools.Native.Extended
             }
 
             sw.Stop();
-            return Task.FromResult(response.ToToolResult(sw.Elapsed.TotalMilliseconds));
+            return response.ToToolResult(sw.Elapsed.TotalMilliseconds);
         }
 
         #region Request Helpers
 
         /// <summary>
-        /// Wait for a Package Manager request to complete with timeout.
+        /// Wait for a Package Manager request to complete with timeout, without blocking
+        /// the main thread. Polls on <see cref="EditorApplication.update"/> and completes
+        /// via a <see cref="TaskCompletionSource{TResult}"/>.
         /// </summary>
-        private static bool WaitForRequest(Request request, int timeoutMs = MaxWaitTimeMs)
+        private static async Task<bool> WaitForRequestAsync(Request request, int timeoutMs = MaxWaitTimeMs, CancellationToken ct = default)
         {
-            var elapsed = 0;
-            while (!request.IsCompleted && elapsed < timeoutMs)
+            if (request.IsCompleted)
+                return true;
+
+            var tcs = new TaskCompletionSource<bool>();
+            var timeoutCts = new CancellationTokenSource(timeoutMs);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+
+            void CheckLoop()
             {
-                System.Threading.Thread.Sleep(PollIntervalMs);
-                elapsed += PollIntervalMs;
+                if (request.IsCompleted)
+                {
+                    EditorApplication.update -= CheckLoop;
+                    tcs.TrySetResult(true);
+                }
             }
-            return request.IsCompleted;
+
+            using var reg = linked.Token.Register(() =>
+            {
+                EditorApplication.update -= CheckLoop;
+                tcs.TrySetResult(false);
+            });
+
+            EditorApplication.update += CheckLoop;
+            try
+            {
+                return await tcs.Task;
+            }
+            finally
+            {
+                EditorApplication.update -= CheckLoop;
+                timeoutCts.Dispose();
+            }
         }
 
         /// <summary>
@@ -172,10 +194,10 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// List all installed packages and return them as a collection.
         /// </summary>
-        private static PackageCollection ListInstalledPackages(bool includeOffline = false)
+        private static async Task<PackageCollection> ListInstalledPackagesAsync(bool includeOffline = false, CancellationToken ct = default)
         {
             var request = Client.List(includeOffline);
-            if (!WaitForRequest(request))
+            if (!await WaitForRequestAsync(request, MaxWaitTimeMs, ct))
                 return null;
             if (request.Status != StatusCode.Success)
                 return null;
@@ -189,12 +211,12 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// List all installed packages.
         /// </summary>
-        private ToolResponse HandleList(JObject parameters)
+        private async Task<ToolResponse> HandleListAsync(JObject parameters, CancellationToken ct)
         {
             var includeBuiltIn = ToolHelpers.GetOptionalBool(parameters, "includeBuiltIn", false);
 
             var request = Client.List(true);
-            if (!WaitForRequest(request))
+            if (!await WaitForRequestAsync(request, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail("Package list request timed out.");
 
             if (request.Status != StatusCode.Success)
@@ -236,7 +258,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Search for packages in the Unity registry.
         /// </summary>
-        private ToolResponse HandleSearch(JObject parameters)
+        private async Task<ToolResponse> HandleSearchAsync(JObject parameters, CancellationToken ct)
         {
             var query = ToolHelpers.GetOptionalString(parameters, "query", "");
 
@@ -244,7 +266,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                 return ToolResponse.Fail("Parameter 'query' is required for search action.");
 
             var request = Client.SearchAll();
-            if (!WaitForRequest(request))
+            if (!await WaitForRequestAsync(request, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail("Package search request timed out.");
 
             if (request.Status != StatusCode.Success)
@@ -282,13 +304,13 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Get detailed information about a specific package.
         /// </summary>
-        private ToolResponse HandleGetInfo(JObject parameters)
+        private async Task<ToolResponse> HandleGetInfoAsync(JObject parameters, CancellationToken ct)
         {
             var packageName = ToolHelpers.GetRequiredString(parameters, "packageName");
 
             // First try to find it in installed packages
             var listRequest = Client.List(true);
-            if (!WaitForRequest(listRequest))
+            if (!await WaitForRequestAsync(listRequest, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail("Package list request timed out.");
 
             if (listRequest.Status != StatusCode.Success)
@@ -308,7 +330,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
             {
                 // Try searching in registry
                 var searchRequest = Client.SearchAll();
-                if (WaitForRequest(searchRequest) && searchRequest.Status == StatusCode.Success)
+                if (await WaitForRequestAsync(searchRequest, MaxWaitTimeMs, ct) && searchRequest.Status == StatusCode.Success)
                 {
                     foreach (var pkg in searchRequest.Result)
                     {
@@ -371,7 +393,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Install a package by name, optionally with a specific version.
         /// </summary>
-        private ToolResponse HandleInstall(JObject parameters)
+        private async Task<ToolResponse> HandleInstallAsync(JObject parameters, CancellationToken ct)
         {
             var packageName = ToolHelpers.GetRequiredString(parameters, "packageName");
             var version = ToolHelpers.GetOptionalString(parameters, "version", null);
@@ -379,7 +401,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
             var packageId = string.IsNullOrEmpty(version) ? packageName : $"{packageName}@{version}";
 
             var request = Client.Add(packageId);
-            if (!WaitForRequest(request))
+            if (!await WaitForRequestAsync(request, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail($"Package install request timed out for '{packageId}'. The installation may still be in progress.");
 
             if (request.Status != StatusCode.Success)
@@ -400,12 +422,12 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Remove an installed package.
         /// </summary>
-        private ToolResponse HandleRemove(JObject parameters)
+        private async Task<ToolResponse> HandleRemoveAsync(JObject parameters, CancellationToken ct)
         {
             var packageName = ToolHelpers.GetRequiredString(parameters, "packageName");
 
             var request = Client.Remove(packageName);
-            if (!WaitForRequest(request))
+            if (!await WaitForRequestAsync(request, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail($"Package remove request timed out for '{packageName}'. The removal may still be in progress.");
 
             if (request.Status != StatusCode.Success)
@@ -417,13 +439,13 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Get all available versions for a package.
         /// </summary>
-        private ToolResponse HandleGetVersions(JObject parameters)
+        private async Task<ToolResponse> HandleGetVersionsAsync(JObject parameters, CancellationToken ct)
         {
             var packageName = ToolHelpers.GetRequiredString(parameters, "packageName");
 
             // Search for the package to get version info
             var searchRequest = Client.SearchAll();
-            if (!WaitForRequest(searchRequest))
+            if (!await WaitForRequestAsync(searchRequest, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail("Package search request timed out.");
 
             if (searchRequest.Status != StatusCode.Success)
@@ -443,7 +465,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
             if (foundPkg == null)
             {
                 var listRequest = Client.List(true);
-                if (WaitForRequest(listRequest) && listRequest.Status == StatusCode.Success)
+                if (await WaitForRequestAsync(listRequest, MaxWaitTimeMs, ct) && listRequest.Status == StatusCode.Success)
                 {
                     foreach (var pkg in listRequest.Result)
                     {
@@ -484,12 +506,12 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Check if a specific package is installed and return its status.
         /// </summary>
-        private ToolResponse HandleCheckInstalled(JObject parameters)
+        private async Task<ToolResponse> HandleCheckInstalledAsync(JObject parameters, CancellationToken ct)
         {
             var packageName = ToolHelpers.GetRequiredString(parameters, "packageName");
 
             var listRequest = Client.List(true);
-            if (!WaitForRequest(listRequest))
+            if (!await WaitForRequestAsync(listRequest, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail("Package list request timed out.");
 
             if (listRequest.Status != StatusCode.Success)
@@ -534,13 +556,13 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Get the dependency tree for a specific package.
         /// </summary>
-        private ToolResponse HandleGetDependencies(JObject parameters)
+        private async Task<ToolResponse> HandleGetDependenciesAsync(JObject parameters, CancellationToken ct)
         {
             var packageName = ToolHelpers.GetRequiredString(parameters, "packageName");
 
             // Search installed packages first
             var listRequest = Client.List(true);
-            if (!WaitForRequest(listRequest))
+            if (!await WaitForRequestAsync(listRequest, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail("Package list request timed out.");
 
             if (listRequest.Status != StatusCode.Success)
@@ -560,7 +582,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
             if (foundPkg == null)
             {
                 var searchRequest = Client.SearchAll();
-                if (WaitForRequest(searchRequest) && searchRequest.Status == StatusCode.Success)
+                if (await WaitForRequestAsync(searchRequest, MaxWaitTimeMs, ct) && searchRequest.Status == StatusCode.Success)
                 {
                     foreach (var pkg in searchRequest.Result)
                     {
@@ -619,7 +641,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
         /// <summary>
         /// Force refresh the Package Manager cache.
         /// </summary>
-        private ToolResponse HandleRefresh()
+        private async Task<ToolResponse> HandleRefreshAsync(CancellationToken ct)
         {
             // Resolve forces a re-resolution of all packages
             var resolveMethod = typeof(Client).GetMethod("Resolve", Type.EmptyTypes);
@@ -628,7 +650,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
             if (request == null)
                 return ToolResponse.Ok("Package Manager cache refresh requested successfully.");
 
-            if (!WaitForRequest(request))
+            if (!await WaitForRequestAsync(request, MaxWaitTimeMs, ct))
                 return ToolResponse.Fail("Package resolve/refresh request timed out.");
 
             if (request.Status != StatusCode.Success)
