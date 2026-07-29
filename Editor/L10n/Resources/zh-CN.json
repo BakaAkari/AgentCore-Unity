@@ -34,6 +34,7 @@
   "chat.status.waitingConfirmation": "等待工具确认...",
   "chat.status.waitingUserDecision": "AI 正在等待你的决定...",
   "chat.status.initFailed": "初始化失败",
+  "chat.status.initializing": "初始化中…",
 
   "chat.pending.thinking": "思考中",
   "chat.pending.executingTool": "调用工具中",

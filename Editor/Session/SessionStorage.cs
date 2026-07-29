@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -126,6 +128,62 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
+        /// 异步加载指定会话（#1 CRITICAL 性能修复）。
+        /// <para>
+        /// 文件读取与 JSON 反序列化都放到后台线程执行 —— 切换会话时会话文件可达数 MB，
+        /// 同步 <see cref="Load"/> 的 <c>File.ReadAllText</c> + <c>JsonConvert.Deserialize</c>
+        /// 会阻塞 Unity 主线程 50-200ms 造成明显卡顿。此方法把这两步都移出主线程，
+        /// await 续体回到主线程后调用方即可安全操作 UI。
+        /// </para>
+        /// 同步 <see cref="Load"/> 保留作为兼容 fallback，供构造/重命名/打 tag 等非热路径同步上下文调用。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>会话数据，加载失败时返回 null</returns>
+        public static async Task<SessionData> LoadAsync(string sessionId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                AgentCoreLog.Error($"{LogPrefix}Cannot load session with empty Id.");
+                return null;
+            }
+
+            try
+            {
+                var filePath = Path.Combine(GetSessionDirectory(), $"{sessionId}.json");
+
+                if (!File.Exists(filePath))
+                {
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session file not found: {filePath}");
+                    return null;
+                }
+
+                // 读取（异步 I/O）+ 反序列化（Task.Run 后台线程）都不占用主线程
+                var json = await File.ReadAllTextAsync(filePath, ct);
+                var session = await Task.Run(
+                    () => JsonConvert.DeserializeObject<SessionData>(json, JsonSettings), ct);
+
+                if (session == null)
+                {
+                    AgentCoreLog.Error($"{LogPrefix}Failed to deserialize session: {sessionId}");
+                    return null;
+                }
+
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded (async): {sessionId} ({session.Title}, {session.MessageCount} messages)");
+                return session;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Failed to load session {sessionId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 列出所有已保存的会话摘要，按 UpdatedAt 降序排列。
         /// </summary>
         /// <returns>会话摘要列表</returns>
@@ -150,21 +208,10 @@ namespace AgentCore.Editor.Session
                     try
                     {
                         var json = File.ReadAllText(file);
-                        var obj = JObject.Parse(json);
-
-                        var id = obj.Value<string>("id");
-                        if (!string.IsNullOrEmpty(id))
+                        var summary = ParseSummary(json);
+                        if (summary != null)
                         {
-                            summaries.Add(new SessionSummary
-                            {
-                                Id = id,
-                                Title = obj.Value<string>("title") ?? "未命名会话",
-                                UpdatedAt = obj.Value<DateTime?>("updated_at") ?? DateTime.MinValue,
-                                MessageCount = obj.Value<int?>("message_count") ?? 0,
-                                Tag = obj.Value<string>("tag"),
-                                Archived = obj.Value<bool?>("archived") ?? false,
-                                TitleManuallySet = obj.Value<bool?>("title_manually_set") ?? false
-                            });
+                            summaries.Add(summary);
                         }
                     }
                     catch (Exception ex)
@@ -182,6 +229,114 @@ namespace AgentCore.Editor.Session
             }
 
             return summaries;
+        }
+
+        /// <summary>
+        /// 异步列出所有已保存的会话摘要，按 UpdatedAt 降序排列（#8 HIGH 性能修复）。
+        /// <para>
+        /// 侧边栏刷新原本在主线程逐个 <c>File.ReadAllText</c> + <c>JObject.Parse</c> 全量会话文件。
+        /// 摘要所需的 <c>tag</c> / <c>archived</c> / <c>message_count</c> 字段在 JSON 中位于
+        /// <c>messages</c> 数组之后（尾部），无法只流式读头部，因此改为：文件读取用异步 I/O，
+        /// 解析集中放到一个后台 <see cref="Task.Run"/>，主线程全程不阻塞。
+        /// </para>
+        /// </summary>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>会话摘要列表</returns>
+        public static async Task<List<SessionSummary>> ListSessionsAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var directory = GetSessionDirectory();
+
+                if (!Directory.Exists(directory))
+                {
+                    return new List<SessionSummary>();
+                }
+
+                var files = Directory.GetFiles(directory, "*.json");
+
+                // 1. 异步读取全部文件内容（每次 await 期间主线程空闲）
+                var contents = new List<(string file, string json)>(files.Length);
+                foreach (var file in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        var json = await File.ReadAllTextAsync(file, ct);
+                        contents.Add((file, json));
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        AgentCoreLog.Warning($"{LogPrefix}Failed to read session file {Path.GetFileName(file)}: {ex.Message}");
+                    }
+                }
+
+                // 2. 后台线程集中解析 + 排序（JObject.Parse 会解析整份 JSON，属 CPU 密集，移出主线程）
+                return await Task.Run(() =>
+                {
+                    var summaries = new List<SessionSummary>(contents.Count);
+                    foreach (var (file, json) in contents)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        try
+                        {
+                            var summary = ParseSummary(json);
+                            if (summary != null)
+                            {
+                                summaries.Add(summary);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            AgentCoreLog.Warning($"{LogPrefix}Failed to parse session file {Path.GetFileName(file)}: {ex.Message}");
+                        }
+                    }
+
+                    summaries.Sort((a, b) => b.UpdatedAt.CompareTo(a.UpdatedAt));
+                    return summaries;
+                }, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Failed to list sessions: {ex.Message}");
+                return new List<SessionSummary>();
+            }
+        }
+
+        /// <summary>
+        /// 从会话 JSON 文本解析出轻量级摘要（只读取摘要字段，不反序列化完整消息列表）。
+        /// 供同步 <see cref="ListSessions"/> 与异步 <see cref="ListSessionsAsync"/> 共用。
+        /// </summary>
+        /// <param name="json">会话文件 JSON 文本</param>
+        /// <returns>会话摘要；当 id 为空时返回 null</returns>
+        private static SessionSummary ParseSummary(string json)
+        {
+            var obj = JObject.Parse(json);
+
+            var id = obj.Value<string>("id");
+            if (string.IsNullOrEmpty(id))
+            {
+                return null;
+            }
+
+            return new SessionSummary
+            {
+                Id = id,
+                Title = obj.Value<string>("title") ?? "未命名会话",
+                UpdatedAt = obj.Value<DateTime?>("updated_at") ?? DateTime.MinValue,
+                MessageCount = obj.Value<int?>("message_count") ?? 0,
+                Tag = obj.Value<string>("tag"),
+                Archived = obj.Value<bool?>("archived") ?? false,
+                TitleManuallySet = obj.Value<bool?>("title_manually_set") ?? false
+            };
         }
 
         /// <summary>

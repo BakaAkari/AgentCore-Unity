@@ -34,6 +34,7 @@
   "chat.status.waitingConfirmation": "Waiting for tool confirmation...",
   "chat.status.waitingUserDecision": "AI is waiting for your decision...",
   "chat.status.initFailed": "Initialization failed",
+  "chat.status.initializing": "Initializing...",
 
   "chat.pending.thinking": "Thinking",
   "chat.pending.executingTool": "Executing tool",

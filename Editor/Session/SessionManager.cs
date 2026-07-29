@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using UnityEngine;
+using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Utils;
 
@@ -190,12 +191,59 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
+        /// 异步加载指定会话并设为当前活动会话（#1 CRITICAL 性能修复的传染层）。
+        /// <para>
+        /// 文件读取与反序列化经 <see cref="SessionStorage.LoadAsync"/> 移出主线程，
+        /// 供 UI 热路径（<c>ChatWindow.SwitchToSession</c>）调用以消除切换会话时的卡顿。
+        /// await 续体回到主线程后，设置活动会话状态与 EditorPrefs 均在主线程完成。
+        /// </para>
+        /// 同步 <see cref="LoadSession"/> 保留，供窗口恢复等同步上下文兜底。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>会话数据，加载失败时返回 null</returns>
+        public async Task<SessionData> LoadSessionAsync(string sessionId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                AgentCoreLog.Warning($"{LogPrefix}Cannot load session with empty Id.");
+                return null;
+            }
+
+            var session = await SessionStorage.LoadAsync(sessionId, ct);
+            if (session != null)
+            {
+                CurrentSessionId = sessionId;
+                _currentSession = session;
+                _isDirty = false; // 刚加载的会话没有未保存的变更
+                SaveLastSessionId(sessionId);
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded and set as active (async): {sessionId}");
+            }
+
+            return session;
+        }
+
+        /// <summary>
         /// 获取会话列表。
         /// </summary>
         /// <returns>会话摘要列表，按最后更新时间降序排列</returns>
         public List<SessionSummary> GetSessionList()
         {
             return SessionStorage.ListSessions();
+        }
+
+        /// <summary>
+        /// 异步获取会话列表（#8 HIGH 性能修复的传染层）。
+        /// <para>
+        /// 经 <see cref="SessionStorage.ListSessionsAsync"/> 把全量会话文件的读取与解析移出主线程，
+        /// 侧边栏刷新时主线程不再阻塞。
+        /// </para>
+        /// </summary>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>会话摘要列表，按最后更新时间降序排列</returns>
+        public Task<List<SessionSummary>> GetSessionListAsync(CancellationToken ct = default)
+        {
+            return SessionStorage.ListSessionsAsync(ct);
         }
 
         /// <summary>

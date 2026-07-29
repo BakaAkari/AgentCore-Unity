@@ -61,6 +61,12 @@ namespace AgentCore.Editor.Core
         public AgentState CurrentState { get; private set; } = AgentState.Idle;
 
         /// <summary>
+        /// 是否已完成初始化。
+        /// UI 层在异步初始化（<see cref="InitializeAsync"/>）尚未完成时据此拦截发送等操作。
+        /// </summary>
+        public bool IsInitialized => _isInitialized;
+
+        /// <summary>
         /// 对话轮次历史（只读视图），供 UI 层显示。
         /// </summary>
         public IReadOnlyList<ConversationTurn> ConversationHistory => _conversationTurns;
@@ -202,10 +208,39 @@ namespace AgentCore.Editor.Core
         /// </summary>
         public void Initialize()
         {
+            if (!TryBeginInitialize()) return;
+            var systemPrompt = LoadBootstrapSystemPrompt();
+            CompleteInitialize(systemPrompt);
+        }
+
+        /// <summary>
+        /// 异步初始化 Agent Loop（#10 HIGH 性能修复）。
+        /// <para>
+        /// 与同步 <see cref="Initialize"/> 行为完全一致，唯一区别是 Bootstrap 上下文经
+        /// <see cref="BootstrapLoader.LoadAsync"/> 加载：文件读取用异步 I/O，重量级项目扫描
+        /// （脚本统计 / 命名空间分布）经 <c>ProjectContextCollector.CollectHeavyAsync</c> 移出主线程，
+        /// 窗口首次打开不再因项目上下文收集而卡顿。
+        /// </para>
+        /// await 续体回到主线程后再执行 <see cref="CompleteInitialize"/>，其中的 Unity API / 事件注册均在主线程完成。
+        /// </summary>
+        /// <param name="ct">取消令牌</param>
+        public async Task InitializeAsync(CancellationToken ct = default)
+        {
+            if (!TryBeginInitialize()) return;
+            var systemPrompt = await LoadBootstrapSystemPromptAsync(ct);
+            CompleteInitialize(systemPrompt);
+        }
+
+        /// <summary>
+        /// 初始化前置：重入检查 + 工具自动发现。返回 false 表示已初始化，应跳过。
+        /// 供同步 <see cref="Initialize"/> 与异步 <see cref="InitializeAsync"/> 共用。
+        /// </summary>
+        private bool TryBeginInitialize()
+        {
             if (_isInitialized)
             {
                 AgentCoreLog.Warning("[AgentCore] AgentLoop already initialized, skipping.");
-                return;
+                return false;
             }
 
             // Phase 2.5: 使用 ToolAutoDiscovery 自动发现并注册原生工具
@@ -219,38 +254,82 @@ namespace AgentCore.Editor.Core
                 AgentCoreLog.Warning($"[AgentCore] ToolAutoDiscovery failed (non-fatal): {ex.Message}");
             }
 
-            string systemPrompt;
+            return true;
+        }
 
+        /// <summary>
+        /// 同步加载 Bootstrap 上下文并编译为 system prompt。加载失败时返回默认 prompt。
+        /// </summary>
+        private string LoadBootstrapSystemPrompt()
+        {
             try
             {
                 var loader = new BootstrapLoader();
                 var context = loader.Load();
-                systemPrompt = context.CompileSystemPrompt();
-
-                // §3.3: 保存延迟注入内容，首轮用户消息时注入
-                _deferredContext = context.CompileDeferredContext();
-
-                if (string.IsNullOrWhiteSpace(systemPrompt))
-                {
-                    AgentCoreLog.Warning("[AgentCore] Bootstrap returned empty system prompt, using default.");
-                    systemPrompt = DefaultSystemPrompt;
-                }
-                else
-                {
-                    var deferredInfo = _deferredContext != null
-                        ? $", deferred ~{context.EstimateDeferredTokenCount()} tokens"
-                        : "";
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] AgentLoop initialized with Bootstrap system prompt (~{context.EstimateTokenCount()} tokens{deferredInfo}).");
-                }
+                return CompileBootstrapPrompt(context);
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"[AgentCore] Failed to load Bootstrap context: {ex.Message}");
                 AgentCoreLog.Warning("[AgentCore] Using default system prompt as fallback.");
-                systemPrompt = DefaultSystemPrompt;
                 _deferredContext = null;
+                return DefaultSystemPrompt;
+            }
+        }
+
+        /// <summary>
+        /// 异步加载 Bootstrap 上下文并编译为 system prompt（#10）。加载失败时返回默认 prompt。
+        /// </summary>
+        private async Task<string> LoadBootstrapSystemPromptAsync(CancellationToken ct)
+        {
+            try
+            {
+                var loader = new BootstrapLoader();
+                var context = await loader.LoadAsync(ct);
+                return CompileBootstrapPrompt(context);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"[AgentCore] Failed to load Bootstrap context: {ex.Message}");
+                AgentCoreLog.Warning("[AgentCore] Using default system prompt as fallback.");
+                _deferredContext = null;
+                return DefaultSystemPrompt;
+            }
+        }
+
+        /// <summary>
+        /// 将 Bootstrap 上下文编译为 system prompt，并保存延迟注入内容。空 prompt 时降级为默认。
+        /// </summary>
+        private string CompileBootstrapPrompt(BootstrapContext context)
+        {
+            var systemPrompt = context.CompileSystemPrompt();
+
+            // §3.3: 保存延迟注入内容，首轮用户消息时注入
+            _deferredContext = context.CompileDeferredContext();
+
+            if (string.IsNullOrWhiteSpace(systemPrompt))
+            {
+                AgentCoreLog.Warning("[AgentCore] Bootstrap returned empty system prompt, using default.");
+                return DefaultSystemPrompt;
             }
 
+            var deferredInfo = _deferredContext != null
+                ? $", deferred ~{context.EstimateDeferredTokenCount()} tokens"
+                : "";
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] AgentLoop initialized with Bootstrap system prompt (~{context.EstimateTokenCount()} tokens{deferredInfo}).");
+            return systemPrompt;
+        }
+
+        /// <summary>
+        /// 初始化收尾：追加语言指令、写入 system 消息、初始化各子系统、恢复压缩统计、置初始化标志。
+        /// 供同步 <see cref="Initialize"/> 与异步 <see cref="InitializeAsync"/> 共用；须在主线程调用。
+        /// </summary>
+        private void CompleteInitialize(string systemPrompt)
+        {
             // v1.9.0+: 追加 UI 语言指令到 system prompt (LlmFollowUiLanguage=true 时).
             // 关闭跟随时返回空串, 由模型按用户输入语言自行判断.
             // 语言切换在新会话/重启窗口后生效, 不在运行中会话动态改写 messages[0].
@@ -627,6 +706,44 @@ namespace AgentCore.Editor.Core
         /// <returns>是否加载成功</returns>
         public bool LoadSession(string sessionId)
         {
+            if (!TryBeginLoadSession(sessionId)) return false;
+
+            // 注意：不在此处调用 ForceSave / TriggerAutoMemory。
+            // 保存当前会话的职责由调用方（ChatWindow.SwitchToSession 等）承担，
+            // 避免重复保存导致空会话被写入磁盘。
+
+            var session = SessionManager.Instance.LoadSession(sessionId);
+            return ApplyLoadedSession(session, sessionId);
+        }
+
+        /// <summary>
+        /// 加载指定会话并恢复对话状态（异步版本，#1 CRITICAL 性能修复）。
+        /// <para>
+        /// 与同步 <see cref="LoadSession"/> 行为一致，但会话文件读取经
+        /// <see cref="SessionManager.LoadSessionAsync"/> 异步执行，切换会话时不再阻塞主线程
+        /// （消除 50–200ms 卡顿）。反序列化后的状态恢复须在主线程完成，由 await 续体保证。
+        /// </para>
+        /// </summary>
+        /// <param name="sessionId">要加载的会话 ID</param>
+        /// <param name="ct">取消令牌</param>
+        /// <returns>是否加载成功</returns>
+        public async Task<bool> LoadSessionAsync(string sessionId, CancellationToken ct = default)
+        {
+            if (!TryBeginLoadSession(sessionId)) return false;
+
+            // 注意：不在此处调用 ForceSave / TriggerAutoMemory。
+            // 保存当前会话的职责由调用方（ChatWindow.SwitchToSession 等）承担。
+
+            var session = await SessionManager.Instance.LoadSessionAsync(sessionId, ct);
+            return ApplyLoadedSession(session, sessionId);
+        }
+
+        /// <summary>
+        /// LoadSession 前置校验：空 Id / Agent 忙检查。返回 false 表示应中止加载。
+        /// 供同步 <see cref="LoadSession"/> 与异步 <see cref="LoadSessionAsync"/> 共用。
+        /// </summary>
+        private bool TryBeginLoadSession(string sessionId)
+        {
             if (string.IsNullOrEmpty(sessionId))
             {
                 AgentCoreLog.Warning("[AgentCore] Cannot load session with empty Id.");
@@ -639,11 +756,15 @@ namespace AgentCore.Editor.Core
                 return false;
             }
 
-            // 注意：不在此处调用 ForceSave / TriggerAutoMemory。
-            // 保存当前会话的职责由调用方（ChatWindow.SwitchToSession 等）承担，
-            // 避免重复保存导致空会话被写入磁盘。
+            return true;
+        }
 
-            var session = SessionManager.Instance.LoadSession(sessionId);
+        /// <summary>
+        /// 将已加载的 <see cref="SessionData"/> 应用到当前对话状态。须在主线程调用。
+        /// 供同步 <see cref="LoadSession"/> 与异步 <see cref="LoadSessionAsync"/> 共用。
+        /// </summary>
+        private bool ApplyLoadedSession(SessionData session, string sessionId)
+        {
             if (session == null)
             {
                 AgentCoreLog.Warning($"[AgentCore] Failed to load session: {sessionId}");

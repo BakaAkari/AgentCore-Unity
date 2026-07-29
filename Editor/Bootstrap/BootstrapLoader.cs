@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Tools;
 using UnityEngine;
@@ -98,6 +100,122 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
+        /// 异步加载所有 Bootstrap Files 并返回上下文对象（#10）。
+        /// <para>
+        /// 与同步 <see cref="Load"/> 等价，但：
+        /// - 文件读取走 <c>File.ReadAllTextAsync</c>，不阻塞主线程；
+        /// - 项目上下文用 <see cref="ProjectContextCollector.CollectHeavyAsync"/> 补齐重量级扫描
+        ///   （脚本统计 / 命名空间分布 / Tags &amp; Layers），磁盘扫描在后台线程执行。
+        /// </para>
+        /// <para>
+        /// Unity API（<c>Application.dataPath</c>、<c>PlayerSettings</c> 等）只能在主线程访问，
+        /// 因此所有 Unity 依赖的取值都在第一个 <c>await</c> 之前完成。
+        /// </para>
+        /// </summary>
+        public async Task<BootstrapContext> LoadAsync(CancellationToken ct = default)
+        {
+            var settings = AgentCoreSettings.instance;
+            var context = new BootstrapContext();
+
+            if (!settings.bootstrapEnabled)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Bootstrap Files disabled, using minimal system prompt.");
+                context.Soul = "你是一个 Unity 开发助手。请用中文回复。";
+                return context;
+            }
+
+            // —— 主线程阶段：所有 Unity API 依赖必须在首个 await 之前取值 ——
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+
+            // 快速项目上下文（仅 Unity API + manifest.json，主线程 < 50ms）
+            string fastProject = null;
+            Task<string> heavyProjectTask = null;
+            if (settings.autoProjectContext)
+            {
+                try
+                {
+                    fastProject = ProjectContextCollector.Collect();
+                    // Heavy 扫描：CollectHeavyAsync 在此处（主线程）完成 Unity 快照后转入后台线程
+                    heavyProjectTask = ProjectContextCollector.CollectHeavyAsync(ct);
+                }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"[AgentCore] Failed to collect project context: {ex.Message}");
+                    fastProject = "(项目信息收集失败)";
+                }
+            }
+
+            // —— 异步阶段：文件读取不阻塞主线程 ——
+
+            // 1. SOUL.md — 内置角色定义（不可变）
+            context.Soul = await LoadEmbeddedResourceAsync("SOUL.md", projectRoot, ct);
+            if (string.IsNullOrEmpty(context.Soul))
+            {
+                AgentCoreLog.Warning("[AgentCore] SOUL.md not found, using default.");
+                context.Soul = "你是一个 Unity 开发助手。请用中文回复。";
+            }
+
+            // 1+. SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL）
+            context.SoulExtension = await LoadUserFileAsync("SOUL.ext.md", projectRoot, ct);
+            if (!string.IsNullOrEmpty(context.SoulExtension))
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded SOUL.ext.md ({context.SoulExtension.Length} chars)");
+            }
+
+            // 2. TOOLS — 拆分为 Core（永驻 system prompt）和 Deferred（首轮注入）
+            await LoadToolsSplitAsync(context, projectRoot, ct);
+
+            // 3. PROJECT.md — 自动收集项目信息（Fast + Heavy）
+            if (settings.autoProjectContext)
+            {
+                try
+                {
+                    var sb = new StringBuilder();
+                    if (!string.IsNullOrEmpty(fastProject))
+                    {
+                        sb.Append(fastProject);
+                        sb.AppendLine();
+                    }
+
+                    if (heavyProjectTask != null)
+                    {
+                        var heavy = await heavyProjectTask;
+                        if (!string.IsNullOrEmpty(heavy))
+                        {
+                            sb.Append(heavy);
+                        }
+                    }
+
+                    context.Project = sb.Length > 0 ? sb.ToString() : fastProject;
+                }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"[AgentCore] Failed to collect project context: {ex.Message}");
+                    context.Project = string.IsNullOrEmpty(fastProject) ? "(项目信息收集失败)" : fastProject;
+                }
+            }
+
+            // 3+. PROJECT.md（用户） — 项目约定与个人偏好
+            context.Workspace = await LoadUserFileAsync("PROJECT.md", projectRoot, ct);
+            if (!string.IsNullOrEmpty(context.Workspace))
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
+            }
+
+            var coreTokens = context.EstimateTokenCount();
+            var deferredTokens = context.EstimateDeferredTokenCount();
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Bootstrap loaded (async): core ~{coreTokens} tokens, deferred ~{deferredTokens} tokens " +
+                      $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
+                      $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
+                      $"TOOLS.core={!string.IsNullOrEmpty(context.Tools)}, " +
+                      $"TOOLS.deferred={!string.IsNullOrEmpty(context.ToolsDeferred)}, " +
+                      $"PROJECT={!string.IsNullOrEmpty(context.Project)}, " +
+                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)})");
+
+            return context;
+        }
+
+        /// <summary>
         /// 加载包内嵌入的资源文件。
         /// </summary>
         private string LoadEmbeddedResource(string fileName)
@@ -125,6 +243,33 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
+        /// <see cref="LoadEmbeddedResource"/> 的异步版本（#10）。文件读取走 <c>ReadAllTextAsync</c>。
+        /// <paramref name="projectRoot"/> 由调用方在主线程预取（<c>Application.dataPath</c> 依赖）。
+        /// </summary>
+        private async Task<string> LoadEmbeddedResourceAsync(string fileName, string projectRoot, CancellationToken ct)
+        {
+            // 方式 1：通过文件系统直接读取（UPM 包内文件）
+            var packagePath = Path.GetFullPath(Path.Combine(ResourcesPath, fileName));
+            if (File.Exists(packagePath))
+            {
+                return await File.ReadAllTextAsync(packagePath, ct);
+            }
+
+            // 方式 2：尝试相对于项目根目录的路径
+            if (projectRoot != null)
+            {
+                var altPath = Path.Combine(projectRoot, ResourcesPath, fileName);
+                if (File.Exists(altPath))
+                {
+                    return await File.ReadAllTextAsync(altPath, ct);
+                }
+            }
+
+            AgentCoreLog.Warning($"[AgentCore] Embedded resource not found: {fileName}");
+            return null;
+        }
+
+        /// <summary>
         /// §3.3 条件化 Section 注入：将 TOOLS.md.template 拆分为 Core 和 Deferred 两部分。
         /// <para>
         /// Core（永驻 system prompt）：Tool Coordination Patterns + Key Behavioral Triggers
@@ -134,6 +279,50 @@ namespace AgentCore.Editor.Bootstrap
         private void LoadToolsSplit(BootstrapContext context)
         {
             var template = LoadEmbeddedResource("TOOLS.md.template");
+            if (string.IsNullOrEmpty(template))
+            {
+                return;
+            }
+
+            // 用 section 标题将模板拆分为各独立段落
+            var sections = SplitTemplateSections(template);
+
+            // Core sections（永驻 system prompt）
+            var coreSb = new StringBuilder();
+            if (sections.TryGetValue("coordination", out var coordination))
+            {
+                coreSb.AppendLine(coordination.TrimEnd());
+            }
+            if (sections.TryGetValue("triggers", out var triggers))
+            {
+                if (coreSb.Length > 0) coreSb.AppendLine();
+                coreSb.AppendLine(triggers.TrimEnd());
+            }
+            context.Tools = coreSb.Length > 0 ? coreSb.ToString().TrimEnd() : null;
+
+            // Deferred sections（首轮注入）
+            var deferredSb = new StringBuilder();
+
+            // Active Tools List（动态生成）
+            var toolsList = GenerateActiveToolsList();
+            deferredSb.AppendLine("# Available Tools\n");
+            deferredSb.AppendLine(toolsList);
+
+            // Tool Selection Decision Tree
+            if (sections.TryGetValue("decision_tree", out var decisionTree))
+            {
+                deferredSb.AppendLine();
+                deferredSb.AppendLine(decisionTree.TrimEnd());
+            }
+            context.ToolsDeferred = deferredSb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// <see cref="LoadToolsSplit"/> 的异步版本（#10）。仅模板文件读取走异步，拆分逻辑不变。
+        /// </summary>
+        private async Task LoadToolsSplitAsync(BootstrapContext context, string projectRoot, CancellationToken ct)
+        {
+            var template = await LoadEmbeddedResourceAsync("TOOLS.md.template", projectRoot, ct);
             if (string.IsNullOrEmpty(template))
             {
                 return;
@@ -452,6 +641,48 @@ namespace AgentCore.Editor.Bootstrap
             try
             {
                 var content = File.ReadAllText(filePath);
+                if (string.IsNullOrWhiteSpace(content) || IsTemplateOnly(content))
+                {
+                    return null;
+                }
+                return content;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Failed to load {fileName}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="LoadUserFile"/> 的异步版本（#10）。文件读取走 <c>ReadAllTextAsync</c>。
+        /// <paramref name="projectRoot"/> 由调用方在主线程预取（<c>Application.dataPath</c> 依赖）。
+        /// </summary>
+        private async Task<string> LoadUserFileAsync(string fileName, string projectRoot, CancellationToken ct)
+        {
+            if (projectRoot == null) return null;
+
+            var rootPath = Path.Combine(projectRoot, fileName);
+            var agentCorePath = Path.Combine(projectRoot, "AgentCore", fileName);
+
+            string filePath = null;
+            if (File.Exists(rootPath))
+            {
+                filePath = rootPath;
+            }
+            else if (File.Exists(agentCorePath))
+            {
+                filePath = agentCorePath;
+            }
+
+            if (filePath == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var content = await File.ReadAllTextAsync(filePath, ct);
                 if (string.IsNullOrWhiteSpace(content) || IsTemplateOnly(content))
                 {
                     return null;

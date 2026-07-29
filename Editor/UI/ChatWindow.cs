@@ -387,17 +387,10 @@ namespace AgentCore.Editor.UI
                 }
             }
 
-            // 7. 创建并初始化 AgentLoop
+            // 7. 创建并初始化 AgentLoop（#10：Bootstrap 上下文异步加载，窗口首次打开不再阻塞主线程）。
+            //    会话恢复 / 挂起提问恢复 / 会话列表刷新移入初始化续体（OnAgentLoopInitialized），
+            //    保证它们在 _agentLoop 就绪之后、且在主线程执行。
             InitializeAgentLoop();
-
-            // 8. Phase 3: 尝试恢复上一次的会话
-            TryRestoreSession();
-
-            // 8.4 ask_user：若 domain reload 前有挂起的提问，恢复挂起状态并重建面板
-            TryRestorePendingAskUser();
-
-            // 8.5 刷新会话列表
-            RefreshSessionList();
         }
 
         /// <summary>
@@ -487,15 +480,53 @@ namespace AgentCore.Editor.UI
                 _autoTitleController.TitleAutoUpdated += _ => { EditorApplication.delayCall += () => UpdateCurrentSessionTitle(); };
                 _autoTitleController.Start();
 
-                // 初始化（加载 Bootstrap 上下文）
-                _agentLoop.Initialize();
-
-                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ChatWindow initialized successfully.");
+                // 初始化（#10：异步加载 Bootstrap 上下文，重量级项目扫描移出主线程）。
+                // 加载期间窗口可交互，但发送等操作由 _agentLoop.IsInitialized 拦截（见 OnSendClicked）。
+                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.initializing", "初始化中…"), false);
+                AsyncHelper.RunAsync(
+                    async () =>
+                    {
+                        await _agentLoop.InitializeAsync();
+                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ChatWindow initialized successfully.");
+                        // await 续体回到主线程后执行会话恢复等 UI 依赖操作
+                        OnAgentLoopInitialized();
+                    },
+                    onError: ex =>
+                    {
+                        AgentCoreLog.Error($"[AgentCore] AgentLoop async initialization failed: {ex.Message}");
+                        UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.initFailed", "初始化失败"), true);
+                    });
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"[AgentCore] Failed to initialize ChatWindow: {ex.Message}");
                 UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.initFailed", "初始化失败"), true);
+            }
+        }
+
+        /// <summary>
+        /// AgentLoop 异步初始化完成后的收尾（在主线程执行）：恢复上一次会话、恢复挂起的
+        /// ask_user 提问、刷新会话列表并清除"初始化中"状态。
+        /// </summary>
+        private void OnAgentLoopInitialized()
+        {
+            try
+            {
+                // Phase 3: 尝试恢复上一次的会话
+                TryRestoreSession();
+
+                // ask_user：若 domain reload 前有挂起的提问，恢复挂起状态并重建面板
+                TryRestorePendingAskUser();
+
+                // 刷新会话列表
+                RefreshSessionList();
+
+                // 清除"初始化中"状态
+                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.ready", "就绪"), false);
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"[AgentCore] Post-initialization steps failed: {ex.Message}");
             }
         }
 

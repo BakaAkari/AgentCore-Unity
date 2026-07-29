@@ -317,14 +317,41 @@ namespace AgentCore.Editor.UI
                 {
                     AgentCoreLog.Warning($"[AgentCore] Auto-memory trigger on session switch failed (non-fatal): {amEx.Message}");
                 }
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"[AgentCore] Error saving current session before switch: {ex.Message}");
+                return;
+            }
 
-                // 2. 加载目标会话（AgentLoop.LoadSession 不再重复保存）
-                if (!_agentLoop.LoadSession(sessionId))
+            // 2. 异步加载目标会话（#1 CRITICAL：会话文件读取移出主线程，消除切换卡顿）。
+            //    await 续体由 Unity 同步上下文回到主线程，后续 UI 重建仍在主线程执行。
+            AsyncHelper.RunAsync(
+                async () =>
                 {
-                    AgentCoreLog.Warning($"[AgentCore] Failed to switch to session: {sessionId}");
-                    return;
-                }
+                    // AgentLoop.LoadSessionAsync 不再重复保存
+                    if (!await _agentLoop.LoadSessionAsync(sessionId))
+                    {
+                        AgentCoreLog.Warning($"[AgentCore] Failed to switch to session: {sessionId}");
+                        return;
+                    }
 
+                    OnSessionSwitchApplied(sessionId);
+                },
+                onError: ex =>
+                {
+                    AgentCoreLog.Error($"[AgentCore] Error switching session: {ex.Message}");
+                });
+        }
+
+        /// <summary>
+        /// 会话异步加载完成后的 UI 收尾（在主线程执行）：重置信任 scope、重建气泡、
+        /// 刷新文件变更面板 / 上下文面板 / 会话列表。
+        /// </summary>
+        private void OnSessionSwitchApplied(string sessionId)
+        {
+            try
+            {
                 // 2.5 重置会话级工具信任 scope（YOLO / Trust Low-Med）。
                 // 切换到另一段对话 = 进入新的对话上下文，上一段对话开启的直通状态不应延续。
                 // 与 OnNewSessionClicked 语义一致：信任绑定对话 session。
@@ -354,7 +381,7 @@ namespace AgentCore.Editor.UI
             }
             catch (Exception ex)
             {
-                AgentCoreLog.Error($"[AgentCore] Error switching session: {ex.Message}");
+                AgentCoreLog.Error($"[AgentCore] Error finalizing session switch: {ex.Message}");
             }
         }
 
@@ -811,37 +838,36 @@ namespace AgentCore.Editor.UI
         /// <param name="format">导出格式</param>
         private void ExportSession(string sessionId, SessionExporter.ExportFormat format)
         {
-            try
-            {
-                var session = SessionStorage.Load(sessionId);
-                if (session == null)
+            // 会话文件读取异步化（UI 层不再同步 SessionStorage.Load）。
+            // await 续体回到主线程后再弹出文件保存对话框（EditorUtility.SaveFilePanel 须主线程）。
+            AsyncHelper.RunAsync(
+                async () =>
                 {
-                    AgentCoreLog.Error($"[AgentCore] Failed to load session: {sessionId}");
-                    return;
-                }
+                    var session = await SessionStorage.LoadAsync(sessionId);
+                    if (session == null)
+                    {
+                        AgentCoreLog.Error($"[AgentCore] Failed to load session: {sessionId}");
+                        return;
+                    }
 
-                var defaultName = SessionExporter.GetDefaultFileName(session, format);
-                var extension = format == SessionExporter.ExportFormat.Markdown ? "md" : "json";
-                var filterDisplay = format == SessionExporter.ExportFormat.Markdown ? "Markdown files" : "JSON files";
+                    var defaultName = SessionExporter.GetDefaultFileName(session, format);
+                    var extension = format == SessionExporter.ExportFormat.Markdown ? "md" : "json";
 
-                var path = EditorUtility.SaveFilePanel(
-                    AgentCore.Editor.L10n.Loc.Tr("session.dialog.exportTitle", "导出会话"),
-                    "",
-                    defaultName,
-                    extension
-                );
+                    var path = EditorUtility.SaveFilePanel(
+                        AgentCore.Editor.L10n.Loc.Tr("session.dialog.exportTitle", "导出会话"),
+                        "",
+                        defaultName,
+                        extension
+                    );
 
-                if (string.IsNullOrEmpty(path))
-                    return; // 用户取消
+                    if (string.IsNullOrEmpty(path))
+                        return; // 用户取消
 
-                SessionExporter.ExportToFile(session, path, format);
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Session exported to: {path}");
-                EditorUtility.RevealInFinder(path);
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Error($"[AgentCore] Export failed: {ex.Message}");
-            }
+                    SessionExporter.ExportToFile(session, path, format);
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Session exported to: {path}");
+                    EditorUtility.RevealInFinder(path);
+                },
+                onError: ex => AgentCoreLog.Error($"[AgentCore] Export failed: {ex.Message}"));
         }
 
         #endregion

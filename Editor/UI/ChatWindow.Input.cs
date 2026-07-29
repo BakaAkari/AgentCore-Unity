@@ -36,6 +36,14 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
+            // #10：初始化改异步，Bootstrap 加载完成前拦截发送，避免 system prompt 尚未就绪即发起对话。
+            if (!_agentLoop.IsInitialized)
+            {
+                AgentCoreLog.Warning("[AgentCore] AgentLoop is still initializing, please wait.");
+                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.initializing", "初始化中…"), false);
+                return;
+            }
+
             // ADR: self-challenge-model-tier-escape §3.4 B1 — 与 AgentLoop.SendMessageAsync gate 对齐
             //   Idle → 正常新一轮
             //   WaitingForClarification → 走 Node A Continuation

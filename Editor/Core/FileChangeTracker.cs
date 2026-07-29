@@ -248,7 +248,7 @@ namespace AgentCore.Editor.Core
             {
                 try
                 {
-                    var lineCount = File.ReadAllLines(absolutePath).Length;
+                    var lineCount = CountLines(absolutePath);
                     _lineCountSnapshots[absolutePath] = lineCount;
                 }
                 catch
@@ -893,7 +893,7 @@ namespace AgentCore.Editor.Core
             {
                 if (File.Exists(absolutePath))
                 {
-                    return File.ReadAllLines(absolutePath).Length;
+                    return CountLines(absolutePath);
                 }
             }
             catch
@@ -901,6 +901,22 @@ namespace AgentCore.Editor.Core
                 // 文件可能被锁定
             }
             return 0;
+        }
+
+        /// <summary>
+        /// 流式统计文件行数。
+        /// <para>
+        /// 相比 <c>File.ReadAllLines(path).Length</c>，此实现不会把整个文件内容读入内存后
+        /// 再分配一个字符串数组：<see cref="StreamReader.ReadLine"/> 逐行读取、只累加计数，
+        /// 内存占用降至 O(1)，避免大文件（数千行源码）在 LLM 每轮 tool call 前后扫描时的分配开销。
+        /// </para>
+        /// </summary>
+        private static int CountLines(string absolutePath)
+        {
+            using var reader = new StreamReader(absolutePath);
+            int count = 0;
+            while (reader.ReadLine() != null) count++;
+            return count;
         }
 
         /// <summary>
