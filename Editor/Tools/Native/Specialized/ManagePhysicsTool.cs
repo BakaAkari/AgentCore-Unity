@@ -30,7 +30,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "diagnosing scene physics performance (list_scene_physics_stats), auditing layer collision setup (get_collision_matrix). " +
                       "NOT FOR: runtime physics simulation (Editor raycasts work but simulation requires Play mode). " +
                       "ACTIVATE WHEN: user mentions 'physics', 'collider', 'rigidbody', 'joint', 'gravity', 'raycast', 'trigger', 'collision', 'physics debug', 'layer matrix'.",
-        Category = "specialized",
+        Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManagePhysicsTool : IAgentTool

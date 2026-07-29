@@ -201,22 +201,9 @@ namespace AgentCore.Editor.Core
         #region 公开方法
 
         /// <summary>
-        /// 初始化 Agent Loop。
-        /// 加载 Bootstrap 上下文并设置系统提示词。
-        /// 通过 ToolAutoDiscovery 自动发现并注册所有原生工具。
-        /// 如果 Bootstrap 加载失败，将使用默认的最小化系统提示词。
-        /// </summary>
-        public void Initialize()
-        {
-            if (!TryBeginInitialize()) return;
-            var systemPrompt = LoadBootstrapSystemPrompt();
-            CompleteInitialize(systemPrompt);
-        }
-
-        /// <summary>
         /// 异步初始化 Agent Loop（#10 HIGH 性能修复）。
         /// <para>
-        /// 与同步 <see cref="Initialize"/> 行为完全一致，唯一区别是 Bootstrap 上下文经
+        /// Bootstrap 上下文经
         /// <see cref="BootstrapLoader.LoadAsync"/> 加载：文件读取用异步 I/O，重量级项目扫描
         /// （脚本统计 / 命名空间分布）经 <c>ProjectContextCollector.CollectHeavyAsync</c> 移出主线程，
         /// 窗口首次打开不再因项目上下文收集而卡顿。
@@ -233,7 +220,7 @@ namespace AgentCore.Editor.Core
 
         /// <summary>
         /// 初始化前置：重入检查 + 工具自动发现。返回 false 表示已初始化，应跳过。
-        /// 供同步 <see cref="Initialize"/> 与异步 <see cref="InitializeAsync"/> 共用。
+        /// 供 <see cref="InitializeAsync"/> 使用。
         /// </summary>
         private bool TryBeginInitialize()
         {
@@ -255,26 +242,6 @@ namespace AgentCore.Editor.Core
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// 同步加载 Bootstrap 上下文并编译为 system prompt。加载失败时返回默认 prompt。
-        /// </summary>
-        private string LoadBootstrapSystemPrompt()
-        {
-            try
-            {
-                var loader = new BootstrapLoader();
-                var context = loader.Load();
-                return CompileBootstrapPrompt(context);
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Error($"[AgentCore] Failed to load Bootstrap context: {ex.Message}");
-                AgentCoreLog.Warning("[AgentCore] Using default system prompt as fallback.");
-                _deferredContext = null;
-                return DefaultSystemPrompt;
-            }
         }
 
         /// <summary>
@@ -326,7 +293,7 @@ namespace AgentCore.Editor.Core
 
         /// <summary>
         /// 初始化收尾：追加语言指令、写入 system 消息、初始化各子系统、恢复压缩统计、置初始化标志。
-        /// 供同步 <see cref="Initialize"/> 与异步 <see cref="InitializeAsync"/> 共用；须在主线程调用。
+        /// 供 <see cref="InitializeAsync"/> 使用；须在主线程调用。
         /// </summary>
         private void CompleteInitialize(string systemPrompt)
         {
@@ -694,8 +661,10 @@ namespace AgentCore.Editor.Core
             // 5. Phase 3: 创建新会话
             SessionManager.Instance.CreateNewSession();
 
-            // 6. 重新初始化
-            Initialize();
+            // 6. 重新初始化（fire-and-forget：Initialize 已异步化为 InitializeAsync）
+            AsyncHelper.RunAsync(
+                async () => await InitializeAsync(),
+                onError: ex => AgentCore.Editor.Utils.AgentCoreLog.Error($"[AgentCore] Re-initialization after reset failed: {ex.Message}"));
         }
 
         /// <summary>
@@ -824,6 +793,8 @@ namespace AgentCore.Editor.Core
         /// <returns>上下文预算信息快照</returns>
         public ContextBudgetInfo GetContextBudget()
         {
+            using var _gcb = AgentCore.Editor.Utils.AgentCoreProfilerMarkers.GetContextBudget.Auto();
+
             if (!_isInitialized || _compressionMetrics == null)
             {
                 return new ContextBudgetInfo

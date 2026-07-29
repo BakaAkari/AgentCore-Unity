@@ -28,7 +28,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "NOT FOR: Editor UI / custom inspectors (use UI Toolkit/manage_ui_toolkit), " +
                       "world-space text that's not UI (use TextMesh component via manage_component). " +
                       "ACTIVATE WHEN: user mentions 'UI', 'Canvas', 'Button', 'Text UI', 'HUD', 'menu', 'uGUI', 'ScrollView', 'panel'.",
-        Category = "specialized",
+        Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageUITool : IAgentTool

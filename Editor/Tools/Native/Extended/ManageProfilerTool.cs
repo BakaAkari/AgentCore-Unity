@@ -36,7 +36,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "NOT FOR: CPU timeline/flame chart (open Unity Profiler window manually), Frame Debugger draw event list (use list_draw_events when available). " +
                       "Requires Play Mode for meaningful frame data — call manage_editor:play_mode first if project is stopped. " +
                       "ACTIVATE WHEN: user mentions 'performance', 'frame rate', 'FPS', 'memory usage', 'profiler', 'draw calls', 'optimization metrics', '抓帧', '性能', '掉帧', '内存占用'.",
-        Category = "extended",
+        Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Low,
         Capabilities = ToolCapability.ReadProject,

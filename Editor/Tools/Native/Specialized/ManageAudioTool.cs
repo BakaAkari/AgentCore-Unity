@@ -24,7 +24,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "checking which objects have audio components. " +
                       "NOT FOR: audio clip import settings (use manage_asset_import), audio mixing/AudioMixer groups, runtime audio scripting. " +
                       "ACTIVATE WHEN: user mentions 'audio', 'sound', 'AudioSource', 'volume', 'spatial audio', '3D sound'.",
-        Category = "specialized",
+        Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageAudioTool : IAgentTool

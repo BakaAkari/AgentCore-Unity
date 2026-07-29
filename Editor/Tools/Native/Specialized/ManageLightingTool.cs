@@ -25,7 +25,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "NOT FOR: ambient/fog settings (use manage_graphics), light probes (manual placement via manage_component), " +
                       "reflection probes (use manage_component), emissive materials (use manage_material). " +
                       "ACTIVATE WHEN: user mentions 'light', 'lighting', 'shadow', 'bake lightmap', 'directional light', 'point light', 'spot light'.",
-        Category = "specialized",
+        Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageLightingTool : IAgentTool

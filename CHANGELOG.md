@@ -5,6 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0-alpha.7] - 2026-07-29
+
+### Fixed — Prompt-layer & Code Consistency
+
+Full audit of Bootstrap prompt layer (SOUL.md / TOOLS.md.template / PROJECT.md.template) against actual code capabilities revealed drift accumulated across alpha.1–alpha.6. This release syncs prompt docs to reality, fixes one real bug, and removes ~280 lines of dead code left behind by alpha.6's full async migration.
+
+#### Prompt layer corrections (SOUL.md)
+
+- **`[MEMORY]` marker mismatch** — SOUL claimed cross-session memories carried `[MEMORY]` prefix, but actual injected prefix is `[历史记忆 - 以下是与当前对话可能相关的历史信息]`. AI following SOUL literally would fail to recognize memory messages. SOUL now documents the real prefix and clarifies memories are re-injected per-turn via semantic search (only when Mem0 is enabled).
+- **`load_skill` action coverage** — SOUL only listed `list` / `load` (2 of 5 actions). Now covers all five: `list` / `load` / `list_loaded` / `unload` / `reload`, including the critical caveat that `reload` refreshes only the skill registry cache — **it does NOT refresh already-loaded skill content in the current session; unload then load if content actually changed**.
+- **`search_code` action coverage** — SOUL only listed 3 of 19 actions (`search_symbol` / `index_scope` / `diagnose`). Now surfaces high-value actions: `search_text` (indexed full-text regex), `find_usages` (call sites for refactoring), `get_dependencies`, `get_symbol_context`, plus index-management diagnostic actions.
+- **Session Tag / archive / auto-rename** — added explicit note that these v1.12.0 session-organization features are user-side UI features (right-click menu on the sidebar), not tool-callable. Prevents AI from either trying to invoke non-existent tools or telling the user "not supported".
+
+#### Prompt layer corrections (TOOLS.md.template)
+
+- **Utility category split fix** — template previously said `activate Utility category` for import tools, but the Utility folder's tools have Category attributes split across 5 different strings (`Utility` / `Animation` / `Asset` / `Material` / `Shader`). Activating `Utility` only surfaces 5 of 9 tools. Now separately calls out `manage_shader` (activate Shader), `manage_animation` (activate Animation), and the actual import tools by name.
+- **6 previously-hidden OnDemand tools now discoverable via decision tree** — added activation hints for `version_control` (git/svn/perforce operations), `execute_menu_item` (Unity menu paths), `smart_operations` (batch refactors), `manage_navmesh` (bake/query/clear), `manage_animation` (already in category split), `manage_shader` (already in category split). Previously AI could see them in schema only if a user manually asked to `request_tools list`.
+
+#### Prompt layer corrections (PROJECT.md.template)
+
+- **Injection-position documentation lie** — L14 comment claimed content "gets injected into every conversation's System Prompt", but actual behavior routes content through `context.Workspace` → `CompileDeferredContext()` → injected **only before first user message**, then released. Users writing critical constraints under this false assumption could see their conventions summarized-away by conversation compression in long chats. Comment now accurately describes: first-turn Deferred Context injection with a warning about long-chat compression, advising important constraints be written concisely and memorably.
+- **Fixed the same misleading text** in `BootstrapLoader.GenerateUserFileTemplate("PROJECT.md")` which auto-generates the initial `PROJECT.md` for new projects (was a second copy of the same wrong comment).
+
+#### Code fix
+
+- **`ProjectContextCollector.GetBuildScenes` status marker bug** — `var status = scene.enabled ? "" : "";` (both branches emit empty string, all scenes displayed as `[ ]`). Fixed to `? "✓" : "✗"` so AI can distinguish enabled vs disabled Build Settings scenes.
+
+### Removed — Dead sync bootstrap loading path (~280 LOC)
+
+Post-alpha.6 audit confirmed the following synchronous methods have **zero call sites** — alpha.6's full async migration left them behind. Retaining them was a latent hazard: any future accidental call would re-introduce the CRITICAL main-thread blocking bugs alpha.6 fixed (#1 SessionStorage.LoadAsync, #10 BootstrapLoader.LoadAsync).
+
+- `AgentLoop.Initialize()` (sync) — replaced by `InitializeAsync()` in alpha.6
+- `AgentLoop.LoadBootstrapSystemPrompt()` (sync) — replaced by `LoadBootstrapSystemPromptAsync()`
+- `BootstrapLoader.Load()` (sync) — replaced by `LoadAsync()`
+- `BootstrapLoader.LoadEmbeddedResource(string)` (sync) — replaced by `LoadEmbeddedResourceAsync(...)`
+- `BootstrapLoader.LoadUserFile(string)` (sync) — replaced by `LoadUserFileAsync(...)`
+- `BootstrapLoader.LoadToolsSplit(BootstrapContext)` (sync) — replaced by `LoadToolsSplitAsync(...)`
+- `ProjectContextCollector.CollectExtended()` — dead code (external zero call sites); its "background prewarm" pattern is superseded by `LoadAsync`'s explicit `await heavyProjectTask` at bootstrap time
+
+Async equivalents fully cover all runtime paths. Doc comments referencing deleted methods have been updated.
+
+### Testing
+
+- Static verification: `grep -rn "public void Initialize\b|public BootstrapContext Load\b|CollectExtended\b|LoadToolsSplit\b(?!Async)" Editor/` → empty (except unrelated static-storage `Load(...)` methods on `SessionStorage` / `WorkspaceConfigStorage` / `IndexingDirtyTracker` / `Assembly` / `PackedMemorySnapshot`).
+- Prompt-layer changes are documentation-only; require Unity Editor manual verification of Bootstrap prompt output.
+- Build Scenes marker fix require in-Editor visual verification: `PROJECT.md` snapshot should now show `[✓]` / `[✗]` per scene.
+
+### Diff summary
+
+- 22 files changed (post-adversarial-review), +48 lines, -290 lines
+- Prompt docs: SOUL.md (+12/-4), TOOLS.md.template (+7/-5, 4 lowercase-activate hints unified), PROJECT.md.template (removed as orphan resource — see below)
+- Code: AgentLoop.cs (-41 dead code, +3 for L665 fix), BootstrapLoader.cs (-191), ProjectContextCollector.cs (-56, includes Build Scenes bug fix)
+- Category unification: 13 tool files changed `Category = "lowercase"` → `Category = "PascalCase"`
+
+### Adversarial re-audit findings & subsequent fixes
+
+An adversarial re-audit was triggered after Unity Editor surfaced a compile error `CS0103: The name 'Initialize' does not exist` on `AgentLoop.cs:665`. The re-audit — done in a fresh Claude Code invocation with the explicit charter "assume every deletion may have a similar oversight; verify from first principles" — turned up **one true break** plus a broader consistency finding:
+
+- **1 real compile break — fixed.** `AgentLoop.ResetConversation()` at L665 called the deleted sync `Initialize()`. Root cause of the miss: the original deletion grep only inspected `Editor/UI/` for call sites, not `Editor/Core/` self-calls. The 4 UI-layer handlers had already been migrated to `InitializeAsync` in alpha.6; this internal `Core/` self-call was left over.
+  - Fix: replaced with `AsyncHelper.RunAsync(async () => await InitializeAsync(), onError: …)` — matching the fire-and-forget pattern already in use at `ChatWindow.Sessions.cs:329` (SwitchToSession) and `AgentLoop.DomainReload.cs:613`. Blocking `.GetAwaiter().GetResult()` was rejected because `InitializeAsync`'s continuations must return to the main thread — blocking there would deadlock the Unity SynchronizationContext.
+
+- **Orphan resource discovered — removed.** `PROJECT.md.template` was carried in `Editor/Bootstrap/Resources/` alongside `SOUL.md` and `TOOLS.md.template`, but **no code path ever loaded it**. Users' actual PROJECT.md is generated by `BootstrapLoader.GenerateUserFileTemplate("PROJECT.md")`, which hardcodes a similar but non-identical template string. The two versions had already drifted apart in 3 places (default reply-language example, header comments about `.gitignore`, and Project Conventions examples).
+  - Decision: delete `Editor/Bootstrap/Resources/PROJECT.md.template` + `.meta` (single source of truth = `GenerateUserFileTemplate`). Keeps future maintenance from re-drifting between two copies.
+
+- **Category attribute case inconsistency — unified.** Tool `Category` attribute values were split across 6 different casings (`meta` / `Meta` / `extended` / `Extended` / `specialized` / `Specialized`, etc.). While `RequestToolsTool` uses `StringComparer.OrdinalIgnoreCase` for activation matching (so this is a cleanup, not a functional bug), the split made prompt-layer documentation and code hard to keep in sync.
+  - Unified to PascalCase across 13 tool files:
+    - `Extended` (5 files): ManageBuildTool, ManageInputTool, ManageNavMeshTool, ManageProfilerTool, ManageTagsLayersTool
+    - `Specialized` (5 files): ManageAudioTool, ManageGraphicsTool, ManageLightingTool, ManagePhysicsTool, ManageUITool
+    - `Meta` (3 files): BatchExecuteTool, ExecuteMenuItemTool, ManageEditorTool
+  - TOOLS.md.template's 4 remaining `activate <lowercase>` hints (`manage_compilation`, `manage_physics`, `manage_prefs`, `execute_menu_item`) synchronized to PascalCase.
+
+### Consistency re-verification (post-fix)
+
+All 11 assertions in the adversarial re-audit passed: `[MEMORY]` marker matches actual runtime prefix; `search_code` 19 actions match enum; `load_skill` 5 actions match enum; all 6 new OnDemand tool Category values match `[AgentTool]` attributes; Deferred Context first-turn injection matches `AgentLoop.cs:506` first-message guard; skill message insertion matches `AgentLoop.SkillContext.cs:131/151/155`. Static verification: `grep -rn 'Category\s*=\s*"[a-z]'` → 0 matches; `grep -rn 'activate [a-z]' TOOLS.md.template` → 0 category residues.
+
+**User-side compile verification via Unity Editor is required before release.**
+
 ## [1.12.0-alpha.6] - 2026-07-29
 
 ### Fixed — Performance & Concurrency (10-issue cleanup)

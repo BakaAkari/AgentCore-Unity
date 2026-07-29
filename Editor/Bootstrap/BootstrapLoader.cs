@@ -33,76 +33,8 @@ namespace AgentCore.Editor.Bootstrap
             "Packages", "com.agentcore.unity", "Editor", "Bootstrap", "Resources");
 
         /// <summary>
-        /// 加载所有 Bootstrap Files 并返回上下文对象。
-        /// </summary>
-        public BootstrapContext Load()
-        {
-            var settings = AgentCoreSettings.instance;
-            var context = new BootstrapContext();
-
-            if (!settings.bootstrapEnabled)
-            {
-                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Bootstrap Files disabled, using minimal system prompt.");
-                context.Soul = "你是一个 Unity 开发助手。请用中文回复。";
-                return context;
-            }
-
-            // 1. SOUL.md — 内置角色定义（不可变）
-            context.Soul = LoadEmbeddedResource("SOUL.md");
-            if (string.IsNullOrEmpty(context.Soul))
-            {
-                AgentCoreLog.Warning("[AgentCore] SOUL.md not found, using default.");
-                context.Soul = "你是一个 Unity 开发助手。请用中文回复。";
-            }
-
-            // 1+. SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL）
-            context.SoulExtension = LoadUserFile("SOUL.ext.md");
-            if (!string.IsNullOrEmpty(context.SoulExtension))
-            {
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded SOUL.ext.md ({context.SoulExtension.Length} chars)");
-            }
-
-            // 2. TOOLS — 拆分为 Core（永驻 system prompt）和 Deferred（首轮注入）
-            LoadToolsSplit(context);
-
-            // 3. PROJECT.md — 自动收集项目信息
-            if (settings.autoProjectContext)
-            {
-                try
-                {
-                    context.Project = ProjectContextCollector.Collect();
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"[AgentCore] Failed to collect project context: {ex.Message}");
-                    context.Project = "(项目信息收集失败)";
-                }
-            }
-
-            // 3+. PROJECT.md（用户） — 项目约定与个人偏好
-            context.Workspace = LoadUserFile("PROJECT.md");
-            if (!string.IsNullOrEmpty(context.Workspace))
-            {
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
-            }
-
-            var coreTokens = context.EstimateTokenCount();
-            var deferredTokens = context.EstimateDeferredTokenCount();
-            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Bootstrap loaded: core ~{coreTokens} tokens, deferred ~{deferredTokens} tokens " +
-                      $"(SOUL={!string.IsNullOrEmpty(context.Soul)}, " +
-                      $"SOUL.ext={!string.IsNullOrEmpty(context.SoulExtension)}, " +
-                      $"TOOLS.core={!string.IsNullOrEmpty(context.Tools)}, " +
-                      $"TOOLS.deferred={!string.IsNullOrEmpty(context.ToolsDeferred)}, " +
-                      $"PROJECT={!string.IsNullOrEmpty(context.Project)}, " +
-                      $"WORKSPACE={!string.IsNullOrEmpty(context.Workspace)})");
-
-            return context;
-        }
-
-        /// <summary>
         /// 异步加载所有 Bootstrap Files 并返回上下文对象（#10）。
         /// <para>
-        /// 与同步 <see cref="Load"/> 等价，但：
         /// - 文件读取走 <c>File.ReadAllTextAsync</c>，不阻塞主线程；
         /// - 项目上下文用 <see cref="ProjectContextCollector.CollectHeavyAsync"/> 补齐重量级扫描
         ///   （脚本统计 / 命名空间分布 / Tags &amp; Layers），磁盘扫描在后台线程执行。
@@ -216,34 +148,7 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
-        /// 加载包内嵌入的资源文件。
-        /// </summary>
-        private string LoadEmbeddedResource(string fileName)
-        {
-            // 方式 1：通过文件系统直接读取（UPM 包内文件）
-            var packagePath = Path.GetFullPath(Path.Combine(ResourcesPath, fileName));
-            if (File.Exists(packagePath))
-            {
-                return File.ReadAllText(packagePath);
-            }
-
-            // 方式 2：尝试相对于 Application.dataPath 的路径
-            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
-            if (projectRoot != null)
-            {
-                var altPath = Path.Combine(projectRoot, ResourcesPath, fileName);
-                if (File.Exists(altPath))
-                {
-                    return File.ReadAllText(altPath);
-                }
-            }
-
-            AgentCoreLog.Warning($"[AgentCore] Embedded resource not found: {fileName}");
-            return null;
-        }
-
-        /// <summary>
-        /// <see cref="LoadEmbeddedResource"/> 的异步版本（#10）。文件读取走 <c>ReadAllTextAsync</c>。
+        /// 加载包内嵌入的资源文件（#10）。文件读取走 <c>ReadAllTextAsync</c>。
         /// <paramref name="projectRoot"/> 由调用方在主线程预取（<c>Application.dataPath</c> 依赖）。
         /// </summary>
         private async Task<string> LoadEmbeddedResourceAsync(string fileName, string projectRoot, CancellationToken ct)
@@ -270,55 +175,12 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
-        /// §3.3 条件化 Section 注入：将 TOOLS.md.template 拆分为 Core 和 Deferred 两部分。
+        /// §3.3 条件化 Section 注入：将 TOOLS.md.template 拆分为 Core 和 Deferred 两部分（#10 异步版）。
         /// <para>
         /// Core（永驻 system prompt）：Tool Coordination Patterns + Key Behavioral Triggers
         /// Deferred（首轮用户消息时注入）：Active Tools List + Tool Selection Decision Tree
         /// </para>
-        /// </summary>
-        private void LoadToolsSplit(BootstrapContext context)
-        {
-            var template = LoadEmbeddedResource("TOOLS.md.template");
-            if (string.IsNullOrEmpty(template))
-            {
-                return;
-            }
-
-            // 用 section 标题将模板拆分为各独立段落
-            var sections = SplitTemplateSections(template);
-
-            // Core sections（永驻 system prompt）
-            var coreSb = new StringBuilder();
-            if (sections.TryGetValue("coordination", out var coordination))
-            {
-                coreSb.AppendLine(coordination.TrimEnd());
-            }
-            if (sections.TryGetValue("triggers", out var triggers))
-            {
-                if (coreSb.Length > 0) coreSb.AppendLine();
-                coreSb.AppendLine(triggers.TrimEnd());
-            }
-            context.Tools = coreSb.Length > 0 ? coreSb.ToString().TrimEnd() : null;
-
-            // Deferred sections（首轮注入）
-            var deferredSb = new StringBuilder();
-
-            // Active Tools List（动态生成）
-            var toolsList = GenerateActiveToolsList();
-            deferredSb.AppendLine("# Available Tools\n");
-            deferredSb.AppendLine(toolsList);
-
-            // Tool Selection Decision Tree
-            if (sections.TryGetValue("decision_tree", out var decisionTree))
-            {
-                deferredSb.AppendLine();
-                deferredSb.AppendLine(decisionTree.TrimEnd());
-            }
-            context.ToolsDeferred = deferredSb.ToString().TrimEnd();
-        }
-
-        /// <summary>
-        /// <see cref="LoadToolsSplit"/> 的异步版本（#10）。仅模板文件读取走异步，拆分逻辑不变。
+        /// 仅模板文件读取走异步，拆分逻辑不变。
         /// </summary>
         private async Task LoadToolsSplitAsync(BootstrapContext context, string projectRoot, CancellationToken ct)
         {
@@ -610,52 +472,10 @@ namespace AgentCore.Editor.Bootstrap
         }
 
         /// <summary>
-        /// 加载用户可编辑的文件（PROJECT.md、SOUL.ext.md 等）。
+        /// 加载用户可编辑的文件（PROJECT.md、SOUL.ext.md 等）（#10）。文件读取走 <c>ReadAllTextAsync</c>。
         /// 按优先级查找：
         /// 1. 项目根目录（Application.dataPath 的父目录）
         /// 2. 项目根目录下的 AgentCore/ 子目录
-        /// </summary>
-        private string LoadUserFile(string fileName)
-        {
-            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
-            if (projectRoot == null) return null;
-
-            var rootPath = Path.Combine(projectRoot, fileName);
-            var agentCorePath = Path.Combine(projectRoot, "AgentCore", fileName);
-
-            string filePath = null;
-            if (File.Exists(rootPath))
-            {
-                filePath = rootPath;
-            }
-            else if (File.Exists(agentCorePath))
-            {
-                filePath = agentCorePath;
-            }
-
-            if (filePath == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                var content = File.ReadAllText(filePath);
-                if (string.IsNullOrWhiteSpace(content) || IsTemplateOnly(content))
-                {
-                    return null;
-                }
-                return content;
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Warning($"[AgentCore] Failed to load {fileName}: {ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// <see cref="LoadUserFile"/> 的异步版本（#10）。文件读取走 <c>ReadAllTextAsync</c>。
         /// <paramref name="projectRoot"/> 由调用方在主线程预取（<c>Application.dataPath</c> 依赖）。
         /// </summary>
         private async Task<string> LoadUserFileAsync(string fileName, string projectRoot, CancellationToken ct)
@@ -753,7 +573,8 @@ namespace AgentCore.Editor.Bootstrap
                     "## Project Conventions\n" +
                     "<!--\n" +
                     "  团队约定：命名规范、架构决策、禁止事项、工作流程等。\n" +
-                    "  这里的内容会注入到每次对话的 System Prompt 中。\n\n" +
+                    "  这里的内容会在每次会话的**首轮用户消息前**作为 Deferred Context 注入（一次性），\n" +
+                    "  长对话中若上下文触发压缩摘要，AI 可能只保留摘要版本。重要约束务必写得简洁醒目。\n\n" +
                     "  示例：\n" +
                     "  - 本项目使用 Mirror 网络框架，禁止使用 UNET\n" +
                     "  - 资源管理使用 Addressables，禁止使用 Resources.Load\n" +

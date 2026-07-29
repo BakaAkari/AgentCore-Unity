@@ -22,7 +22,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
             "Use when: 2+ similar operations on different targets (e.g. set_transform on 5 objects, add component to 3 objects). " +
             "NOT for: operations that depend on the result of a previous step (use sequential single calls instead). " +
             "Returns: array of {tool, success, result} for each operation, plus summary counts.",
-        Category = "meta",
+        Category = "Meta",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.BatchExecute)]

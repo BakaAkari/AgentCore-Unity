@@ -23,7 +23,6 @@ namespace AgentCore.Editor.Bootstrap
     /// v1.4.0（Step 1）— 主线程零阻塞拆分：
     /// - <see cref="Collect"/> / <see cref="CollectFast"/> — 快速版，仅使用 Unity API 与 UPM manifest（不扫盘）
     /// - <see cref="CollectHeavyAsync"/> — 重量级扫描（脚本统计、命名空间分布、Tags/Layers），后台执行 + 缓存
-    /// - <see cref="CollectExtended"/> — 向后兼容入口：命中缓存返回完整版，未命中则返回快速版并触发后台预热
     /// </remarks>
     public static class ProjectContextCollector
     {
@@ -238,59 +237,6 @@ namespace AgentCore.Editor.Bootstrap
             catch (Exception ex) { snapshot.KeyProjectSettings = $"(关键设置读取失败: {ex.Message})"; }
 
             return snapshot;
-        }
-
-        /// <summary>
-        /// 收集扩展项目信息（向后兼容入口）。
-        /// <para>
-        /// v1.4.0 行为校准：
-        /// - 若 <see cref="CollectHeavyAsync"/> 缓存命中，返回 <c>Fast + Heavy</c> 完整版
-        /// - 若未命中，返回 <c>Fast + "扩展信息后台生成中"</c>，并异步触发 Heavy 预热
-        /// </para>
-        /// 调用方（BootstrapLoader）总是能立即拿到主线程零阻塞的结果，
-        /// 完整扩展信息将在下次 Bootstrap 加载或后台任务完成后可用。
-        /// </summary>
-        public static string CollectExtended()
-        {
-            var fast = Collect();
-
-            string heavy = null;
-            lock (_cacheLock)
-            {
-                if (_cachedHeavyContent != null
-                    && DateTime.UtcNow - _cachedHeavyAt < HeavyCacheTtl)
-                {
-                    heavy = _cachedHeavyContent;
-                }
-            }
-
-            // 后台预热（fire-and-forget；错误静默）
-            if (heavy == null)
-            {
-                _ = CollectHeavyAsync().ContinueWith(t =>
-                {
-                    if (t.IsFaulted)
-                    {
-                        AgentCoreLog.Warning($"[AgentCore] Heavy project context prefetch failed: {t.Exception?.GetBaseException().Message}");
-                    }
-                }, TaskScheduler.Default);
-            }
-
-            var sb = new StringBuilder();
-            sb.Append(fast);
-            sb.AppendLine();
-
-            if (heavy != null)
-            {
-                sb.Append(heavy);
-            }
-            else
-            {
-                sb.AppendLine("### 扩展信息");
-                sb.AppendLine("_（脚本统计 / 命名空间分布 / Tags & Layers 正在后台生成，下次 Bootstrap 加载时会自动补齐）_");
-            }
-
-            return sb.ToString();
         }
 
         /// <summary>
@@ -655,7 +601,7 @@ namespace AgentCore.Editor.Bootstrap
             for (int i = 0; i < scenes.Length; i++)
             {
                 var scene = scenes[i];
-                var status = scene.enabled ? "" : "";
+                var status = scene.enabled ? "✓" : "✗";
                 var path = scene.path;
                 sb.AppendLine($"- [{status}] `{i}`: {path}");
             }

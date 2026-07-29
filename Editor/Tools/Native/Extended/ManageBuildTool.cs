@@ -27,7 +27,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "asset bundle building, addressable builds. " +
                       "REQUIRES CONFIRMATION: build action triggers actual compilation and may take minutes. " +
                       "ACTIVATE WHEN: user mentions 'build', 'platform switch', 'build settings', 'scripting defines', 'build scenes'.",
-        Category = "extended",
+        Category = "Extended",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.BuildPlayer | ToolCapability.ModifyProjectSettings,

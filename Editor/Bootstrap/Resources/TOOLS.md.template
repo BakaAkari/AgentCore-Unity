@@ -54,7 +54,9 @@
 - Prefab create/instantiate/apply/unpack → **manage_prefab**
 - ScriptableObject CRUD → **manage_scriptable_object**
 - Material create/modify/batch → **manage_material** (activate Material)
-- Import settings for textures/models/generic → activate Utility category
+- **Shader create/modify** → **manage_shader** (activate Shader)
+- **Animation clip / AnimatorController / state machine** → **manage_animation** (activate Animation)
+- Import settings for textures/models/generic → **manage_texture_import / manage_model_import / manage_asset_import** (activate Utility)
 
 ### User wants UI work
 - Legacy uGUI (Canvas/Button/Text/Image) → **manage_ui** (activate Specialized)
@@ -64,11 +66,11 @@
 - Console errors/warnings/system info → **read_console**
 - Scene performance analysis → **scene_analysis** action:find_hotspots / performance_hints
 - Profiler data → **manage_profiler** (activate Extended)
-- **Compilation status / recompile / wait for compile / list assemblies** → **manage_compilation** (activate meta; get_status/get_last_errors/request_compilation/wait_for_compilation/get_assemblies)
+- **Compilation status / recompile / wait for compile / list assemblies** → **manage_compilation** (activate Meta; get_status/get_last_errors/request_compilation/wait_for_compilation/get_assemblies)
 - Batch optimization (textures/meshes/audio) → **optimization** (activate Extended)
 - Missing references/unused assets/duplicates → **cleaner** (activate Extended)
 - **Memory snapshot / memory leak / .snap file / heap analysis** → **manage_memory_profiler** (activate Extended; take_memory_snapshot/list/analyze/diff — take+list need no external package)
-- **Scene physics stats / layer collision matrix / raycast(2D) / overlap(capsule)** → **manage_physics** (activate specialized; list_scene_physics_stats / get_collision_matrix / raycast dimension=2d / overlap_test shape=capsule)
+- **Scene physics stats / layer collision matrix / raycast(2D) / overlap(capsule)** → **manage_physics** (activate Specialized; list_scene_physics_stats / get_collision_matrix / raycast dimension=2d / overlap_test shape=capsule)
 
 ### User wants project-level operations
 - Build settings/trigger build → **manage_build** (activate Extended)
@@ -76,8 +78,12 @@
 - Run tests → **manage_test** (activate Extended)
 - Tags/layers management → **manage_tags_layers** (activate Extended)
 - Editor state/play mode/selection → **manage_editor** (rich selection via set_selection_by_query + mode=add/remove)
-- **EditorPrefs / PlayerPrefs (per-user editor or app state)** → **manage_prefs** (activate meta; has/get/set/delete/delete_all — **destructive**, non-undoable)
+- **EditorPrefs / PlayerPrefs (per-user editor or app state)** → **manage_prefs** (activate Meta; has/get/set/delete/delete_all — **destructive**, non-undoable)
 - **SceneView pivot/size/rotation** → **manage_camera** (activate Specialized; get_scene_view / set_scene_view)
+- **NavMesh bake / query / clear** → **manage_navmesh** (activate Extended)
+- **Smart batch operations (batch-rename / find-replace across scene / cross-cutting refactors)** → **smart_operations** (activate Extended)
+- **Execute any Unity Editor menu item by path (e.g., "Assets/Create/Material", "Window/Analysis/Profiler")** → **execute_menu_item** (activate Meta)
+- **Git / SVN / Perforce operations (status / diff / commit / pull / log / branches)** — when user says "提交" / "commit" / "看修改" / "推送" / "pull the changes" → **version_control** (activate VersionControl)
 - Repetitive bulk operations → **workflow**
 
 ### User wants to store/retrieve knowledge

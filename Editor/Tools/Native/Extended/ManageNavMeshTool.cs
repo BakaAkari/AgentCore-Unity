@@ -25,7 +25,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "adding obstacles that carve or block navigation. " +
                       "NOT FOR: runtime pathfinding queries (NavMesh.CalculatePath is runtime), NavMesh components from AI Navigation package v2. " +
                       "ACTIVATE WHEN: user mentions 'navmesh', 'navigation', 'pathfinding', 'bake navmesh', 'AI agent movement'.",
-        Category = "extended",
+        Category = "Extended",
         RequiresMainThread = true,
         Visibility = ToolVisibility.OnDemand)]
     public class ManageNavMeshTool : IAgentTool

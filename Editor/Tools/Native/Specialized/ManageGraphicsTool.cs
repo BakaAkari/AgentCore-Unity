@@ -32,7 +32,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "render pipeline asset configuration (SRP settings are in pipeline assets), custom VolumeComponent creation (only reads/writes existing components). " +
                       "ACTIVATE WHEN: user mentions 'fog', 'ambient light', 'skybox', 'quality settings', 'render settings', 'shadow distance', 'vsync', " +
                       "'bloom', 'vignette', 'post-processing', 'color grading', 'tonemapping', 'volume', 'HDRP', 'URP', '后处理', '泛光', '暗角', '色调'.",
-        Category = "specialized",
+        Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
     public class ManageGraphicsTool : IAgentTool

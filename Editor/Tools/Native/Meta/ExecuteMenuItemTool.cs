@@ -22,7 +22,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
             "Applicable: triggering editor functionality that has no dedicated tool (e.g. custom menu items, editor extensions). " +
             "NOT for: standard operations covered by other tools (use manage_asset for asset creation, manage_editor for play mode, etc.). " +
             "Note: some menu items require specific context (e.g. selection) to work — set selection first if needed.",
-        Category = "meta",
+        Category = "Meta",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,

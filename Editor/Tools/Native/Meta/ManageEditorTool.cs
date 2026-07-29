@@ -30,7 +30,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
             "Use get_info as a first step to confirm editor connectivity and project state. " +
             "Use refresh after script changes to trigger recompilation. " +
             "NOT for: scene object operations (use manage_gameobject), build pipeline (use manage_build).",
-        Category = "meta",
+        Category = "Meta",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyProjectSettings,

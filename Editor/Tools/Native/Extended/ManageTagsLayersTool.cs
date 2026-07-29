@@ -25,7 +25,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "NOT FOR: querying objects by tag/layer (use find_gameobjects with tag/layer filter), " +
                       "physics layer collision matrix (use manage_editor get_project_settings). " +
                       "ACTIVATE WHEN: user mentions 'tags', 'layers', 'sorting layer', 'LayerMask', 'add tag', 'custom layer'.",
-        Category = "extended",
+        Category = "Extended",
         RequiresMainThread = true,
         Visibility = ToolVisibility.OnDemand)]
     public class ManageTagsLayersTool : IAgentTool

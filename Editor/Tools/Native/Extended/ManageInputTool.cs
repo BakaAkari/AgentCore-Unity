@@ -22,7 +22,7 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "inspecting what input axes exist in the project. " +
                       "NOT FOR: new Input System package (com.unity.inputsystem) — that uses InputAction assets, not InputManager. " +
                       "ACTIVATE WHEN: user mentions 'input axis', 'input settings', 'key bindings', 'InputManager', or wants to add/modify legacy input axes.",
-        Category = "extended",
+        Category = "Extended",
         RequiresMainThread = true,
         Visibility = ToolVisibility.OnDemand)]
     public class ManageInputTool : IAgentTool
