@@ -40,7 +40,7 @@ namespace AgentCore.Editor.Core
 
             int maxTokens = settings.maxContextTokens > 0
                 ? settings.maxContextTokens
-                : ContextWindowManager.GetModelMaxTokens(settings.llmModel);
+                : ContextWindowManager.GetModelMaxTokens(ActiveModelConfig.ModelName);
             int reserveTokens = settings.reserveResponseTokens;
 
             // Phase 5: 在 TrimToFit 之前尝试对话压缩（智能压缩优先于暴力截断）

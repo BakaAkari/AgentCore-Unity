@@ -134,12 +134,12 @@ namespace AgentCore.Editor.Core
             // 自挑战与其重复 → 逃逸 Node A, 依赖 native thinking。extractor 仍常驻兜底剥离。
             // 热插拔: 每轮实时读取 selfChallengeEscapeEnabled + llmModel, 不缓存。
             if (settings.selfChallengeEscapeEnabled &&
-                ModelCapabilityDetector.HasNativeReasoning(settings.llmModel))
+                ModelCapabilityDetector.HasNativeReasoning(ActiveModelConfig.ModelName))
             {
                 _currentSelfChallengeData.NodeATriggered = false;
                 _currentSelfChallengeData.NodeASkipReason = "模型具备原生推理";
                 _nodeAEnabledThisTurn = false;
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] Node A escaped: model '{settings.llmModel}' has native reasoning.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] Node A escaped: model '{ActiveModelConfig.ModelName}' has native reasoning.");
                 return _currentSelfChallengeData;
             }
 
@@ -650,7 +650,7 @@ namespace AgentCore.Editor.Core
             var settings = AgentCoreSettings.instance;
             int maxTokens = settings.maxContextTokens > 0
                 ? settings.maxContextTokens
-                : ContextWindowManager.GetModelMaxTokens(settings.llmModel);
+                : ContextWindowManager.GetModelMaxTokens(ActiveModelConfig.ModelName);
             int reserveTokens = settings.reserveResponseTokens;
 
             // 组装压缩后主对话历史(复用现有 TrimToFit; 主历史此时应已剥离 challenge 块)

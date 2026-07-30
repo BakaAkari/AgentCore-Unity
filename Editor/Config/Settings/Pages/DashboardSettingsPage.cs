@@ -136,11 +136,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             context.Ui.DrawCard("Setup Status", "Current configuration state for core services.", () =>
             {
-                // LLM — required, so missing endpoint is an Error.
+                // LLM — required, so missing active profile is an Error.
                 DrawServiceStatusRow(context,
                     "LLM",
-                    isEnabled: !string.IsNullOrWhiteSpace(settings.llmEndpoint),
-                    enabledDetail: settings.llmModel,
+                    isEnabled: ActiveModelConfig.IsUsingProfile,
+                    enabledDetail: ActiveModelConfig.IsUsingProfile ? ActiveModelConfig.ModelName : "",
                     disabledIsError: true);
 
                 // Memory (mem0) — optional.
@@ -295,6 +295,19 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     {
                         SecureKeyStorage.ClearAll();
                         AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] All secure keys cleared.");
+                    }
+                }
+
+                if (GUILayout.Button("Clear Learned Request Rules", GUILayout.Width(ButtonWidth)))
+                {
+                    if (EditorUtility.DisplayDialog(
+                        "Clear Learned Request Rules",
+                        "This will forget all auto-learned request field restrictions (e.g. which endpoints reject 'reasoning' or 'temperature').\n\n" +
+                        "Each affected model will re-learn on its next call (one recoverable 400 retry).",
+                        "Clear",
+                        "Cancel"))
+                    {
+                        AgentCore.Editor.LLM.RequestPruningRegistry.ClearAll();
                     }
                 }
 

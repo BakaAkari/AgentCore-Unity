@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0-alpha.3] - 2026-07-30
+
+### Changed — Model & Agent 设置页精简
+
+- **Active Profile 卡片**：原"Current 标签 + Switch to 下拉"两件套合并为单一下拉，选中即 `store.SetActive()` 立即生效，减少一次多余点击。
+- **删除 Notes 字段**：`ProviderProfile.notes` 纯文本备注无功能依赖，UI 输入框、`Duplicate` 复制逻辑、数据模型字段全部移除。
+
+### Removed — Provider Hint 彻底删除（粒度错配修复）
+
+`providerHint` 挂在 profile（endpoint）层，但"该注入 reasoning 字段"是 **model 层**属性——中转站场景下同一 endpoint 服务几百个模型，单一 hint 天生打不中"每模型各自不同"。讨论后采纳纯 error-driven 方案，不叠加模型名前缀猜测。
+
+- **`ProviderProfile.providerHint`** 字段声明 + `Create()` 初始化删除。
+- **`ActiveModelConfig.ProviderHint`** 属性删除。
+- **`ModelAgentSettingsPage`**：Provider Hint 输入框、默认值、`Duplicate` 复制逻辑删除。
+- **`RequestEnrichment`**：白名单 `IsInReasoningAllowlist` / `ReasoningInjectAllowlist`（`glm/zhipu/openrouter/deepseek/moonshot/kimi`）删除。reasoning 注入的"是否禁用"判断权全部交还 error-driven 学习。
+- **`OpenAICompatibleClient`**：两处基于 hint 的 fast-path 预注册禁字段逻辑删除，统一走"发送 → 400 命中错误签名 → 学禁字段 → 自动重试"单一路径。接受的代价：每个新模型首次调用可能多一次可自动恢复的 400（用户已确认可接受）。
+
+### Added — `RequestPruningRegistry` 持久化（EditorPrefs）
+
+- alpha.2 的内存注册表升级为 **EditorPrefs 持久化**（懒加载 + 写盘，JSON via Newtonsoft），重启 Unity Editor 不再需要重新踩坑。按 `endpoint + "|" + model` 粒度存储，与 profile 无关——这正是"每模型各自不同"该有的粒度。
+- **代价**：清单可能陈旧（供应商解除某字段限制后本地仍继续 strip）。用户权衡后接受"清单可能陈旧"换"不用每次重启全模型重新踩坑"。
+- **`DashboardSettingsPage`** 新增 "Clear Learned Request Rules" 按钮兜底，供应商行为变化时手动清空。
+
+### Fixed — tool_call.id 跨供应商兼容清洗
+
+- **场景**：Node B correction 重试耗尽 fallback 到 AWS Bedrock（`claude-haiku-4-5`）时，历史消息里某个 tool_call id（GLM 生成，允许冒号/点等字符，GLM 自家网关不校验）随对话历史一起发给 Bedrock，触发 400（`tool_use.id: String should match pattern '^[a-zA-Z0-9_-]+$'`），且被判定为非 retryable，整轮对话失败。
+- **修复**：`OpenAICompatibleClient.SanitizeMessageToolCalls` 新增 `SanitizeToolCallId`——非 `[a-zA-Z0-9-_]` 字符统一替换为 `_`，对 assistant 侧 `tool_calls[].id` 与 tool 侧 `tool_call_id` 分别独立清洗（纯函数，同输入同输出，天然保持配对一致，无需维护映射表）。跨所有供应商统一生效，不分白名单。
+
+## [1.13.0-alpha.2] - 2026-07-29
+
+### Added — 请求字段自动裁剪（Error-driven Request Pruning）
+
+不同 LLM 供应商对 OpenAI-compat 请求体的宽容度差异很大：GLM/OpenRouter 吃 `reasoning: {}` 顶层字段，Bedrock/OpenAI 原生会 400 拒绝；Claude Sonnet 5 在 Bedrock 上又废弃了 `temperature`。手动维护"哪个供应商禁哪个字段"的知识库既繁琐又易过时。
+
+**新方案**：让服务端教我们规矩。
+
+- **`RequestPruningRegistry`** (`Editor/LLM/RequestPruningRegistry.cs`): 注册表 + 正则库。收到 HTTP 400 时用正则匹配错误消息（如 `` `temperature` is deprecated ``、`reasoning: Extra inputs are not permitted`），提取被拒字段名，按 `endpoint + "|" + model` 缓存。下次同组合请求自动 strip 该字段。
+- **`OpenAICompatibleClient`**: 首次请求应用已知 pruning；400 且匹配到学习模式 → 自动重试一次（每次调用最多重试 1 次，不递归）；未匹配的 400 直接抛给用户（真错误：apiKey 错、消息格式错等）。
+
+> **注**：本条目原描述的"Fast path：providerHint 白名单预注册 reasoning 禁字段"与"仅内存、domain reload 后清空"两点，已在 alpha.3 被取代——Provider Hint 彻底删除，注册表改为 EditorPrefs 持久化。详见 alpha.3。
+
+### Changed
+
+- **`RequestEnrichment.BuildEnrichedJson`** 恢复"按 ActiveModelConfig 意图注入"的单一职责：不再做供应商判断。供应商差异由 `RequestPruningRegistry.ApplyPruning` 在发送前统一处理。
+
+### Notes
+
+- 正则库覆盖当前已知的 6 种错误签名（`reasoning` / `temperature` / `top_p` / `max_tokens` / `stream_options`）。见到新供应商拒绝其他字段时，在 `RequestPruningRegistry.ErrorSignatures` 加一条正则即可，无需改其他代码。
+- **对用户可观测**：`AgentCoreLog.Info` 打印 `learned N banned field(s) for endpoint|model: [reasoning, temperature]` + `auto-retry after learning ...`，Console 可追踪自愈过程。
+
+## [1.13.0-alpha.1] - 2026-07-29
+
+### Added — Provider Profile 系统
+
+多套 LLM Provider 配置管理，一键切换。彻底取代 v1.12.x 的单一 `llmEndpoint` / `llmModel` / `apiKey` 全局字段模型。
+
+- **`ProviderProfile`**: 单套 provider 配置的数据模型 — GUID 主键 + displayName + endpoint + modelName + 可选覆盖字段（temperature / maxTokens / reasoning* / extraRequestBody，各自有 override 布尔位）+ providerHint + notes。改名不破坏引用（`activeProfileId` 认 GUID）。
+- **`AgentCoreProviderProfiles`**: `ScriptableSingleton` 存于 `ProjectSettings/AgentCoreProviderProfiles.asset` — **进 git**，团队共享 endpoint / modelName / override 参数。apiKey **不进 git**，按 profile GUID 分键存于 EditorPrefs（`AgentCore_ProfileKey_<id>`）。
+- **`ActiveModelConfig`** (v1.13.0 收敛后): 运行时唯一的配置解析入口，所有 LLM 调用点走此入口取 Endpoint / ModelName / ApiKey / Temperature / MaxTokens / Reasoning* / ExtraRequestBody。无 active profile 时抛 `InvalidOperationException`（无 legacy fallthrough 路径）。
+- **Model & Agent 设置页重写**: 在原页面内集成 profile 管理 UI — 顶部展示 active + 快切下拉，中部是可折叠的 profile 列表（编辑 endpoint / apiKey / model / overrides / notes，逐条 "Set as Active" / "Duplicate" / "Delete"），底部 "+ Add Profile"。删除独立的 "Provider Profiles" 分页。首次打开设置页且列表为空时自动创建 Default (Local GLM) profile 并异步 fetch 模型列表选中第一个。
+- **Chat 窗口工具栏下拉**: 主界面工具栏右上角新增 profile 快切下拉（`ProviderProfileSelector`，实现 `IAgentCoreStatusContribution` 自动挂载）。
+- **模型自动选择**: 新建 profile 保存 endpoint + apiKey 后可 "Refresh Models" 拉取列表；Default profile 自动选中第一个。
+- **Profile-scoped API Key**: `SecureKeyStorage` 新增 `SetProfileApiKey / GetProfileApiKey / HasProfileApiKey / DeleteProfileApiKey`。删除 profile 会同步清理其 EditorPrefs 键，避免键膨胀。
+- **单元测试**: `ActiveModelConfigTests` 覆盖 profile ↔ 全局 fallthrough 优先级、无 profile 时抛异常、`SecureKeyStorage` profile-scoped API round-trip。
+
+### Removed — BREAKING
+
+**升级后现有 LLM 配置全部失效，需要在 Project Settings > AgentCore > Model & Agent 重新创建 Profile。** 用户已确认此为可接受的破坏性升级（当前仅内部使用，无外部用户）。
+
+- **`AgentCoreSettings.llmEndpoint`** / **`AgentCoreSettings.llmModel`** 字段删除。
+- **`AgentCoreSettings.GetChatCompletionsUrl()`** 方法删除。运行时改为 `ActiveModelConfig.Endpoint.TrimEnd('/') + "/chat/completions"`。
+- **`AgentCoreSettings.FetchModelsAsync()`** 私有方法删除（旧的启动自动 fetch 逻辑）。UI 改用 `ModelSettingsService.FetchModelsAsync` 显式触发。
+- **`SecureKeyStorage.SetLLMApiKey / GetLLMApiKey / HasLLMApiKey`** 三个方法与 `LLM_API_KEY` 常量删除。Mem0 / LightRAG 的 apiKey 存储保持不变。
+- **迁移逻辑与 UI 全部删除**: 无 v21→v22 数据迁移，用户重新配置。Settings `CurrentVersion` bump 到 22（旧字段被序列化删除，反序列化自动丢弃）。
+- **独立的 Provider Profiles 分页**移除（早期 alpha 实现），并入 Model & Agent 页。
+
+### Changed
+
+- **运行时 20 处配置读取点全部改为 `ActiveModelConfig`**（`OpenAICompatibleClient` × 8, `AgentLoop` × 3, `AgentLoop.LLM` × 1, `AgentLoop.Runner` × 1, `AgentLoop.SelfChallenge` × 3, `ConversationCompressor` × 1, `RequestEnrichment` × 4）。
+- **`RequestEnrichment.BuildEnrichedJson(request, settings)`** → **`BuildEnrichedJson(request)`**：Batch B 后 `settings` 参数已不被使用，清理签名与两处调用点。
+- **`DashboardSettingsPage` / `IndexingPanel`** UI 展示改读 `ActiveModelConfig.Endpoint / ModelName`，无 active profile 时安全降级为空字符串（`IsUsingProfile` 判定）。
+- **L10n**: 删除 `providerProfiles.title / description / legacy / setNone / empty / migrateNotice / migrateAction`（迁移/legacy 概念不再存在）。保留 `providerProfiles.manage / tooltip / add / setActive / duplicate / overrides / deleteConfirmTitle / deleteConfirmMsg / currentActive`。新增 `modelAgent.activeProfile` = "Active: {0}" / "当前使用: {0}"。en-US / zh-CN 均同步。
+
+### Notes
+
+- Profile 数据文件 `ProjectSettings/AgentCoreProviderProfiles.asset` 进 git，团队协作时 endpoint + model 会共享，apiKey 各自本地。
+- 覆盖字段语义：profile 上 `overrideXxx` 布尔位为 true 时用 profile 值，否则 fallthrough 到 `AgentCoreSettings` 全局默认（这些全局字段仍存在，作为 profile 默认值来源）。`extraRequestBody` 无 override 位，空字符串 = fallthrough。
+- Default profile 硬编码本地 GLM endpoint `http://172.16.248.60:8000/v1`；用户可编辑或删除。
+- **`providerHint` 字段本条目引入时曾用于驱动 reasoning 白名单注入，该设计已在 alpha.3 被彻底删除**（挂 profile/endpoint 层与"reasoning 支持"这个 model 层属性粒度错配，中转站单 endpoint 服务几百模型场景下打不中）。详见 alpha.3。
+
 ## [1.12.0-alpha.7] - 2026-07-29
 
 ### Fixed — Prompt-layer & Code Consistency

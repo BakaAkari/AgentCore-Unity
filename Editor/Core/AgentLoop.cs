@@ -368,8 +368,8 @@ namespace AgentCore.Editor.Core
             // ProbeAsync 异步探测 /v1/models → max_model_len，覆盖 ContextWindowManager 硬编码
             AgentCoreSettings.instance.ApplyAdaptiveDefaults();
             _ = ModelCapabilityProbe.ProbeAsync(
-                AgentCoreSettings.instance.llmEndpoint,
-                SecureKeyStorage.GetLLMApiKey());
+                ActiveModelConfig.Endpoint,
+                ActiveModelConfig.ApiKey);
 
             // Phase 3: 会话创建始终延迟到 TryRestoreSession() 中处理。
             // 修复 #6: 之前在 WasInterrupted == false 时会立即创建新会话，
@@ -814,7 +814,7 @@ namespace AgentCore.Editor.Core
             }
 
             var settings = AgentCoreSettings.instance;
-            var modelName = settings.llmModel;
+            var modelName = ActiveModelConfig.ModelName;
             var maxTokens = ContextWindowManager.GetModelMaxTokens(modelName);
             var reservedTokens = settings.reserveResponseTokens;
 

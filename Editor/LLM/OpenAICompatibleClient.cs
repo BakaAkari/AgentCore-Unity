@@ -30,53 +30,82 @@ namespace AgentCore.Editor.LLM
             int? contentMaxTokens = null)
         {
             var settings = AgentCoreSettings.instance;
-            var apiKey = SecureKeyStorage.GetLLMApiKey();
+            var apiKey = ActiveModelConfig.ApiKey;
+            var endpoint = ActiveModelConfig.Endpoint;
+            var model = ActiveModelConfig.ModelName;
 
             // 修复消息历史中所有 tool_calls 的 arguments，防止无效 JSON 导致服务端解析失败
             SanitizeMessageToolCalls(messages);
 
             var request = new ChatCompletionRequest
             {
-                Model = settings.llmModel,
+                Model = model,
                 Messages = messages,
                 Tools = tools?.Count > 0 ? tools : null,
                 Stream = false,
-                Temperature = settings.temperature,
+                Temperature = ActiveModelConfig.Temperature,
                 MaxTokens = contentMaxTokens.HasValue
                     ? settings.GetEffectiveMaxTokens(contentMaxTokens.Value)
                     : settings.GetEffectiveMaxTokens()
             };
 
-            var json = RequestEnrichment.BuildEnrichedJson(request, settings);
-            var url = settings.GetChatCompletionsUrl();
-AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model={settings.llmModel} messages={messages.Count}");
+            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request);
+            var url = endpoint.TrimEnd('/') + "/chat/completions";
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model={model} messages={messages.Count}");
 
+            // 首次发送：应用当前已知的 pruning 规则
+            var body = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
+            var (response, responseBody) = await SendPostAsync(url, apiKey, body, ct);
 
+            // 400 → 尝试从错误消息学习禁字段，学到则重试一次（每次调用最多重试 1 次，不递归）
+            if (!response.IsSuccessStatusCode && (int)response.StatusCode == 400)
+            {
+                var learned = RequestPruningRegistry.LearnFromErrorResponse(endpoint, model, responseBody);
+                response.Dispose();
+                if (learned.Count > 0)
+                {
+                    AgentCoreLog.Info($"[AgentCore] LLM request auto-retry after learning {learned.Count} banned field(s): [{string.Join(", ", learned)}]");
+                    var retryBody = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
+                    (response, responseBody) = await SendPostAsync(url, apiKey, retryBody, ct);
+                }
+            }
+
+            using (response)
+            {
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new HttpRequestException(
+                        $"LLM API error: HTTP {(int)response.StatusCode} {response.ReasonPhrase}\n{responseBody}");
+                }
+
+                var result = JsonHelper.Deserialize<ChatCompletionResponse>(responseBody);
+                if (result == null)
+                {
+                    throw new InvalidOperationException($"Failed to parse LLM response:\n{responseBody}");
+                }
+
+                if (result.Usage != null)
+                {
+                    AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM usage: prompt={result.Usage.PromptTokens} completion={result.Usage.CompletionTokens} total={result.Usage.TotalTokens}");
+                }
+
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// 发送 POST 请求并返回响应对象 + 已读响应体字符串。
+        /// 调用方负责 <c>Dispose</c> 返回的 <see cref="HttpResponseMessage"/>。
+        /// </summary>
+        private static async Task<(HttpResponseMessage, string)> SendPostAsync(
+            string url, string apiKey, string body, CancellationToken ct)
+        {
             var client = HttpClientFactory.GetClient();
             using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
-            httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            using var response = await client.SendAsync(httpRequest, ct);
+            httpRequest.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            var response = await client.SendAsync(httpRequest, ct);
             var responseBody = await response.Content.ReadAsStringAsync();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new HttpRequestException(
-                    $"LLM API error: HTTP {(int)response.StatusCode} {response.ReasonPhrase}\n{responseBody}");
-            }
-
-            var result = JsonHelper.Deserialize<ChatCompletionResponse>(responseBody);
-            if (result == null)
-            {
-                throw new InvalidOperationException($"Failed to parse LLM response:\n{responseBody}");
-            }
-
-            if (result.Usage != null)
-            {
-                AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM usage: prompt={result.Usage.PromptTokens} completion={result.Usage.CompletionTokens} total={result.Usage.TotalTokens}");
-            }
-
-            return result;
+            return (response, responseBody);
         }
 
         /// <summary>
@@ -91,95 +120,129 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model
             int? contentMaxTokens = null)
         {
             var settings = AgentCoreSettings.instance;
-            var apiKey = SecureKeyStorage.GetLLMApiKey();
+            var apiKey = ActiveModelConfig.ApiKey;
+            var endpoint = ActiveModelConfig.Endpoint;
+            var model = ActiveModelConfig.ModelName;
 
             // 修复消息历史中所有 tool_calls 的 arguments，防止无效 JSON 导致服务端解析失败
             SanitizeMessageToolCalls(messages);
 
             var request = new ChatCompletionRequest
             {
-                Model = settings.llmModel,
+                Model = model,
                 Messages = messages,
                 Tools = tools?.Count > 0 ? tools : null,
                 Stream = true,
-                Temperature = settings.temperature,
+                Temperature = ActiveModelConfig.Temperature,
                 MaxTokens = contentMaxTokens.HasValue
                     ? settings.GetEffectiveMaxTokens(contentMaxTokens.Value)
                     : settings.GetEffectiveMaxTokens()
             };
 
-            var json = RequestEnrichment.BuildEnrichedJson(request, settings);
-            var url = settings.GetChatCompletionsUrl();
-AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url} model={settings.llmModel} messages={messages.Count}");
+            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request);
+            var url = endpoint.TrimEnd('/') + "/chat/completions";
+            AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url} model={model} messages={messages.Count}");
 
+            // 首次发送
+            var body = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
+            var response = await SendPostForStreamAsync(url, apiKey, body, ct);
 
-            var client = HttpClientFactory.GetClient();
-            using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
-            httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            // 使用 ResponseHeadersRead 以便尽早开始读取流
-            using var response = await client.SendAsync(
-                httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-
-            if (!response.IsSuccessStatusCode)
+            // Header 阶段 400 → 学习 → 重试一次（此时流未开始，重试安全）
+            if (!response.IsSuccessStatusCode && (int)response.StatusCode == 400)
             {
                 var errorBody = await response.Content.ReadAsStringAsync();
-                throw new HttpRequestException(
-                    $"LLM API error: HTTP {(int)response.StatusCode} {response.ReasonPhrase}\n{errorBody}");
-            }
+                var learned = RequestPruningRegistry.LearnFromErrorResponse(endpoint, model, errorBody);
+                response.Dispose();
 
-            // 读取 SSE 流
-            using var stream = await response.Content.ReadAsStreamAsync();
-
-            // 用于拼接完整的 assistant 消息
-            var contentBuilder = new StringBuilder();
-            var toolCalls = new List<ToolCall>();
-            var toolCallBuilders = new Dictionary<int, ToolCallBuilder>();
-            string finishReason = null;
-
-            await _streamParser.ParseStreamAsync(stream, chunk =>
-            {
-                switch (chunk.Type)
+                if (learned.Count > 0)
                 {
-                    case StreamChunkType.ContentToken:
-                        contentBuilder.Append(chunk.Content);
-                        onChunk?.Invoke(chunk);
-                        break;
-
-                    case StreamChunkType.ReasoningToken:
-                        onChunk?.Invoke(chunk);
-                        break;
-
-                    case StreamChunkType.ToolCallDelta:
-                        // 拼接工具调用的增量 JSON（Phase 2 完整使用）
-                        AccumulateToolCallDelta(chunk.ToolCallDelta, toolCallBuilders);
-                        onChunk?.Invoke(chunk);
-                        break;
-
-                    case StreamChunkType.Done:
-                        finishReason = chunk.FinishReason;
-                        onChunk?.Invoke(chunk);
-                        break;
-
-                    case StreamChunkType.Error:
-                        AgentCoreLog.Warning($"[AgentCore] Stream error: {chunk.Error}");
-                        onChunk?.Invoke(chunk);
-                        break;
+                    AgentCoreLog.Info($"[AgentCore] LLM stream request auto-retry after learning {learned.Count} banned field(s): [{string.Join(", ", learned)}]");
+                    var retryBody = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
+                    response = await SendPostForStreamAsync(url, apiKey, retryBody, ct);
                 }
-            }, ct);
-
-            // 构建完整的 tool_calls 列表
-            foreach (var builder in toolCallBuilders.Values)
-            {
-                toolCalls.Add(builder.Build());
+                else
+                {
+                    // 未匹配到任何学习模式的 400 直接抛出（真错误 - 消息格式错、apiKey 错等）
+                    throw new HttpRequestException(
+                        $"LLM API error: HTTP 400 {response.ReasonPhrase}\n{errorBody}");
+                }
             }
 
-            // 返回拼接好的完整 assistant 消息
-            var content = contentBuilder.ToString();
-            return ChatMessage.Assistant(
-                string.IsNullOrEmpty(content) ? null : content,
-                toolCalls.Count > 0 ? toolCalls : null
-            );
+            using (response)
+            {
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync();
+                    throw new HttpRequestException(
+                        $"LLM API error: HTTP {(int)response.StatusCode} {response.ReasonPhrase}\n{errorBody}");
+                }
+
+                // 读取 SSE 流
+                using var stream = await response.Content.ReadAsStreamAsync();
+
+                // 用于拼接完整的 assistant 消息
+                var contentBuilder = new StringBuilder();
+                var toolCalls = new List<ToolCall>();
+                var toolCallBuilders = new Dictionary<int, ToolCallBuilder>();
+                string finishReason = null;
+
+                await _streamParser.ParseStreamAsync(stream, chunk =>
+                {
+                    switch (chunk.Type)
+                    {
+                        case StreamChunkType.ContentToken:
+                            contentBuilder.Append(chunk.Content);
+                            onChunk?.Invoke(chunk);
+                            break;
+
+                        case StreamChunkType.ReasoningToken:
+                            onChunk?.Invoke(chunk);
+                            break;
+
+                        case StreamChunkType.ToolCallDelta:
+                            // 拼接工具调用的增量 JSON（Phase 2 完整使用）
+                            AccumulateToolCallDelta(chunk.ToolCallDelta, toolCallBuilders);
+                            onChunk?.Invoke(chunk);
+                            break;
+
+                        case StreamChunkType.Done:
+                            finishReason = chunk.FinishReason;
+                            onChunk?.Invoke(chunk);
+                            break;
+
+                        case StreamChunkType.Error:
+                            AgentCoreLog.Warning($"[AgentCore] Stream error: {chunk.Error}");
+                            onChunk?.Invoke(chunk);
+                            break;
+                    }
+                }, ct);
+
+                // 构建完整的 tool_calls 列表
+                foreach (var builder in toolCallBuilders.Values)
+                {
+                    toolCalls.Add(builder.Build());
+                }
+
+                // 返回拼接好的完整 assistant 消息
+                var content = contentBuilder.ToString();
+                return ChatMessage.Assistant(
+                    string.IsNullOrEmpty(content) ? null : content,
+                    toolCalls.Count > 0 ? toolCalls : null
+                );
+            }
+        }
+
+        /// <summary>
+        /// 发送 POST 请求并以 <see cref="HttpCompletionOption.ResponseHeadersRead"/> 模式返回，
+        /// 用于流式响应。调用方负责 <c>Dispose</c>。
+        /// </summary>
+        private static async Task<HttpResponseMessage> SendPostForStreamAsync(
+            string url, string apiKey, string body, CancellationToken ct)
+        {
+            var client = HttpClientFactory.GetClient();
+            using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
+            httpRequest.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
         }
 
         /// <summary>
@@ -217,8 +280,17 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url
         }
 
         /// <summary>
-        /// 遍历消息列表，修复所有 assistant 消息中 tool_calls 的 arguments 字段。
-        /// 确保发送给 API 的历史消息中不包含无效 JSON，防止 vLLM 等服务端解析失败。
+        /// 遍历消息列表，修复所有 assistant 消息中 tool_calls 的 arguments 字段，
+        /// 并统一清洗 tool_call id 格式（v1.14.0+）。
+        /// <para>
+        /// id 清洗动机：部分模型（如 GLM）生成的 tool_call id 允许包含冒号/点等字符，
+        /// 自家网关不校验故从未暴露问题；但 fallback 到 AWS Bedrock 时，Bedrock 对
+        /// <c>tool_use.id</c> 有严格正则校验（<c>^[a-zA-Z0-9_-]+$</c>），不合规 id 直接 400，
+        /// 且历史消息里 assistant.tool_calls[].id 与对应 tool 消息的 tool_call_id 必须
+        /// 清洗后依然一致（否则模型侧无法配对 tool_use/tool_result）。
+        /// <see cref="SanitizeToolCallId"/> 是纯函数（同输入必同输出），故 assistant 侧和
+        /// tool 侧分别独立清洗即可保持一致，无需维护映射表。幂等：已合规的 id 清洗后不变。
+        /// </para>
         /// </summary>
         /// <param name="messages">待发送的消息列表（会就地修改）</param>
         private static void SanitizeMessageToolCalls(List<ChatMessage> messages)
@@ -227,18 +299,50 @@ AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url
 
             foreach (var message in messages)
             {
-                if (message.ToolCalls == null || message.ToolCalls.Count == 0)
-                    continue;
-
-                foreach (var toolCall in message.ToolCalls)
+                if (message.ToolCalls != null && message.ToolCalls.Count > 0)
                 {
-                    if (toolCall.Function != null && !string.IsNullOrEmpty(toolCall.Function.Arguments))
+                    foreach (var toolCall in message.ToolCalls)
                     {
-                        toolCall.Function.Arguments = SanitizeToolArguments(toolCall.Function.Arguments);
+                        if (!string.IsNullOrEmpty(toolCall.Id))
+                        {
+                            toolCall.Id = SanitizeToolCallId(toolCall.Id);
+                        }
+
+                        if (toolCall.Function != null && !string.IsNullOrEmpty(toolCall.Function.Arguments))
+                        {
+                            toolCall.Function.Arguments = SanitizeToolArguments(toolCall.Function.Arguments);
+                        }
                     }
+                }
+
+                if (message.Role == "tool" && !string.IsNullOrEmpty(message.ToolCallId))
+                {
+                    message.ToolCallId = SanitizeToolCallId(message.ToolCallId);
                 }
             }
         }
+
+        /// <summary>
+        /// 将 tool_call id 清洗为跨供应商兼容的格式：仅保留 <c>[a-zA-Z0-9_-]</c>，
+        /// 其余字符（冒号、点、斜杠等）替换为下划线。空结果 / 空输入回退为固定占位符
+        /// （极端场景，正常不会触发——id 通常非空且含字母数字）。
+        /// </summary>
+        private static string SanitizeToolCallId(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return "call_unknown";
+
+            var sb = new StringBuilder(id.Length);
+            foreach (var c in id)
+            {
+                sb.Append(IsValidToolCallIdChar(c) ? c : '_');
+            }
+
+            var result = sb.ToString();
+            return result.Length > 0 ? result : "call_unknown";
+        }
+
+        private static bool IsValidToolCallIdChar(char c)
+            => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
 
         /// <summary>
         /// 修复 LLM 生成的无效 JSON arguments。

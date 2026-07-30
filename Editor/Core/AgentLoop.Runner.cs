@@ -396,7 +396,7 @@ namespace AgentCore.Editor.Core
                 var settings = AgentCoreSettings.instance;
                 bool nodeBShouldRun = settings.selfChallengeEnabled &&
                     !(settings.selfChallengeEscapeEnabled &&
-                      ModelCapabilityDetector.HasNativeReasoning(settings.llmModel));
+                      ModelCapabilityDetector.HasNativeReasoning(ActiveModelConfig.ModelName));
 
                 if (nodeBShouldRun)
                 {

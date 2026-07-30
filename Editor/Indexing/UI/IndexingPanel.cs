@@ -194,11 +194,12 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
             var settings = AgentCoreSettings.instance;
 
-            var endpointConfigured = !string.IsNullOrWhiteSpace(settings.llmEndpoint);
-            var modelConfigured    = !string.IsNullOrWhiteSpace(settings.llmModel);
+            var usingProfile = ActiveModelConfig.IsUsingProfile;
+            var endpointConfigured = usingProfile && !string.IsNullOrWhiteSpace(ActiveModelConfig.Endpoint);
+            var modelConfigured    = usingProfile && !string.IsNullOrWhiteSpace(ActiveModelConfig.ModelName);
 
-            content.Add(CreateLabelRow("Endpoint",    endpointConfigured ? settings.llmEndpoint : "(not configured)"));
-            content.Add(CreateLabelRow("Model",       modelConfigured    ? settings.llmModel    : "(not configured)"));
+            content.Add(CreateLabelRow("Endpoint",    endpointConfigured ? ActiveModelConfig.Endpoint  : "(not configured)"));
+            content.Add(CreateLabelRow("Model",       modelConfigured    ? ActiveModelConfig.ModelName : "(not configured)"));
             content.Add(CreateLabelRow("Temperature", settings.temperature.ToString("F2")));
             content.Add(CreateLabelRow("Max Output Tokens", settings.GetEffectiveMaxTokens().ToString("N0")));
             if (settings.enableReasoningOutput && settings.reasoningMaxTokens > 0)

@@ -12,15 +12,12 @@
   "common.success": "成功",
   "common.loading": "加载中...",
   "common.error": "错误",
-
   "language.name": "语言",
   "language.tooltip": "切换界面语言",
   "language.en-US": "English",
   "language.zh-CN": "简体中文",
-
   "chat.window.title": "AgentCore",
   "chat.toolbar.title": "AgentCore",
-
   "chat.status.idle": "就绪",
   "chat.status.thinking": "思考中...",
   "chat.status.streaming": "回复中...",
@@ -35,23 +32,19 @@
   "chat.status.waitingUserDecision": "AI 正在等待你的决定...",
   "chat.status.initFailed": "初始化失败",
   "chat.status.initializing": "初始化中…",
-
   "chat.pending.thinking": "思考中",
   "chat.pending.executingTool": "调用工具中",
   "chat.pending.streaming": "回复中",
   "chat.pending.compressing": "压缩上下文",
   "chat.pending.reviewingAnswer": "审阅答案",
   "chat.pending.processing": "处理中",
-
   "chat.input.send": "发送",
   "chat.input.cancel": "取消",
   "chat.input.scrollToLatest": "跳到最新",
   "chat.input.scrollToLatestTooltip": "回到最新消息",
-
   "chat.error.unknown": "未知错误",
   "chat.error.stackInfo": "堆栈信息",
   "chat.error.retryPrefix": "[重试] {0}",
-
   "chat.tool.status.waiting": "等待中...",
   "chat.tool.status.running": "执行中...",
   "chat.tool.status.completed": "完成",
@@ -62,7 +55,6 @@
   "chat.tool.copyButtonCopied": "已复制",
   "chat.tool.copyButtonFailed": "失败",
   "chat.tool.copyTooltip": "复制完整原始详情到剪贴板",
-
   "session.defaultTitle": "新会话",
   "session.sidebar.title": "会话列表",
   "session.button.new": "+ 新建",
@@ -104,7 +96,6 @@
   "session.tagMenu.delete": "删除 tag",
   "session.tagMenu.deleteTitle": "删除 tag",
   "session.tagMenu.deleteConfirm": "确认删除 tag \"{0}\"？{1} 个会话将变为未分类。",
-
   "settings.dashboard.title": "总览",
   "settings.dashboard.description": "AgentCore 配置状态与快捷操作总览。",
   "settings.language.card.title": "语言",
@@ -112,7 +103,6 @@
   "settings.language.field.label": "界面语言",
   "settings.language.llmFollow.label": "LLM 回复跟随界面语言",
   "settings.language.llmFollow.tooltip": "开启后, 助手会被指示用与界面相同的语言回复。关闭则由模型根据用户输入自行判断。",
-
   "domainReload.header": "检测到 Domain Reload 中断",
   "domainReload.reasonLabel": "中断原因：",
   "domainReload.reasonValue": "编译触发 Domain Reload",
@@ -130,12 +120,10 @@
   "domainReload.status.recoverFailed": "恢复失败",
   "domainReload.status.recoverNotSupported": "恢复未执行，可能是中断阶段不支持自动恢复",
   "domainReload.status.hint": "\n 建议：请手动重新发送消息继续操作",
-
   "askUser.title": "AI 需要你的决定",
   "askUser.hint.customOption": "我自己描述...",
   "askUser.hint.freeText": "请在下方输入框输入你的答案并发送",
   "askUser.meta.noTimeout": "等待你的决定 · 面板会一直保留直到你回答（不会超时）",
-
   "help.title": "AgentCore 使用技巧",
   "help.section.shortcuts": "快捷键",
   "help.section.tips": "使用技巧",
@@ -149,7 +137,6 @@
   "help.tip.autoCompress": "多轮对话中 Agent 会自动压缩旧消息，无需手动清理",
   "help.trust.lowMed": "Trust Low/Med — 本会话 ReadOnly/Low/Medium 风险工具直通，High/破坏性操作仍弹窗",
   "help.trust.yolo": "信任 YOLO（全部）— 本次会话中所有工具（含 delete/push/compile 等破坏性操作）都放行。慎用。",
-
   "contextUsage.header": "上下文使用情况",
   "contextUsage.usage": "{0}% ({1} / {2} tokens)",
   "contextUsage.tokenAllocation.label": "Token 分配",
@@ -158,19 +145,16 @@
   "contextUsage.compression.value": "工具: {0} | 对话: {1} | 节省: {2} tokens | 压缩率: {3}",
   "contextUsage.compression.none": "暂无压缩",
   "contextUsage.compression.active": "压缩已激活",
-
   "thinking.tooltip.toggle": "展开 / 折叠 Thinking",
   "thinking.tooltip.expand": "展开 Thinking",
   "thinking.tooltip.collapse": "折叠 Thinking",
   "thinking.title.running": "思考中 · {0}s",
   "thinking.title.done": "思考完成 · {0}s",
-
   "fileChange.header.empty": "此对话中已更改 0 个文件",
   "fileChange.header.some": "此对话中已更改 {0} 个文件",
   "fileChange.stat.added": "+{0}",
   "fileChange.stat.removed": "-{0}",
   "fileChange.deletedSuffix": "(已删除)",
-
   "toolCallGroup.title": "工具执行过程",
   "toolCallGroup.round": "第 {0}/{1} 轮",
   "toolCallGroup.stats.n": "{0} 成功",
@@ -179,10 +163,8 @@
   "toolCallGroup.stats.rNamed": "{0} 执行中: {1}",
   "toolCallGroup.stats.pending": "{0} 等待",
   "toolCallGroup.stats.summary": "{0} 个调用: {1}",
-
   "toolCall.card.argsPrefix": "参数: {0}",
   "toolCall.card.detailsTruncated": "\n\n… [已截断 {0} 字符，仅影响此处显示。点击右上角\"复制\"可获取完整内容] …",
-
   "message.role.user": "用户",
   "message.role.assistant": "助手",
   "message.role.error": "错误",
@@ -191,12 +173,9 @@
   "message.copyFailed": "失败",
   "message.retry": "重试",
   "message.retrying": "重试中...",
-
-  "askUser.title": "AI 需要你的决定",
   "askUser.customOption": "我自己描述...",
   "askUser.freeTextHint": "请在下方输入框输入你的答案并发送",
   "askUser.waitingMeta": "等待你的决定 · 面板会一直保留直到你回答（不会超时）",
-
   "toolConfirmation.title": "工具确认",
   "toolConfirmation.deny": "拒绝",
   "toolConfirmation.allowOnce": "仅此一次允许",
@@ -205,14 +184,12 @@
   "toolConfirmation.yolo": "YOLO (All)",
   "toolConfirmation.yoloTooltip": "本会话内所有工具直通,含删除/推送/编译等破坏性操作,慎用",
   "toolConfirmation.waiting": "等待工具确认...",
-
   "domainReload.autoRecoverCompileFailedMsg": "编译失败，请检查 Unity Console 中的错误信息",
   "domainReload.autoRecoverNotSupportedMsg": "恢复未执行，可能是中断阶段不支持自动恢复",
   "domainReload.recoverStatus.recovering": "正在恢复会话...",
   "domainReload.recoverStatus.recovered": "会话已恢复，继续执行中",
   "domainReload.recoverStatus.failed": "恢复失败",
   "domainReload.hintSuggestion": "\n 建议：请手动重新发送消息继续操作",
-
   "knowledge.status.section": "状态",
   "knowledge.button.testConnection": "测试连接",
   "knowledge.button.openSettings": "打开设置",
@@ -283,7 +260,6 @@
   "knowledge.unknownDoc": "(未知)",
   "knowledge.reason.lightRAGCheckStatus": "请检查 LightRAG 服务状态",
   "knowledge.errorMsg.processFailed": "LightRAG 处理失败",
-
   "memory.status.section": "状态",
   "memory.button.testConnection": "测试连接",
   "memory.button.createUser": "创建用户",
@@ -337,7 +313,6 @@
   "memory.item.updated": "更新：{0}",
   "memory.item.state": "状态：{0}",
   "memory.status.deleteCanceled": "删除已取消。",
-
   "selfChallenge.title": "自挑战",
   "selfChallenge.verdict.pass": "通过",
   "selfChallenge.verdict.revise": "已修正",
@@ -346,5 +321,15 @@
   "selfChallenge.verdict.running": "自审中...",
   "selfChallenge.verdict.intentClear": "意图明确",
   "selfChallenge.verdict.skipped": "已跳过 ({0})",
-  "selfChallenge.verdict.notTriggered": "未触发"
+  "selfChallenge.verdict.notTriggered": "未触发",
+  "providerProfiles.manage": "管理配置…",
+  "providerProfiles.tooltip": "切换当前 LLM 供应商配置",
+  "providerProfiles.add": "+ 新增配置",
+  "providerProfiles.setActive": "设为当前",
+  "providerProfiles.duplicate": "复制",
+  "providerProfiles.overrides": "参数覆盖",
+  "providerProfiles.deleteConfirmTitle": "删除配置",
+  "providerProfiles.deleteConfirmMsg": "确定要删除「{0}」吗？其 API Key 也会一并移除。",
+  "providerProfiles.currentActive": "当前使用：{0}",
+  "modelAgent.activeProfile": "当前使用: {0}"
 }

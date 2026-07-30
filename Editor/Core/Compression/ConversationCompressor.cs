@@ -289,7 +289,7 @@ namespace AgentCore.Editor.Core.Compression
             // 压缩请求 = system prompt + user(conversationText)
             // 预留 reasoning 预算 + content 预算后，剩余空间才是 conversationText 的上限
             var settings = AgentCoreSettings.instance;
-            int modelMaxTokens = ContextWindowManager.GetModelMaxTokens(settings.llmModel);
+            int modelMaxTokens = ContextWindowManager.GetModelMaxTokens(ActiveModelConfig.ModelName);
             int compressionBudget = modelMaxTokens
                 - settings.GetEffectiveMaxTokens(CompressionLLMClientFactory.CompressionMaxTokens)
                 - TokenCounter.EstimateTokens(CompressionPrompts.ConversationCompressionSystem)

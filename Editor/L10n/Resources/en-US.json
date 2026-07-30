@@ -12,15 +12,12 @@
   "common.success": "Success",
   "common.loading": "Loading...",
   "common.error": "Error",
-
   "language.name": "Language",
   "language.tooltip": "Switch UI language",
   "language.en-US": "English",
   "language.zh-CN": "简体中文",
-
   "chat.window.title": "AgentCore",
   "chat.toolbar.title": "AgentCore",
-
   "chat.status.idle": "Ready",
   "chat.status.thinking": "Thinking...",
   "chat.status.streaming": "Replying...",
@@ -35,23 +32,19 @@
   "chat.status.waitingUserDecision": "AI is waiting for your decision...",
   "chat.status.initFailed": "Initialization failed",
   "chat.status.initializing": "Initializing...",
-
   "chat.pending.thinking": "Thinking",
   "chat.pending.executingTool": "Executing tool",
   "chat.pending.streaming": "Replying",
   "chat.pending.compressing": "Compressing context",
   "chat.pending.reviewingAnswer": "Reviewing answer",
   "chat.pending.processing": "Processing",
-
   "chat.input.send": "Send",
   "chat.input.cancel": "Cancel",
   "chat.input.scrollToLatest": "Jump to latest",
   "chat.input.scrollToLatestTooltip": "Return to newest message",
-
   "chat.error.unknown": "Unknown error",
   "chat.error.stackInfo": "Stack info",
   "chat.error.retryPrefix": "[Retry] {0}",
-
   "chat.tool.status.waiting": "Waiting...",
   "chat.tool.status.running": "Running...",
   "chat.tool.status.completed": "Completed",
@@ -62,7 +55,6 @@
   "chat.tool.copyButtonCopied": "Copied",
   "chat.tool.copyButtonFailed": "Failed",
   "chat.tool.copyTooltip": "Copy full raw details to clipboard",
-
   "session.defaultTitle": "New session",
   "session.sidebar.title": "Sessions",
   "session.button.new": "+ New",
@@ -104,7 +96,6 @@
   "session.tagMenu.delete": "Delete tag",
   "session.tagMenu.deleteTitle": "Delete tag",
   "session.tagMenu.deleteConfirm": "Delete tag \"{0}\"? {1} sessions will become uncategorized.",
-
   "settings.dashboard.title": "Dashboard",
   "settings.dashboard.description": "Overview of AgentCore configuration status and quick actions.",
   "settings.language.card.title": "Language",
@@ -112,7 +103,6 @@
   "settings.language.field.label": "Interface language",
   "settings.language.llmFollow.label": "LLM replies follow UI language",
   "settings.language.llmFollow.tooltip": "When enabled, the assistant is instructed to reply in the same language as the UI. Disable to let the model decide by user input.",
-
   "domainReload.header": "Domain Reload interrupt detected",
   "domainReload.reasonLabel": "Reason:",
   "domainReload.reasonValue": "Compilation triggered Domain Reload",
@@ -130,12 +120,10 @@
   "domainReload.status.recoverFailed": "Recovery failed",
   "domainReload.status.recoverNotSupported": "Recovery not executed; the interrupt phase may not support auto-recovery.",
   "domainReload.status.hint": "\n Suggestion: please resend the message manually to continue.",
-
   "askUser.title": "AI needs your decision",
   "askUser.hint.customOption": "Describe it myself...",
   "askUser.hint.freeText": "Please type your answer in the input box below and send.",
   "askUser.meta.noTimeout": "Waiting for your decision · This panel stays until you answer (no timeout)",
-
   "help.title": "AgentCore tips",
   "help.section.shortcuts": "Shortcuts",
   "help.section.tips": "Tips",
@@ -149,7 +137,6 @@
   "help.tip.autoCompress": "In multi-turn conversations the Agent auto-compresses old messages, no need to clean up manually",
   "help.trust.lowMed": "Trust Low/Med — this session lets ReadOnly/Low/Medium risk tools through, High/destructive still prompt",
   "help.trust.yolo": "YOLO (All) — this session lets ALL tools through, including delete / push / compile / other destructive ops. Use with care.",
-
   "contextUsage.header": "Context usage",
   "contextUsage.usage": "{0}% ({1} / {2} tokens)",
   "contextUsage.tokenAllocation.label": "Token allocation",
@@ -158,19 +145,16 @@
   "contextUsage.compression.value": "Tools: {0} | Chat: {1} | Saved: {2} tokens | Ratio: {3}",
   "contextUsage.compression.none": "No compression yet",
   "contextUsage.compression.active": "Compression active",
-
   "thinking.tooltip.toggle": "Expand / collapse Thinking",
   "thinking.tooltip.expand": "Expand Thinking",
   "thinking.tooltip.collapse": "Collapse Thinking",
   "thinking.title.running": "Thinking · {0}s",
   "thinking.title.done": "Thought · {0}s",
-
   "fileChange.header.empty": "0 files changed in this conversation",
   "fileChange.header.some": "{0} files changed in this conversation",
   "fileChange.stat.added": "+{0}",
   "fileChange.stat.removed": "-{0}",
   "fileChange.deletedSuffix": "(deleted)",
-
   "toolCallGroup.title": "Tool execution",
   "toolCallGroup.round": "Round {0}/{1}",
   "toolCallGroup.stats.n": "{0} succeeded",
@@ -179,10 +163,8 @@
   "toolCallGroup.stats.rNamed": "{0} running: {1}",
   "toolCallGroup.stats.pending": "{0} pending",
   "toolCallGroup.stats.summary": "{0} calls: {1}",
-
   "toolCall.card.argsPrefix": "Arguments: {0}",
   "toolCall.card.detailsTruncated": "\n\n… [truncated {0} chars; only affects display here. Click 'Copy' at top-right for the full content] …",
-
   "message.role.user": "User",
   "message.role.assistant": "Assistant",
   "message.role.error": "Error",
@@ -191,12 +173,9 @@
   "message.copyFailed": "Failed",
   "message.retry": "Retry",
   "message.retrying": "Retrying...",
-
-  "askUser.title": "AI needs your decision",
   "askUser.customOption": "I'll describe it myself...",
   "askUser.freeTextHint": "Please type your answer in the input box below and send.",
   "askUser.waitingMeta": "Waiting for your decision · This panel stays until you answer (no timeout)",
-
   "toolConfirmation.title": "Tool confirmation needed",
   "toolConfirmation.deny": "Deny",
   "toolConfirmation.allowOnce": "Allow once",
@@ -205,14 +184,12 @@
   "toolConfirmation.yolo": "YOLO (All)",
   "toolConfirmation.yoloTooltip": "This session lets ALL tools through, including delete/push/compile/other destructive ops. Use with care",
   "toolConfirmation.waiting": "Waiting for tool confirmation...",
-
   "domainReload.autoRecoverCompileFailedMsg": "Compilation failed, please check the errors in the Unity Console",
   "domainReload.autoRecoverNotSupportedMsg": "Recovery not executed, the interrupt phase may not support auto-recovery",
   "domainReload.recoverStatus.recovering": "Recovering session...",
   "domainReload.recoverStatus.recovered": "Session recovered, continuing execution",
   "domainReload.recoverStatus.failed": "Recovery failed",
   "domainReload.hintSuggestion": "\n Suggestion: please resend the message manually to continue",
-
   "knowledge.status.section": "Status",
   "knowledge.button.testConnection": "Test connection",
   "knowledge.button.openSettings": "Open settings",
@@ -283,7 +260,6 @@
   "knowledge.unknownDoc": "(unknown)",
   "knowledge.reason.lightRAGCheckStatus": "Please check LightRAG service status",
   "knowledge.errorMsg.processFailed": "LightRAG processing failed",
-
   "memory.status.section": "Status",
   "memory.button.testConnection": "Test connection",
   "memory.button.createUser": "Create user",
@@ -337,7 +313,6 @@
   "memory.item.updated": "Updated: {0}",
   "memory.item.state": "State: {0}",
   "memory.status.deleteCanceled": "Delete canceled.",
-
   "selfChallenge.title": "Self-Challenge",
   "selfChallenge.verdict.pass": "Passed",
   "selfChallenge.verdict.revise": "Revised",
@@ -346,5 +321,15 @@
   "selfChallenge.verdict.running": "Self-reviewing...",
   "selfChallenge.verdict.intentClear": "Intent clear",
   "selfChallenge.verdict.skipped": "Skipped ({0})",
-  "selfChallenge.verdict.notTriggered": "Not triggered"
+  "selfChallenge.verdict.notTriggered": "Not triggered",
+  "providerProfiles.manage": "Manage Profiles...",
+  "providerProfiles.tooltip": "Switch active LLM provider profile",
+  "providerProfiles.add": "+ Add Profile",
+  "providerProfiles.setActive": "Set as Active",
+  "providerProfiles.duplicate": "Duplicate",
+  "providerProfiles.overrides": "Overrides",
+  "providerProfiles.deleteConfirmTitle": "Delete Profile",
+  "providerProfiles.deleteConfirmMsg": "Are you sure you want to delete '{0}'? This will also remove its API key.",
+  "providerProfiles.currentActive": "Current Active: {0}",
+  "modelAgent.activeProfile": "Active: {0}"
 }

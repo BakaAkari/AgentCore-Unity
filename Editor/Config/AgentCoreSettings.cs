@@ -1,13 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
-using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -47,7 +44,7 @@ namespace AgentCore.Editor.Config
 
         // --- 版本迁移 ---
         /// <summary>Current settings schema version. Bumped whenever migrations add/remove fields.</summary>
-        public const int CurrentVersion = 21;
+        public const int CurrentVersion = 22;
 
         /// <summary>Persisted schema version of this settings asset. Compared against <see cref="CurrentVersion"/> to trigger MigrateSettings.</summary>
         [SerializeField] private int settingsVersion = 0;
@@ -56,12 +53,9 @@ namespace AgentCore.Editor.Config
         // 用户 UI 可见字段 (共 ~10 个, 极简哲学: 只保留必要)
         // ═══════════════════════════════════════════════════════════════
 
-        // --- LLM connection (Model & Agent page, essential config) ---
-        [Tooltip("LLM API endpoint (OpenAI-compatible)")]
-        public string llmEndpoint = "http://172.16.248.60:8000/v1";
-
-        [Tooltip("LLM model name")]
-        public string llmModel = "glm-5.2";
+        // v1.13.0: LLM 连接配置(endpoint/model/apiKey)已迁移到 Provider Profile 系统。
+        // 单一真源 = active ProviderProfile,统一经 ActiveModelConfig 解析。
+        // 以下 temperature/maxTokens/reasoning* 保留为 Profile 未 override 时的全局 fallback 默认值。
 
         // v1.6.5+: temperature 和 maxTokens 已自适应化，不再暴露给用户
         // temperature 默认 0.7，maxTokens 由 ModelCapabilityProbe 探测的 max_model_len 自动计算
@@ -262,22 +256,6 @@ namespace AgentCore.Editor.Config
             {
                 MigrateSettings();
             }
-
-            // 若模型设置为自动获取, 则在延迟调用中异步获取模型列表
-            if (llmModel == "auto")
-            {
-                EditorApplication.delayCall += async () =>
-                {
-                    try
-                    {
-                        await FetchModelsAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        AgentCoreLog.Error($"[AgentCore] Failed to fetch models: {ex.Message}");
-                    }
-                };
-            }
         }
 
         /// <summary>
@@ -293,7 +271,7 @@ namespace AgentCore.Editor.Config
             }
 
             // v1-v16: 历史迁移(逻辑保留但精简日志)
-            if (settingsVersion < 5 && llmModel == "deepseek-chat") llmModel = "claude-sonnet-4-5";
+            // (v5 llmModel 默认值迁移已随 v22 移除 llmModel 字段而删除)
             if (settingsVersion < 5 && maxTokens == 4096) maxTokens = 16000;
             if (settingsVersion < 5 && reserveResponseTokens == 2000) reserveResponseTokens = 8000;
             if (settingsVersion < 9 && reserveResponseTokens == 8000) reserveResponseTokens = 32000;
@@ -343,6 +321,14 @@ namespace AgentCore.Editor.Config
                 }
             }
 
+            // v22: v1.13.0 Provider Profile 架构收敛 — 删除 legacy llmEndpoint/llmModel 字段。
+            // 无数据操作: 旧字段已从序列化结构中移除, 反序列化时自动丢弃其残留值。
+            // 用户需在 Project Settings > AgentCore > Model & Agent 重新配置(首次进入自动建 Default profile)。
+            if (settingsVersion < 22)
+            {
+                AgentCoreLog.Info("[AgentCore] Settings migrated from v21 to v22 (legacy llm endpoint/model fields removed, use Provider Profiles instead)");
+            }
+
             settingsVersion = CurrentVersion;
 
             EditorApplication.delayCall += () =>
@@ -378,52 +364,10 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
-        /// 异步获取 LLM 模型列表并设置第一个为默认模型。
-        /// </summary>
-        private async Task FetchModelsAsync()
-        {
-            if (string.IsNullOrEmpty(llmEndpoint))
-            {
-                AgentCoreLog.Warning("[AgentCore] LLM endpoint is empty, cannot fetch models.");
-                return;
-            }
-
-            var client = HttpClientFactory.GetClient();
-            var request = HttpClientFactory.CreateRequest(HttpMethod.Get, llmEndpoint + "/models");
-            var response = await client.SendAsync(request);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var content = await response.Content.ReadAsStringAsync();
-                var jobj = JsonHelper.ParseObject(content);
-                if (jobj != null && jobj.TryGetValue("data", out var jarr) && jarr is JArray models && models.Count > 0)
-                {
-                    var firstModel = models[0]["id"]?.ToString();
-                    if (!string.IsNullOrEmpty(firstModel))
-                    {
-                        llmModel = firstModel;
-                        SafeSave(true);
-                        AgentCoreLog.Info($"[AgentCore] Fetched models, set default to: {firstModel}");
-                    }
-                }
-                else
-                {
-                    AgentCoreLog.Warning($"[AgentCore] No models found in response: {content}");
-                }
-            }
-            else
-            {
-                AgentCoreLog.Error($"[AgentCore] Failed to fetch models: {response.StatusCode} {response.ReasonPhrase}");
-            }
-        }
-
-        /// <summary>
         /// 重置所有设置为默认值。
         /// </summary>
         public void ResetToDefaults()
         {
-            llmEndpoint = "http://172.16.248.60:8000/v1";
-            llmModel = "glm-5.2";
             temperature = 0.7f;
             maxTokens = 8192;
             selfChallengeEnabled = true;
@@ -504,22 +448,14 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
-        /// 获取完整的 LLM API Chat Completions URL。
-        /// </summary>
-        public string GetChatCompletionsUrl()
-        {
-            var baseUrl = llmEndpoint.TrimEnd('/');
-            return $"{baseUrl}/chat/completions";
-        }
-
-        /// <summary>
         /// v1.6.5+: 根据模型实际能力参数自适应调整配置。
         /// 在每次 LLM 调用前由 AgentLoop 调用，确保 maxTokens / reserveResponseTokens
         /// 与 ModelCapabilityProbe 探测到的 max_model_len 匹配。
+        /// v1.13.0: 模型名从 <see cref="ActiveModelConfig.ModelName"/> 解析(无 active profile 时抛异常)。
         /// </summary>
         public void ApplyAdaptiveDefaults()
         {
-            int maxModelLen = ModelCapabilityProbe.GetMaxModelLen(llmModel);
+            int maxModelLen = ModelCapabilityProbe.GetMaxModelLen(ActiveModelConfig.ModelName);
 
             // reserveResponseTokens = max_model_len * 4%，clamp [4096, 65536]
             int adaptiveReserve = Mathf.RoundToInt(maxModelLen * ReserveRatio);

@@ -13,13 +13,17 @@ namespace AgentCore.Editor.LLM
     public static class RequestEnrichment
     {
         /// <summary>
-        /// 将 ChatCompletionRequest 序列化为 JSON，并根据 Settings 配置注入额外字段。
+        /// 将 ChatCompletionRequest 序列化为 JSON，并根据 ActiveModelConfig 注入额外字段。
         /// 注入顺序：stream_options → reasoning → extraRequestBody → 清除 null 值。
+        /// <para>
+        /// 注意：此方法只负责"按 ActiveModelConfig 意图注入"，不做任何供应商判断——
+        /// 是否支持 reasoning 等字段完全由 <see cref="RequestPruningRegistry"/> 的
+        /// error-driven learning 路径判定（首次请求踩雷 → 学习 → 之后自动 strip）。
+        /// </para>
         /// </summary>
         /// <param name="request">强类型请求对象</param>
-        /// <param name="settings">当前设置实例</param>
         /// <returns>增强后的 JSON 字符串，可直接作为 HTTP body 发送</returns>
-        public static string BuildEnrichedJson(ChatCompletionRequest request, AgentCoreSettings settings)
+        public static string BuildEnrichedJson(ChatCompletionRequest request)
         {
             // Step 1: 序列化为 JObject（保留 null 移除语义由 JsonHelper 控制）
             var baseJson = JsonHelper.Serialize(request);
@@ -31,16 +35,18 @@ namespace AgentCore.Editor.LLM
                 InjectStreamOptions(body);
             }
 
-            // Step 3: 注入 reasoning 参数（当启用时）
-            if (settings.enableReasoningOutput)
+            // Step 3: 注入 reasoning 参数（若用户启用）。
+            // 白名单外的供应商由 client 层通过 RequestPruningRegistry 在发送前 strip 掉；
+            // 这里保持"按用户意图注入"的单一职责，不做供应商判断。
+            if (ActiveModelConfig.EnableReasoningOutput)
             {
-                InjectReasoning(body, settings.reasoningEffort, settings.reasoningMaxTokens);
+                InjectReasoning(body, ActiveModelConfig.ReasoningEffort, ActiveModelConfig.ReasoningMaxTokens);
             }
 
             // Step 4: 深度合并用户自定义 extra body
-            if (!string.IsNullOrWhiteSpace(settings.extraRequestBody))
+            if (!string.IsNullOrWhiteSpace(ActiveModelConfig.ExtraRequestBody))
             {
-                MergeExtraBody(body, settings.extraRequestBody);
+                MergeExtraBody(body, ActiveModelConfig.ExtraRequestBody);
             }
 
             // Step 5: 清除所有值为 null 的属性（防止某些 API 对 null 敏感）
