@@ -81,6 +81,29 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// </summary>
         public string[] ReadOnlyActions { get; set; } = System.Array.Empty<string>();
 
+        /// <summary>
+        /// Playmode 硬禁止 action 列表（v1.12+ ModifyRuntimeState）。
+        /// <para>
+        /// 这些 action 在 Playmode 中<b>无论工具 Capabilities 如何一律 Block</b>
+        /// （返回错误,不执行）。典型场景:涉及磁盘写、Domain Reload、Build、Package 安装
+        /// 的 action —— 它们与"运行时内存修改"语义冲突,且执行会破坏 Playmode 会话。
+        /// </para>
+        /// <para>
+        /// 未列入此处的 write action 在 Playmode 中<b>放行</b>,由工具内的
+        /// <see cref="Safety.PlaymodeWriteInterceptor"/> 拦截落盘 API 调用,转为运行时内存操作
+        /// (退出 Playmode 自然消失)。例如 manage_scriptable_object 的 "modify" 放行,
+        /// 但 "create"/"delete" 应列入此字段。
+        /// </para>
+        /// <para>
+        /// 大小写不敏感。默认空数组 —— 未声明的工具其所有 write action 在 Playmode 中放行
+        /// (落盘调用由 Interceptor 兜底拦截)。
+        /// </para>
+        /// <para>
+        /// 详见 plans/playmode-runtime-state-mutation.md §5.2 Action 分类规范。
+        /// </para>
+        /// </summary>
+        public string[] PlaymodeHardBlockedActions { get; set; } = System.Array.Empty<string>();
+
         // ---------------------------------------------------------------
         // G.3 ActiveToolScope — 工具可见性
         // 默认 AlwaysVisible，现有工具无需修改即可保持向后兼容。

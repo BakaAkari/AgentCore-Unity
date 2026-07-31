@@ -29,7 +29,10 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene,
-        ReadOnlyActions = new[] { "get_info" })]
+        ReadOnlyActions = new[] { "get_info" },
+        // v1.12+ ModifyRuntimeState: create (SaveAsPrefabAsset 落盘) 和 apply (写回 Prefab 资产文件) 硬禁止。
+        // instantiate/unpack/revert 只作用于场景运行时实例 (内存),Play Mode 中放行 —— 退出后自然消失。
+        PlaymodeHardBlockedActions = new[] { "create", "apply" })]
     public class ManagePrefabTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

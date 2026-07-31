@@ -37,7 +37,10 @@ namespace AgentCore.Editor.Tools.Native.Utility
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
-        ReadOnlyActions = new[] { "get_dependencies", "get_info", "search", "find_references" })]
+        ReadOnlyActions = new[] { "get_dependencies", "get_info", "search", "find_references" },
+        // v1.12+ ModifyRuntimeState: 所有 AssetDatabase 落盘/删除/移动操作在 Play Mode 中硬禁止。
+        // 这些操作直接写磁盘,与运行时内存修改语义冲突。Agent 运行时需临时对象应直接 Instantiate。
+        PlaymodeHardBlockedActions = new[] { "create_folder", "delete", "move", "copy", "import" })]
     public class ManageAssetTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

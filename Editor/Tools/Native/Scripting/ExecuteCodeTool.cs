@@ -171,6 +171,16 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                     "Code contains potentially dangerous operations (Process.Start, File.Delete, AppDomain.Unload, etc.). " +
                     "Remove the dangerous call before running.");
 
+            // v1.12+ ModifyRuntimeState: Play Mode 中禁止用户代码直接调用落盘/Domain Reload API,
+            // 否则会绕过 PlaymodeWriteInterceptor 把运行时脏状态写入磁盘。运行时修改应停留在内存。
+            if (UnityEditor.EditorApplication.isPlaying && ContainsPlaymodeForbiddenApi(code, out var forbiddenApi))
+                return ToolResponse.Fail(
+                    $"Code contains forbidden API '{forbiddenApi}' while in Play Mode. " +
+                    "Runtime code execution must not persist to disk or trigger Domain Reload — " +
+                    "such changes conflict with runtime-only mutation semantics. " +
+                    "Modify in-memory objects directly instead (e.g. component fields, ScriptableObject instances); " +
+                    "exit Play Mode first if you need to persist changes.");
+
             if (!TryBuildEvaluator(out object evaluator, out Type evType, out StringWriter errorSink, out string buildError))
                 return ToolResponse.Fail("Failed to initialize Mono.CSharp evaluator: " + buildError);
 
@@ -621,6 +631,47 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             };
 
             return dangerous.Any(p => code.Contains(p));
+        }
+
+        /// <summary>
+        /// v1.12+ ModifyRuntimeState: Play Mode 中额外禁止的落盘 / Domain Reload API。
+        /// <para>
+        /// execute_code 在 Play Mode 中允许执行 (运行时 REPL 是核心价值),但用户代码若直接调用
+        /// 落盘 API 会绕过 <see cref="Safety.PlaymodeWriteInterceptor"/> 的拦截,把运行时脏状态写入磁盘,
+        /// 破坏"运行时修改退出即消失"的语义。此处做静态扫描,命中即拒绝执行。
+        /// </para>
+        /// <para>
+        /// 反射绕过 (如 typeof(AssetDatabase).GetMethod("SaveAssets")) 无法被字符串扫描覆盖 ——
+        /// 这是已知残余风险 (plans §7.1),接受:反射写盘属于蓄意规避,非误用;且需用户确认才能执行。
+        /// </para>
+        /// </summary>
+        private static bool ContainsPlaymodeForbiddenApi(string code, out string hit)
+        {
+            hit = null;
+            string[] forbidden =
+            {
+                "SaveAssets",
+                "SaveAssetIfDirty",
+                "SaveScene",
+                "SaveOpenScenes",
+                "CreateAsset",
+                "SaveAsPrefabAsset",
+                "ApplyPrefabInstance",
+                "File.WriteAllText",
+                "File.WriteAllBytes",
+                "File.AppendAll",
+                "EditorApplication.Exit",
+                "AssetDatabase.ImportAsset"
+            };
+            foreach (var p in forbidden)
+            {
+                if (code.Contains(p))
+                {
+                    hit = p;
+                    return true;
+                }
+            }
+            return false;
         }
 
         #endregion

@@ -81,6 +81,34 @@ namespace AgentCore.Editor.Tools
         }
 
         /// <summary>
+        /// Playmode 硬禁止 action 列表（v1.12+ ModifyRuntimeState）。
+        /// <para>
+        /// 命中的 action 在 Playmode 中一律 Block (详见
+        /// plans/playmode-runtime-state-mutation.md §5.2)。默认空数组 —— 未声明的 write
+        /// action 在 Playmode 中放行,由 <see cref="Safety.PlaymodeWriteInterceptor"/> 兜底拦截落盘。
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<string> PlaymodeHardBlockedActions { get; }
+
+        /// <summary>
+        /// 判断给定 action 是否在 Playmode 硬禁止列表中（大小写不敏感）。
+        /// <para>
+        /// 供 <see cref="Safety.PlayModePreflight"/> 在分级放行逻辑中查询。
+        /// </para>
+        /// </summary>
+        public bool IsPlaymodeHardBlockedAction(string action)
+        {
+            if (string.IsNullOrWhiteSpace(action) || PlaymodeHardBlockedActions == null || PlaymodeHardBlockedActions.Count == 0)
+                return false;
+            for (int i = 0; i < PlaymodeHardBlockedActions.Count; i++)
+            {
+                if (string.Equals(PlaymodeHardBlockedActions[i], action, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 工具对 LLM 的可见性级别（G.3 ActiveToolScope）。
         /// 默认为 <see cref="ToolVisibility.AlwaysVisible"/>。
         /// </summary>
@@ -135,7 +163,8 @@ namespace AgentCore.Editor.Tools
             ToolCapability capabilities,
             bool requiresConfirmation,
             ToolVisibility visibility = ToolVisibility.AlwaysVisible,
-            IReadOnlyList<string> readOnlyActions = null)
+            IReadOnlyList<string> readOnlyActions = null,
+            IReadOnlyList<string> playmodeHardBlockedActions = null)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = description ?? throw new ArgumentNullException(nameof(description));
@@ -147,6 +176,7 @@ namespace AgentCore.Editor.Tools
             RequiresConfirmation = requiresConfirmation;
             Visibility = visibility;
             ReadOnlyActions = readOnlyActions ?? Array.Empty<string>();
+            PlaymodeHardBlockedActions = playmodeHardBlockedActions ?? Array.Empty<string>();
         }
 
         /// <summary>
@@ -161,7 +191,8 @@ namespace AgentCore.Editor.Tools
             ToolCapability capabilities,
             bool requiresConfirmation,
             ToolVisibility visibility,
-            IReadOnlyList<string> readOnlyActions = null)
+            IReadOnlyList<string> readOnlyActions = null,
+            IReadOnlyList<string> playmodeHardBlockedActions = null)
         {
             return new ToolMetadata(
                 Name,
@@ -173,7 +204,8 @@ namespace AgentCore.Editor.Tools
                 capabilities,
                 requiresConfirmation,
                 visibility,
-                readOnlyActions);
+                readOnlyActions,
+                playmodeHardBlockedActions);
         }
     }
 

@@ -32,7 +32,11 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         MayModifyScripts = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.ModifyScripts | ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles,
-        ReadOnlyActions = new[] { "analyze", "find_references", "get_info", "list", "read", "search" })]
+        ReadOnlyActions = new[] { "analyze", "find_references", "get_info", "list", "read", "search" },
+        // v1.12+ ModifyRuntimeState: 所有 .cs 源码 write action 在 Play Mode 中硬禁止。
+        // 理由:修改源码需 Domain Reload 才生效,而 Domain Reload 会退出 Play Mode —— 运行时改代码毫无意义。
+        // Agent 若需运行时验证逻辑,应改用 execute_code (运行时 REPL) 或直接改运行时对象字段。
+        PlaymodeHardBlockedActions = new[] { "write", "create", "delete", "add_method", "add_field" })]
     public class ManageScriptTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -146,5 +146,27 @@ namespace AgentCore.Editor.Utils
                 UnityEngine.Debug.LogError($"{message}\n{ex}");
             }
         }
+
+        /// <summary>
+        /// Playmode 运行时状态修改拦截日志 (v1.12+ ModifyRuntimeState)。
+        /// <para>
+        /// 当 <see cref="Safety.PlaymodeWriteInterceptor"/> 在 Playmode 中拦截落盘 API
+        /// (SaveAssets / SaveScene / WriteFile / CreateAsset 等) 时调用,记录为 Info 级,
+        /// 带有 <c>[PLAYMODE-INTERCEPT]</c> 前缀以便用户在 Console 中快速识别。
+        /// </para>
+        /// <para>
+        /// 这些日志帮助用户/Agent 理解"哪些修改是运行时内存操作,未落盘",
+        /// 对齐 plans/playmode-runtime-state-mutation.md §3.2 的设计。
+        /// </para>
+        /// </summary>
+        /// <param name="api">被拦截的 Unity API 名 (如 "AssetDatabase.SaveAssets")</param>
+        /// <param name="detail">拦截原因/跳过说明 (人类可读)</param>
+        public static void PlaymodeIntercept(string api, string detail)
+        {
+            if (CurrentLevel >= LogLevel.Info)
+            {
+                UnityEngine.Debug.Log($"[PLAYMODE-INTERCEPT] {api}: {detail}");
+            }
+        }
     }
 }

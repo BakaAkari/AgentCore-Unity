@@ -31,7 +31,10 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
-        ReadOnlyActions = new[] { "get", "find", "list_types", "export_json" })]
+        ReadOnlyActions = new[] { "get", "find", "list_types", "export_json" },
+        // v1.12+ ModifyRuntimeState: create/delete/duplicate 涉及 CreateAsset/DeleteAsset/CopyAsset 落盘,
+        // Play Mode 中硬禁止。set/set_batch/import_json 放行 (SaveAssets 由 PlaymodeWriteInterceptor 降级为运行时内存操作)。
+        PlaymodeHardBlockedActions = new[] { "create", "delete", "duplicate" })]
     public class ManageScriptableObjectTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -238,13 +241,17 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
             so.ApplyModifiedProperties();
             EditorUtility.SetDirty(asset);
-            AssetDatabase.SaveAssets();
+            var persisted = PlaymodeWriteInterceptor.SaveAssets();
 
             return ToolResponse.OkWithData(new
             {
                 path = assetPath,
                 property = propertyName,
-                newValue = GetSerializedPropertyValue(so.FindProperty(propertyName))
+                newValue = GetSerializedPropertyValue(so.FindProperty(propertyName)),
+                _runtime_only = !persisted,
+                _note = persisted
+                    ? null
+                    : "Property modified on in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged; value resets when the asset is reloaded from disk."
             }, $"Set '{propertyName}' on {assetPath}");
         }
 
@@ -404,12 +411,16 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             Undo.RecordObject(asset, "Import JSON to ScriptableObject");
             EditorJsonUtility.FromJsonOverwrite(json, asset);
             EditorUtility.SetDirty(asset);
-            AssetDatabase.SaveAssets();
+            var persisted = PlaymodeWriteInterceptor.SaveAssets();
 
             return ToolResponse.OkWithData(new
             {
                 path = assetPath,
-                typeName = asset.GetType().FullName
+                typeName = asset.GetType().FullName,
+                _runtime_only = !persisted,
+                _note = persisted
+                    ? null
+                    : "JSON imported to in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged."
             }, $"Imported JSON into {assetPath}");
         }
 
@@ -451,7 +462,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
             so.ApplyModifiedProperties();
             EditorUtility.SetDirty(asset);
-            AssetDatabase.SaveAssets();
+            var persisted = PlaymodeWriteInterceptor.SaveAssets();
 
             var data = new JObject
             {
@@ -461,6 +472,11 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             };
             if (errors.Count > 0)
                 data["errors"] = JArray.FromObject(errors);
+            if (!persisted)
+            {
+                data["_runtime_only"] = true;
+                data["_note"] = "Batch modifications applied to in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged.";
+            }
 
             return ToolResponse.OkWithData(data, $"Set {setCount}/{propsObj.Count} properties on {assetPath}");
         }

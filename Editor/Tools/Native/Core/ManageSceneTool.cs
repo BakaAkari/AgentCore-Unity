@@ -26,7 +26,14 @@ namespace AgentCore.Editor.Tools.Native.Core
             "Note: opening a new scene discards unsaved changes in the current scene unless saved first.",
         Category = "Scene", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene | ToolCapability.WriteProjectFiles,
-        ReadOnlyActions = new[] { "get_active", "get_hierarchy", "list", "get_build_scenes", "list_open_scenes" })]
+        ReadOnlyActions = new[] { "get_active", "get_hierarchy", "list", "get_build_scenes", "list_open_scenes" },
+        // v1.12+ ModifyRuntimeState: 场景切换/新建/合并/另存/构建配置在 Play Mode 中会中断运行或落盘,一律硬禁止。
+        // "save" 放行 (由 PlaymodeWriteInterceptor 降级为运行时 NoOp)。set_active/set_active_scene 是纯内存切换,放行。
+        PlaymodeHardBlockedActions = new[]
+        {
+            "create", "open", "open_scene", "new_scene", "save_scene_as",
+            "merge_scenes", "add_to_build"
+        })]
     public class ManageSceneTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -367,6 +374,20 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 bool saved;
                 string finalPath;
+
+                // v1.12+ ModifyRuntimeState: Play Mode 中场景修改仅在内存生效,SaveScene 被拦截器降级为 NoOp。
+                if (PlaymodeWriteInterceptor.IsPlaymodeActive)
+                {
+                    PlaymodeWriteInterceptor.SaveScene(activeScene,
+                        string.IsNullOrEmpty(scenePath) ? null : scenePath);
+                    return ToolResponse.OkWithData(new JObject
+                    {
+                        ["path"] = string.IsNullOrEmpty(scenePath) ? activeScene.path : scenePath,
+                        ["name"] = activeScene.name,
+                        ["_runtime_only"] = true,
+                        ["_note"] = "Scene NOT saved to disk (Play Mode). Runtime scene modifications are in-memory only and revert on exiting Play Mode. Exit Play Mode first to persist."
+                    }, $"Scene '{activeScene.name}' save skipped in Play Mode (runtime-only).");
+                }
 
                 if (!string.IsNullOrEmpty(scenePath))
                 {
