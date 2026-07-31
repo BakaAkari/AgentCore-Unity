@@ -15,7 +15,7 @@ namespace AgentCore.Editor.Core
     /// 探测内容：
     /// <list type="bullet">
     ///   <item>max_model_len — 模型实际 context window 大小（覆盖 ContextWindowManager.ModelPrefixMap 的硬编码）</item>
-    ///   <item>模型 ID — 用于验证 settings.llmModel 是否存在于服务器</item>
+    ///   <item>模型 ID — 用于验证 ActiveModelConfig.ModelName 是否存在于服务器</item>
     /// </list>
     /// </para>
     /// <para>

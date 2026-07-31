@@ -1,6 +1,6 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-07-28 | **当前版本**: v1.10.6 | **下一目标**: v1.11.0 (阶段 D — checklist prompt 治理 L/N/O/R) | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-07-31 | **当前版本**: v1.13.0 | **下一目标**: v1.14.0 (待规划) | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
@@ -11,7 +11,8 @@
 | 文档 | 用途 | 状态 |
 |------|------|------|
 | [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — Phase 6~9 路线图、任务清单、ADR 记录 | 活跃维护 |
-| [**v1.10.0/smoke-test-findings.md**](v1.10.0/smoke-test-findings.md) | **v1.10.x Windows 测试发现汇总** — 21 bugs (A~U)，13 已修 (v1.10.1~v1.10.6)，3 驳回 (H/F/P 伪 bug)，1 悬案 (I FrameDebugger)，4 待修 (阶段 D checklist prompt L/N/O/R) | ⚠️ 2026-07-28 需二次修订 |
+| [**v1.13.0/provider-profile-plan.md**](v1.13.0/provider-profile-plan.md) | **v1.13.0 Provider Profile 方案** — 多 Provider 配置管理设计文档 | ✅ 已实施 (v1.13.0) |
+| [**v1.10.0/smoke-test-findings.md**](v1.10.0/smoke-test-findings.md) | **v1.10.x Windows 测试发现汇总** — 21 bugs (A~U)，全部已修或驳回 | ✅ 已完成 |
 | [**v1.10.0-system-capability-assessment.md**](v1.10.0-system-capability-assessment.md) | **v1.10.0 系统能力评估** — 92→89/100 (Windows 测试后下调)，包含 Part 9 修订 | ⚠️ 2026-07-27 修订 |
 | [**v1.10.0-adversarial-audit.md**](v1.10.0-adversarial-audit.md) | **v1.10.0 对抗性闭环校验** — 95%→85% (Windows 测试后下调)，包含附录 C 修订 | ⚠️ 2026-07-27 修订 |
 | [**v1.10.0-handoff.md**](v1.10.0-handoff.md) | **v1.10.0 开发交接文档** — 6 个 P1 工具增强 (G04/G05/G06/G07/G08/G09) | ✅ 已发布 |
@@ -23,17 +24,15 @@
 | [**llm-agent-architecture-remediation-plan.md**](llm-agent-architecture-remediation-plan.md) | **LLM/Agent 架构安全治理准则** — Tool Risk Policy / WorkspacePathPolicy / Lazy Tool Discovery；Phase 7/8 前置依据 | 活跃维护，长期治理约束 |
 | [**mcp-server-feasibility.md**](mcp-server-feasibility.md) | **MCP Server 可行性方案（Phase 8）** — 外部 IDE / CLI 通过 MCP 调用 Unity 工具 | 设计基线完成，待启动 |
 
-### v1.10.x Patch 历史
+### 版本历史（最近）
 
 | 版本 | 发布日期 | 主要变更 | 文档 |
 |------|---------|---------|------|
-| **v1.10.6** | 2026-07-28 | v1.11 阶段 C — Bug T/U/V/B/D 剩余瑕疵批处理 (path normalize / top_n no-op 明示 / validation error 不计 fail / total_matches 字段 / asset_filter sub-asset 泄漏) | [CHANGELOG.md](../CHANGELOG.md#v1106) |
-| **v1.10.5** | 2026-07-28 | v1.11 阶段 B — Bug X/Q Play Mode + governance 只读白名单粒度 (PlayModePreflight 消费 ReadOnlyActions + ToolRiskPolicy.RequiresConfirmation gate；顺带 12 个只读 action 不再弹面板) | [CHANGELOG.md](../CHANGELOG.md#v1105) |
-| **v1.10.4** | 2026-07-28 | v1.11 阶段 A — Bug C 响应压缩三层防护 (hard cap + list_stats limit + LLM 压缩兜底) + Bug F' tool_calls JSON 归 OpenAI 嵌套 schema + Bug Y execute_code URP/HDRP 动态引用 (无 tag, package.json 未 bump; commit fbe6803) | [CHANGELOG.md](../CHANGELOG.md#v1104) |
-| **v1.10.3** | 2026-07-27 | Bug S — MemoryProfiler API drift 4-tier fallback | [CHANGELOG.md](../CHANGELOG.md#v1103) |
-| **v1.10.2** | 2026-07-27 | Bug E/K — GLM provider 类型转换双层防御 (Validator + Handler) | [CHANGELOG.md](../CHANGELOG.md#v1102) |
-| **v1.10.1** | 2026-07-25 | Bug B1/B2 — batch_execute 截断 + Windows 路径规范化 (PathUtils) | [CHANGELOG.md](../CHANGELOG.md#v1101) |
-| **v1.10.0** | 2026-07-24 | G04 MemoryProfiler + 6 P1 工具增强 (G05/G06/G07/G08/G09) | [v1.10.0-handoff.md](v1.10.0-handoff.md) |
+| **v1.13.0** | 2026-07-31 | Provider Profile 系统 + Error-driven Request Pruning + RequestPruningRegistry EditorPrefs 持久化 + tool_call.id 跨供应商清洗 | [CHANGELOG.md](../CHANGELOG.md#1130) |
+| **v1.12.0-alpha.7** | 2026-07-29 | Prompt-code 一致性 + 死代码清理 + Category 统一 | [CHANGELOG.md](../CHANGELOG.md#1120-alpha7) |
+| **v1.12.0-alpha.1~6** | 2026-07-28~29 | Session Organization — tag registry / 归档区 / 自动命名 debounce / 移除 Silent mode | [CHANGELOG.md](../CHANGELOG.md) |
+| **v1.10.6** | 2026-07-28 | v1.11 hardening 阶段 C — Bug T/U/V/B/D | [CHANGELOG.md](../CHANGELOG.md#v1106) |
+| **v1.10.0~v1.10.5** | 2026-07-24~28 | G04 MemoryProfiler + P1 工具增强 + v1.11 hardening A/B | [v1.10.0-handoff.md](v1.10.0-handoff.md) |
 
 ---
 

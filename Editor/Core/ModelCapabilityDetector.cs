@@ -48,7 +48,7 @@ namespace AgentCore.Editor.Core
         /// 判定模型是否具备 native reasoning 能力。
         /// 匹配规则:模型名以表中任一前缀开头(OrdinalIgnoreCase)即视为具备。
         /// </summary>
-        /// <param name="modelName">模型标识(来自 AgentCoreSettings.llmModel)</param>
+        /// <param name="modelName">模型标识(来自 ActiveModelConfig.ModelName)</param>
         /// <returns>true=具备 native reasoning,Self-Challenge 应逃逸;false=未知或不具备,走自挑战</returns>
         public static bool HasNativeReasoning(string modelName)
         {
