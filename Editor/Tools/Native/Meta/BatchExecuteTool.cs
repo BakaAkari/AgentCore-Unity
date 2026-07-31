@@ -39,11 +39,6 @@ namespace AgentCore.Editor.Tools.Native.Meta
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
             ""type"": ""object"",
             ""properties"": {
-                ""action"": {
-                    ""type"": ""string"",
-                    ""enum"": [""execute""],
-                    ""description"": ""Action to perform (currently only 'execute')""
-                },
                 ""operations"": {
                     ""type"": ""array"",
                     ""description"": ""List of tool operations to execute sequentially"",

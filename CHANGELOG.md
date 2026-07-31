@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-07-31
+
+### GA 发布说明
+
+v1.13.0 正式版，整合 alpha.1~alpha.3 三阶段工作（详见下方各 alpha 条目）：
+
+- **Provider Profile 系统**：多 Provider 配置一键切换，`ActiveModelConfig` 作为唯一读取入口，legacy `llmEndpoint`/`llmModel` 字段删除（破坏性变更）。
+- **Error-driven Request Pruning**：收到供应商 400 时自动学习禁字段，按 `endpoint + model` 缓存并自动重试。
+- **`RequestPruningRegistry` EditorPrefs 持久化**：学习结果跨 Editor 重启保留，UI 提供 "Clear Learned Request Rules" 手动兜底。
+- **`providerHint` 彻底删除**：粒度错配（挂 profile/endpoint 层但 reasoning 支持是 model 层属性）修复，改纯 error-driven。
+- **`tool_call.id` 跨供应商清洗**：非法字符统一替换，修复 fallback 到 Bedrock 时的 400。
+
+### Fixed — 对抗式校验收尾
+
+发布后对全系统做对抗式一致性校验（文档-代码状态、工具层闭合性、L10n 完整性、Settings 迁移链），发现并修复：
+
+- `AGENTS.md` / `README.md` / `plans/ROADMAP.md` / `plans/README.md` 多处版本号与工具数量过期未同步（v1.8.0 → v1.13.0，51 → 56 个 AgentTool）。
+- `plans/README.md`、`plans/ROADMAP.md` 共 8 处死链接（指向已删除或已移动的归档文档）清理/修复。
+
 ## [1.13.0-alpha.3] - 2026-07-30
 
 ### Changed — Model & Agent 设置页精简

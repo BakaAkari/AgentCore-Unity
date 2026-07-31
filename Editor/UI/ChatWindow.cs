@@ -522,7 +522,7 @@ namespace AgentCore.Editor.UI
                 RefreshSessionList();
 
                 // 清除"初始化中"状态
-                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.ready", "就绪"), false);
+                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.idle", "就绪"), false);
             }
             catch (Exception ex)
             {

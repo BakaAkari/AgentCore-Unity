@@ -170,7 +170,7 @@ namespace AgentCore.Editor.UI
                 card.AddToClassList("domain-reload-notification--error");
                 if (statusIcon != null) statusIcon.text = "";
 
-                var failText = AgentCore.Editor.L10n.Loc.Tr("domainReload.status.failed", "恢复失败");
+                var failText = AgentCore.Editor.L10n.Loc.Tr("domainReload.recoverStatus.failed", "恢复失败");
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
                     failText += $"：{errorMessage}";

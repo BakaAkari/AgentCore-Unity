@@ -26,7 +26,7 @@ AgentCore Unity 是一个 Editor-only UPM package。它不是通用代码 Agent 
 ### Unity 原生工具系统
 
 - 基于 `[AgentTool]` + `IAgentTool` 的反射自动发现
-- 当前源码中约 **51 个 AgentTool 声明**，覆盖场景、对象、组件、脚本、Prefab、资源、材质、Shader、导入设置、UI、相机、物理、光照、音频、Timeline、Cinemachine、ProBuilder、构建、测试、清理、优化、文件系统、Memory、LightRAG、Indexing、VCS 等能力域
+- 当前源码中约 **56 个 AgentTool 声明**，覆盖场景、对象、组件、脚本、Prefab、资源、材质、Shader、导入设置、UI、相机、物理、光照、音频、Timeline、Cinemachine、ProBuilder、构建、测试、清理、优化、文件系统、Memory、LightRAG、Indexing、VCS 等能力域
 - 工具执行统一经过 schema 校验、Dispatcher 分发、主线程调度与异常包装
 
 ### Tool Governance

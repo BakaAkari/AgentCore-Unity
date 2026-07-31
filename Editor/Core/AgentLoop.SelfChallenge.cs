@@ -132,7 +132,7 @@ namespace AgentCore.Editor.Core
 
             // ADR: self-challenge-model-tier-escape — 高级模型具备 native reasoning,
             // 自挑战与其重复 → 逃逸 Node A, 依赖 native thinking。extractor 仍常驻兜底剥离。
-            // 热插拔: 每轮实时读取 selfChallengeEscapeEnabled + llmModel, 不缓存。
+            // 热插拔: 每轮实时读取 selfChallengeEscapeEnabled + ActiveModelConfig.ModelName, 不缓存。
             if (settings.selfChallengeEscapeEnabled &&
                 ModelCapabilityDetector.HasNativeReasoning(ActiveModelConfig.ModelName))
             {

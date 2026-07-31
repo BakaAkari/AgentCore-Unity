@@ -28,10 +28,10 @@
 
 | 版本 | 发布日期 | 主要变更 | 文档 |
 |------|---------|---------|------|
-| **v1.13.0** | 2026-07-31 | Provider Profile 系统 + Error-driven Request Pruning + RequestPruningRegistry EditorPrefs 持久化 + tool_call.id 跨供应商清洗 | [CHANGELOG.md](../CHANGELOG.md#1130) |
-| **v1.12.0-alpha.7** | 2026-07-29 | Prompt-code 一致性 + 死代码清理 + Category 统一 | [CHANGELOG.md](../CHANGELOG.md#1120-alpha7) |
+| **v1.13.0** | 2026-07-31 | Provider Profile 系统 + Error-driven Request Pruning + RequestPruningRegistry EditorPrefs 持久化 + tool_call.id 跨供应商清洗 | [CHANGELOG.md](../CHANGELOG.md#1130---2026-07-31) |
+| **v1.12.0-alpha.7** | 2026-07-29 | Prompt-code 一致性 + 死代码清理 + Category 统一 | [CHANGELOG.md](../CHANGELOG.md#1120-alpha7---2026-07-29) |
 | **v1.12.0-alpha.1~6** | 2026-07-28~29 | Session Organization — tag registry / 归档区 / 自动命名 debounce / 移除 Silent mode | [CHANGELOG.md](../CHANGELOG.md) |
-| **v1.10.6** | 2026-07-28 | v1.11 hardening 阶段 C — Bug T/U/V/B/D | [CHANGELOG.md](../CHANGELOG.md#v1106) |
+| **v1.10.6** | 2026-07-28 | v1.11 hardening 阶段 C — Bug T/U/V/B/D | [CHANGELOG.md](../CHANGELOG.md#1106---2026-07-28) |
 | **v1.10.0~v1.10.5** | 2026-07-24~28 | G04 MemoryProfiler + P1 工具增强 + v1.11 hardening A/B | [v1.10.0-handoff.md](v1.10.0-handoff.md) |
 
 ---
@@ -105,8 +105,6 @@
 | [context-compression-implementation.md](_archive/features/context-compression-implementation.md) | v0.5.0 | 上下文压缩实施文档 |
 | [context-visualization-plan.md](_archive/features/context-visualization-plan.md) | v0.5.2 | 上下文压缩可视化 |
 | [version-control-integration-plan.md](_archive/features/version-control-integration-plan.md) | v0.5.4~v0.5.5 | 版本控制集成 |
-| [workspace-foundation-v0.9.0-p0-plan.md](_archive/features/workspace-foundation-v0.9.0-p0-plan.md) | v0.9.0 | Workspace 基础设施 P0 |
-| [codebase-indexing-phase1-plan.md](_archive/features/codebase-indexing-phase1-plan.md) | v0.9.1 | 代码库索引 Phase 1 |
 | [codebase-indexing-phase2-plan.md](_archive/features/codebase-indexing-phase2-plan.md) | v0.9.3 | 代码库索引 Phase 2 — SQLite 迁移 + 依赖图 + FTS5 |
 | [vcs-treeview-refactor-plan.md](_archive/features/vcs-treeview-refactor-plan.md) | ~~废弃~~ | VCS Panel TreeView（改为扁平列表） |
 
@@ -122,10 +120,6 @@
 | [mem0-vs-openmemory-analysis.md](_archive/analysis/mem0-vs-openmemory-analysis.md) | 技术选型 | mem0 Server vs OpenMemory MCP |
 | [mem0-settings-optimization.md](_archive/analysis/mem0-settings-optimization.md) | UX 优化 | Memory Service 设置界面优化 |
 | [context-compression-llm-analysis.md](_archive/analysis/context-compression-llm-analysis.md) | 技术选型 | 上下文压缩 LLM 分离式/统一式选型 |
-| [ai-coding-assistants-analysis.md](_archive/analysis/ai-coding-assistants-analysis.md) | 竞品分析 | Cursor / Cline / Roo Code / OpenCode / Hermes 对比 |
-| [ARCHITECTURE.md](_archive/analysis/ARCHITECTURE.md) | 架构参考 | 系统架构总览 v0.4.8 |
-| [enterprise-agentcore-implementation-audit.md](_archive/analysis/enterprise-agentcore-implementation-audit.md) | 适配审计 | 已实现功能企业级适配审计 |
-| [teamcity-svn-unity-build-quality-plan.md](_archive/analysis/teamcity-svn-unity-build-quality-plan.md) | 外部方案 | Unity + SVN + TeamCity 构建质量治理草案 |
 
 ---
 
