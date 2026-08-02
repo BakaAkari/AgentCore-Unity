@@ -32,9 +32,11 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
         ReadOnlyActions = new[] { "get", "find", "list_types", "export_json" },
-        // v1.12+ ModifyRuntimeState: create/delete/duplicate 涉及 CreateAsset/DeleteAsset/CopyAsset 落盘,
-        // Play Mode 中硬禁止。set/set_batch/import_json 放行 (SaveAssets 由 PlaymodeWriteInterceptor 降级为运行时内存操作)。
-        PlaymodeHardBlockedActions = new[] { "create", "delete", "duplicate" })]
+        // v1.13+ 白名单反转: create/delete/duplicate 涉及 CreateAsset/DeleteAsset/CopyAsset 落盘,
+        // Play Mode 中硬禁止。set/set_batch/import_json 已验证走 PlaymodeWriteInterceptor.SaveAssets(),
+        // 落盘被降级为运行时内存操作,登记进白名单放行。
+        PlaymodeHardBlockedActions = new[] { "create", "delete", "duplicate" },
+        PlaymodeRuntimeSafeActions = new[] { "set", "set_batch", "import_json" })]
     public class ManageScriptableObjectTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -234,7 +236,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (prop == null)
                 return ToolResponse.Fail($"Property '{propertyName}' not found on {asset.GetType().Name}. Use 'get' action to list available properties.");
 
-            Undo.RecordObject(asset, $"Set {propertyName}");
+            PlaymodeAssetRevertGuard.SnapshotBeforeFirstEdit(asset);
+            PlaymodeUndoGuard.RecordObject(asset, $"Set {propertyName}");
 
             if (!SetSerializedPropertyValue(prop, valueToken))
                 return ToolResponse.Fail($"Failed to set property '{propertyName}' — unsupported type: {prop.propertyType}");
@@ -251,7 +254,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 _runtime_only = !persisted,
                 _note = persisted
                     ? null
-                    : "Property modified on in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged; value resets when the asset is reloaded from disk."
+                    : "Property modified on in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged; in-memory value auto-reverts to pre-Play-Mode state on Stop."
             }, $"Set '{propertyName}' on {assetPath}");
         }
 
@@ -408,7 +411,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (asset == null)
                 return ToolResponse.Fail($"ScriptableObject not found at: {assetPath}");
 
-            Undo.RecordObject(asset, "Import JSON to ScriptableObject");
+            PlaymodeAssetRevertGuard.SnapshotBeforeFirstEdit(asset);
+            PlaymodeUndoGuard.RecordObject(asset, "Import JSON to ScriptableObject");
             EditorJsonUtility.FromJsonOverwrite(json, asset);
             EditorUtility.SetDirty(asset);
             var persisted = PlaymodeWriteInterceptor.SaveAssets();
@@ -420,7 +424,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 _runtime_only = !persisted,
                 _note = persisted
                     ? null
-                    : "JSON imported to in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged."
+                    : "JSON imported to in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged; in-memory value auto-reverts to pre-Play-Mode state on Stop."
             }, $"Imported JSON into {assetPath}");
         }
 
@@ -440,7 +444,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 return ToolResponse.Fail($"ScriptableObject not found at: {assetPath}");
 
             var so = new SerializedObject(asset);
-            Undo.RecordObject(asset, "Set ScriptableObject Batch");
+            PlaymodeAssetRevertGuard.SnapshotBeforeFirstEdit(asset);
+            PlaymodeUndoGuard.RecordObject(asset, "Set ScriptableObject Batch");
 
             int setCount = 0;
             var errors = new List<string>();
@@ -475,7 +480,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (!persisted)
             {
                 data["_runtime_only"] = true;
-                data["_note"] = "Batch modifications applied to in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged.";
+                data["_note"] = "Batch modifications applied to in-memory instance only; NOT persisted to disk (Play Mode). Disk .asset file unchanged; in-memory value auto-reverts to pre-Play-Mode state on Stop.";
             }
 
             return ToolResponse.OkWithData(data, $"Set {setCount}/{propsObj.Count} properties on {assetPath}");

@@ -27,13 +27,15 @@ namespace AgentCore.Editor.Tools.Native.Core
         Category = "Scene", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene | ToolCapability.WriteProjectFiles,
         ReadOnlyActions = new[] { "get_active", "get_hierarchy", "list", "get_build_scenes", "list_open_scenes" },
-        // v1.12+ ModifyRuntimeState: 场景切换/新建/合并/另存/构建配置在 Play Mode 中会中断运行或落盘,一律硬禁止。
-        // "save" 放行 (由 PlaymodeWriteInterceptor 降级为运行时 NoOp)。set_active/set_active_scene 是纯内存切换,放行。
+        // v1.13+ 白名单反转: 场景切换/新建/合并/另存/构建配置在 Play Mode 中会中断运行或落盘,一律硬禁止。
         PlaymodeHardBlockedActions = new[]
         {
             "create", "open", "open_scene", "new_scene", "save_scene_as",
             "merge_scenes", "add_to_build"
-        })]
+        },
+        // "save" 已验证走 PlaymodeWriteInterceptor.SaveScene() 降级为运行时 NoOp;
+        // set_active/set_active_scene 内部只调 SceneManager.SetActiveScene (纯内存切换,不落盘)。
+        PlaymodeRuntimeSafeActions = new[] { "save", "set_active", "set_active_scene" })]
     public class ManageSceneTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

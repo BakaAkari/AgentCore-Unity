@@ -89,20 +89,36 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// 的 action —— 它们与"运行时内存修改"语义冲突,且执行会破坏 Playmode 会话。
         /// </para>
         /// <para>
-        /// 未列入此处的 write action 在 Playmode 中<b>放行</b>,由工具内的
-        /// <see cref="Safety.PlaymodeWriteInterceptor"/> 拦截落盘 API 调用,转为运行时内存操作
-        /// (退出 Playmode 自然消失)。例如 manage_scriptable_object 的 "modify" 放行,
-        /// 但 "create"/"delete" 应列入此字段。
-        /// </para>
-        /// <para>
-        /// 大小写不敏感。默认空数组 —— 未声明的工具其所有 write action 在 Playmode 中放行
-        /// (落盘调用由 Interceptor 兜底拦截)。
+        /// 大小写不敏感。默认空数组。
         /// </para>
         /// <para>
         /// 详见 plans/playmode-runtime-state-mutation.md §5.2 Action 分类规范。
         /// </para>
         /// </summary>
         public string[] PlaymodeHardBlockedActions { get; set; } = System.Array.Empty<string>();
+
+        /// <summary>
+        /// Playmode 运行时安全 action 白名单（v1.13+ 白名单反转，fail-closed）。
+        /// <para>
+        /// write 类工具（Capabilities 命中 write 能力位）的 write action，在 Playmode 中
+        /// <b>默认硬禁止</b>，只有列在本白名单中的 action 才放行执行。
+        /// </para>
+        /// <para>
+        /// 登记条件（二选一）：
+        /// (a) action 内部所有落盘调用已改用 <see cref="Safety.PlaymodeWriteInterceptor"/> 包装，
+        ///     退出 Playmode 后磁盘状态不受影响（如 manage_scriptable_object 的 "set"）；
+        /// (b) action 本身只操作内存/运行时实例，不落盘（如 manage_prefab 的 "instantiate"/"unpack"/"revert"）。
+        /// </para>
+        /// <para>
+        /// 未登记的 write action 在 Playmode 中一律 Block，避免遗漏声明导致意外落盘
+        /// （v1.12 alpha 的黑名单模型曾因此产生真实漏洞：ManageFileTool/CleanerTool 等工具
+        /// 未接入 Interceptor 也未列入黑名单，在 Playmode 中被默认放行后真实写盘/删盘）。
+        /// </para>
+        /// <para>
+        /// 大小写不敏感。默认空数组 —— 未显式登记的工具其所有 write action 在 Playmode 中硬禁止。
+        /// </para>
+        /// </summary>
+        public string[] PlaymodeRuntimeSafeActions { get; set; } = System.Array.Empty<string>();
 
         // ---------------------------------------------------------------
         // G.3 ActiveToolScope — 工具可见性

@@ -195,6 +195,12 @@ namespace AgentCore.Editor.Core
                 case TaskCanceledException _:
                     return true;
 
+                // v1.13+ SSE 流空闲超时看门狗 (StreamingResponseParser.ReadLineWithIdleTimeoutAsync)
+                // 抛出的 TimeoutException -> 判定为死连接，可重试 (显式类型判断，不依赖消息字符串
+                // 匹配 "timeout" —— 该异常消息描述的是空闲时长，未必含这个词，类型判断更可靠)。
+                case TimeoutException _:
+                    return true;
+
                 // HttpRequestException 需要进一步检查内容
                 case HttpRequestException httpEx:
                     return IsRetryableHttpError(httpEx);

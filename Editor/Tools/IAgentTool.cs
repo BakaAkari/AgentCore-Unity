@@ -84,8 +84,7 @@ namespace AgentCore.Editor.Tools
         /// Playmode 硬禁止 action 列表（v1.12+ ModifyRuntimeState）。
         /// <para>
         /// 命中的 action 在 Playmode 中一律 Block (详见
-        /// plans/playmode-runtime-state-mutation.md §5.2)。默认空数组 —— 未声明的 write
-        /// action 在 Playmode 中放行,由 <see cref="Safety.PlaymodeWriteInterceptor"/> 兜底拦截落盘。
+        /// plans/playmode-runtime-state-mutation.md §5.2)。默认空数组。
         /// </para>
         /// </summary>
         public IReadOnlyList<string> PlaymodeHardBlockedActions { get; }
@@ -103,6 +102,47 @@ namespace AgentCore.Editor.Tools
             for (int i = 0; i < PlaymodeHardBlockedActions.Count; i++)
             {
                 if (string.Equals(PlaymodeHardBlockedActions[i], action, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Playmode 运行时安全 action 白名单（v1.13+ ModifyRuntimeState 白名单反转）。
+        /// <para>
+        /// <b>fail-closed 设计</b>：write 类工具的 write action，在 Playmode 中<b>默认硬禁止</b>，
+        /// 只有显式登记在本白名单中的 action 才放行。放行前提：该 action 内部的落盘调用
+        /// 已全部改用 <see cref="Safety.PlaymodeWriteInterceptor"/> 包装（退出 Playmode 后
+        /// 磁盘状态不受影响），或该 action 本身只操作内存/运行时实例（如 instantiate/unpack/revert）。
+        /// </para>
+        /// <para>
+        /// 历史背景：v1.12 alpha 曾用"黑名单硬禁止、其余默认放行"的反向模型，但审查发现
+        /// 大量工具（ManageFileTool/CleanerTool/ManageCameraTool 等）声明了写能力或直接调用
+        /// 落盘 API，却未被列入黑名单也未接入 Interceptor —— 在 Playmode 中被默认放行后
+        /// 真实执行，与"运行时改动退出即消失"的核心语义矛盾。v1.13 改为白名单模型堵住此类漏洞：
+        /// 未显式验证的 write action 一律硬禁止，避免任何工具因遗漏声明而意外在 Playmode 落盘。
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<string> PlaymodeRuntimeSafeActions { get; }
+
+        /// <summary>
+        /// 判断给定 action 是否在 Playmode 运行时安全白名单中（大小写不敏感）。
+        /// <para>
+        /// 特殊值 <c>"*"</c>：整工具级放行，仅用于没有 discrete action 字段、
+        /// 且工具自身已实现独立运行时安全防护的工具（如 execute_code 的
+        /// <c>ContainsPlaymodeForbiddenApi</c> 静态代码扫描）。谨慎使用 —— 该值会让
+        /// 白名单机制对这个工具完全失效，安全性完全依赖工具自身实现。
+        /// </para>
+        /// </summary>
+        public bool IsPlaymodeRuntimeSafeAction(string action)
+        {
+            if (PlaymodeRuntimeSafeActions == null || PlaymodeRuntimeSafeActions.Count == 0)
+                return false;
+            for (int i = 0; i < PlaymodeRuntimeSafeActions.Count; i++)
+            {
+                if (string.Equals(PlaymodeRuntimeSafeActions[i], "*", StringComparison.Ordinal))
+                    return true;
+                if (string.Equals(PlaymodeRuntimeSafeActions[i], action, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
             return false;
@@ -164,7 +204,8 @@ namespace AgentCore.Editor.Tools
             bool requiresConfirmation,
             ToolVisibility visibility = ToolVisibility.AlwaysVisible,
             IReadOnlyList<string> readOnlyActions = null,
-            IReadOnlyList<string> playmodeHardBlockedActions = null)
+            IReadOnlyList<string> playmodeHardBlockedActions = null,
+            IReadOnlyList<string> playmodeRuntimeSafeActions = null)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = description ?? throw new ArgumentNullException(nameof(description));
@@ -177,6 +218,7 @@ namespace AgentCore.Editor.Tools
             Visibility = visibility;
             ReadOnlyActions = readOnlyActions ?? Array.Empty<string>();
             PlaymodeHardBlockedActions = playmodeHardBlockedActions ?? Array.Empty<string>();
+            PlaymodeRuntimeSafeActions = playmodeRuntimeSafeActions ?? Array.Empty<string>();
         }
 
         /// <summary>
@@ -192,7 +234,8 @@ namespace AgentCore.Editor.Tools
             bool requiresConfirmation,
             ToolVisibility visibility,
             IReadOnlyList<string> readOnlyActions = null,
-            IReadOnlyList<string> playmodeHardBlockedActions = null)
+            IReadOnlyList<string> playmodeHardBlockedActions = null,
+            IReadOnlyList<string> playmodeRuntimeSafeActions = null)
         {
             return new ToolMetadata(
                 Name,
@@ -205,7 +248,8 @@ namespace AgentCore.Editor.Tools
                 requiresConfirmation,
                 visibility,
                 readOnlyActions,
-                playmodeHardBlockedActions);
+                playmodeHardBlockedActions,
+                playmodeRuntimeSafeActions);
         }
     }
 

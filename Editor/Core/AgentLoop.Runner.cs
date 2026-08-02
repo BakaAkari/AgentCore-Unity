@@ -788,10 +788,18 @@ namespace AgentCore.Editor.Core
 
         /// <summary>
         /// 从工具参数 JSON 中提取最能代表“操作目标”的键值。
+        /// <para>
+        /// 提取失败时 (无匹配的语义字段) 不再退化为固定空字符串 —— 那会让同一工具的所有
+        /// 不同调用被误判为“反复操作同一目标”(真实案例 v1.13.0: execute_code 每次代码内容
+        /// 完全不同，却因 target 全部为 '' 在第 7 次被强制中断；manage_scene/manage_editor
+        /// 同理)。改为对参数 JSON 内容取稳定摘要 (与 action 一起) 作为 fallback target ——
+        /// 参数内容不同则摘要不同，天然区分“真复读”与“外观相同工具名、实际不同操作”；
+        /// 参数内容确实相同才会摘要相同，此时判定为复读是正确的。
+        /// </para>
         /// </summary>
         /// <param name="toolName">工具名称</param>
         /// <param name="argumentsJson">工具参数 JSON 字符串</param>
-        /// <returns>目标键值；无法提取时返回空字符串</returns>
+        /// <returns>目标键值；语义字段和参数均为空时返回空字符串 (无操作内容，天然算同一目标)</returns>
         private static string ExtractToolTargetKey(string toolName, string argumentsJson)
         {
             if (string.IsNullOrEmpty(argumentsJson))
@@ -799,7 +807,7 @@ namespace AgentCore.Editor.Core
 
             var args = JsonHelper.ParseObject(argumentsJson);
             if (args == null)
-                return string.Empty;
+                return StableContentDigest(argumentsJson);
 
             // 优先匹配常见的路径/目标字段
             var candidateKeys = new[]
@@ -826,7 +834,32 @@ namespace AgentCore.Editor.Core
                 }
             }
 
-            return string.Empty;
+            // 无语义字段命中 (如 execute_code 的 'code'、manage_scene/manage_editor 的纯 action+state)
+            // —— 用参数内容整体的稳定摘要区分不同调用，而非退化为空字符串。
+            return StableContentDigest(argumentsJson);
+        }
+
+        /// <summary>
+        /// 对字符串内容生成稳定摘要 (跨进程/跨运行一致)，用作 repetition-brake 的 fallback target。
+        /// 不使用 <see cref="string.GetHashCode"/> —— .NET 该实现按进程加盐随机化，无法跨调用比较用途外的稳定性需求。
+        /// </summary>
+        private static string StableContentDigest(string content)
+        {
+            if (string.IsNullOrEmpty(content))
+                return string.Empty;
+
+            unchecked
+            {
+                // FNV-1a 32-bit —— 足够区分不同参数内容，无需密码学强度。
+                const uint fnvPrime = 16777619;
+                uint hash = 2166136261;
+                foreach (char c in content)
+                {
+                    hash ^= c;
+                    hash *= fnvPrime;
+                }
+                return hash.ToString("x8");
+            }
         }
 
         /// <summary>

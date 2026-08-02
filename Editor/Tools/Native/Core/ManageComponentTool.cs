@@ -30,7 +30,14 @@ namespace AgentCore.Editor.Tools.Native.Core
             "Note: componentType uses the class name (e.g. 'Rigidbody', 'BoxCollider', 'AudioSource'), not the full namespace.",
         Category = "Component", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene,
-        ReadOnlyActions = new[] { "get", "list", "get_components_batch" })]
+        ReadOnlyActions = new[] { "get", "list", "get_components_batch" },
+        // v1.13+ 白名单反转: 本工具全部 write action 只操作 Scene 内 Component (SetDirty + Undo.Record,
+        // 从不调用 SaveAssets/SaveScene 等落盘 API),是 Play Mode 运行时调试的核心场景,登记进白名单放行。
+        PlaymodeRuntimeSafeActions = new[]
+        {
+            "add", "remove", "modify", "set_enabled",
+            "add_batch", "remove_batch", "set_property_batch", "copy_component"
+        })]
     public class ManageComponentTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -188,7 +195,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     return ToolResponse.Fail($"Component '{componentTypeName}' already exists on '{go.name}' and does not allow multiples.");
                 }
 
-                var component = Undo.AddComponent(go, type);
+                var component = PlaymodeUndoGuard.AddComponent(go, type);
                 if (component == null)
                     return ToolResponse.Fail($"Failed to add component '{componentTypeName}' to '{go.name}'.");
 
@@ -235,7 +242,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 if (component is Transform)
                     return ToolResponse.Fail("Cannot remove the Transform component.");
 
-                Undo.DestroyObjectImmediate(component);
+                PlaymodeUndoGuard.DestroyObjectImmediate(component);
 
                 EditorUtility.SetDirty(go);
                 MarkSceneDirty(go);
@@ -466,9 +473,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 var successes = new JArray();
                 var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Add Components Batch");
+                int undoGroup = PlaymodeUndoGuard.BeginGroup("Add Components Batch");
 
                 foreach (var target in targets)
                 {
@@ -486,7 +491,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                         continue;
                     }
 
-                    var component = Undo.AddComponent(go, type);
+                    var component = PlaymodeUndoGuard.AddComponent(go, type);
                     if (component == null)
                     {
                         failures.Add(new JObject { ["target"] = target, ["error"] = $"Failed to add component '{componentTypeName}' to '{go.name}'." });
@@ -498,7 +503,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     successes.Add(new JObject { ["gameObject"] = go.name, ["instanceId"] = go.GetInstanceID(), ["componentType"] = type.FullName, ["componentInstanceId"] = component.GetInstanceID() });
                 }
 
-                Undo.CollapseUndoOperations(undoGroup);
+                PlaymodeUndoGuard.EndGroup(undoGroup);
                 return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Added component to {successes.Count} GameObject(s), {failures.Count} failure(s).");
             }
             catch (Exception ex)
@@ -522,9 +527,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 var successes = new JArray();
                 var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Remove Components Batch");
+                int undoGroup = PlaymodeUndoGuard.BeginGroup("Remove Components Batch");
 
                 foreach (var target in targets)
                 {
@@ -547,13 +550,13 @@ namespace AgentCore.Editor.Tools.Native.Core
                         continue;
                     }
 
-                    Undo.DestroyObjectImmediate(component);
+                    PlaymodeUndoGuard.DestroyObjectImmediate(component);
                     EditorUtility.SetDirty(go);
                     MarkSceneDirty(go);
                     successes.Add(new JObject { ["gameObject"] = go.name, ["instanceId"] = go.GetInstanceID(), ["removedType"] = componentTypeName });
                 }
 
-                Undo.CollapseUndoOperations(undoGroup);
+                PlaymodeUndoGuard.EndGroup(undoGroup);
                 return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Removed component from {successes.Count} GameObject(s), {failures.Count} failure(s).");
             }
             catch (Exception ex)
@@ -572,9 +575,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 var successes = new JArray();
                 var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Set Component Properties Batch");
+                int undoGroup = PlaymodeUndoGuard.BeginGroup("Set Component Properties Batch");
 
                 foreach (var token in items)
                 {
@@ -630,7 +631,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                         successes.Add(new JObject { ["target"] = go.name, ["componentType"] = componentTypeName, ["property"] = property });
                 }
 
-                Undo.CollapseUndoOperations(undoGroup);
+                PlaymodeUndoGuard.EndGroup(undoGroup);
                 return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Set {successes.Count} component propertie(s), {failures.Count} failure(s).");
             }
             catch (Exception ex)
@@ -704,7 +705,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 if (component is Transform)
                     return ToolResponse.Fail("Cannot copy the Transform component.");
 
-                Undo.RegisterCompleteObjectUndo(target, "Copy Component");
+                PlaymodeUndoGuard.RegisterCompleteObjectUndo(target, "Copy Component");
                 if (!ComponentUtility.CopyComponent(component) || !ComponentUtility.PasteComponentAsNew(target))
                     return ToolResponse.Fail($"Failed to copy component '{componentTypeName}' from '{source.name}' to '{target.name}'.");
 
@@ -1287,18 +1288,13 @@ namespace AgentCore.Editor.Tools.Native.Core
             return targets.Split(',').Select(t => t.Trim()).Where(t => !string.IsNullOrEmpty(t)).Distinct().ToList();
         }
 
+        /// <summary>
+        /// 标脏场景（或当前 Prefab Stage 场景）。转发到 <see cref="AgentCore.Editor.Tools.Safety.PlaymodeUndoGuard.MarkSceneDirty"/>：
+        /// Play Mode 中该调用是 no-op（<c>EditorSceneManager.MarkSceneDirty</c> 在 Play Mode 下会抛
+        /// "This cannot be used during play mode" 异常，已通过实机 DIAG 验证）。
+        /// </summary>
         private void MarkSceneDirty(GameObject go)
-        {
-            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
-            if (prefabStage != null)
-            {
-                EditorSceneManager.MarkSceneDirty(prefabStage.scene);
-            }
-            else
-            {
-                EditorSceneManager.MarkSceneDirty(go.scene);
-            }
-        }
+            => AgentCore.Editor.Tools.Safety.PlaymodeUndoGuard.MarkSceneDirty(go);
 
         #endregion
     }

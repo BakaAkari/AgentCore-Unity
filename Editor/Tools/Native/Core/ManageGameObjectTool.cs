@@ -26,7 +26,14 @@ namespace AgentCore.Editor.Tools.Native.Core
             "Note: 'target' accepts a name or hierarchy path (e.g. '/Canvas/Panel/Button'). Duplicate names return the first match — use find_gameobjects to disambiguate.",
         Category = "GameObject", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene,
-        ReadOnlyActions = new[] { "get_info" })]
+        ReadOnlyActions = new[] { "get_info" },
+        // v1.13+ 白名单反转: 本工具全部 write action 只操作 Scene 内 GameObject (SetDirty + Undo.Record,
+        // 从不调用 SaveAssets/SaveScene 等落盘 API),是 Play Mode 运行时调试的核心场景,登记进白名单放行。
+        PlaymodeRuntimeSafeActions = new[]
+        {
+            "create", "delete", "modify", "set_transform", "set_parent", "duplicate",
+            "create_batch", "modify_batch", "delete_batch", "set_active_batch"
+        })]
     public class ManageGameObjectTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -263,7 +270,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                 var name = go.name;
                 var instanceId = go.GetInstanceID();
 
-                Undo.DestroyObjectImmediate(go);
+                PlaymodeUndoGuard.DestroyObjectImmediate(go);
 
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Deleted GameObject '{name}'");
                 return ToolResponse.OkWithData(new JObject
@@ -461,9 +468,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 var successes = new JArray();
                 var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Create GameObjects Batch");
+                int undoGroup = PlaymodeUndoGuard.BeginGroup("Create GameObjects Batch");
 
                 foreach (var token in items)
                 {
@@ -504,7 +509,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["path"] = GetGameObjectPath(go) });
                 }
 
-                Undo.CollapseUndoOperations(undoGroup);
+                PlaymodeUndoGuard.EndGroup(undoGroup);
                 return ToolResponse.OkWithData(new JObject
                 {
                     ["succeeded"] = successes,
@@ -529,9 +534,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 var successes = new JArray();
                 var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Modify GameObjects Batch");
+                int undoGroup = PlaymodeUndoGuard.BeginGroup("Modify GameObjects Batch");
 
                 foreach (var token in items)
                 {
@@ -564,7 +567,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["path"] = GetGameObjectPath(go) });
                 }
 
-                Undo.CollapseUndoOperations(undoGroup);
+                PlaymodeUndoGuard.EndGroup(undoGroup);
                 return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Modified {successes.Count} GameObject(s), {failures.Count} failure(s).");
             }
             catch (Exception ex)
@@ -583,9 +586,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 var successes = new JArray();
                 var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Delete GameObjects Batch");
+                int undoGroup = PlaymodeUndoGuard.BeginGroup("Delete GameObjects Batch");
 
                 foreach (var name in names)
                 {
@@ -598,11 +599,11 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                     int instanceId = go.GetInstanceID();
                     string deletedName = go.name;
-                    Undo.DestroyObjectImmediate(go);
+                    PlaymodeUndoGuard.DestroyObjectImmediate(go);
                     successes.Add(new JObject { ["name"] = deletedName, ["instanceId"] = instanceId });
                 }
 
-                Undo.CollapseUndoOperations(undoGroup);
+                PlaymodeUndoGuard.EndGroup(undoGroup);
                 return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"Deleted {successes.Count} GameObject(s), {failures.Count} failure(s).");
             }
             catch (Exception ex)
@@ -661,9 +662,7 @@ namespace AgentCore.Editor.Tools.Native.Core
 
                 var successes = new JArray();
                 var failures = new JArray();
-                Undo.IncrementCurrentGroup();
-                int undoGroup = Undo.GetCurrentGroup();
-                Undo.SetCurrentGroupName("Set Active GameObjects Batch");
+                int undoGroup = PlaymodeUndoGuard.BeginGroup("Set Active GameObjects Batch");
 
                 foreach (var (name, active) in targets)
                 {
@@ -681,7 +680,7 @@ namespace AgentCore.Editor.Tools.Native.Core
                     successes.Add(new JObject { ["name"] = go.name, ["instanceId"] = go.GetInstanceID(), ["active"] = go.activeSelf });
                 }
 
-                Undo.CollapseUndoOperations(undoGroup);
+                PlaymodeUndoGuard.EndGroup(undoGroup);
                 return ToolResponse.OkWithData(new JObject { ["succeeded"] = successes, ["failed"] = failures, ["successCount"] = successes.Count, ["failureCount"] = failures.Count }, $"set_active_batch: {successes.Count} succeeded, {failures.Count} failed.");
             }
             catch (Exception ex)
@@ -849,18 +848,13 @@ namespace AgentCore.Editor.Tools.Native.Core
             return path;
         }
 
+        /// <summary>
+        /// 标脏场景（或当前 Prefab Stage 场景）。转发到 <see cref="AgentCore.Editor.Tools.Safety.PlaymodeUndoGuard.MarkSceneDirty"/>：
+        /// Play Mode 中该调用是 no-op（<c>EditorSceneManager.MarkSceneDirty</c> 在 Play Mode 下会抛
+        /// "This cannot be used during play mode" 异常，已通过实机 DIAG 验证）。
+        /// </summary>
         private void MarkSceneDirty(GameObject go)
-        {
-            var prefabStage = UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage();
-            if (prefabStage != null)
-            {
-                EditorSceneManager.MarkSceneDirty(prefabStage.scene);
-            }
-            else
-            {
-                EditorSceneManager.MarkSceneDirty(go.scene);
-            }
-        }
+            => AgentCore.Editor.Tools.Safety.PlaymodeUndoGuard.MarkSceneDirty(go);
 
         #endregion
     }

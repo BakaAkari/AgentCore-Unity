@@ -34,7 +34,15 @@ namespace AgentCore.Editor.Tools.Native.Meta
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyProjectSettings,
-        ReadOnlyActions = new[] { "get_info", "get_selection", "get_project_settings" })]
+        ReadOnlyActions = new[] { "get_info", "get_selection", "get_project_settings" },
+        // v1.13+ 白名单反转补漏: play_mode 只是编辑器状态机切换 (play/pause/stop/step),
+        // 不触达 ProjectSettings 磁盘文件、不触发 Domain Reload、不落盘 —— 与本工具声明的
+        // ModifyProjectSettings 硬禁止能力位语义完全无关，之前因白名单检查排在能力位检查之后
+        // 被误伤整体封死 (真实案例: play_mode:stop 是退出 Play Mode 的唯一工具路径都被拦，
+        // 只能绕行 execute_code 调 EditorApplication.isPlaying=false)。set_project_setting/
+        // refresh/set_selection 等真正写 ProjectSettings 或触发 reimport 的 action 不在此列，
+        // 仍受硬禁止能力位拦截。
+        PlaymodeRuntimeSafeActions = new[] { "play_mode" })]
     public class ManageEditorTool : IAgentTool
     {
         #region Schema

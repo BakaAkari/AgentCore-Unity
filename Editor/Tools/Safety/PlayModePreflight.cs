@@ -6,7 +6,7 @@ using UnityEngine;
 namespace AgentCore.Editor.Tools.Safety
 {
     /// <summary>
-    /// Play Mode 前置检查 (ADR: 1.6.4 §D3, v1.12+ ModifyRuntimeState 分级放行)。
+    /// Play Mode 前置检查 (ADR: 1.6.4 §D3, v1.13+ ModifyRuntimeState 白名单反转)。
     ///
     /// <para><b>历史策略 (v1.10.x ~ v1.11.x)</b>:所有 write 类工具在 Play Mode 中一律 Block。
     /// 理由:Play Mode 下磁盘文件修改与运行时状态不一致,可能导致修改不生效、退出时状态混乱。
@@ -14,16 +14,24 @@ namespace AgentCore.Editor.Tools.Safety
     /// v1.11+ (Bug X): ReadOnlyActions 白名单命中的 action 即便工具级是 write 类也放行。
     /// </para>
     ///
-    /// <para><b>当前策略 (v1.12+ ModifyRuntimeState)</b>:改为<b>分级放行</b>。
-    /// 详见 plans/playmode-runtime-state-mutation.md §3.4。
+    /// <para><b>v1.12 alpha 策略 (已废弃 — 存在真实漏洞)</b>:曾改为"黑名单硬禁止、其余默认放行"。
+    /// 审查发现该模型的假设（"未被列入硬禁止的 write action 都已接入 PlaymodeWriteInterceptor"）
+    /// 不成立：ManageFileTool/CleanerTool/ManageCameraTool 等多个工具声明了写能力或直接调用
+    /// AssetDatabase/File 落盘 API，既未接入 Interceptor 也未列入黑名单，在 Play Mode 中被
+    /// 默认放行后真实写盘/删盘，与"运行时改动退出即消失"的核心语义矛盾。
+    /// </para>
+    ///
+    /// <para><b>当前策略 (v1.13+ 白名单反转, fail-closed)</b>:
     /// <list type="bullet">
     ///   <item>Read action (工具 ReadOnlyActions 白名单命中) → 放行 (不变)</item>
     ///   <item>工具无 write 能力位 (Capabilities & WriteCapabilities == 0) → 放行 (不变)</item>
     ///   <item><b>硬禁止</b>:工具声明的 <c>PlaymodeHardBlockedActions</c> 命中,或工具 Capabilities
     ///     含 Build/Package/VCS write/ProjectSettings 等<b>触发 Domain Reload 或落盘的全局副作用</b>能力位 → Block</item>
-    ///   <item>其余 write action → <b>放行</b>,由工具内的 <see cref="PlaymodeWriteInterceptor"/>
-    ///     拦截落盘 API (SaveAssets/SaveScene/WriteFile/CreateAsset) 转为运行时内存操作
+    ///   <item><b>放行</b>:仅当 action 命中工具声明的 <c>PlaymodeRuntimeSafeActions</c> 白名单 →
+    ///     放行,由工具内的 <see cref="PlaymodeWriteInterceptor"/> 拦截落盘 API 转为运行时内存操作
     ///     (退出 Playmode 自然消失,等同 Inspector 拖值)</item>
+    ///   <item><b>其余 write action 一律硬禁止</b> (fail-closed 默认值) —— 未显式登记进白名单的
+    ///     write action,无论是否声明了硬禁止,都视为"未验证运行时安全"而拒绝执行。</item>
     /// </list>
     /// </para>
     /// </summary>
@@ -91,9 +99,9 @@ namespace AgentCore.Editor.Tools.Safety
             };
 
         /// <summary>
-        /// 主入口: 检查工具在 Play Mode 中是否被禁止执行 (v1.12+ 分级放行)。
+        /// 主入口: 检查工具在 Play Mode 中是否被禁止执行 (v1.13+ 白名单反转, fail-closed)。
         /// </summary>
-        /// <param name="metadata">工具元数据 (含 Capabilities / ReadOnlyActions / PlaymodeHardBlockedActions)</param>
+        /// <param name="metadata">工具元数据 (含 Capabilities / ReadOnlyActions / PlaymodeHardBlockedActions / PlaymodeRuntimeSafeActions)</param>
         /// <param name="action">当前调用的 action 名 (从 parameters["action"] 提取, 可为 null)</param>
         /// <param name="reason">若返回 true，输出对 LLM/用户可读的拒绝原因</param>
         /// <returns>true = 应该阻止执行；false = 放行</returns>
@@ -112,32 +120,46 @@ namespace AgentCore.Editor.Tools.Safety
             if (metadata.IsReadOnlyAction(action))
                 return false;
 
-            // v1.12+ ModifyRuntimeState: 硬禁止能力位 (Build/Package/VCS write/ProjectSettings 等)
-            // —— 这些操作触发 Domain Reload 或全局落盘,与运行时内存修改语义根本冲突。
-            if ((metadata.Capabilities & PlaymodeHardBlockedCapabilities) != 0)
-            {
-                reason =
-                    $"Play Mode 中禁止执行工具 '{metadata.Name}'。\n" +
-                    "原因：该工具触达 Build / Package / VCS 写 / ProjectSettings / AgentConfig / BatchExecute 等" +
-                    "会触发 Domain Reload 或全局落盘副作用的能力位，与运行时内存修改语义冲突，" +
-                    "执行会破坏 Play Mode 会话。\n" +
-                    "解决：请先退出 Play Mode 再重试。";
-                return true;
-            }
-
-            // v1.12+ ModifyRuntimeState: 硬禁止 action (工具声明 + 全局兜底)
-            // —— 涉及落盘 / Domain Reload / Build 的具体 action 一律 Block。
+            // v1.12+ ModifyRuntimeState: 硬禁止 action (工具声明 + 全局兜底) —— 检查顺序在
+            // 能力位/白名单判定之前。涉及落盘 / Domain Reload / Build 的具体 action 是最强显式
+            // 否决信号,即便该 action 后续被误放进白名单也优先拒绝 (defense in depth)。
             if (IsHardBlockedAction(metadata, action, out var hardReason))
             {
                 reason = hardReason;
                 return true;
             }
 
-            // 其余 write action 放行,交给工具内的 PlaymodeWriteInterceptor 拦截落盘调用,
-            // 转为运行时内存操作 (退出 Playmode 自然消失)。
-            // 工具若未改造 (未通过 Interceptor 路由落盘 API),其落盘调用会照常执行 ——
-            // 这是 Phase 2 全面改造前的已知过渡态,核心 3 工具 (SO/Scene/Script) 已在 Phase 1 改造。
-            return false;
+            // v1.13+ 白名单反转 (fail-closed): 只要 action 显式登记进 PlaymodeRuntimeSafeActions,
+            // 即可放行 —— 由工具内 PlaymodeWriteInterceptor 拦截落盘,转为运行时内存操作。
+            // 该判定必须先于下方的"硬禁止能力位"粗粒度检查:后者是工具级(而非 action 级)拦截,
+            // 若排在白名单之前会导致任何声明了硬禁止能力位的工具永远走不到白名单
+            // (真实案例 v1.13.0: manage_editor 声明 ModifyProjectSettings 能力位被整体 Block,
+            // 连 play_mode:stop 这个纯运行时状态切换、退出 Play Mode 的唯一工具路径也被误伤)。
+            if (metadata.IsPlaymodeRuntimeSafeAction(action))
+                return false;
+
+            // v1.12+ ModifyRuntimeState: 硬禁止能力位 (Build/Package/VCS write/ProjectSettings 等)
+            // —— 这些操作触发 Domain Reload 或全局落盘,与运行时内存修改语义根本冲突。
+            // 仅在上面的白名单未命中时才生效,即"未被显式验证为运行时安全"的 action 才受此粗粒度拦截。
+            if ((metadata.Capabilities & PlaymodeHardBlockedCapabilities) != 0)
+            {
+                reason =
+                    $"Play Mode 中禁止执行工具 '{metadata.Name}' 的 action '{action ?? "(unspecified)"}'。\n" +
+                    "原因：该工具触达 Build / Package / VCS 写 / ProjectSettings / AgentConfig / BatchExecute 等" +
+                    "会触发 Domain Reload 或全局落盘副作用的能力位，此 action 未被显式登记为运行时安全，" +
+                    "执行会破坏 Play Mode 会话。\n" +
+                    "解决：请先退出 Play Mode 再重试；如该 action 确实只产生运行时内存效果 (不触发 Domain Reload/落盘)，" +
+                    "应在工具的 [AgentTool] 特性中把它加入 PlaymodeRuntimeSafeActions 白名单。";
+                return true;
+            }
+
+            reason =
+                $"Play Mode 中禁止执行工具 '{metadata.Name}' 的 action '{action ?? "(unspecified)"}'。\n" +
+                "原因：该 action 未被显式登记为 Playmode 运行时安全 (PlaymodeRuntimeSafeActions)，" +
+                "无法确认其落盘调用已被 PlaymodeWriteInterceptor 拦截或本身不落盘，按 fail-closed 策略默认拒绝。\n" +
+                "解决：请先退出 Play Mode 再重试；如该 action 确实只产生运行时内存效果，" +
+                "应在工具的 [AgentTool] 特性中把它加入 PlaymodeRuntimeSafeActions 白名单。";
+            return true;
         }
 
         /// <summary>

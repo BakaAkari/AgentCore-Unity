@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-07-31
+
+### Changed — Playmode 写权限模型反转为白名单（fail-closed，破坏性变更）
+
+v1.12 alpha 引入的"黑名单硬禁止、其余默认放行"模型审查发现真实漏洞：`ManageFileTool`/`CleanerTool`/`ManageCameraTool` 等工具声明了写能力或直接调用落盘 API，却未列入黑名单也未接入 `PlaymodeWriteInterceptor`，Playmode 中被默认放行后真实执行，违反"运行时改动退出即消失"的核心安全承诺。
+
+- **`IAgentTool.PlaymodeRuntimeSafeActions` / `AgentToolAttribute.PlaymodeRuntimeSafeActions`**：新增白名单机制。write 类工具的 write action 在 Playmode 中默认硬禁止，只有显式登记的 action 才放行；登记条件为 (a) 内部落盘调用已全部接入 `PlaymodeWriteInterceptor`，或 (b) action 本身只操作内存/运行时实例（instantiate/unpack/revert 等）。
+- 特殊值 `"*"`：整工具级放行，仅用于自身已实现独立运行时安全防护的工具（如 `execute_code` 的静态代码扫描 `ContainsPlaymodeForbiddenApi`）。
+- 已核实并登记白名单的工具：`manage_component`（add/remove）、`manage_gameobject`、`manage_scriptable_object`（set）、`manage_prefab`（instantiate/unpack/revert）、`manage_scene`（save 走 no-op 降级）、`manage_editor`（play_mode 含 stop）。
+- **代价**：未来新增 write 工具若忘记登记白名单，Playmode 中会被硬禁止而非默默放行——这是有意的 fail-closed 设计取向（宁可误杀报错，不可漏放破坏磁盘状态）。
+
+### Fixed — manage_component:add 在 Playmode 报 "cannot be used during play mode"（根因修正）
+
+排查过程中两次误判：最初怀疑是 `Undo.AddComponent` 在 Playmode 下被引擎拒绝，改用 `PlaymodeUndoGuard.AddComponent`（`IsActive` 时走 `go.AddComponent` 分支）修复后，DIAG 日志实锤该分支正确执行、组件添加成功——但测试仍复现同一异常文本。
+
+- **真正根因**：`AddComponent` 成功后紧跟的标脏步骤调用了 `EditorSceneManager.MarkSceneDirty(go.scene)`，此 API 在 Playmode 下被 Unity 引擎硬拒绝，抛出与 `Undo.AddComponent` 异常文本完全相同的 `InvalidOperationException("...cannot be used during play mode")`，导致此前误判根因。
+- **修复**：新增 `PlaymodeUndoGuard.MarkSceneDirty(GameObject)`——Playmode 下 no-op（场景改动本就是运行时内存态，不落盘），Edit Mode 下转发 `EditorSceneManager.MarkSceneDirty` + PrefabStage 处理。`ManageComponentTool`/`ManageGameObjectTool` 的私有 `MarkSceneDirty` 方法体改为转发至 Guard，调用点不变。
+- 实机验证：Play Mode 中 `manage_component:add`/`remove` 均无报错，退出 Play Mode 后场景与磁盘状态符合预期（详见 A-E 完整测试套件 + 5 项回归测试，全部 PASS）。
+
+### Changed — README.md 重写为对外开源版本 + LICENSE 改为 MIT
+
+项目已开源，原 README 面向内部研发（Phase 历史、目录树、技术栈表、开发路线），与开源仓库门面定位不符。
+
+- **README.md**：全文英文重写，聚焦 What it is / Why / Install / Quick Start / Configuration / Shortcuts / Optional Components，删除内部研发笔记内容（迁移至 `AGENTS.md`/`CHANGELOG.md`，不重复维护）。
+- **LICENSE.md**：由 "Internal use only, unauthorized distribution is prohibited" 改为标准 MIT License 全文。
+- **package.json**：补充缺失的 `"license": "MIT"` 字段。
+
 ## [1.13.0] - 2026-07-31
 
 ### GA 发布说明

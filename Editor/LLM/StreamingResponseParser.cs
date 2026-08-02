@@ -34,6 +34,29 @@ namespace AgentCore.Editor.LLM
         private const long YieldBudgetMs = 200;
 
         /// <summary>
+        /// 单次 <c>ReadLineAsync</c> 的空闲超时上限。
+        /// <para>
+        /// 根因 (已核实，非猜测)：<see cref="AgentCore.Editor.Utils.HttpClientFactory"/> 上配置的
+        /// <c>HttpClient.Timeout</c> 在 <see cref="System.Net.Http.HttpCompletionOption.ResponseHeadersRead"/>
+        /// 模式下只覆盖"发出请求到拿到响应头"这一段 —— <c>SendAsync</c> 一旦返回，该 timeout 就已经
+        /// 失效，后续对响应 body 流的手动 <c>ReadLineAsync</c> 循环完全不受它保护。真实故障案例
+        /// (v1.13.0 后续): 远端模型代理主动关闭连接 (TCP 进入 CLOSE_WAIT)，但本地读取循环既不返回
+        /// null、也不抛异常，永久挂起，只能靠用户手动点取消才能恢复。
+        /// </para>
+        /// <para>
+        /// 修复不针对"远端主动关闭"这一种故障模式打补丁 —— 无论卡住的原因是什么 (对方 FIN、
+        /// 代理静默丢包、中间网络设备吞连接)，只要读取空闲超过阈值就视为死连接，主动关闭底层
+        /// 流以唤醒/终结挂起的读取，抛出 <see cref="TimeoutException"/> 交给上层 (FallbackRouter)
+        /// 的既有重试机制接管。复用 <see cref="AgentCore.Editor.Utils.HttpClientFactory.DefaultTimeoutSeconds"/>
+        /// 而非新增配置项 —— 该常量本来就代表"这条 LLM 请求允许的最大等待时间"这一个概念，
+        /// 只是原实现把它错误地只套用在了 headers 阶段；这里是把同一个语义正确地延伸到 body 读取阶段，
+        /// 不是引入第二个含义重叠的超时来源。
+        /// </para>
+        /// </summary>
+        private static readonly TimeSpan StreamIdleTimeout =
+            TimeSpan.FromSeconds(AgentCore.Editor.Utils.HttpClientFactory.DefaultTimeoutSeconds);
+
+        /// <summary>
         /// 解析 SSE 流，通过回调逐 chunk 推送解析结果。
         /// </summary>
         /// <param name="responseStream">HTTP 响应流</param>
@@ -55,7 +78,7 @@ namespace AgentCore.Editor.LLM
                 string line;
                 try
                 {
-                    line = await reader.ReadLineAsync();
+                    line = await ReadLineWithIdleTimeoutAsync(reader, responseStream, ct);
                 }
                 catch (Exception) when (ct.IsCancellationRequested)
                 {
@@ -109,6 +132,37 @@ namespace AgentCore.Editor.LLM
             {
                 onChunk?.Invoke(StreamChunk.Finished("stream_end"));
             }
+        }
+
+        /// <summary>
+        /// 带空闲超时的 <c>ReadLineAsync</c>。
+        /// <para>
+        /// 用 <c>Task.WhenAny</c> 竞速一个 <see cref="StreamIdleTimeout"/> 定时任务：读取先完成则
+        /// 正常返回；超时先触发则主动 <c>Dispose</c> 底层流唤醒/终结挂起的读取，并抛出
+        /// <see cref="TimeoutException"/>。<c>Dispose</c> 而非 <c>Close</c> —— 对 <c>NetworkStream</c>
+        /// 效果一致，但对某些 handler 包装的 stream 更可靠地释放底层 socket，避免 CLOSE_WAIT 累积。
+        /// </para>
+        /// </summary>
+        private static async Task<string> ReadLineWithIdleTimeoutAsync(
+            StreamReader reader, Stream responseStream, CancellationToken ct)
+        {
+            var readTask = reader.ReadLineAsync();
+            var timeoutTask = Task.Delay(StreamIdleTimeout, ct);
+
+            var completed = await Task.WhenAny(readTask, timeoutTask);
+            if (completed == readTask)
+                return await readTask;
+
+            // 超时先完成 —— 读取仍在挂起，主动关闭底层流以终结它，防止 socket 泄漏。
+            try { responseStream.Dispose(); } catch { /* 已关闭或正在被读取任务处理，忽略 */ }
+
+            // readTask 被放弃后，Dispose() 会让它内部以异常收尾 —— 挂一个静默 continuation
+            // 观察掉该异常，避免变成 unobserved task exception (GC 终结阶段的噪音/警告)。
+            _ = readTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+
+            throw new TimeoutException(
+                $"[AgentCore] SSE stream read idle for {StreamIdleTimeout.TotalSeconds}s with no new data. " +
+                "Connection likely dropped by remote (e.g. proxy closed it) without a clean stream-end signal.");
         }
 
         /// <summary>

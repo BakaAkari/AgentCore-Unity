@@ -163,7 +163,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
                     attr.RequiresConfirmation,
                     attr.Visibility,
                     attr.ReadOnlyActions,
-                    attr.PlaymodeHardBlockedActions);
+                    attr.PlaymodeHardBlockedActions,
+                    attr.PlaymodeRuntimeSafeActions);
             }
 
             public ToolMetadata Metadata => _metadata;

@@ -556,7 +556,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
         {
             if (obj != null)
             {
-                Undo.RegisterCreatedObjectUndo(obj, $"AgentCore: {operationName}");
+                AgentCore.Editor.Tools.Safety.PlaymodeUndoGuard.RegisterCreatedObjectUndo(obj, $"AgentCore: {operationName}");
             }
         }
 

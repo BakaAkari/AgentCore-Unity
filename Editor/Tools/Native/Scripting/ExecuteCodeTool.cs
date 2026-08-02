@@ -51,7 +51,11 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         MayModifyScripts = false,
         RiskLevel = ToolRiskLevel.CodeExecution,
         Capabilities = ToolCapability.ExecuteCode,
-        RequiresConfirmation = true)]
+        RequiresConfirmation = true,
+        // v1.13+ 白名单反转: execute_code 无 discrete action 字段(自由代码块),用 "*" 整工具级放行。
+        // 安全性不依赖白名单机制本身,而是工具自带的 ContainsPlaymodeForbiddenApi 静态代码扫描
+        // (拦截 SaveAssets/SaveScene/File.Write 等落盘 API 字面调用,见 execute_code 源码 L640+)。
+        PlaymodeRuntimeSafeActions = new[] { "*" })]
     public class ExecuteCodeTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"

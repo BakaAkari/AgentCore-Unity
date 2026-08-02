@@ -30,9 +30,10 @@ namespace AgentCore.Editor.Tools.Native.Scripting
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ModifyAssets | ToolCapability.ModifyScene,
         ReadOnlyActions = new[] { "get_info" },
-        // v1.12+ ModifyRuntimeState: create (SaveAsPrefabAsset 落盘) 和 apply (写回 Prefab 资产文件) 硬禁止。
-        // instantiate/unpack/revert 只作用于场景运行时实例 (内存),Play Mode 中放行 —— 退出后自然消失。
-        PlaymodeHardBlockedActions = new[] { "create", "apply" })]
+        // v1.13+ 白名单反转: create (SaveAsPrefabAsset 落盘) 和 apply (写回 Prefab 资产文件) 硬禁止。
+        PlaymodeHardBlockedActions = new[] { "create", "apply" },
+        // instantiate/unpack/revert 只作用于场景运行时实例 (内存),不调用任何落盘 API,登记进白名单放行。
+        PlaymodeRuntimeSafeActions = new[] { "instantiate", "unpack", "revert" })]
     public class ManagePrefabTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -264,7 +265,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 }
             }
 
-            Undo.RegisterCreatedObjectUndo(instance, "AgentCore: Instantiate Prefab");
+            PlaymodeUndoGuard.RegisterCreatedObjectUndo(instance, "AgentCore: Instantiate Prefab");
 
             return ToolResponse.OkWithData(new JObject
             {
@@ -343,7 +344,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (!PrefabUtility.IsPartOfPrefabInstance(targetGo))
                 return ToolResponse.Fail($"'{targetName}' is not a prefab instance.");
 
-            Undo.RecordObject(targetGo, "AgentCore: Unpack Prefab");
+            PlaymodeUndoGuard.RecordObject(targetGo, "AgentCore: Unpack Prefab");
 
             PrefabUnpackMode unpackMode;
             switch (mode)
@@ -420,7 +421,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (!PrefabUtility.IsPartOfPrefabInstance(targetGo))
                 return ToolResponse.Fail($"'{targetName}' is not a prefab instance.");
 
-            Undo.RecordObject(targetGo, "AgentCore: Revert Prefab");
+            PlaymodeUndoGuard.RecordObject(targetGo, "AgentCore: Revert Prefab");
 
             PrefabUtility.RevertPrefabInstance(targetGo, InteractionMode.UserAction);
 

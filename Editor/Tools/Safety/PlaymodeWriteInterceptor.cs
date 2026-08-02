@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -68,7 +69,8 @@ namespace AgentCore.Editor.Tools.Safety
                     $"Skipped in Playmode for asset '{(asset != null ? asset.name : "null")}' (runtime-only mutation).");
                 return false;
             }
-            return AssetDatabase.SaveAssetIfDirty(asset);
+            AssetDatabase.SaveAssetIfDirty(asset);
+            return true;
         }
 
         /// <summary>
