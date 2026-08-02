@@ -86,6 +86,18 @@ Disabled by default, enabled via scripting define symbols:
 - [`CHANGELOG.md`](CHANGELOG.md) — version history
 - [`AGENTS.md`](AGENTS.md) — architecture and contribution guide
 
+## Known Limitations
+
+- **No automated test suite.** Verification today is manual: exercising
+  affected tool actions in the Unity Editor (Edit Mode + Play Mode) and
+  checking Console output. Compiling cleanly does not guarantee correctness
+  — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for a concrete example of a
+  bug that shipped with a clean compile.
+- **Single maintainer.** No SLA, no guaranteed response time on issues/PRs.
+- **`execute_code` and Play Mode write actions carry real risk if misused.**
+  Read [`SECURITY.md`](SECURITY.md) before enabling write-capable tools on a
+  project without version control.
+
 ## License
 
 See [`LICENSE.md`](LICENSE.md).
