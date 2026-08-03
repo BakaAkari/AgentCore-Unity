@@ -24,7 +24,7 @@ namespace AgentCore.Editor.Config
         /// <summary>用户可编辑的显示名，例 "本地 GLM-5.2" / "OpenAI GPT-5"。</summary>
         public string displayName;
 
-        /// <summary>base URL（OpenAI-compatible），例 http://172.16.248.60:8000/v1 。</summary>
+        /// <summary>base URL（OpenAI-compatible），例 http://172.16.248.201:34567/v1 。</summary>
         public string endpoint;
 
         /// <summary>模型名，例 glm-5.2 。</summary>

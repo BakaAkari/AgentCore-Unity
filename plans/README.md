@@ -1,6 +1,6 @@
 ﻿# AgentCore 计划文档导航
 
-> **最后更新**: 2026-07-31 | **当前版本**: v1.14.0 | **下一目标**: 待规划 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后更新**: 2026-08-02 | **当前版本**: v1.14.1 | **下一目标**: 待规划 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.1] - 2026-08-02
+
+### Changed
+- 默认 Provider Profile（首次安装/全新项目自动创建的 "Default" profile）从内网 GLM endpoint（`172.16.248.60:8000/v1`）切换为内网 NewAPI 网关（`172.16.248.201:34567/v1`，无用量限制，可统计用量数据）。仅影响首次自动创建的默认 profile，不影响用户手动新建（Add Profile）或复制（Duplicate）的 profile——两者均从空白/源 profile 派生，不读取该默认值常量。
+- 修复 Dashboard → Quick Actions 卡片最后一个按钮 "Clear Learned Request Rules" 文字超出按钮固定宽度（150px）被截断，缩短为 "Clear Learned Rules"（弹窗标题/说明文字不变）。
+
+### Security note
+- 该默认 profile 的 API Key 明确内置于源码（用户判断该 NewAPI 网关仅企业内网可达，公网不可访问，接受随开源仓库公开的风险）。若你 fork/部署此项目到不同网络环境，请在 `Editor/Config/Settings/Pages/ModelAgentSettingsPage.cs` 中替换 `DefaultProfileEndpoint`/`DefaultProfileApiKeyPlaceholder`，或直接在 Settings 面板中编辑/删除该默认 profile。
+
 ## [1.14.0] - 2026-07-31
 
 ### Changed — Playmode 写权限模型反转为白名单（fail-closed，破坏性变更）

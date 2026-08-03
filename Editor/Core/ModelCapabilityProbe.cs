@@ -64,7 +64,7 @@ namespace AgentCore.Editor.Core
         /// 异步探测模型能力。调用 /v1/models 端点，解析 max_model_len。
         /// 失败时静默 fallback 到 ContextWindowManager.ModelPrefixMap。
         /// </summary>
-        /// <param name="endpoint">LLM API base URL（如 http://172.16.248.60:8000/v1）</param>
+        /// <param name="endpoint">LLM API base URL（如 http://172.16.248.201:34567/v1）</param>
         /// <param name="apiKey">API key（可为空）</param>
         /// <param name="ct">取消令牌</param>
         public static async Task ProbeAsync(string endpoint, string apiKey, CancellationToken ct = default)

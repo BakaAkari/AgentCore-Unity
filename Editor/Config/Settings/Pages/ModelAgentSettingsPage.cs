@@ -34,9 +34,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private const string OverridesFoldoutKeyPrefix = "model-agent.overridesFoldout."; // + profileId, EditorPrefs bool
 
         // ── Default profile 硬编码值（首次自动创建时使用）──
-        private const string DefaultProfileName = "Default (Local GLM)";
-        private const string DefaultProfileEndpoint = "http://172.16.248.60:8000/v1";
-        private const string DefaultProfileApiKeyPlaceholder = "sk-xxx";
+        // v1.14.1: 默认 endpoint 切换到内网 NewAPI 网关（无用量限制，可统计用量数据）。
+        // 该地址仅企业内网可达，公网无法访问，故 API Key 按用户明确决定内置于源码。
+        private const string DefaultProfileName = "Default (NewAPI Internal)";
+        private const string DefaultProfileEndpoint = "http://172.16.248.201:34567/v1";
+        private const string DefaultProfileApiKeyPlaceholder = "sk-B7YGb4nVwFb9pZsvLf1p8otnDfbThKOjWKsGgnrmwAdcXYJR";
 
         private readonly ModelSettingsService _service = new ModelSettingsService();
 

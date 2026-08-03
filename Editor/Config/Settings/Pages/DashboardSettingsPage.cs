@@ -298,7 +298,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     }
                 }
 
-                if (GUILayout.Button("Clear Learned Request Rules", GUILayout.Width(ButtonWidth)))
+                if (GUILayout.Button("Clear Learned Rules", GUILayout.Width(ButtonWidth)))
                 {
                     if (EditorUtility.DisplayDialog(
                         "Clear Learned Request Rules",
