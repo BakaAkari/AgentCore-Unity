@@ -378,8 +378,13 @@ namespace AgentCore.Editor.UI.Components
         private void StartTimer()
         {
             StopTimer();
-            // v1.8.7: 全关动态效果, ThinkingDrawer 标题定时更新禁用
-            // _timer = schedule.Execute(UpdateTitle).Every(250);
+            // v1.14.5: 恢复标题秒数定时更新。
+            // 用途与 PendingIndicator 三点动画同类：显示"已思考 N 秒"是真实经过时间的展示，
+            // 不是数据活跃度指示 —— 即使 reasoning 流暂时没有新 token，计时器仍应继续走，
+            // 否则用户无法判断"已经思考了多久"。v1.8.7 全关时的真凶（StreamReader.EndOfStream
+            // 同步阻塞）已在 v1.12.0-alpha.4 修复；UpdateTitle 只改本地 Label.text，不跨线程
+            // EmitEvent，250ms 频率下不会重现原问题。
+            _timer = schedule.Execute(UpdateTitle).Every(250);
         }
 
         private void StopTimer()

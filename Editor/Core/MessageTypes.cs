@@ -154,7 +154,22 @@ namespace AgentCore.Editor.Core
         /// draft 重新生成完成后触发（<see cref="AnswerChallengeRegenerating"/> 的收尾）；
         /// 触发后 UI 恢复正常显示；v0.10 §0.4：新 draft 不再进 Node B，直接输出。
         /// </summary>
-        AnswerChallengeRegenerated
+        AnswerChallengeRegenerated,
+
+        // === v1.14.5 新增 ===
+
+        /// <summary>
+        /// 流式期间的节流心跳信号 —— 目前专用于工具调用参数（tool_call.arguments）
+        /// 正在流式接收但尚未凑够完整 JSON 的阶段。该阶段此前完全没有对应的 UI 事件：
+        /// Console 只有逐 delta 的 Debug 日志，Chat 窗口零反馈，长任务下用户无法区分
+        /// "模型正在吐一个大参数" 与 "已经卡死"。
+        /// <para>
+        /// 由 <see cref="AgentLoop"/> 按时间(约 800ms)或字符量(约 2000 字符)双阈值节流后
+        /// 发出，不是每个 delta 都发；UI 侧据此刷新状态文案 + 触发一次呼吸动画帧，
+        /// 不依赖任何自驱动 timer。
+        /// </para>
+        /// </summary>
+        ToolCallProgress
     }
 
     #endregion
@@ -253,6 +268,17 @@ namespace AgentCore.Editor.Core
         public string TurnId { get; }
 
         /// <summary>
+        /// 累积字符数（<see cref="AgentEventType.ToolCallProgress"/> 时有值）：
+        /// 当前工具调用 arguments 已流式接收的总字符数，用于 UI 展示体量参考。
+        /// </summary>
+        public int ProgressCharCount { get; }
+
+        /// <summary>
+        /// 距该工具调用开始接收参数的耗时（毫秒，<see cref="AgentEventType.ToolCallProgress"/> 时有值）。
+        /// </summary>
+        public double ProgressElapsedMs { get; }
+
+        /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
         private AgentEvent(
@@ -274,7 +300,9 @@ namespace AgentCore.Editor.Core
             ToolConfirmationRequest confirmationRequest = null,
             ThinkingTraceSource reasoningSource = ThinkingTraceSource.None,
             SelfChallengeData selfChallenge = null,
-            string turnId = null)
+            string turnId = null,
+            int progressCharCount = 0,
+            double progressElapsedMs = 0)
         {
             Type = type;
             State = state;
@@ -295,6 +323,8 @@ namespace AgentCore.Editor.Core
             ReasoningSource = reasoningSource;
             SelfChallenge = selfChallenge;
             TurnId = turnId;
+            ProgressCharCount = progressCharCount;
+            ProgressElapsedMs = progressElapsedMs;
         }
 
         #region Phase 1 工厂方法
@@ -390,6 +420,27 @@ namespace AgentCore.Editor.Core
         #endregion
 
         #region Phase 2 工厂方法
+
+        /// <summary>
+        /// 创建工具调用参数接收进度事件（节流后发出，非每 delta 一次）。
+        /// </summary>
+        /// <param name="toolName">工具名称（可能为 null——function.name delta 尚未到达）</param>
+        /// <param name="toolCallId">工具调用 id（可能为 null）</param>
+        /// <param name="charCount">当前已累积的 arguments 字符数</param>
+        /// <param name="elapsedMs">本次工具调用参数接收已耗时（毫秒）</param>
+        /// <param name="messageId">关联的 assistant turn ID</param>
+        /// <returns>工具调用进度事件</returns>
+        public static AgentEvent ToolCallProgress(string toolName, string toolCallId, int charCount, double elapsedMs, string messageId = null)
+        {
+            return new AgentEvent(
+                AgentEventType.ToolCallProgress,
+                toolName: toolName,
+                toolCallId: toolCallId,
+                messageId: messageId,
+                progressCharCount: charCount,
+                progressElapsedMs: elapsedMs
+            );
+        }
 
         /// <summary>
         /// 创建工具调用开始事件。

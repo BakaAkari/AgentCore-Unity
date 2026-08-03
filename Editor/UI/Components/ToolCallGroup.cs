@@ -67,6 +67,11 @@ namespace AgentCore.Editor.UI.Components
         // 内部卡片列表（用于统计）
         private readonly List<ToolCallCard> _cards = new List<ToolCallCard>();
 
+        // v1.14.5: 工具调用参数接收进度（ToolCallStarted 之前的空窗期，此前完全无 UI 反馈）
+        private bool _isReceivingArgs;
+        private string _receivingToolName;
+        private int _receivingChars;
+
         #endregion
 
         #region 构造函数
@@ -273,6 +278,43 @@ namespace AgentCore.Editor.UI.Components
             SetExpanded(expanded);
         }
 
+        /// <summary>
+        /// v1.14.5: 报告工具调用参数正在流式接收（<see cref="ToolCallCard"/> 尚未创建的阶段）。
+        /// <para>
+        /// 覆盖此前完全黑箱的空窗期：模型决定调用工具 → 参数 JSON 流式到达 → 参数接收完毕
+        /// 开始真正执行（此时才有 ToolCallStarted / ToolCallCard）。由 AgentLoop 节流后的
+        /// ToolCallProgress 事件驱动调用，不是自驱动定时器。
+        /// </para>
+        /// </summary>
+        /// <param name="toolName">工具名（可能为 null，function.name delta 尚未到达时）</param>
+        /// <param name="charCount">已累积的参数字符数</param>
+        public void ReportReceivingArguments(string toolName, int charCount)
+        {
+            _isReceivingArgs = true;
+            _receivingToolName = toolName;
+            _receivingChars = charCount;
+
+            UpdateSummaryText();
+
+            // 与"有工具执行中"同等对待：自动展开，让用户看到活动
+            if (!_userToggled)
+            {
+                SetExpanded(true);
+            }
+        }
+
+        /// <summary>
+        /// v1.14.5: 清除"接收参数中"进度态。ToolCallStarted 到达（真正开始执行）或本轮结束时调用。
+        /// </summary>
+        public void ClearReceivingArguments()
+        {
+            if (!_isReceivingArgs) return;
+            _isReceivingArgs = false;
+            _receivingToolName = null;
+            _receivingChars = 0;
+            UpdateSummaryText();
+        }
+
         #endregion
 
         #region 私有方法
@@ -399,12 +441,20 @@ namespace AgentCore.Editor.UI.Components
                     "toolCallGroup.stats.summary", "{0} 个调用: {1}", _totalCalls, string.Join(", ", statParts)));
             }
 
+            // v1.14.5: 接收参数中（ToolCallCard 尚不存在的空窗期，独立于 _totalCalls 统计）
+            if (_isReceivingArgs)
+            {
+                parts.Add(string.IsNullOrEmpty(_receivingToolName)
+                    ? AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.receivingArgs", "接收参数中... {0} 字符", _receivingChars)
+                    : AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.receivingArgsNamed", "接收参数中: {0} ({1} 字符)", _receivingToolName, _receivingChars));
+            }
+
             _summaryLabel.text = parts.Count > 0
                 ? $"[{string.Join(" | ", parts)}]"
                 : "";
 
-            // 折叠状态下有工具执行中：加脉动指示；无 running 工具则移除脉动
-            var isActive = _runningCalls > 0;
+            // 折叠状态下有工具执行中 或 正在接收参数：加脉动指示；否则移除脉动
+            var isActive = _runningCalls > 0 || _isReceivingArgs;
             if (isActive) AddToClassList("active-pulse");
             else RemoveFromClassList("active-pulse");
         }

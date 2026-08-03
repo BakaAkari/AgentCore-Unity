@@ -36,11 +36,13 @@ namespace AgentCore.Editor.UI
 
                 case AgentEventType.StreamToken:
                     AppendStreamToken(evt.Content, evt.MessageId);
+                    _agentStatusLine?.Tick();
                     ThrottledScrollToBottom();
                     break;
 
                 case AgentEventType.ReasoningToken:
                     AppendReasoningToken(evt.Content, evt.MessageId, evt.ReasoningSource);
+                    _agentStatusLine?.Tick();
                     ThrottledScrollToBottom();
                     break;
 
@@ -75,6 +77,14 @@ namespace AgentCore.Editor.UI
 
                 case AgentEventType.ToolCallFailed:
                     HandleToolCallFailed(evt);
+                    break;
+
+                // v1.14.5: 工具调用参数流式接收进度心跳（节流后，非每 delta 一次）。
+                // 覆盖"模型决定调用工具 → 参数 JSON 到达 → ToolCallStarted 真正开始执行"
+                // 之间此前完全无 UI 反馈的空窗期。
+                case AgentEventType.ToolCallProgress:
+                    HandleToolCallProgress(evt);
+                    _agentStatusLine?.Tick();
                     break;
 
                 case AgentEventType.LoopRoundStarted:

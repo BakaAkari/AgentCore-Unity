@@ -65,10 +65,16 @@ namespace AgentCore.Editor.UI.Components
             _actionLabel.style.unityFontStyleAndWeight = FontStyle.Normal;
             Add(_actionLabel);
 
-            // v1.8.7: 流式期 UI 卡顿排查, 全关动态效果 (PendingIndicator 3 点动画禁用).
-            // schedule.Execute.Every 每次触发都往 UnitySynchronizationContext post continuation,
-            // 累积到主线程 SC 队列每帧 flush 200+ ms. 关闭后 UI 静默但主线程流畅.
-            // _dotAnim = schedule.Execute(TickDots).Every(400);
+            // v1.14.5: 恢复三点脉动动画。
+            // 根因回顾：v1.8.7 全关时误判"schedule.Execute.Every 本身就是卡顿源"，
+            // 实际真凶是 StreamReader.EndOfStream 同步阻塞主线程（已在 v1.12.0-alpha.4 修复，
+            // 经 118 万行日志压力测试验证）。TickDots 只改本地 Label.text，不跨线程
+            // EmitEvent，不会重现 v1.8.x 那种"每次触发都 post continuation 到
+            // UnitySynchronizationContext 累积阻塞"的问题。
+            // 注意：这里恢复定时器是刻意的，不是"事件驱动"设计的例外破坏 ——
+            // PendingIndicator 存在的意义就是覆盖"LLM 请求已发出但还没有任何 token 抵达"
+            // 的真空期，这段区间没有任何数据流事件可用来驱动 Tick()，事件驱动在此无法工作。
+            _dotAnim = schedule.Execute(TickDots).Every(400);
         }
 
         /// <summary>

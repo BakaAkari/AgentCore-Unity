@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.5] - 2026-08-03
+
+### Fixed
+- **长任务中工具调用参数流式接收阶段完全无 UI 反馈，Console 却在刷屏**：模型决定调用一个大参数工具（如 `batch_execute`/`manage_script`）后，参数 JSON 通过多个 `ToolCallDelta` chunk 陆续到达，此前每个 delta 都打一行 `Received ToolCallDelta: (accumulating)` Debug 日志（无信息量的刷屏），且完全没有对应的 `AgentEvent` —— Chat 窗口在这段时间里彻底静止，用户无法区分"模型正在吐一个大参数"与"已经卡死"。
+  - 新增 `AgentEventType.ToolCallProgress`：按时间(800ms)或字符量(2000字符)双阈值节流后发出（不是每 delta 一次），带工具名（若已知）/累积字符数/耗时。
+  - `AgentLoop.LLM.cs` 的 Debug 日志同步改为有信息量的心跳（`tool=... chars=... elapsed=...ms`），替代旧版逐 delta 刷屏。
+  - `ToolCallGroup` 摘要栏新增"接收参数中... N 字符"/"接收参数中: {工具名} (N 字符)"文案，覆盖 `ToolCallStarted` 之前此前完全黑箱的空窗期；同时提前触发 `active-pulse` 呼吸动画。
+- **AI 最终回复正文完全没有流式感，等模型说完才一次性整段蹦出来**：v1.8.5 曾把 content token 全量攒到 `StreamChunkType.Done` 才一次性 `EmitEvent`（当时为消除逐 token 200+ms/帧主线程阻塞），但 reasoning 侧在 v1.8.8 已经改为"攒够 200 字符或遇到 `\n\n` 段落边界就中间 flush 一次"的分块策略，content 侧一直没跟上，导致两者体感不一致。现在 content 也统一到同一节流分块策略，恢复流式显示效果，且不会重新引入逐 token 阻塞问题（阈值机制不变，只是不再等到 Done）。
+- **三点脉动等待动画、光标闪烁、"思考中 N 秒"计时器长期禁用（自 v1.8.7 起）**：当年为排查流式期 UI 卡顿，将相关 `schedule.Execute().Every()` 定时器整体关闭止血；真正根因（`StreamReader.EndOfStream` 属性同步阻塞主线程）已在 v1.12.0-alpha.4 修复并经 118 万行日志压力测试验证，原关闭是不必要的过度止血。本次按场景差异化恢复：
+  - `AgentStatusLine`（顶部状态行圆点）、`StreamingTextElement`（流式文本光标）改为**事件驱动**：由数据到达（`StreamToken`/`ReasoningToken`/`ToolCallProgress`）触发翻转，内部仍有时间防抖（≥500-600ms）避免视觉闪烁；数据流真的停止时（模型卡死/网络断开）动画会诚实停在最后一帧，不再用假动画掩盖卡死状态——这是与旧版"自驱动定时器"的关键区别。
+  - `PendingIndicator`（发送后等待首个 token 的占位气泡三点动画）、`ThinkingDrawer`（"思考中 N 秒"标题计时）恢复原有的 `schedule.Execute().Every()` 定时器：这两处工作阶段本质上没有数据流可用来驱动事件（真空期/纯时间展示），事件驱动在此无法工作，且两者的更新逻辑只改本地 `Label.text`，不触发跨线程 `EmitEvent`，不会重现 v1.8.x 那种"高频 EmitEvent 累积主线程阻塞"的问题。
+
+### Cleanup
+- 清理 L10n 资源文件（`zh-CN.json`/`en-US.json`）中 40 个孤儿 key（无任何 `Loc.Tr()` 引用，含改名前的 `chat.tool.group.title`、未接入 UI 的 `toolConfirmation.*`/`providerProfiles.*`/`domainReload.status.*` 等历史遗留字段），335 → 295 keys，两语言文件保持严格对称。
+
 ## [1.14.4] - 2026-08-03
 
 ### Fixed

@@ -88,6 +88,10 @@ namespace AgentCore.Editor.UI
 
             var group = EnsureToolCallGroup();
 
+            // v1.14.5: 参数已接收完毕，真正开始执行——清除"接收参数中"进度态，
+            // 避免 ToolCallCard 出现后摘要栏同时挂着两套状态文案。
+            group.ClearReceivingArguments();
+
             var card = new ToolCallCard(evt.ToolName, evt.ToolArguments);
             card.SetStatus(ToolCallStatus.Running, AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.running", "执行中..."));
             group.AddToolCard(card);
@@ -101,6 +105,22 @@ namespace AgentCore.Editor.UI
             UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.executingToolNamed", "执行工具: {0}", evt.ToolName));
 
             ScrollToBottom(force: true); // 新工具调用卡片添加，强制滚动到底部
+        }
+
+        /// <summary>
+        /// 处理工具调用参数流式接收进度事件（v1.14.5，节流后触发，非每 delta 一次）。
+        /// <para>
+        /// 此事件在 <see cref="ToolCallCard"/> 尚未创建之前到达——工具名可能仍为 null
+        /// （function.name 的 delta 还没到），此时只报告字符数；工具名到达后一起显示。
+        /// 若已经有对应的 ToolCallCard（罕见的竞态：多工具并行，某个 index 的卡片已建立
+        /// 但另一个 index 仍在接收参数），不影响已存在卡片，只驱动分组级的进度提示。
+        /// </para>
+        /// </summary>
+        /// <param name="evt">工具调用进度事件</param>
+        private void HandleToolCallProgress(AgentEvent evt)
+        {
+            var group = EnsureToolCallGroup();
+            group.ReportReceivingArguments(evt.ToolName, evt.ProgressCharCount);
         }
 
         /// <summary>

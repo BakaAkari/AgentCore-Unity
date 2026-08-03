@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -37,6 +38,7 @@ namespace AgentCore.Editor.UI.Components
 
         private bool _isAnimating;
         private bool _pulsePhase;
+        private DateTime? _lastPulseUtc;
 
         #endregion
 
@@ -75,11 +77,35 @@ namespace AgentCore.Editor.UI.Components
             _text.style.unityFontStyleAndWeight = FontStyle.Bold;
             Add(_text);
 
-            // v1.8.7: 全关动态效果, 状态栏呼吸动画禁用
-            // schedule.Execute(OnPulseTick).Every(PulseIntervalMs);
+            // v1.14.5: 呼吸动画不再用 schedule.Execute().Every() 自驱动定时器（v1.8.7 曾因
+            // 400ms 定时器持续 post continuation 累积主线程阻塞而全关）。改为完全被动：
+            // 由外部（AgentLoop 的节流心跳事件）调用 Tick() 才翻转一帧。数据不流入时
+            // (模型真的卡住/网络断开) 动画也不会凭空跳动 —— 诚实反映系统状态，而非用假动画
+            // 掩盖卡死。详见 HandleAgentEvent 中 ToolCallProgress / StreamToken / ReasoningToken
+            // 分支对 Tick() 的调用。
         }
 
         #region 公开方法
+
+        /// <summary>
+        /// v1.14.5: 由外部事件驱动的动画帧 tick —— 每次收到"系统仍在流式产出数据"的
+        /// 信号时调用一次（ToolCallProgress 心跳 / StreamToken / ReasoningToken）。
+        /// 内部按 <see cref="PulseIntervalMs"/> 做时间防抖，即使被高频调用也不会视觉闪烁；
+        /// 若长时间没有调用（数据流真的停了），呼吸动画会自然停在最后一帧，不伪造活跃状态。
+        /// </summary>
+        public void Tick()
+        {
+            if (!_isAnimating) return;
+
+            var now = DateTime.UtcNow;
+            if (_lastPulseUtc != null && (now - _lastPulseUtc.Value).TotalMilliseconds < PulseIntervalMs)
+                return;
+
+            _lastPulseUtc = now;
+            _pulsePhase = !_pulsePhase;
+            // 呼吸效果：1.0 ↔ 0.35
+            _dot.style.opacity = _pulsePhase ? 0.35f : 1f;
+        }
 
         /// <summary>
         /// 更新状态行文本和样式。
@@ -105,6 +131,7 @@ namespace AgentCore.Editor.UI.Components
                 _dot.style.opacity = 1f;
                 _isAnimating = true;
                 _pulsePhase = false;
+                _lastPulseUtc = null;
             }
             else
             {
@@ -113,19 +140,6 @@ namespace AgentCore.Editor.UI.Components
                 _dot.style.opacity = 1f;
                 _isAnimating = false;
             }
-        }
-
-        #endregion
-
-        #region 私有方法
-
-        private void OnPulseTick()
-        {
-            if (!_isAnimating) return;
-
-            _pulsePhase = !_pulsePhase;
-            // 呼吸效果：1.0 ↔ 0.35
-            _dot.style.opacity = _pulsePhase ? 0.35f : 1f;
         }
 
         #endregion

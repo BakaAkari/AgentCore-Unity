@@ -10,7 +10,7 @@
 
 AgentCore Unity is an **Editor-only UPM package**, not a generic coding-agent wrapper. It's a native execution layer purpose-built for Unity projects: model reasoning, live Editor state, 50+ native tools, project knowledge, version control, code indexing, and verification feedback — wired into one governed loop.
 
-- **Package**: `com.agentcore.unity` · **Version**: `1.14.4` · **Unity**: `2021.3+`
+- **Package**: `com.agentcore.unity` · **Version**: `1.14.5` · **Unity**: `2021.3+`
 - Editor-only assembly — zero runtime footprint, never ships in your build
 - ~108K lines, 56 native tools covering scenes, GameObjects, components, prefabs, assets, materials, shaders, UI, physics, audio, cameras, Timeline, Cinemachine, ProBuilder, builds, tests, and more
 

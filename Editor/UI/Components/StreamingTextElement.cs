@@ -886,11 +886,20 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>用于累积文本的 StringBuilder</summary>
         private StringBuilder _currentTextBuilder;
 
-        /// <summary>光标闪烁动画调度器</summary>
+        /// <summary>光标闪烁动画调度器（v1.14.5: 已不再使用独立定时器驱动光标翻转，
+        /// 翻转逻辑改为挂在 <see cref="ShowCursor"/> 上的事件驱动 + 时间防抖；此字段保留仅为
+        /// 兼容 <see cref="HideCursor"/> 里的空判断，永远为 null，不再被赋值）。</summary>
         private IVisualElementScheduledItem _cursorBlink;
 
         /// <summary>光标当前是否可见</summary>
         private bool _cursorVisible;
+
+        /// <summary>v1.14.5: 光标翻转的最小间隔（毫秒）——收到 token flush 时才可能翻转，
+        /// 但翻转频率上限受此间隔约束，避免高频 flush（16ms 一次）导致光标肉眼看不清。</summary>
+        private const int CursorBlinkMinIntervalMs = 500;
+
+        /// <summary>上次光标翻转的时间。</summary>
+        private DateTime? _lastCursorToggleUtc;
 
         /// <summary>是否已切换到 block 渲染模式</summary>
         private bool _isBlockMode;
@@ -1234,23 +1243,30 @@ namespace AgentCore.Editor.UI.Components
         #region 光标动画
 
         /// <summary>
-        /// 显示闪烁光标并启动动画。
+        /// 显示闪烁光标；由 <see cref="AppendText"/> 每次收到新的流式片段时调用一次
+        /// （即"确实有新数据到达"才可能翻转），不使用独立的 schedule.Execute().Every() 定时器。
+        /// <para>
+        /// v1.14.5 恢复设计说明：v1.8.7 全关时的真凶是 StreamReader.EndOfStream 同步阻塞（已在
+        /// v1.12.0-alpha.4 修复），不是光标定时器本身。但既然本次改造统一走"事件驱动"（有数据才动，
+        /// 无数据诚实静止），这里选择比 PendingIndicator 更严格的方案：完全不用定时器，翻转动作
+        /// 挂在 FlushPending 上，用 <see cref="CursorBlinkMinIntervalMs"/> 做频率上限。
+        /// 效果：正常流式速度下光标看起来仍是闪烁的（flush 频率通常高于 500ms 一次翻转的下限），
+        /// 网络卡住不再吐 token 时光标诚实停在最后状态，不会用假动画掩盖卡死。
+        /// </para>
         /// </summary>
         private void ShowCursor()
         {
             _cursor.AddToClassList("streaming-cursor--visible");
             _cursor.style.display = DisplayStyle.Flex;
-            _cursorVisible = true;
 
-            // v1.8.7: 全关动态效果, 光标闪烁禁用
-            // if (_cursorBlink == null)
-            // {
-            //     _cursorBlink = schedule.Execute(() =>
-            //     {
-            //         _cursorVisible = !_cursorVisible;
-            //         _cursor.style.opacity = _cursorVisible ? 1f : 0f;
-            //     }).Every(530);
-            // }
+            var now = DateTime.UtcNow;
+            if (_lastCursorToggleUtc == null ||
+                (now - _lastCursorToggleUtc.Value).TotalMilliseconds >= CursorBlinkMinIntervalMs)
+            {
+                _cursorVisible = !_cursorVisible;
+                _cursor.style.opacity = _cursorVisible ? 1f : 0f;
+                _lastCursorToggleUtc = now;
+            }
         }
 
         /// <summary>

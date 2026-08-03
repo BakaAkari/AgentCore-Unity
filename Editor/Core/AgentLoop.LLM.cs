@@ -74,6 +74,9 @@ namespace AgentCore.Editor.Core
             // 每次 LLM 调用重新识别可见规划 trace；reasoning 内容保留在同一个 assistant turn 中追加。
             _visiblePlanningTraceExtractor.Reset();
 
+            // v1.14.5: 每轮 LLM 调用重置工具调用参数接收进度节流状态
+            ResetToolCallProgressState();
+
             // Phase 9: 每次 LLM 调用前重置 SelfChallenge extractors (Node A / Node B stream 抽取器)
             ResetSelfChallengeExtractorsForNewRound();
 
@@ -163,8 +166,11 @@ namespace AgentCore.Editor.Core
                     CompleteReasoningIfNeeded(assistantTurn);
                     // Phase 2：ToolCallDelta 由 OpenAICompatibleClient 内部累积，
                     // 最终通过 Done 事件返回完整的 tool_calls 列表。
-                    // 此处仅记录日志用于调试。
-                    AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] Received ToolCallDelta: {chunk.ToolCallDelta?.Function?.Name ?? "(accumulating)"}");
+                    // v1.14.5: 此前每个 delta 都打一行 "(accumulating)" Debug 日志（刷屏无信息），
+                    // 且完全没有对应 UI 事件 —— 用户在此期间只能看到 console 疯狂滚动、chat 窗口
+                    // 静止不动，容易误判为卡死。改为节流心跳：按时间(800ms)或字符量(2000字符)双阈值，
+                    // 取先到者才记录一次，同时 emit ToolCallProgress 事件驱动 UI 侧的活体信号。
+                    HandleToolCallDeltaProgress(chunk.ToolCallDelta, assistantTurn);
                     break;
             }
         }
@@ -195,21 +201,67 @@ namespace AgentCore.Editor.Core
             {
                 CompleteReasoningIfNeeded(assistantTurn);
                 assistantTurn.Content += delta.VisibleContent;
-                // v1.8.5: 不再每 token emit StreamToken 事件. 累积到 _pendingStreamContent,
-                // 由 StreamChunkType.Done 时 FlushAccumulatedContentIfAny 一次性 emit.
-                // 消除主线程 200+ ms/帧 阻塞. 副作用: UI 不再逐字显示, 完成时一次性显示.
+                // v1.14.5: content 与 reasoning 统一为"分块 flush"策略 —— 之前 v1.8.5 曾
+                // 全累积到 Done 才一次性 emit(为消除逐字 200+ms/帧阻塞), 但副作用是最终回复
+                // 正文完全没有流式感, 用户反馈"看不出任何进度"。reasoning 侧在 v1.8.8 已经改为
+                // 攒够 ContentFlushCharThreshold 字符或遇到 \n\n 段落边界就中间 flush 一次,
+                // 这里把 content 也统一到同一策略 —— 频率上限仍受阈值控制, 不会重现 v1.8.5 的
+                // 逐 token 阻塞问题。
                 if (_pendingStreamContent == null)
                     _pendingStreamContent = new StringBuilder();
                 _pendingStreamContent.Append(delta.VisibleContent);
+
+                if (ShouldFlushPendingContent())
+                {
+                    FlushPendingContentIfAny(assistantTurn);
+                }
             }
         }
 
         /// <summary>
-        /// v1.8.5: 一次性 flush 累积的 stream content 到 UI (StreamChunkType.Done 时调用).
+        /// v1.14.5: 判断累积的 content 是否达到中间 flush 阈值。
+        /// 触发条件（任一先到）：
+        /// - buffer 含 "\n\n"（段落边界，语义完整点）
+        /// - buffer 长度 >= ContentFlushCharThreshold（兜底）
+        /// 与 <see cref="ShouldFlushPendingReasoning"/> 保持同一节流哲学。
+        /// </summary>
+        private bool ShouldFlushPendingContent()
+        {
+            if (_pendingStreamContent == null || _pendingStreamContent.Length == 0) return false;
+            if (_pendingStreamContent.Length >= ContentFlushCharThreshold) return true;
+            var text = _pendingStreamContent.ToString();
+            return text.Contains("\n\n");
+        }
+
+        /// <summary>
+        /// v1.14.5: 只 flush content（不影响 reasoning），用于流式期间的中间分块吐出。
+        /// </summary>
+        private void FlushPendingContentIfAny(ConversationTurn assistantTurn)
+        {
+            if (_pendingStreamContent == null || _pendingStreamContent.Length == 0) return;
+            var chunk = _pendingStreamContent.ToString();
+            _pendingStreamContent.Clear();
+            if (assistantTurn != null)
+            {
+                EmitEvent(AgentEvent.StreamToken(chunk, assistantTurn.Id));
+            }
+        }
+
+        /// <summary>
+        /// v1.14.5: content 分块 flush 的字符阈值（兜底），与 reasoning 侧同一权衡：
+        /// 太小又变逐字流式重新引入高频问题；太大失去流式感。
+        /// </summary>
+        private const int ContentFlushCharThreshold = 200;
+
+        /// <summary>
+        /// v1.14.5: 流式结束/出错时的收尾 flush —— 清空 <see cref="ShouldFlushPendingContent"/>/
+        /// <see cref="ShouldFlushPendingReasoning"/> 尚未触发中间 flush 而残留在 buffer 里的尾段。
+        /// 正常情况下 buffer 里只剩不足一个阈值的小段（因为中间 flush 已经按段落/字符阈值持续吐出），
+        /// 这里只是兜底保证不丢失最后一小段。
         /// </summary>
         private void FlushAccumulatedContentIfAny(ConversationTurn assistantTurn)
         {
-            // v1.8.6: flush reasoning 累积 (先 emit reasoning, 再 emit content, 顺序与 UI 组织一致)
+            // 先 flush reasoning 残留 (顺序与 UI 组织一致：reasoning 在前，content 在后)
             if (_pendingStreamReasoning != null && _pendingStreamReasoning.Length > 0)
             {
                 var fullReasoning = _pendingStreamReasoning.ToString();
@@ -233,7 +285,7 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
-        /// v1.8.5: 累积 stream 期的 UI content, 完成时一次性 emit.
+        /// v1.14.5: 累积 stream 期尚未达到 flush 阈值的 content 尾段（分块 flush 策略下的缓冲区）。
         /// </summary>
         private StringBuilder _pendingStreamContent;
 
@@ -309,6 +361,101 @@ namespace AgentCore.Editor.Core
         /// markdown 又出现 v1.8.6 那种 829ms 尖峰.
         /// </summary>
         private const int ReasoningFlushCharThreshold = 200;
+
+        // === v1.14.5: 工具调用参数接收进度节流状态 ===
+
+        /// <summary>本轮 LLM 调用中，当前正在接收参数的工具调用累积字符数（跨多个 delta）。</summary>
+        private int _toolCallProgressCharCount;
+
+        /// <summary>上次 emit ToolCallProgress 时的累积字符数（用于字符阈值判断）。</summary>
+        private int _toolCallProgressLastEmittedCharCount;
+
+        /// <summary>上次 emit ToolCallProgress 的时间（用于时间阈值判断）。</summary>
+        private DateTime? _toolCallProgressLastEmittedUtc;
+
+        /// <summary>本次工具调用参数开始接收的时间（用于计算耗时）。</summary>
+        private DateTime? _toolCallProgressStartedUtc;
+
+        /// <summary>当前已知的工具名（function.name delta 到达后填充；可能长期为 null）。</summary>
+        private string _toolCallProgressToolName;
+
+        /// <summary>
+        /// v1.14.5: 心跳节流的时间阈值 —— 与字符阈值任一先到即 emit 一次。
+        /// 800ms 是权衡点：短于此会在正常小参数工具调用上也频繁触发（无意义噪音）；
+        /// 长于此用户在大参数场景下等待反馈的间隔会变得明显。
+        /// </summary>
+        private const int ToolCallProgressFlushIntervalMs = 800;
+
+        /// <summary>
+        /// v1.14.5: 心跳节流的字符阈值 —— 与时间阈值任一先到即 emit 一次。
+        /// 2000 字符对应典型 batch_execute/manage_script 大参数场景下每次心跳约代表一次
+        /// 有意义的增量，不会在参数量小的常规调用上触发多次。
+        /// </summary>
+        private const int ToolCallProgressFlushCharThreshold = 2000;
+
+        /// <summary>
+        /// v1.14.5: 每轮 LLM 调用开始前重置节流状态，避免跨轮次累积字符数失真。
+        /// </summary>
+        private void ResetToolCallProgressState()
+        {
+            _toolCallProgressCharCount = 0;
+            _toolCallProgressLastEmittedCharCount = 0;
+            _toolCallProgressLastEmittedUtc = null;
+            _toolCallProgressStartedUtc = null;
+            _toolCallProgressToolName = null;
+        }
+
+        /// <summary>
+        /// v1.14.5: 处理单个 ToolCallDelta，做节流统计并在达到阈值时 emit 心跳。
+        /// <para>
+        /// 治本设计：不是每个 delta 都 emit（会重现 v1.8.x 那种高频问题），而是维护累积状态，
+        /// 按"时间(800ms) 或 字符量(2000) 任一先到"节流发出。数据不流入时（网络卡住/模型停止）
+        /// 心跳也不会凭空跳动 —— 这是"事件驱动"而非"定时器驱动"的关键区别：如果模型真的卡住，
+        /// UI 会诚实地停在最后一次心跳，不会用假动画掩盖真实的卡死状态。
+        /// </para>
+        /// </summary>
+        private void HandleToolCallDeltaProgress(ToolCall delta, ConversationTurn assistantTurn)
+        {
+            if (delta == null) return;
+
+            if (_toolCallProgressStartedUtc == null)
+            {
+                _toolCallProgressStartedUtc = DateTime.UtcNow;
+            }
+
+            if (delta.Function != null)
+            {
+                if (!string.IsNullOrEmpty(delta.Function.Name))
+                    _toolCallProgressToolName = delta.Function.Name;
+
+                if (!string.IsNullOrEmpty(delta.Function.Arguments))
+                    _toolCallProgressCharCount += delta.Function.Arguments.Length;
+            }
+
+            var now = DateTime.UtcNow;
+            bool charThresholdHit = (_toolCallProgressCharCount - _toolCallProgressLastEmittedCharCount) >= ToolCallProgressFlushCharThreshold;
+            bool timeThresholdHit = _toolCallProgressLastEmittedUtc == null
+                || (now - _toolCallProgressLastEmittedUtc.Value).TotalMilliseconds >= ToolCallProgressFlushIntervalMs;
+
+            if (!charThresholdHit && !timeThresholdHit) return;
+
+            _toolCallProgressLastEmittedCharCount = _toolCallProgressCharCount;
+            _toolCallProgressLastEmittedUtc = now;
+
+            var elapsedMs = Math.Max(0, (now - _toolCallProgressStartedUtc.Value).TotalMilliseconds);
+
+            // 心跳日志：带进度信息，替代旧版每 delta 一行的 "(accumulating)" 刷屏日志
+            AgentCore.Editor.Utils.AgentCoreLog.Debug(
+                $"[AgentCore] Tool call argument stream: tool={_toolCallProgressToolName ?? "(pending)"} " +
+                $"chars={_toolCallProgressCharCount} elapsed={elapsedMs:F0}ms");
+
+            EmitEvent(AgentEvent.ToolCallProgress(
+                _toolCallProgressToolName,
+                delta.Id,
+                _toolCallProgressCharCount,
+                elapsedMs,
+                assistantTurn?.Id));
+        }
 
         /// <summary>
         /// 标记当前 assistant turn 开始接收 reasoning / planning trace。
