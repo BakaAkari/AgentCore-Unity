@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.4] - 2026-08-03
+
+### Fixed
+- **长任务思考链渲染撞 UIToolkit 顶点上限，导致文本截断/报错并伴随明显卡顿**（`A VisualElement must not allocate more than 65535 vertices` / `Generated text will be truncated because it exceeds 49152 vertices`）。根因：`ThinkingDrawer`（reasoning 折叠抽屉）把整轮 reasoning token 全量拼接进单个 `Label.text`，模型单轮 reasoning 一旦写出上万字（长任务、复杂功能规划等场景常见），必然撞上 UIToolkit 单文本元素的顶点硬上限；撞线前，每次节流 flush 还要对全量历史文本重新排版，文本越长越慢，主线程被拖慢造成"看起来卡死"的体感。
+  - `ThinkingDrawer` 新增 `MaxRenderChars`（6000 字）渲染窗口：超过此长度只显示最新片段 + 省略提示，**只影响 UI 展示**，完整 reasoning 内容仍整体持久化到 `ConversationTurn.Reasoning`（会话 JSON、导出等不受影响）。
+  - 顺手修复一个关联的性能债：`AppendReasoning` 原本每 token 一次 `_reasoningText += token` 字符串拼接（O(n) 重新分配拷贝，文本越长单次追加越慢），改为 `StringBuilder` 累积，仅在节流 flush 时同步一次。
+- **prompt 层新增任务拆分纪律**（`SOUL.md` §2 新增规则 2b）：目标明确、预计需要 4+ 步骤的多步骤/多文件/整功能任务，要求模型先输出简短分步计划（可见回复，非藏在长 reasoning 里）再逐步执行、逐步汇报，而非一次性把全部思考和执行压在单轮输出里。目的是限制单轮输出规模（间接降低撞上上面顶点上限的概率），并给用户在执行过程中及时纠偏的检查点。这条规则与既有的 Node A（Intent Self-Challenge，管"该不该反问"）是互补关系，不重复、不替代——2b 管的是"方案已明确后如何拆步骤执行"。
+
 ## [1.14.3] - 2026-08-03
 
 ### Fixed

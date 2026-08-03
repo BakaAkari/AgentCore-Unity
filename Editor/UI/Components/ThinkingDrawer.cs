@@ -32,7 +32,27 @@ namespace AgentCore.Editor.UI.Components
 
         private const int PreviewMaxChars = 60;
 
+        /// <summary>
+        /// UI 渲染字符上限(v1.14.4)。UIToolkit 单个 Label 生成 mesh 时每字符约占若干顶点，
+        /// 长文本达到约 49152 顶点会被截断显示，65535 顶点直接报错
+        /// "A VisualElement must not allocate more than 65535 vertices"。
+        /// 长任务场景下模型单轮 reasoning 可能轻松写出数万字，必须在渲染层做硬性上限，
+        /// 否则不仅报错，撞线前的全量文本重排(见 FlushReasoningPending)还会随文本增长
+        /// 拖慢主线程、造成"看起来卡死"的体感。取远低于两个阈值的安全值。
+        /// 注意：此上限只影响 UI 显示，不裁剪 <see cref="_reasoningText"/> 本身，
+        /// 完整 reasoning 内容仍会整体持久化到 ConversationTurn.Reasoning。
+        /// </summary>
+        private const int MaxRenderChars = 6000;
+
         private string _reasoningText = string.Empty;
+
+        /// <summary>
+        /// v1.14.4: reasoning token 的追加用累加器。<see cref="_reasoningText"/> 每 token 一次
+        /// 字符串 += 拼接是 O(n) 重新分配拷贝，文本越长单次追加越慢，长任务(数万字 reasoning)
+        /// 下会造成随对话推进愈发明显的主线程卡顿。改用 StringBuilder 累积，
+        /// 仅在 <see cref="FlushReasoningPending"/>(节流后，非每 token)同步到 <see cref="_reasoningText"/>。
+        /// </summary>
+        private readonly StringBuilder _reasoningAccumulator = new StringBuilder();
         private bool _isExpanded;
         private bool _isRunning;
         private double _durationMs;
@@ -180,6 +200,21 @@ namespace AgentCore.Editor.UI.Components
                 AgentCore.Editor.L10n.LanguageManager.LanguageChanged -= OnLanguageChanged);
         }
 
+        /// <summary>
+        /// 获取可安全渲染的 reasoning 文本：超过 <see cref="MaxRenderChars"/> 时只取最新片段，
+        /// 头部加省略提示，避免 UIToolkit 单文本框顶点上限截断/报错。
+        /// 完整内容仍保留在 <see cref="_reasoningText"/>，此方法只影响展示。
+        /// </summary>
+        private string GetRenderableReasoningText()
+        {
+            var text = _reasoningText ?? string.Empty;
+            if (text.Length <= MaxRenderChars) return text;
+
+            var omitted = text.Length - MaxRenderChars;
+            var head = $"...[已省略前 {omitted} 字，仅显示最新内容，完整思考过程已完整保存]...\n\n";
+            return head + text.Substring(text.Length - MaxRenderChars);
+        }
+
         private void OnLanguageChanged(string _)
         {
             // 刷新 tooltip
@@ -214,7 +249,9 @@ namespace AgentCore.Editor.UI.Components
             }
 
             _source = MergeSource(_source, source);
-            _reasoningText += token;
+
+            // v1.14.4: 用 StringBuilder 累积，避免每 token 一次 O(n) 字符串拼接。
+            _reasoningAccumulator.Append(token);
 
             // v1.6.5: 累积 token，帧节流 flush — 不每 token 更新 UI
             _reasoningPending.Append(token);
@@ -240,10 +277,13 @@ namespace AgentCore.Editor.UI.Components
             _reasoningFlushScheduled = false;
             if (_reasoningPending.Length == 0) return;
 
+            // v1.14.4: 节流后统一同步一次（而非每 token），ToString() 有拷贝开销但频率已降到 ~60fps。
+            _reasoningText = _reasoningAccumulator.ToString();
+
             UpdateSourceLabel();
             if (_isExpanded)
             {
-                _reasoningLabel.text = ContentFilter.SanitizeUnsupportedEmoji(_reasoningText);
+                _reasoningLabel.text = ContentFilter.SanitizeUnsupportedEmoji(GetRenderableReasoningText());
             }
             else
             {
@@ -263,6 +303,9 @@ namespace AgentCore.Editor.UI.Components
         public void SetReasoning(string reasoning, ThinkingTraceSource source, double durationMs)
         {
             _reasoningText = reasoning ?? string.Empty;
+            // v1.14.4: 会话恢复走直接赋值路径，同步累加器避免后续 AppendReasoning 时状态不一致。
+            _reasoningAccumulator.Clear();
+            _reasoningAccumulator.Append(_reasoningText);
             _source = source;
             _durationMs = Mathf.Max(0, (float)durationMs);
             _isRunning = false;
@@ -272,7 +315,7 @@ namespace AgentCore.Editor.UI.Components
             UpdateTitle();
             if (_isExpanded)
             {
-                _reasoningLabel.text = ContentFilter.SanitizeUnsupportedEmoji(_reasoningText);
+                _reasoningLabel.text = ContentFilter.SanitizeUnsupportedEmoji(GetRenderableReasoningText());
             }
         }
 
@@ -288,6 +331,9 @@ namespace AgentCore.Editor.UI.Components
             // v1.6.5: 完成时 flush 残留 token
             _reasoningFlushScheduled = false;
             _reasoningPending.Clear();
+
+            // v1.14.4: 确保最后一批未被节流 flush 同步到 _reasoningText 的 token 不丢失。
+            _reasoningText = _reasoningAccumulator.ToString();
 
             _durationMs = Mathf.Max(0, (float)durationMs);
             _source = MergeSource(_source, source);
@@ -307,7 +353,7 @@ namespace AgentCore.Editor.UI.Components
                 ? AgentCore.Editor.L10n.Loc.Tr("thinking.tooltip.collapse", "折叠 Thinking")
                 : AgentCore.Editor.L10n.Loc.Tr("thinking.tooltip.expand", "展开 Thinking");
             _content.style.display = expanded ? DisplayStyle.Flex : DisplayStyle.None;
-            _reasoningLabel.text = expanded ? ContentFilter.SanitizeUnsupportedEmoji(_reasoningText) : string.Empty;
+            _reasoningLabel.text = expanded ? ContentFilter.SanitizeUnsupportedEmoji(GetRenderableReasoningText()) : string.Empty;
             // 展开时隐藏 preview（避免重复展示），折叠时刷新 preview
             _previewLabel.style.display = expanded ? DisplayStyle.None : DisplayStyle.Flex;
             if (!expanded) UpdatePreview();
