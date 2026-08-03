@@ -6,15 +6,15 @@
   "unity": "2021.3",
   "unityRelease": "0f1",
   "license": "MIT",
-  "documentationUrl": "https://github.com/BakaAkari/agentcore-unity#readme",
-  "changelogUrl": "https://github.com/BakaAkari/agentcore-unity/blob/main/CHANGELOG.md",
-  "licensesUrl": "https://github.com/BakaAkari/agentcore-unity/blob/main/LICENSE.md",
+  "documentationUrl": "https://github.com/BakaAkari/AgentCore-Unity#readme",
+  "changelogUrl": "https://github.com/BakaAkari/AgentCore-Unity/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/BakaAkari/AgentCore-Unity/blob/main/LICENSE.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BakaAkari/agentcore-unity.git"
+    "url": "https://github.com/BakaAkari/AgentCore-Unity.git"
   },
   "bugs": {
-    "url": "https://github.com/BakaAkari/agentcore-unity/issues"
+    "url": "https://github.com/BakaAkari/AgentCore-Unity/issues"
   },
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.0.2"
