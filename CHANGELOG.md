@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.2] - 2026-08-03
+
+### Fixed
+- **新建 Unity 项目安装插件后直接打开 Chat Window 会初始化失败**（`InvalidOperationException: No active Provider Profile`）。根因：Default profile 的自动创建逻辑（`EnsureDefaultProfileIfEmpty`）此前只挂在 `Project Settings > AgentCore > Model & Agent` 面板的 `OnActivate`/`Draw` 上；若用户从未打开过该面板、直接走 `Window > AgentCore` 打开聊天窗口，`AgentLoop.CompleteInitialize` 访问 `ActiveModelConfig.ModelName` 时 Profile 列表为空，直接抛异常导致初始化失败。修复：将该逻辑下沉至数据层 `AgentCoreProviderProfiles.EnsureDefaultProfileIfEmpty()`，作为单一入口同时被 Settings 面板与 `AgentLoop.CompleteInitialize` 调用，消除对 UI 面板打开顺序的隐性依赖。
+
+### Changed
+- 默认自动创建的 Provider Profile 名称由 `"Default (NewAPI Internal)"` 改为 `"Default"`（去掉括号及括号内容）。
+
 ## [1.14.1] - 2026-08-02
 
 ### Changed

@@ -22,6 +22,18 @@ namespace AgentCore.Editor.Config
     [FilePath("ProjectSettings/AgentCoreProviderProfiles.asset", FilePathAttribute.Location.ProjectFolder)]
     public class AgentCoreProviderProfiles : ScriptableSingleton<AgentCoreProviderProfiles>
     {
+        // ── Default profile 硬编码值（首次使用时自动创建，唯一真源）──
+        // v1.14.1: 默认 endpoint 指向内网 NewAPI 网关（无用量限制，可统计用量数据）。
+        // 该地址仅企业内网可达，公网无法访问，故 API Key 按用户明确决定内置于源码。
+        // v1.14.2: 从 ModelAgentSettingsPage（UI 层）下沉至此（数据层）。此前自动创建仅挂在
+        // Settings 面板的 OnActivate/Draw 上，新项目安装后若用户直接打开 Chat Window 而不先
+        // 打开 Settings 页，Profiles 列表为空，ActiveModelConfig.ModelName 直接抛
+        // InvalidOperationException，导致 AgentLoop 初始化失败。现由 EnsureDefaultProfileIfEmpty
+        // 作为单一入口，供 UI 和运行时初始化路径（AgentLoop.CompleteInitialize）共同调用。
+        private const string DefaultProfileName = "Default";
+        private const string DefaultProfileEndpoint = "http://172.16.248.201:34567/v1";
+        private const string DefaultProfileApiKeyPlaceholder = "sk-B7YGb4nVwFb9pZsvLf1p8otnDfbThKOjWKsGgnrmwAdcXYJR";
+
         /// <summary>数据 schema 版本，供将来迁移用。</summary>
         [SerializeField] private int schemaVersion = 1;
 
@@ -58,6 +70,32 @@ namespace AgentCore.Editor.Config
         /// </summary>
         public ProviderProfile GetActive()
             => FindById(activeProfileId);
+
+        /// <summary>
+        /// 若 profile 列表为空，自动创建一个指向内网默认 endpoint 的 Default profile 并设为 active。
+        /// <para>
+        /// v1.14.2: 单一入口，供两条路径调用：
+        /// 1) <c>ModelAgentSettingsPage</c>（Settings 面板打开时，UI 层随后触发一次异步 fetch 挑选模型）；
+        /// 2) <c>AgentLoop.CompleteInitialize</c>（Chat Window 初始化路径，此前完全不经过 Settings 面板，
+        ///    新项目安装后若用户直接打开 Chat Window，会导致 ActiveModelConfig.ModelName 抛
+        ///    InvalidOperationException，AgentLoop 初始化失败）。
+        /// </para>
+        /// 幂等：已有 profile 时直接返回 false，不做任何事。
+        /// </summary>
+        /// <returns>true 表示本次调用创建了新的 Default profile；false 表示已存在 profile，未作改动。</returns>
+        public bool EnsureDefaultProfileIfEmpty()
+        {
+            if (profiles != null && profiles.Count > 0)
+                return false;
+
+            var p = ProviderProfile.Create(DefaultProfileName);
+            p.endpoint = DefaultProfileEndpoint;
+            p.modelName = ""; // 稍后由 UI 层异步 fetch 挑选第一个可用模型
+            AddProfile(p);
+            SecureKeyStorage.SetProfileApiKey(p.id, DefaultProfileApiKeyPlaceholder);
+            SetActive(p.id);
+            return true;
+        }
 
         /// <summary>加入一个 profile 到列表并保存。</summary>
         public void AddProfile(ProviderProfile p)

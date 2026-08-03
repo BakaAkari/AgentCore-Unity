@@ -363,6 +363,13 @@ namespace AgentCore.Editor.Core
 
             _isInitialized = true;
 
+            // v1.14.2: 新项目安装后若用户直接打开 Chat Window（不先经过 Settings 面板），
+            // Provider Profile 列表为空，下面对 ActiveModelConfig 的访问会抛
+            // InvalidOperationException 导致初始化失败。EnsureDefaultProfileIfEmpty 是
+            // 幂等的单一入口（与 ModelAgentSettingsPage 共用），此处仅需确保有 profile 存在，
+            // 不负责挑选具体模型名（留空，交由 ModelCapabilityProbe/用户在 Settings 页选择）。
+            AgentCore.Editor.Config.AgentCoreProviderProfiles.instance.EnsureDefaultProfileIfEmpty();
+
             // v1.6.5+: 自适应参数调整 + 异步探测模型能力
             // ApplyAdaptiveDefaults 在初始化时调用一次，确保 reserveResponseTokens 与模型能力匹配
             // ProbeAsync 异步探测 /v1/models → max_model_len，覆盖 ContextWindowManager 硬编码

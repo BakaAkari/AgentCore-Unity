@@ -33,12 +33,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private const string FoldoutOpenKeyPrefix = "model-agent.foldout."; // + profileId, EditorPrefs bool
         private const string OverridesFoldoutKeyPrefix = "model-agent.overridesFoldout."; // + profileId, EditorPrefs bool
 
-        // ── Default profile 硬编码值（首次自动创建时使用）──
-        // v1.14.1: 默认 endpoint 切换到内网 NewAPI 网关（无用量限制，可统计用量数据）。
-        // 该地址仅企业内网可达，公网无法访问，故 API Key 按用户明确决定内置于源码。
-        private const string DefaultProfileName = "Default (NewAPI Internal)";
-        private const string DefaultProfileEndpoint = "http://172.16.248.201:34567/v1";
-        private const string DefaultProfileApiKeyPlaceholder = "sk-B7YGb4nVwFb9pZsvLf1p8otnDfbThKOjWKsGgnrmwAdcXYJR";
+        // v1.14.2: Default profile 硬编码值（名称/endpoint/apiKey）已下沉至
+        // AgentCoreProviderProfiles.EnsureDefaultProfileIfEmpty（数据层单一入口）。
+        // 此处不再重复定义，避免两份硬编码值漂移。
 
         private readonly ModelSettingsService _service = new ModelSettingsService();
 
@@ -96,18 +93,16 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private void EnsureDefaultProfileIfEmpty(AgentCoreSettingsContext context)
         {
             var store = AgentCoreProviderProfiles.instance;
-            if (store.Profiles != null && store.Profiles.Count > 0)
+            bool created = store.EnsureDefaultProfileIfEmpty();
+            if (!created)
                 return;
 
-            var p = ProviderProfile.Create(DefaultProfileName);
-            p.endpoint = DefaultProfileEndpoint;
-            p.modelName = ""; // 稍后自动 fetch 取第一个
-            store.AddProfile(p);
-            SecureKeyStorage.SetProfileApiKey(p.id, DefaultProfileApiKeyPlaceholder);
-            store.SetActive(p.id);
+            var active = store.GetActive();
+            if (active == null)
+                return;
 
-            // 触发一次异步 fetch 挑第一个模型
-            _ = TryAutoSelectFirstModelAsync(p.id, context);
+            // 触发一次异步 fetch 挑第一个模型（UI 层职责，数据层不做网络调用）
+            _ = TryAutoSelectFirstModelAsync(active.id, context);
         }
 
         private async Task TryAutoSelectFirstModelAsync(string profileId, AgentCoreSettingsContext context)
