@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.3] - 2026-08-03
+
+### Fixed
+- **v1.14.2 遗留缺口：新项目直接打开 Chat Window 后首次对话必然失败**（`HTTP 400 "Model name not specified"`）。v1.14.2 修复了"无 Provider Profile 导致初始化崩溃"的问题，但自动创建的 Default profile 的 `modelName` 字段留空，且 `AgentLoop` 初始化路径没有等价的"自动 fetch 首个可用模型名"逻辑（此前只有 Settings 面板路径有）——导致请求带 `model=""` 被网关拒绝，3 次重试后放弃，产生连锁的 "LLM returned empty content" / "reasoning-only turn" 噪声日志。
+  - 新增 `AgentCoreProviderProfiles.EnsureDefaultProfileWithAutoModelAsync()`：创建 Default profile 后立即异步 fetch `/v1/models`，取第一个可用模型名填入。
+  - `AgentLoop.InitializeAsync` 改为 `await` 此方法（而非 fire-and-forget），确保 `CompleteInitialize` 访问 `ActiveModelConfig.ModelName` 时已就位；加 8 秒超时保护，网络不通/慢时不阻塞 Chat Window 打开（fetch 转后台继续跑，完成后 `ActiveModelConfig` 实时读取仍能生效）。
+  - Settings 面板路径不受影响，继续用原有的 `EnsureDefaultProfileIfEmpty()` + 自带 UI 状态提示的 fetch 逻辑，避免重复请求。
+
 ## [1.14.2] - 2026-08-03
 
 ### Fixed

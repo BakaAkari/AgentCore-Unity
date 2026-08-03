@@ -214,6 +214,30 @@ namespace AgentCore.Editor.Core
         public async Task InitializeAsync(CancellationToken ct = default)
         {
             if (!TryBeginInitialize()) return;
+
+            // v1.14.3: 必须在 CompleteInitialize（内部同步访问 ActiveModelConfig.ModelName）之前
+            // 完成，否则 fetch 尚未返回时 modelName 仍为空，请求会带 model="" 被网关拒绝
+            // （HTTP 400 "Model name not specified"）。新项目安装后若用户直接打开 Chat Window，
+            // 此调用负责补齐 v1.14.2 遗留的空 modelName 缺口。
+            // 用 8s 超时包一层：底层 HttpClientFactory 默认超时 300s，若不加限制，网络不通/慢时
+            // 会让 Chat Window 打开卡住数分钟。超时后放弃等待、继续初始化——fetch 仍在后台跑，
+            // 跑完后台会异步更新 profile.modelName（ActiveModelConfig.ModelName 不缓存，实时读取），
+            // 之后的请求即可用上；只有超时窗口内发出的第一条消息可能因 modelName 仍空而失败一次。
+            using (var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8)))
+            {
+                var ensureTask = AgentCoreProviderProfiles.instance.EnsureDefaultProfileWithAutoModelAsync();
+                var delayTask = Task.Delay(Timeout.Infinite, timeoutCts.Token);
+                await Task.WhenAny(ensureTask, delayTask);
+
+                // 超时场景下 ensureTask 可能仍在后台跑；即便内部已 try/catch，此处额外吸收一层，
+                // 避免 unobserved task exception（不阻塞，不影响本次初始化流程）。
+                _ = ensureTask.ContinueWith(t =>
+                {
+                    if (t.Exception != null)
+                        AgentCoreLog.Warning($"[AgentCore] EnsureDefaultProfileWithAutoModelAsync background continuation error: {t.Exception.Message}");
+                }, TaskScheduler.Default);
+            }
+
             var systemPrompt = await LoadBootstrapSystemPromptAsync(ct);
             CompleteInitialize(systemPrompt);
         }
@@ -363,12 +387,8 @@ namespace AgentCore.Editor.Core
 
             _isInitialized = true;
 
-            // v1.14.2: 新项目安装后若用户直接打开 Chat Window（不先经过 Settings 面板），
-            // Provider Profile 列表为空，下面对 ActiveModelConfig 的访问会抛
-            // InvalidOperationException 导致初始化失败。EnsureDefaultProfileIfEmpty 是
-            // 幂等的单一入口（与 ModelAgentSettingsPage 共用），此处仅需确保有 profile 存在，
-            // 不负责挑选具体模型名（留空，交由 ModelCapabilityProbe/用户在 Settings 页选择）。
-            AgentCore.Editor.Config.AgentCoreProviderProfiles.instance.EnsureDefaultProfileIfEmpty();
+            // v1.14.3: EnsureDefaultProfile 逻辑已上移至 InitializeAsync（await 完成后才进入
+            // CompleteInitialize），确保 modelName 在此处已就位，不再在这里重复调用。
 
             // v1.6.5+: 自适应参数调整 + 异步探测模型能力
             // ApplyAdaptiveDefaults 在初始化时调用一次，确保 reserveResponseTokens 与模型能力匹配

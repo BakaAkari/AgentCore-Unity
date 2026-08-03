@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using AgentCore.Editor.Config.Settings;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -28,8 +30,11 @@ namespace AgentCore.Editor.Config
         // v1.14.2: 从 ModelAgentSettingsPage（UI 层）下沉至此（数据层）。此前自动创建仅挂在
         // Settings 面板的 OnActivate/Draw 上，新项目安装后若用户直接打开 Chat Window 而不先
         // 打开 Settings 页，Profiles 列表为空，ActiveModelConfig.ModelName 直接抛
-        // InvalidOperationException，导致 AgentLoop 初始化失败。现由 EnsureDefaultProfileIfEmpty
-        // 作为单一入口，供 UI 和运行时初始化路径（AgentLoop.CompleteInitialize）共同调用。
+        // InvalidOperationException，导致 AgentLoop 初始化失败。
+        // v1.14.3: 单独下沉创建逻辑还不够——新建 profile 的 modelName 留空会让请求带 model=""
+        // 被网关拒绝（HTTP 400）。现由 EnsureDefaultProfileIfEmpty（仅创建）+
+        // EnsureDefaultProfileWithAutoModelAsync（创建 + fetch 模型名）两个入口分别供
+        // UI 层（Settings 面板，自带状态提示）和运行时初始化路径（AgentLoop.InitializeAsync）调用。
         private const string DefaultProfileName = "Default";
         private const string DefaultProfileEndpoint = "http://172.16.248.201:34567/v1";
         private const string DefaultProfileApiKeyPlaceholder = "sk-B7YGb4nVwFb9pZsvLf1p8otnDfbThKOjWKsGgnrmwAdcXYJR";
@@ -74,11 +79,9 @@ namespace AgentCore.Editor.Config
         /// <summary>
         /// 若 profile 列表为空，自动创建一个指向内网默认 endpoint 的 Default profile 并设为 active。
         /// <para>
-        /// v1.14.2: 单一入口，供两条路径调用：
-        /// 1) <c>ModelAgentSettingsPage</c>（Settings 面板打开时，UI 层随后触发一次异步 fetch 挑选模型）；
-        /// 2) <c>AgentLoop.CompleteInitialize</c>（Chat Window 初始化路径，此前完全不经过 Settings 面板，
-        ///    新项目安装后若用户直接打开 Chat Window，会导致 ActiveModelConfig.ModelName 抛
-        ///    InvalidOperationException，AgentLoop 初始化失败）。
+        /// 仅负责创建 profile，不做网络请求。供 <c>ModelAgentSettingsPage</c>（Settings 面板）调用——
+        /// UI 层随后自行触发一次带状态提示的异步 fetch。运行时初始化路径（<c>AgentLoop.InitializeAsync</c>）
+        /// 请用 <see cref="EnsureDefaultProfileWithAutoModelAsync"/>，否则会漏掉 modelName 自动填充。
         /// </para>
         /// 幂等：已有 profile 时直接返回 false，不做任何事。
         /// </summary>
@@ -90,11 +93,71 @@ namespace AgentCore.Editor.Config
 
             var p = ProviderProfile.Create(DefaultProfileName);
             p.endpoint = DefaultProfileEndpoint;
-            p.modelName = ""; // 稍后由 UI 层异步 fetch 挑选第一个可用模型
+            p.modelName = ""; // 由调用方决定是否触发自动 fetch（见 EnsureDefaultProfileWithAutoModelAsync）
             AddProfile(p);
             SecureKeyStorage.SetProfileApiKey(p.id, DefaultProfileApiKeyPlaceholder);
             SetActive(p.id);
             return true;
+        }
+
+        /// <summary>
+        /// v1.14.3: 组合入口——创建 Default profile（若为空）后，立即异步 fetch 并填入首个可用模型名。
+        /// <para>
+        /// 专供不经过 Settings 面板 UI 的初始化路径使用（当前为 <c>AgentLoop.CompleteInitialize</c>）。
+        /// Settings 面板路径请继续使用 <see cref="EnsureDefaultProfileIfEmpty"/> + 自身的
+        /// <c>TryAutoSelectFirstModelAsync</c>（带 UI 状态提示），不要调用本方法，否则会重复 fetch。
+        /// </para>
+        /// <para>
+        /// 背景：新建的 profile modelName 留空会导致后续请求发出 <c>model=""</c>，被 OpenAI-compatible
+        /// 网关拒绝（HTTP 400 "Model name not specified"）。此前只有 Settings 面板路径会异步 fetch 补上
+        /// modelName，AgentLoop 初始化路径完全没有等价逻辑——上次修复只解决了"抛异常崩溃"，没有解决
+        /// "创建出一个永远打不通的空 model 配置"。
+        /// </para>
+        /// </summary>
+        public async Task EnsureDefaultProfileWithAutoModelAsync()
+        {
+            bool created = EnsureDefaultProfileIfEmpty();
+            if (!created)
+                return;
+
+            var active = GetActive();
+            if (active == null)
+                return;
+
+            await TryAutoSelectFirstModelAsync(active.id);
+        }
+
+        /// <summary>
+        /// 异步 fetch 指定 profile 的可用模型列表，取第一个填入 modelName（仅当仍为空时）。
+        /// 静默失败：fetch 失败只记 Warning，不抛异常、不阻塞调用方（初始化路径不能因网络问题卡死）。
+        /// </summary>
+        private static async Task TryAutoSelectFirstModelAsync(string profileId)
+        {
+            try
+            {
+                var store = instance;
+                var p = store.FindById(profileId);
+                if (p == null)
+                    return;
+
+                var service = new ModelSettingsService();
+                var models = await service.FetchModelsAsync(p.endpoint, SecureKeyStorage.GetProfileApiKey(profileId));
+                if (models == null || models.Count == 0)
+                    return;
+
+                AsyncHelper.RunOnMainThread(() =>
+                {
+                    var current = store.FindById(profileId);
+                    if (current != null && string.IsNullOrEmpty(current.modelName))
+                    {
+                        store.UpdateProfile(profileId, x => x.modelName = models[0]);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Auto-select default model for '{profileId}' failed: {ex.Message}");
+            }
         }
 
         /// <summary>加入一个 profile 到列表并保存。</summary>
