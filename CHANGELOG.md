@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.6] - 2026-08-04
+
+### Fixed
+- **`batch_execute` 每次调用无条件触发风险确认弹窗，哪怕所有子操作都是只读排查（`get_info`/`read_file`/`search`/`read_console` 等）**：`BatchExecuteTool` 固定声明 `RiskLevel = High` 且无 `ReadOnlyActions` 白名单，导致批量只读排查时被反复打扰确认；确认等待时间还会被计入该次工具调用的 `execution_time_ms`，在长任务日志里表现为异常耗时。
+  - `ToolCallDispatcher` 新增 `ResolveBatchExecuteEffectiveAction`：对 `batch_execute` 的每个子操作复用既有的 `PlayModePreflight` + `ToolRiskPolicy.Evaluate` 完整判定链（不新增判定规则、不硬编码工具名单），只有当所有子操作独立评估均为 `Allow` 时才跳过确认弹窗；任一子操作需要确认/被拦截，fail-closed 走回原有确认流程。
+  - `BatchExecuteTool` 新增哨兵值 `ReadOnlyActions` 声明，配合上述判定结果跳过 High 风险确认。
+
+### Added
+- **诊断日志（DIAG）**：在 Domain Reload 触发/恢复、主线程工具调度排队、确认框等待四个关键点新增一次性诊断日志（`[DIAG]` 前缀），用于下次复现"长时间无响应/卡死"类问题时精确拆分耗时来源（排队 vs 确认等待 vs Domain Reload 本身），不是永久遥测。
+- **会话导出：完整诊断包（.zip）替代原 Markdown 导出入口**：原 Markdown 导出（人类可读对话文本）实际使用价值有限，排查 bug 时真正需要的是会话 JSON 之外的运行环境上下文。新导出入口一次性打包 `session.json`（完整会话数据）+ `Editor.log`/`Editor-prev.log`（Unity 日志）+ `system_info.json`（Unity/OS/编译环境）+ `domain_reload_state.json`（最近一次中断状态快照）+ `manifest.txt`（打包清单，记录每项成功/失败原因）。任一附加项读取失败不影响整体导出（fail-soft）。JSON 单独导出入口保留不变。
+
+### Fixed (Streaming)
+- **长任务多轮流式响应中，前面轮次的 assistant 正文在后续轮次被覆盖丢失**：`AgentLoop.Runner.cs` 每轮开始时会重置当前轮次的流式缓冲区，但历史累积逻辑存在缺口，导致 UI 和会话历史中只保留最后一轮的可见文本。新增 `_turnContentBeforeCurrentRound` 快照字段，在 `PrepareAssistantMessageForHistory` 中累积拼接前序轮次内容，移除 `HandleFinalResponse` 中的第二次覆盖写入，并在 `RegenerateDraftForReviseAsync`（用户主动要求重新生成）路径正确清零该快照，避免重新生成场景误将旧内容拼接进新草稿。
+
 ## [1.14.5] - 2026-08-03
 
 ### Fixed

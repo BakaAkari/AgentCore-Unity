@@ -352,16 +352,13 @@ namespace AgentCore.Editor.Core
             // 将完整的助手消息添加到 LLM 历史；RawAssistantContent 仅留在 ConversationTurn。
             if (assistantMessage != null)
             {
+                // v1.14.6 fix: PrepareAssistantMessageForHistory 内部已经把 assistantTurn.Content
+                // 设置为"跨轮累积值"（_turnContentBeforeCurrentRound + 本轮内容），不能再用
+                // assistantMessage.Content（写入 LLM 历史的单轮消息内容，不含前序轮次前缀）整体
+                // 覆盖回去——此前这里的覆盖正是多轮工具调用场景下中间轮次可见文字丢失的根因之一
+                // （另一处见 PrepareAssistantMessageForHistory 本身）。Prepare 已保证一致性，这里不再赋值。
                 PrepareAssistantMessageForHistory(assistantMessage, assistantTurn);
                 _messages.Add(assistantMessage);
-
-                // 确保 UI 轮次内容与清洗后的 LLM 历史一致。
-                // 用 IsNullOrWhiteSpace：GLM-5.2 reasoning 吃满预算时可能返回纯空白符（空格/换行）content，
-                // 若用 IsNullOrEmpty 会把空白符当有效正文赋值，导致后续 fallback 判断失效、留下空正文气泡。
-                if (!string.IsNullOrWhiteSpace(assistantMessage.Content))
-                {
-                    assistantTurn.Content = assistantMessage.Content;
-                }
             }
             else
             {
@@ -497,6 +494,11 @@ namespace AgentCore.Editor.Core
                 SetState(AgentState.Thinking);
 
                 // 复用 CallLLMStreamAsync 触发流式重生成, 但**禁用 Node A 抽取**(Node A 已完成)
+                // v1.14.6: 这里语义是"替换"整轮内容(REVISE 重新生成), 不是"跨轮累积"(见 CallLLMStreamAsync
+                // 头部对 _turnContentBeforeCurrentRound 的说明)。显式清零快照，避免 PrepareAssistantMessageForHistory
+                // 内部产生的中间态把旧草稿内容当前缀拼接进去（虽然本方法末尾会用 newMessage.Content 显式覆盖回单轮值，
+                // 但清零能让这条路径的中间状态本身也语义正确，不依赖后续覆盖兜底）。
+                _turnContentBeforeCurrentRound = string.Empty;
                 var newMessage = await CallLLMStreamAsync(assistantTurn, tools: null, ct);
 
                 if (newMessage != null)
@@ -570,11 +572,17 @@ namespace AgentCore.Editor.Core
             if (finalResult.State == VisiblePlanningTraceState.Completed)
             {
                 assistantMessage.Content = finalResult.Content;
-                assistantTurn.Content = finalResult.Content;
+                // v1.14.6 fix: 多轮工具调用场景下，assistantTurn.Content 在跨轮次累积（HandleContentToken
+                // 用 "+=" 逐 token 追加），但这里此前直接用本轮 finalResult.Content 整体赋值（"="），会把
+                // 前面所有轮次已经流式显示过的可见文字全部覆盖丢失，只留最后一轮的内容。
+                // 修复：拼回本轮开始前已累积的内容（_turnContentBeforeCurrentRound，在 CallLLMStreamAsync
+                // 开头快照），保证跨轮次可见文字不丢失。
+                assistantTurn.Content = _turnContentBeforeCurrentRound + finalResult.Content;
             }
             else if (!string.IsNullOrEmpty(rawContent))
             {
-                assistantTurn.Content = rawContent;
+                // 同上：else 分支同样需要跨轮次累积，不能直接用本轮 rawContent 整体覆盖。
+                assistantTurn.Content = _turnContentBeforeCurrentRound + rawContent;
             }
         }
 

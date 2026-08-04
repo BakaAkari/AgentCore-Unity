@@ -25,9 +25,23 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Category = "Meta",
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.High,
-        Capabilities = ToolCapability.BatchExecute)]
+        Capabilities = ToolCapability.BatchExecute,
+        ReadOnlyActions = new[] { AllSubOperationsReadOnlySentinel })]
     public class BatchExecuteTool : IAgentTool
     {
+        /// <summary>
+        /// 哨兵 action 值，供 <see cref="AgentCore.Editor.Tools.ToolCallDispatcher"/> 使用。
+        /// <para>
+        /// batch_execute 本身没有 "action" 参数（用 operations 数组代替），无法像其他工具那样
+        /// 靠单个 action 名判定是否只读。Dispatcher 会动态检查 operations 数组中每个子操作
+        /// 是否命中各自工具自己声明的 ReadOnlyActions 白名单——若全部只读，则把有效 action
+        /// 解析为本哨兵值，命中本工具声明的 ReadOnlyActions，从而跳过 High 风险确认弹窗。
+        /// 不硬编码任何具体子工具/action 名单，新增只读子工具只需自己正确声明
+        /// ReadOnlyActions 即可被自动识别。
+        /// </para>
+        /// </summary>
+        public const string AllSubOperationsReadOnlySentinel = "__all_sub_operations_read_only__";
+
         /// <summary>Default max chars per sub-tool output before truncation (from 500 in v1.10.0, raised in v1.10.1).</summary>
         private const int DefaultMaxOutputChars = 8000;
 

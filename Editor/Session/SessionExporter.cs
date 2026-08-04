@@ -1,19 +1,34 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
+using AgentCore.Editor.Core;
 using AgentCore.Editor.Utils;
+using Newtonsoft.Json.Linq;
+using UnityEditor;
 using UnityEngine;
 
 namespace AgentCore.Editor.Session
 {
     /// <summary>
-    /// 会话导出器 — 将 <see cref="SessionData"/> 导出为 Markdown 或 JSON 文件。
+    /// 会话导出器 — 将 <see cref="SessionData"/> 导出为 JSON 文件，或导出为包含
+    /// 会话数据 + Unity Editor 诊断信息的完整诊断包（.zip）。
     /// <para>
-    /// 支持两种导出格式：
+    /// v1.14.6 起：原 Markdown 导出入口（人类可读格式，仅含对话文本）实际使用价值有限——
+    /// 排查 bug 时真正需要的是会话 JSON 以外的运行环境上下文（Editor.log、系统信息、
+    /// Domain Reload 中断状态等），这些信息此前完全没有导出入口，只能靠用户手工翻找、
+    /// 甚至像 O 盘加密空间那种场景一样完全拿不到。因此把原 Markdown 入口改造为
+    /// "完整诊断包"导出，一次性打包：
     /// <list type="bullet">
-    ///   <item><b>Markdown</b>: 人类可读格式，包含角色标签、时间戳、工具调用摘要</item>
-    ///   <item><b>JSON</b>: 完整数据格式，可用于导入或分析</item>
+    ///   <item><b>session.json</b>: 完整会话数据（含 turns/tool_calls/压缩统计）</item>
+    ///   <item><b>Editor.log</b> / <b>Editor-prev.log</b>: Unity Editor 日志（若存在）</item>
+    ///   <item><b>system_info.json</b>: Unity 版本、OS、编译状态、Scripting Backend 等</item>
+    ///   <item><b>domain_reload_state.json</b>: 最近一次 Domain Reload 中断状态快照
+    ///     （诊断"卡死"/"中断"类问题的关键线索，含本次新增的 [DIAG] 日志关联字段）</item>
+    ///   <item><b>manifest.txt</b>: 导出清单，记录每个文件是否成功打包及原因</item>
     /// </list>
+    /// 任一附加文件读取失败都不会中断整体导出——manifest 会记录失败原因，
+    /// 保证核心的 session.json 始终能导出成功（fail-soft，不是 fail-fast）。
     /// </para>
     /// </summary>
     public static class SessionExporter
@@ -23,64 +38,11 @@ namespace AgentCore.Editor.Session
         /// </summary>
         public enum ExportFormat
         {
-            /// <summary>Markdown 格式（.md）</summary>
-            Markdown,
+            /// <summary>完整诊断包（.zip）：会话 JSON + Editor.log + 系统信息 + Domain Reload 状态</summary>
+            DiagnosticBundle,
 
-            /// <summary>JSON 格式（.json）</summary>
+            /// <summary>JSON 格式（.json）：仅会话数据</summary>
             Json
-        }
-
-        /// <summary>
-        /// 将会话数据导出为 Markdown 字符串。
-        /// </summary>
-        /// <param name="session">会话数据</param>
-        /// <returns>Markdown 格式的字符串</returns>
-        /// <exception cref="ArgumentNullException">session 为 null 时抛出</exception>
-        public static string ExportToMarkdown(SessionData session)
-        {
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
-
-            var sb = new StringBuilder();
-
-            // 标题和元信息
-            sb.AppendLine("# AgentCore 对话记录");
-            sb.AppendLine();
-            sb.AppendLine($"**会话**: {EscapeMarkdown(session.Title ?? "未命名会话")}");
-            sb.AppendLine($"**创建时间**: {session.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
-            sb.AppendLine($"**最后更新**: {session.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
-            sb.AppendLine($"**消息数**: {session.MessageCount}");
-            sb.AppendLine();
-            sb.AppendLine("---");
-            sb.AppendLine();
-
-            // 导出对话轮次
-            if (session.Turns != null && session.Turns.Count > 0)
-            {
-                foreach (var turn in session.Turns)
-                {
-                    ExportTurn(sb, turn);
-                }
-            }
-            else if (session.Messages != null && session.Messages.Count > 0)
-            {
-                // 如果没有 Turns 数据，回退到 Messages
-                foreach (var msg in session.Messages)
-                {
-                    ExportMessage(sb, msg);
-                }
-            }
-            else
-            {
-                sb.AppendLine("*(空会话)*");
-            }
-
-            // 页脚
-            sb.AppendLine("---");
-            sb.AppendLine();
-            sb.AppendLine($"*导出时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | 由 AgentCore 生成*");
-
-            return sb.ToString();
         }
 
         /// <summary>
@@ -98,7 +60,8 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
-        /// 将会话数据导出到文件。
+        /// 将会话数据导出到文件。<see cref="ExportFormat.DiagnosticBundle"/> 导出为 .zip，
+        /// <see cref="ExportFormat.Json"/> 导出为纯 .json。
         /// </summary>
         /// <param name="session">会话数据</param>
         /// <param name="filePath">目标文件路径</param>
@@ -111,13 +74,6 @@ namespace AgentCore.Editor.Session
 
             try
             {
-                string content = format switch
-                {
-                    ExportFormat.Markdown => ExportToMarkdown(session),
-                    ExportFormat.Json => ExportToJson(session),
-                    _ => throw new ArgumentOutOfRangeException(nameof(format))
-                };
-
                 // 确保目录存在
                 var directory = Path.GetDirectoryName(filePath);
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
@@ -125,8 +81,18 @@ namespace AgentCore.Editor.Session
                     Directory.CreateDirectory(directory);
                 }
 
-                File.WriteAllText(filePath, content, Encoding.UTF8);
-                return true;
+                if (format == ExportFormat.Json)
+                {
+                    File.WriteAllText(filePath, ExportToJson(session), Encoding.UTF8);
+                    return true;
+                }
+
+                if (format == ExportFormat.DiagnosticBundle)
+                {
+                    return ExportDiagnosticBundle(session, filePath);
+                }
+
+                throw new ArgumentOutOfRangeException(nameof(format));
             }
             catch (Exception ex)
             {
@@ -147,104 +113,215 @@ namespace AgentCore.Editor.Session
             // 清理文件名中的非法字符
             var safeName = SanitizeFileName(title);
             var date = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var ext = format == ExportFormat.Markdown ? "md" : "json";
-            return $"AgentCore_{safeName}_{date}.{ext}";
+            var ext = format == ExportFormat.DiagnosticBundle ? "zip" : "json";
+            var suffix = format == ExportFormat.DiagnosticBundle ? "_diag" : "";
+            return $"AgentCore_{safeName}{suffix}_{date}.{ext}";
         }
+
+        #region 诊断包构建
+
+        /// <summary>
+        /// 构建并写出完整诊断包（.zip）。
+        /// 打包顺序：session.json（必须成功）→ Editor.log / Editor-prev.log（尽力而为）→
+        /// system_info.json（尽力而为）→ domain_reload_state.json（尽力而为）→ manifest.txt（记录全过程）。
+        /// </summary>
+        private static bool ExportDiagnosticBundle(SessionData session, string filePath)
+        {
+            var manifest = new StringBuilder();
+            manifest.AppendLine("AgentCore 诊断包导出清单");
+            manifest.AppendLine($"导出时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            manifest.AppendLine($"会话: {session.Title ?? "(未命名)"} (ID: {session.Id})");
+            manifest.AppendLine(new string('-', 40));
+
+            // 若目标文件已存在，先删除
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+
+            // 直接用 ZipArchive 包裹 FileStream，而非 ZipFile.Open 便捷方法——
+            // ZipArchive 保证在 .NET Standard 2.0 API Compatibility Level 下可用，
+            // 不依赖历史上曾拆分到 System.IO.Compression.FileSystem 的 ZipFile 静态类，
+            // 兼容性更可控（Unity 项目的 API Compatibility Level 因项目而异）。
+            using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+            using (var zip = new ZipArchive(fileStream, ZipArchiveMode.Create))
+            {
+                // 1. session.json —— 核心数据，失败即整体失败
+                AddTextEntry(zip, "session.json", ExportToJson(session));
+                manifest.AppendLine("[OK] session.json — 完整会话数据");
+
+                // 2. Editor.log / Editor-prev.log —— 尽力而为
+                TryAddLogFile(zip, manifest, "Editor.log", isPrev: false);
+                TryAddLogFile(zip, manifest, "Editor-prev.log", isPrev: true);
+
+                // 3. system_info.json —— 尽力而为
+                TryAddSystemInfo(zip, manifest);
+
+                // 4. domain_reload_state.json —— 尽力而为
+                TryAddDomainReloadState(zip, manifest);
+
+                // 5. manifest.txt 最后写入（要包含前面所有条目的记录）
+                AddTextEntry(zip, "manifest.txt", manifest.ToString());
+            }
+
+            return true;
+        }
+
+        private static void AddTextEntry(ZipArchive zip, string entryName, string content)
+        {
+            var entry = zip.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Optimal);
+            using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
+            writer.Write(content);
+        }
+
+        private static void AddFileEntry(ZipArchive zip, string entryName, string sourceFilePath)
+        {
+            // 用共享读方式打开源文件（Unity 可能仍持有 Editor.log 的写锁），
+            // 再流式写入 zip entry，避免 ZipFile.CreateEntryFromFile 因文件被占用而失败。
+            var entry = zip.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Optimal);
+            using var source = new FileStream(sourceFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var dest = entry.Open();
+            source.CopyTo(dest);
+        }
+
+        /// <summary>
+        /// 尝试打包 Editor.log / Editor-prev.log。跨平台路径解析对齐
+        /// <see cref="AgentCore.Editor.Tools.Native.Utility.ReadConsoleTool"/> 的 get_log_file 实现。
+        /// </summary>
+        private static void TryAddLogFile(ZipArchive zip, StringBuilder manifest, string fileName, bool isPrev)
+        {
+            try
+            {
+                var logPath = GetEditorLogPath(isPrev);
+                if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
+                {
+                    manifest.AppendLine($"[SKIP] {fileName} — 文件不存在 (期望路径: {logPath ?? "unknown"})");
+                    return;
+                }
+
+                AddFileEntry(zip, fileName, logPath);
+                var sizeKb = new FileInfo(logPath).Length / 1024.0;
+                manifest.AppendLine($"[OK] {fileName} — 来自 {logPath} ({sizeKb:F1} KB)");
+            }
+            catch (Exception ex)
+            {
+                manifest.AppendLine($"[FAIL] {fileName} — {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 打包系统/环境信息（Unity 版本、OS、编译状态、Scripting Backend 等）。
+        /// 字段范围对齐 read_console 工具的 get_system_info action，便于交叉核对。
+        /// </summary>
+        private static void TryAddSystemInfo(ZipArchive zip, StringBuilder manifest)
+        {
+            try
+            {
+                var activeTarget = EditorUserBuildSettings.activeBuildTarget;
+                var activeTargetGroup = BuildPipeline.GetBuildTargetGroup(activeTarget);
+
+                var data = new JObject
+                {
+                    ["exportedAt"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                    ["unityVersion"] = Application.unityVersion,
+                    ["unityEditorPath"] = EditorApplication.applicationPath,
+                    ["projectName"] = Application.productName,
+                    ["projectPath"] = Path.GetFullPath(Application.dataPath + "/.."),
+                    ["activeBuildTarget"] = activeTarget.ToString(),
+                    ["activeBuildTargetGroup"] = activeTargetGroup.ToString(),
+                    ["isPlaying"] = EditorApplication.isPlaying,
+                    ["isCompiling"] = EditorApplication.isCompiling,
+                    ["isPaused"] = EditorApplication.isPaused,
+                    ["scriptCompilationFailed"] = EditorUtility.scriptCompilationFailed,
+                    ["operatingSystem"] = SystemInfo.operatingSystem,
+                    ["operatingSystemFamily"] = SystemInfo.operatingSystemFamily.ToString(),
+                    ["processorType"] = SystemInfo.processorType,
+                    ["processorCount"] = SystemInfo.processorCount,
+                    ["systemMemorySize"] = SystemInfo.systemMemorySize,
+                    ["graphicsDeviceName"] = SystemInfo.graphicsDeviceName,
+                    ["scriptingBackend"] = PlayerSettings.GetScriptingBackend(activeTargetGroup).ToString(),
+                    ["apiCompatibilityLevel"] = PlayerSettings.GetApiCompatibilityLevel(activeTargetGroup).ToString(),
+                    ["dotNetVersion"] = Environment.Version.ToString(),
+                    ["machineName"] = Environment.MachineName,
+                    ["userName"] = Environment.UserName,
+                };
+
+                AddTextEntry(zip, "system_info.json", data.ToString(Newtonsoft.Json.Formatting.Indented));
+                manifest.AppendLine("[OK] system_info.json — Unity/OS/编译环境信息");
+            }
+            catch (Exception ex)
+            {
+                manifest.AppendLine($"[FAIL] system_info.json — {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 打包最近一次 Domain Reload 中断状态快照（若从未发生过中断，字段多为空/默认值，
+        /// 但仍打包以明确"未中断"这一事实本身也是诊断信息）。
+        /// </summary>
+        private static void TryAddDomainReloadState(ZipArchive zip, StringBuilder manifest)
+        {
+            try
+            {
+                var state = DomainReloadState.instance;
+                var data = new JObject
+                {
+                    ["wasInterrupted"] = state.WasInterrupted,
+                    ["interruptedSessionId"] = state.InterruptedSessionId,
+                    ["interruptPhase"] = state.InterruptPhase.ToString(),
+                    ["lastToolName"] = state.LastToolName,
+                    ["interruptTimestamp"] = state.InterruptTimestamp,
+                    ["hadPendingToolCalls"] = state.HadPendingToolCalls,
+                    ["interruptedToolCallId"] = state.InterruptedToolCallId,
+                    ["compilationSucceeded"] = state.CompilationSucceeded,
+                    ["compilationErrors"] = state.CompilationErrors,
+                    ["pendingUserMessage"] = state.PendingUserMessage,
+                    ["lastAssistantContent"] = state.LastAssistantContent,
+                    ["lastAssistantReasoning"] = state.LastAssistantReasoning,
+                    ["toolResultCompressionSuccessCount"] = state.ToolResultCompressionSuccessCount,
+                    ["conversationCompressionSuccessCount"] = state.ConversationCompressionSuccessCount,
+                    ["totalTokensSaved"] = state.TotalTokensSaved,
+                };
+
+                AddTextEntry(zip, "domain_reload_state.json", data.ToString(Newtonsoft.Json.Formatting.Indented));
+                manifest.AppendLine("[OK] domain_reload_state.json — 最近一次 Domain Reload 中断状态");
+            }
+            catch (Exception ex)
+            {
+                manifest.AppendLine($"[FAIL] domain_reload_state.json — {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 解析当前平台的 Unity Editor 日志路径。与
+        /// <see cref="AgentCore.Editor.Tools.Native.Utility.ReadConsoleTool"/> 中同名私有方法逻辑一致
+        /// （该方法为 private，无法直接复用，此处保持路径规则同步：Windows 下 Editor-prev.log
+        /// 与 Editor.log 同目录）。
+        /// </summary>
+        private static string GetEditorLogPath(bool isPrev)
+        {
+            string fileName = isPrev ? "Editor-prev.log" : "Editor.log";
+            string os = SystemInfo.operatingSystemFamily.ToString();
+            if (os == "Windows")
+            {
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                return Path.Combine(localAppData, "Unity", "Editor", fileName);
+            }
+            else if (os == "MacOSX")
+            {
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+                return Path.Combine(home, "Library", "Logs", "Unity", fileName);
+            }
+            else
+            {
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+                return Path.Combine(home, ".config", "unity3d", fileName);
+            }
+        }
+
+        #endregion
 
         #region 私有方法
-
-        /// <summary>
-        /// 导出单个对话轮次为 Markdown。
-        /// </summary>
-        private static void ExportTurn(StringBuilder sb, SerializableConversationTurn turn)
-        {
-            if (turn == null) return;
-
-            // 跳过 system 消息
-            if (turn.Role == "system") return;
-
-            var roleName = GetRoleDisplayName(turn.Role);
-            var time = turn.Timestamp.ToLocalTime().ToString("HH:mm");
-
-            sb.AppendLine($"## {roleName} ({time})");
-            sb.AppendLine();
-
-            if (!string.IsNullOrEmpty(turn.Content))
-            {
-                sb.AppendLine(turn.Content.Trim());
-                sb.AppendLine();
-            }
-
-            // 导出工具调用信息
-            if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
-            {
-                foreach (var tc in turn.ToolCalls)
-                {
-                    var status = tc.Success ? "成功" : "失败";
-                    var timeMs = tc.ExecutionTimeMs > 0 ? $" ({tc.ExecutionTimeMs:F0}ms)" : "";
-                    sb.AppendLine($"> **工具调用**: `{tc.ToolName}` — {status}{timeMs}");
-                }
-                sb.AppendLine();
-            }
-        }
-
-        /// <summary>
-        /// 导出单条消息为 Markdown（回退模式，当 Turns 不可用时使用）。
-        /// </summary>
-        private static void ExportMessage(StringBuilder sb, SerializableChatMessage msg)
-        {
-            if (msg == null) return;
-
-            // 跳过 system 和 tool 消息
-            if (msg.Role == "system" || msg.Role == "tool") return;
-
-            var roleName = GetRoleDisplayName(msg.Role);
-            sb.AppendLine($"## {roleName}");
-            sb.AppendLine();
-
-            if (!string.IsNullOrEmpty(msg.Content))
-            {
-                sb.AppendLine(msg.Content.Trim());
-                sb.AppendLine();
-            }
-
-            // 如果 assistant 消息有 tool_calls，简要列出
-            if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
-            {
-                foreach (var tc in msg.ToolCalls)
-                {
-                    // Bug F' (v1.11+): tool call function name 从嵌套 Function.Name 读取，
-                    // 兼容旧 v1.10.x 存档 (向后兼容 setter 会将平铺 function_name 映射到 Function.Name)
-                    var name = tc.Function?.Name ?? "(unknown)";
-                    sb.AppendLine($"> **工具调用**: `{name}`");
-                }
-                sb.AppendLine();
-            }
-        }
-
-        /// <summary>
-        /// 获取角色的中文显示名称。
-        /// </summary>
-        private static string GetRoleDisplayName(string role)
-        {
-            return role switch
-            {
-                "user" => "用户",
-                "assistant" => "助手",
-                "system" => "系统",
-                _ => role
-            };
-        }
-
-        /// <summary>
-        /// 转义 Markdown 特殊字符。
-        /// </summary>
-        private static string EscapeMarkdown(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return text;
-            // 只转义可能破坏 Markdown 结构的字符
-            return text.Replace("|", "\\|");
-        }
 
         /// <summary>
         /// 清理文件名中的非法字符。

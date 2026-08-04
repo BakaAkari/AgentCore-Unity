@@ -23,6 +23,13 @@ namespace AgentCore.Editor.UI
         {
             if (_agentLoop == null) return;
 
+            // DIAG (2026-08-04, 8分钟卡死排查用，一次性诊断日志，非永久遥测):
+            // TryRestoreSession 在 CreateGUI 中被调用，约等于"Domain Reload 结束、
+            // ChatWindow UI 重新可用"的时刻。与 AgentLoop.DomainReload.cs 里
+            // "[DIAG] Domain Reload BEGIN" 的时间差 = Domain Reload 本身的真实耗时，
+            // 可与 Editor.log 里的 "Reloading assemblies done" 交叉验证。
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][DIAG] TryRestoreSession CALLED (Domain Reload likely finished) at {DateTime.Now:HH:mm:ss.fff}, WasInterrupted={DomainReloadState.instance.WasInterrupted}");
+
             try
             {
                 var session = SessionManager.Instance.TryRestoreLastSession();

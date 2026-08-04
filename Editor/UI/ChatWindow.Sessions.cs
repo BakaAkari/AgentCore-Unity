@@ -512,9 +512,9 @@ namespace AgentCore.Editor.UI
 
             menu.AddSeparator("");
 
-            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.exportMarkdown", "导出/Markdown (.md)")), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.exportBundle", "导出/完整诊断包 (.zip)")), false, () =>
             {
-                ExportSession(sessionId, SessionExporter.ExportFormat.Markdown);
+                ExportSession(sessionId, SessionExporter.ExportFormat.DiagnosticBundle);
             });
 
             menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.exportJson", "导出/JSON (.json)")), false, () =>
@@ -820,9 +820,9 @@ namespace AgentCore.Editor.UI
             }
 
             var menu = new GenericMenu();
-            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.exportMarkdown.short", "导出为 Markdown (.md)")), false, () =>
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.exportBundle.short", "导出为完整诊断包 (.zip)")), false, () =>
             {
-                ExportSession(sessionId, SessionExporter.ExportFormat.Markdown);
+                ExportSession(sessionId, SessionExporter.ExportFormat.DiagnosticBundle);
             });
             menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.menu.exportJson.short", "导出为 JSON (.json)")), false, () =>
             {
@@ -851,7 +851,7 @@ namespace AgentCore.Editor.UI
                     }
 
                     var defaultName = SessionExporter.GetDefaultFileName(session, format);
-                    var extension = format == SessionExporter.ExportFormat.Markdown ? "md" : "json";
+                    var extension = format == SessionExporter.ExportFormat.DiagnosticBundle ? "zip" : "json";
 
                     var path = EditorUtility.SaveFilePanel(
                         AgentCore.Editor.L10n.Loc.Tr("session.dialog.exportTitle", "导出会话"),

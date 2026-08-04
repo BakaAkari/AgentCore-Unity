@@ -31,6 +31,11 @@ namespace AgentCore.Editor.Core
             List<ToolDefinition> tools,
             CancellationToken ct)
         {
+            // v1.14.6 fix: 快照本轮开始前 assistantTurn.Content 已累积的文本（前面所有轮次的可见内容）。
+            // 供 PrepareAssistantMessageForHistory 在清洗/重写本轮内容时拼回前缀，避免多轮工具调用场景下
+            // 中间轮次的可见文字被后续轮次的 Prepare 覆盖丢失（根因：Prepare 此前用 "=" 赋值而非累加）。
+            _turnContentBeforeCurrentRound = assistantTurn?.Content ?? string.Empty;
+
             // Phase 3: 上下文窗口截断
             // 创建 _messages 的浅拷贝，对拷贝进行截断，不修改原始列表（保留完整历史用于 UI 显示）
             var settings = AgentCoreSettings.instance;
@@ -285,9 +290,17 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
-        /// v1.14.5: 累积 stream 期尚未达到 flush 阈值的 content 尾段（分块 flush 策略下的缓冲区）。
+        /// v1.14.6 fix: 累积 stream 期尚未达到 flush 阈值的 content 尾段（分块 flush 策略下的缓冲区）。
         /// </summary>
         private StringBuilder _pendingStreamContent;
+
+        /// <summary>
+        /// v1.14.6 fix: 本轮 LLM 调用（CallLLMStreamAsync）开始前，assistantTurn.Content 已经累积
+        /// 的文本快照（即之前所有轮次已经流式显示过的可见内容）。供 PrepareAssistantMessageForHistory
+        /// 在清洗/重写本轮内容时拼回前缀，避免多轮工具调用场景下用整体赋值（"="）覆盖掉此前轮次通过
+        /// 逐 token 追加（"+="）写入的可见文字。
+        /// </summary>
+        private string _turnContentBeforeCurrentRound = string.Empty;
 
         /// <summary>
         /// 追加 reasoning / planning trace token 到当前 assistant turn。

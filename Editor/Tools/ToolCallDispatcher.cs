@@ -256,7 +256,15 @@ namespace AgentCore.Editor.Tools
                 // 3.5 Play Mode preflight（D3）—— write 类工具在 Play Mode 中一律 Block
                 //   v1.11+ (Bug X): 提前提取 action 以支持 ReadOnlyActions 白名单跳过
                 //   (对齐 ToolRiskPolicy 只读白名单粒度修复)。
-                var preflightAction = ExtractActionFromParameters(parameters);
+                //   v1.14.6 (batch_execute 确认弹窗降噪): batch_execute 没有单一 "action" 字段，
+                //   改为动态检查 operations 数组中每个子操作是否命中各自工具自己声明的
+                //   ReadOnlyActions 白名单；全部只读时解析为哨兵 action 值，命中
+                //   BatchExecuteTool 自身声明的 ReadOnlyActions，从而在纯读排查场景
+                //   (get_info/search/read_file 等组合) 跳过高风险确认。不硬编码任何
+                //   具体子工具/action 名单，判定依据是子工具自身已声明的白名单。
+                var preflightAction = toolName == BatchExecuteReadOnlyToolName
+                    ? ResolveBatchExecuteEffectiveAction(parameters)
+                    : ExtractActionFromParameters(parameters);
                 if (Safety.PlayModePreflight.IsBlockedInPlayMode(tool.Metadata, preflightAction, out var playModeReason))
                 {
                     stopwatch.Stop();
@@ -491,6 +499,14 @@ namespace AgentCore.Editor.Tools
             var tcs = new TaskCompletionSource<ToolResult>();
             var executed = false;
 
+            // DIAG (2026-08-04, 8分钟卡死排查用，一次性诊断日志，非永久遥测):
+            // 记录"发起主线程调度请求"到"EditorApplication.update 回调真正被调用"之间的排队耗时。
+            // 若下次复现长时间卡死，diagQueueSw 的值能直接说明卡死是发生在"等待被调度到主线程"
+            // 这一段（例如 Domain Reload 期间 update 回调整体停摆），还是发生在拿到主线程之后
+            // 的工具执行本身（ExecuteToolOnMainThreadAsync 内部）。
+            var diagQueueSw = Stopwatch.StartNew();
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}[DIAG] MainThread dispatch REQUESTED tool='{tool.Metadata.Name}' at {DateTime.Now:HH:mm:ss.fff}");
+
             // 注册取消回调
             using var registration = ct.Register(() =>
             {
@@ -504,6 +520,7 @@ namespace AgentCore.Editor.Tools
             {
                 if (!executed)
                 {
+                    AgentCore.Editor.Utils.AgentCoreLog.Warning($"{LogPrefix}[DIAG] MainThread dispatch TIMEOUT tool='{tool.Metadata.Name}' after {diagQueueSw.Elapsed.TotalMilliseconds:F0}ms queued (30s timeout fired) at {DateTime.Now:HH:mm:ss.fff}");
                     tcs.TrySetException(new TimeoutException(
                         $"Tool '{tool.Metadata.Name}' timed out after {mainThreadTimeoutSeconds}s waiting for the main thread. " +
                         "This often happens during long asset imports, Domain Reload, or modal dialogs. Please retry after the operation completes."));
@@ -520,6 +537,9 @@ namespace AgentCore.Editor.Tools
                     return;
 
                 executed = true;
+                // DIAG (2026-08-04, 8分钟卡死排查用): update 回调真正被调用的时刻，
+                // 与上面 REQUESTED 日志的时间差 = 主线程排队等待耗时。
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}[DIAG] MainThread dispatch CALLBACK_FIRED tool='{tool.Metadata.Name}' queued={diagQueueSw.Elapsed.TotalMilliseconds:F0}ms at {DateTime.Now:HH:mm:ss.fff}");
                 _ = ExecuteToolOnMainThreadAsync(tool, parameters, ct, tcs);
             };
             EditorApplication.update += callback;
@@ -583,7 +603,90 @@ namespace AgentCore.Editor.Tools
                 return false;
             }
 
-            return await _confirmationProvider.RequestConfirmationAsync(decision.ConfirmationRequest, ct);
+            // DIAG (2026-08-04, 8分钟卡死排查用，一次性诊断日志，非永久遥测):
+            // 若下次复现"Hold on / busy" 长时间卡死，对比这两行时间戳与 Editor.log 里
+            // Reloading assemblies / Compiling shader 等条目的时间戳，可判定卡死时长是否
+            // 主要落在"等待用户点击确认框"这一段，还是落在确认之外的其它阶段。
+            var diagSw = Stopwatch.StartNew();
+            AgentCoreLog.Info($"{LogPrefix}[DIAG] Confirmation wait START tool='{decision.ConfirmationRequest.ToolName}' at {DateTime.Now:HH:mm:ss.fff}");
+            var confirmedResult = await _confirmationProvider.RequestConfirmationAsync(decision.ConfirmationRequest, ct);
+            diagSw.Stop();
+            AgentCoreLog.Info($"{LogPrefix}[DIAG] Confirmation wait END tool='{decision.ConfirmationRequest.ToolName}' result={confirmedResult} waited={diagSw.Elapsed.TotalMilliseconds:F0}ms at {DateTime.Now:HH:mm:ss.fff}");
+            return confirmedResult;
+        }
+
+        /// <summary>
+        /// <c>batch_execute</c> 工具名常量，用于 Play Mode preflight / 风险策略评估中
+        /// 触发只读白名单动态判定（见 <see cref="ResolveBatchExecuteEffectiveAction"/>）。
+        /// </summary>
+        private const string BatchExecuteReadOnlyToolName = "batch_execute";
+
+        /// <summary>
+        /// 动态判定 <c>batch_execute</c> 的 <c>operations</c> 数组是否全部由"策略上可直接放行"
+        /// 的子操作组成（即每个子操作单独评估都会得到 <see cref="ToolPolicyOutcome.Allow"/>）。
+        /// <para>
+        /// v1.14.6 (确认弹窗降噪)：batch_execute 因固定声明 <see cref="ToolRiskLevel.High"/>，
+        /// 此前无条件对每次调用触发用户确认弹窗，即便子操作全部是 get_info/read_file/search/
+        /// read_console 等纯读排查操作。
+        /// </para>
+        /// <para>
+        /// 判定方式：对每个子操作复用现有的 <see cref="Safety.PlayModePreflight.IsBlockedInPlayMode"/>
+        /// 与 <see cref="ToolRiskPolicy.Evaluate"/> 完整评估链（与 <see cref="DispatchAsync"/>
+        /// 对单个工具调用的判定完全一致），而不是自建一套简化规则——这样能自动覆盖：
+        /// 工具级 <see cref="ToolRiskLevel.ReadOnly"/>（如 read_console 整工具只读，无需
+        /// 逐 action 声明白名单）、逐 action 的 <see cref="ToolMetadata.ReadOnlyActions"/> 白名单、
+        /// <see cref="ToolRiskPolicy"/> 的破坏性 token 兜底、以及 Play Mode 下的写操作拦截。
+        /// 任一子操作的独立评估结果不是 Allow（RequireConfirmation / Block / preflight 拒绝），
+        /// 或子操作缺失可解析的 tool/action、目标工具未注册，均视为"不能确定全安全"，
+        /// 返回空字符串走原有（High 风险确认）路径 —— fail-closed，不放行不确定的批量操作。
+        /// 不硬编码任何具体工具名/action 名单，完全依赖各子工具自身已声明的风险元数据。
+        /// </para>
+        /// </summary>
+        /// <param name="parameters">batch_execute 的已解析参数（含 operations 数组）</param>
+        /// <returns>全部子操作均可直接放行时返回哨兵 action 值；否则返回空字符串</returns>
+        private string ResolveBatchExecuteEffectiveAction(JObject parameters)
+        {
+            var operations = parameters?["operations"] as JArray;
+            if (operations == null || operations.Count == 0)
+                return string.Empty;
+
+            foreach (var op in operations)
+            {
+                var subToolName = op?["tool"]?.Type == JTokenType.String
+                    ? op["tool"].Value<string>()
+                    : null;
+                if (string.IsNullOrEmpty(subToolName))
+                    return string.Empty;
+
+                // batch_execute 嵌套 batch_execute 不在本次判定范围内，保守起见直接拒绝自动放行。
+                if (string.Equals(subToolName, BatchExecuteReadOnlyToolName, StringComparison.OrdinalIgnoreCase))
+                    return string.Empty;
+
+                var subTool = _registry.GetTool(subToolName);
+                if (subTool?.Metadata == null)
+                    return string.Empty;
+
+                var subArgs = op["args"] as JObject ?? new JObject();
+                var subAction = ExtractActionFromParameters(subArgs);
+
+                // 与 DispatchAsync 对单个工具调用完全一致的判定链：Play Mode 拦截 + 风险策略评估。
+                if (Safety.PlayModePreflight.IsBlockedInPlayMode(subTool.Metadata, subAction, out _))
+                    return string.Empty;
+
+                var subPathRisk = ToolPathRiskResolver.Resolve(subArgs, subTool.Metadata, out var subTargets);
+                var subDecision = ToolRiskPolicy.Evaluate(
+                    subTool.Metadata,
+                    subPathRisk,
+                    subToolName,
+                    subAction,
+                    BuildParameterSummary(subArgs),
+                    subTargets);
+
+                if (!subDecision.IsAllowed)
+                    return string.Empty;
+            }
+
+            return Native.Meta.BatchExecuteTool.AllSubOperationsReadOnlySentinel;
         }
 
         /// <summary>

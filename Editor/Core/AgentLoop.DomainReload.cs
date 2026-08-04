@@ -20,6 +20,13 @@ namespace AgentCore.Editor.Core
         /// </summary>
         private void OnBeforeAssemblyReload()
         {
+            // DIAG (2026-08-04, 8分钟卡死排查用，一次性诊断日志，非永久遥测):
+            // 记录 Domain Reload 触发的确切时刻与当时的 Agent 状态。若下次复现长时间卡死，
+            // 对比这一行与下面 OnAfterAssemblyReload 的 RESUMED 行的时间差 = Reload 本身耗时；
+            // 再对比 ExecuteOnMainThreadAsync 的 [DIAG] MainThread dispatch 系列日志，
+            // 可判定卡死主体落在 Reload 本身，还是 Reload 之后 dispatcher 恢复调度的这一段。
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][DIAG] Domain Reload BEGIN at {DateTime.Now:HH:mm:ss.fff}, CurrentState={CurrentState}");
+
             // 1. 检查当前是否正在执行操作
             // WaitingForUserInput（ask_user 挂起）视同"干净挂起"：历史已完整合法（占位 tool_result 已写入），
             // 挂起状态由 SavePendingAskUser 独立持久化，不应标记为"执行中被打断"，故与 Idle 同路径处理。
