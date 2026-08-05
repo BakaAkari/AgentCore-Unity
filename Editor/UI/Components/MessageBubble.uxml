@@ -9,5 +9,9 @@
     <ui:VisualElement name="bubble-content">
       <ui:Label name="content-label" />
     </ui:VisualElement>
+    <ui:VisualElement name="bubble-footer">
+      <ui:VisualElement name="footer-spacer" />
+      <ui:Button name="fork-button" class="bubble-fork-button" tooltip="从这条消息开始，复制历史到一个新会话继续" />
+    </ui:VisualElement>
   </ui:VisualElement>
 </ui:UXML>

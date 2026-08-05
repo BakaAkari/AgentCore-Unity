@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.8] - 2026-08-05
+
+### Added
+- **Fork 会话**：消息卡片新增 Fork 按钮，从任意历史消息节点复制出一个新会话（截断历史 + 新建，不走 LLM 总结），用于探索不同分支而不丢失原会话上下文。孤儿 tool 消息按合法 `tool_call_id` 集合联动过滤；旧会话边界特例（`MessageEndIndex == -1` 且为最后一条 turn）按 `source.Messages.Count` 兜底。
+
+### Fixed
+- **思考折叠条（ThinkingDrawer）在多轮工具调用循环中途悬空读秒，永不停止**：根因是两层状态模型不匹配——Core 层的 reasoning 计时状态（`_reasoningActive`）是整个 assistant turn 生命周期内共享的单例字段，但 UI 层每轮 LLM 调用都会创建一个独立的 `ThinkingDrawer`（`AssistantTurnView.BeginNewRound`）。两者靠 Core 在每轮结束时补发一次 `ReasoningCompleted` 事件维持同步，这是个单点：
+  - 已定位并修复的漏发路径之一：取消是协作式的（`StreamingResponseParser` 检测到取消后静默 return，不抛异常），`RunToolCallLoopAsync` 中两处 `if (ct.IsCancellationRequested) { break; }`（LLM 流取消 / 工具执行取消）从不经过任何 `catch(OperationCanceledException)` 分支，导致 `CompleteReasoningIfNeeded` 从未被调用。现已在两处 `break` 前显式补齐调用。
+  - 结构性预防（不再依赖 Core 单点通知）：新增 `ThinkingDrawer.ForceCompleteIfRunning()`，在 `AssistantTurnView.BeginNewRound()` 创建新一轮之前调用——新一轮的开始本身就是"上一轮必然已经结束"的强证据，不依赖 Core 是否正确 emit 了对应事件。若 Core 之后仍补发一次迟到的 `ReasoningCompleted`，`Complete()` 的 early-return 保证幂等。
+
+### Changed
+- **BUG1 预防（初始化偶发变慢）**：
+  - `LoadBootstrapSystemPromptAsync`（此前唯一无超时保护的磁盘扫描环节）包一层 5 秒超时；超时即放弃、降级为默认 system prompt，保证初始化流程本身永不真正卡死。
+  - 新增 `SlowOperationDiagnostics`：单次 `InitializeAsync` 超过 3 秒自动把分段耗时明细落盘到 `Library/AgentCore/slow_init_diagnostics.log`（追加模式），不再需要用户掐点截图/导出诊断包才能复现证据。
+
 ## [1.14.7] - 2026-08-05
 
 ### Fixed

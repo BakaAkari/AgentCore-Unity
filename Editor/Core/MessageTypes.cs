@@ -825,6 +825,22 @@ namespace AgentCore.Editor.Core
         public SelfChallengeData SelfChallenge { get; set; }
 
         /// <summary>
+        /// Fork 支持：此 turn 完成时 <c>_messages</c>（LLM 扁平历史）的长度快照。
+        /// <para>
+        /// 用于 Fork 功能定位"该 turn 结束后 LLM 历史应截断到第几条"——不能靠数组下标
+        /// 启发式推断，因为 ask_user 等场景会在同一个 assistant turn 生命周期内向
+        /// <c>_messages</c> 追加多条消息（如 continuation user 消息），turn 数量与
+        /// message 数量并非线性对应。
+        /// </para>
+        /// <para>
+        /// 仅在 turn 真正完成（HandleFinalResponse / 强制退出 / DomainReload 恢复等
+        /// 明确完成点）时被赋值；默认 -1 表示"未记录"——这类 turn（多为旧版本会话数据，
+        /// 或仍在进行中的轮次）不允许作为 Fork 点，避免用不可靠边界切出新的坏历史。
+        /// </para>
+        /// </summary>
+        public int MessageEndIndex { get; set; } = -1;
+
+        /// <summary>
         /// 创建一个新的对话轮次。
         /// </summary>
         /// <param name="role">角色标识</param>

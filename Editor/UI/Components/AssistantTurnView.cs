@@ -128,6 +128,11 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         public void BeginNewRound()
         {
+            // BUG1(第二起) 结构性预防：新一轮开始前，强制结束上一轮 drawer 的计时（若仍在 running）。
+            // 见 ThinkingDrawer.ForceCompleteIfRunning 上的详细说明——新一轮的开始本身就是
+            // "上一轮必然已经结束"的强证据，不依赖 Core 是否正确 emit 了 ReasoningCompleted。
+            CurrentRound?.ThinkingDrawer.ForceCompleteIfRunning();
+
             var section = new RoundSection();
 
             var sectionContainer = new VisualElement();

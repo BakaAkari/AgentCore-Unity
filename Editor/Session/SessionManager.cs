@@ -511,6 +511,173 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
+        /// Fork 会话：从指定 turn（含）截断源会话历史，创建一个全新会话作为延续起点。
+        /// <para>
+        /// 设计取舍（详见架构讨论，2026-08-05）：不做"总结后新建会话"——那需要在源会话里
+        /// 再调一次 LLM，如果源会话历史本身已经损坏（tool_calls 缺 function.name 等）导致
+        /// LLM 持续 400，总结路径同样会失败，用户完全无法脱身。Fork 走纯粹的"复制截断"，
+        /// 不依赖 LLM 调用，任何时候都能成功。
+        /// </para>
+        /// <para>
+        /// 边界必须按 Turn.MessageEndIndex 快照截断，不能按数组下标启发式推断——
+        /// ask_user 等场景会在同一个 assistant turn 生命周期内向 messages 追加多条消息
+        /// （见 ResumeFromUserInput），turn 数量与 message 数量不是线性对应关系。
+        /// </para>
+        /// </summary>
+        /// <param name="sourceSessionId">源会话 ID。</param>
+        /// <param name="forkAtTurnId">Fork 点：复制到这条 turn（含）为止的历史。</param>
+        /// <returns>
+        /// 新建会话的 <see cref="SessionData"/>；若源会话不存在、目标 turn 不存在，
+        /// 或目标 turn 的 <c>MessageEndIndex</c> 为 -1（未记录快照，多为旧版本会话数据
+        /// 或异常中断的轮次，边界不可靠）则返回 null，不冒险产生新的坏历史。
+        /// </returns>
+        public SessionData ForkSession(string sourceSessionId, string forkAtTurnId)
+        {
+            if (string.IsNullOrEmpty(sourceSessionId) || string.IsNullOrEmpty(forkAtTurnId))
+            {
+                AgentCoreLog.Warning($"{LogPrefix}ForkSession called with empty sourceSessionId or forkAtTurnId.");
+                return null;
+            }
+
+            // 源会话若恰好是当前活动会话，用内存中的最新数据（可能比磁盘上的更新），
+            // 否则从磁盘加载。避免"刚发完消息还没触发自动保存就 fork"丢最后一轮的问题。
+            SessionData source;
+            if (sourceSessionId == CurrentSessionId && _currentSession != null)
+            {
+                source = _currentSession;
+            }
+            else
+            {
+                source = SessionStorage.Load(sourceSessionId);
+            }
+
+            if (source == null)
+            {
+                AgentCoreLog.Warning($"{LogPrefix}ForkSession: source session not found: {sourceSessionId}");
+                return null;
+            }
+
+            var turns = source.Turns;
+            if (turns == null || turns.Count == 0)
+            {
+                AgentCoreLog.Warning($"{LogPrefix}ForkSession: source session has no turns: {sourceSessionId}");
+                return null;
+            }
+
+            int turnIndex = turns.FindIndex(t => t.Id == forkAtTurnId);
+            if (turnIndex < 0)
+            {
+                AgentCoreLog.Warning($"{LogPrefix}ForkSession: fork turn not found: {forkAtTurnId}");
+                return null;
+            }
+
+            var forkTurn = turns[turnIndex];
+            int messageCutoff;
+
+            if (forkTurn.MessageEndIndex >= 0)
+            {
+                messageCutoff = forkTurn.MessageEndIndex;
+            }
+            else if (turnIndex == turns.Count - 1)
+            {
+                // 安全特例：没有 MessageEndIndex 快照（旧版本会话数据），但 fork 点恰好是
+                // 该会话的最后一条消息 —— 这种情况下"复制到 fork 点为止"等价于"复制全部历史"，
+                // 不需要知道任何中间 turn 具体占了几条 message，天然不存在边界猜测风险。
+                // 中间某条历史消息就没有这个保证（会被记忆注入的 system 消息、历史压缩等打乱
+                // turn↔message 的对应关系），因此仍然拒绝。
+                messageCutoff = source.Messages?.Count ?? 0;
+                AgentCoreLog.Info($"{LogPrefix}ForkSession: turn {forkAtTurnId} has no MessageEndIndex snapshot, " +
+                    "but is the last turn in the session — forking the entire history (safe boundary).");
+            }
+            else
+            {
+                AgentCoreLog.Warning($"{LogPrefix}ForkSession: turn {forkAtTurnId} has no MessageEndIndex snapshot " +
+                    "(legacy session data or turn was never marked complete) and is not the last turn — " +
+                    "refusing to fork on an unreliable mid-history boundary.");
+                return null;
+            }
+
+            if (source.Messages == null || messageCutoff > source.Messages.Count)
+            {
+                AgentCoreLog.Warning($"{LogPrefix}ForkSession: MessageEndIndex {messageCutoff} out of range " +
+                    $"for source session {sourceSessionId} (messages count = {source.Messages?.Count ?? 0}).");
+                return null;
+            }
+
+            // 复制消息历史：截断到 messageCutoff（不含），并顺手过滤掉这次事故教训对应的坏数据——
+            // tool_calls 里 function.name 为空/null 的 assistant 消息不允许带入新会话。
+            // 关键点：assistant 消息被丢弃后，紧跟着的 tool 结果消息（tool_call_id 指向被丢弃
+            // 的那个 tool_call）如果原样保留，会变成"孤儿 tool 消息"——引用一个新会话历史里
+            // 根本不存在的 tool_call_id，这是 OpenAI 兼容 API 同样会拒绝的另一种坏结构，等于
+            // 把一种 400 换成另一种 400。用"保留合法 tool_call_id 集合"的方式联动过滤：
+            // 只有当 tool 消息的 tool_call_id 确实来自一条被保留的 assistant 消息时才留下。
+            var keptToolCallIds = new HashSet<string>();
+            var newMessages = new List<SerializableChatMessage>();
+            for (int i = 0; i < messageCutoff; i++)
+            {
+                var msg = source.Messages[i];
+
+                if (msg.Role == "assistant" && msg.ToolCalls != null && msg.ToolCalls.Count > 0)
+                {
+                    bool hasInvalidToolCall = msg.ToolCalls.Exists(tc => string.IsNullOrEmpty(tc.Function?.Name));
+                    if (hasInvalidToolCall)
+                    {
+                        AgentCoreLog.Warning($"{LogPrefix}ForkSession: dropped assistant message with invalid " +
+                            "tool_call(s) (missing function.name) while copying history — this is the exact " +
+                            "corruption pattern that causes repeated LLM 400s.");
+                        continue;
+                    }
+
+                    foreach (var tc in msg.ToolCalls)
+                    {
+                        if (!string.IsNullOrEmpty(tc.Id)) keptToolCallIds.Add(tc.Id);
+                    }
+                }
+                else if (msg.Role == "tool")
+                {
+                    // 联动过滤：tool_call_id 对应的 assistant 消息已被丢弃（或从未在保留集合里），
+                    // 这条 tool 结果消息就是孤儿，必须一起丢弃，否则产生新的坏结构。
+                    if (string.IsNullOrEmpty(msg.ToolCallId) || !keptToolCallIds.Contains(msg.ToolCallId))
+                    {
+                        AgentCoreLog.Warning($"{LogPrefix}ForkSession: dropped orphan tool-result message " +
+                            $"(tool_call_id={msg.ToolCallId ?? "<null>"}) whose originating assistant tool_call " +
+                            "was dropped — keeping it would create a different 400-causing structure.");
+                        continue;
+                    }
+                }
+
+                newMessages.Add(msg);
+            }
+
+            // 复制 UI turns：同样截断到 forkAtTurnId（含）。
+            var newTurns = new List<SerializableConversationTurn>(turns.GetRange(0, turnIndex + 1));
+
+            var newSession = new SessionData
+            {
+                Id = Guid.NewGuid().ToString(),
+                Title = string.IsNullOrEmpty(source.Title) || source.Title == SessionData.DefaultTitle
+                    ? SessionData.DefaultTitle
+                    : source.Title + " (fork)",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                Messages = newMessages,
+                Turns = newTurns,
+                MessageCount = newMessages.Count,
+                // 压缩统计是源会话全生命周期的累计值，对新会话无意义，不带过去，重置为初始态。
+                CompressionMetrics = null,
+                Tag = null,
+                Archived = false,
+                TitleManuallySet = false
+            };
+
+            SessionStorage.Save(newSession);
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}ForkSession: created {newSession.Id} from " +
+                $"{sourceSessionId} at turn {forkAtTurnId} ({newMessages.Count} messages, {newTurns.Count} turns).");
+
+            return newSession;
+        }
+
+        /// <summary>
         /// 获取上一次活动会话的 ID。
         /// 用于窗口重新打开时恢复上一次的会话。
         /// </summary>

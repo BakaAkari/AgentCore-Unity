@@ -87,6 +87,9 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>复制按钮引用（如果 UXML 中存在）</summary>
         private Button _copyButton;
 
+        /// <summary>Fork 按钮引用（如果 UXML 中存在）</summary>
+        private Button _forkButton;
+
         /// <summary>底部资源引用栏（仅 assistant 消息使用，含消息里出现的文件/GO 引用 chip）</summary>
         private MessageReferenceBar _referenceBar;
 
@@ -96,6 +99,12 @@ namespace AgentCore.Editor.UI.Components
         #endregion
 
         #region 公开属性 (扩展)
+
+        /// <summary>
+        /// Fork 按钮点击回调。由外部（ChatWindow）设置；点击时以本气泡的 <see cref="MessageId"/>
+        /// （即对应 turn.Id）作为参数调用，外部负责实际的 <c>SessionManager.ForkSession</c> + 切换会话。
+        /// </summary>
+        public Action<string> OnForkClicked { get; set; }
 
         /// <summary>
         /// 当前气泡显示的完整原始文本内容（供外部读取或复制使用）。
@@ -150,6 +159,7 @@ namespace AgentCore.Editor.UI.Components
             _contentLabel = this.Q<Label>("content-label");
             _bubbleContent = this.Q<VisualElement>("bubble-content");
             _copyButton = this.Q<Button>("copy-button");
+            _forkButton = this.Q<Button>("fork-button");
 
             // 启用内容文本选择，允许用户选中和复制文本（Unity 2022.2+）
             if (_contentLabel != null)
@@ -159,6 +169,9 @@ namespace AgentCore.Editor.UI.Components
 
             // 初始化复制按钮（user 角色不显示——用户已经知道自己输入了什么）
             SetupCopyButton();
+
+            // 初始化 Fork 按钮（error 角色不显示——错误消息不构成有效的对话延续点）
+            SetupForkButton();
 
             // 设置角色样式类
             if (_bubbleRoot != null)
@@ -633,6 +646,56 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
+        /// 初始化 Fork 按钮：user / assistant 消息可用，error 气泡不显示
+        /// （错误消息不是真正的对话轮次，没有对应的 <c>ConversationTurn</c> 可供 fork）。
+        /// <para>
+        /// 按钮初始可用性交给外部通过 <see cref="SetForkAvailable"/> 控制——构造时无法得知
+        /// 对应 turn 的 <c>MessageEndIndex</c> 是否有效（-1 表示不可靠边界，通常是旧版本会话
+        /// 数据或仍在进行中的轮次），ChatWindow 在恢复/追加气泡时会显式调用一次。
+        /// </para>
+        /// </summary>
+        private void SetupForkButton()
+        {
+            if (_forkButton == null) return;
+
+            if (Role != "user" && Role != "assistant")
+            {
+                _forkButton.style.display = DisplayStyle.None;
+                return;
+            }
+
+            _forkButton.text = AgentCore.Editor.L10n.Loc.Tr("message.fork", "Fork");
+            _forkButton.focusable = false;
+            _forkButton.clicked += HandleForkClicked;
+
+            // 默认禁用：外部（ChatWindow）必须显式调用 SetForkAvailable(true) 才能启用，
+            // 这样"忘记接线"的失败模式是"按钮看起来存在但置灰"，而不是"点了没反应"。
+            _forkButton.SetEnabled(false);
+        }
+
+        /// <summary>
+        /// Fork 按钮点击处理：转发给外部回调，本组件不直接接触 SessionManager/ChatWindow。
+        /// </summary>
+        private void HandleForkClicked()
+        {
+            OnForkClicked?.Invoke(MessageId);
+        }
+
+        /// <summary>
+        /// 设置 Fork 按钮是否可用。
+        /// </summary>
+        /// <param name="available">
+        /// false 时按钮置灰且不可点击——用于对应 turn 的 <c>MessageEndIndex == -1</c>（
+        /// 未记录快照/边界不可靠，见 <see cref="Core.MessageTypes.ConversationTurn.MessageEndIndex"/>）
+        /// 或该 turn 仍在流式输出中的场景，避免在不可靠边界上产生新的坏历史。
+        /// </param>
+        public void SetForkAvailable(bool available)
+        {
+            if (_forkButton == null) return;
+            _forkButton.SetEnabled(available);
+        }
+
+        /// <summary>
         /// 当 UXML 模板加载失败时，创建兜底布局。
         /// </summary>
         private void CreateFallbackLayout()
@@ -671,6 +734,21 @@ namespace AgentCore.Editor.UI.Components
             content.Add(contentLabel);
 
             bubbleRoot.Add(content);
+
+            var footer = new VisualElement { name = "bubble-footer" };
+            footer.style.flexDirection = FlexDirection.Row;
+            footer.style.marginTop = 4;
+
+            var footerSpacer = new VisualElement { name = "footer-spacer" };
+            footerSpacer.style.flexGrow = 1;
+            footer.Add(footerSpacer);
+
+            var forkBtn = new Button { name = "fork-button" };
+            forkBtn.AddToClassList("bubble-fork-button");
+            footer.Add(forkBtn);
+
+            bubbleRoot.Add(footer);
+
             Add(bubbleRoot);
         }
 

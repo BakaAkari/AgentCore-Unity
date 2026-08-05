@@ -19,10 +19,20 @@ namespace AgentCore.Editor.UI
         /// 添加用户消息气泡到消息容器。
         /// </summary>
         /// <param name="content">用户消息内容</param>
-        private void AddUserMessage(string content)
+        /// <param name="messageId">
+        /// 消息 ID。必须与随后传给 <see cref="Core.AgentLoop.SendMessageAsync"/> 的
+        /// <c>userTurnId</c> 是同一个值，否则气泡 MessageId 与真实 turn.Id 不一致，
+        /// Fork 按钮会找不到对应的 turn。
+        /// </param>
+        private void AddUserMessage(string content, string messageId)
         {
-            var messageId = Guid.NewGuid().ToString();
             var bubble = new MessageBubble(messageId, "user", content);
+            // user turn 的 MessageEndIndex 由 AgentLoop.SendMessageAsync 在方法开头同步设置
+            // （不经过任何 await），是调用方可以依赖的不变量——一旦气泡创建，对应 turn 必然
+            // 会在随后的同步代码路径里被标记为"已完成"，因此这里可以直接启用 fork，
+            // 不需要像 assistant 消息那样等待事件回调后再查证。
+            bubble.OnForkClicked = OnForkButtonClicked;
+            bubble.SetForkAvailable(true);
             _messageBubbles[messageId] = bubble;
             _messageListManager?.AddItem(bubble);
             ScrollToBottom(force: true); // 新消息添加，强制滚动到底部
@@ -165,6 +175,15 @@ namespace AgentCore.Editor.UI
             if (_messageBubbles.TryGetValue(messageId, out var bubble))
             {
                 bubble.FinalizeContent(fullContent);
+
+                // Fork 接线：此刻 assistantTurn.MessageEndIndex 已经由 HandleFinalResponse
+                // 同步设置完毕（在 EmitEvent 触发本回调之前），可以安全查询。
+                // isLastTurn=true：assistant 消息刚完成，必然是当前会话里最新的 turn。
+                var turn = FindTurnById(messageId);
+                if (turn != null)
+                {
+                    WireForkButton(bubble, turn, isLastTurn: true);
+                }
             }
         }
 
@@ -236,12 +255,13 @@ namespace AgentCore.Editor.UI
             // 更新状态标签
             UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.retrying", "重试中..."));
 
-            // 添加用户消息气泡（显示重试标记）
-            AddUserMessage(AgentCore.Editor.L10n.Loc.Tr("chat.error.retryPrefix", "[重试] {0}", message));
+            // 添加用户消息气泡（显示重试标记）：同样需要 ID 同步，见 OnSendClicked 注释。
+            var retryTurnId = Guid.NewGuid().ToString();
+            AddUserMessage(AgentCore.Editor.L10n.Loc.Tr("chat.error.retryPrefix", "[重试] {0}", message), retryTurnId);
 
             // 异步发送消息
             AsyncHelper.RunAsync(
-                () => _agentLoop.SendMessageAsync(message),
+                () => _agentLoop.SendMessageAsync(message, retryTurnId),
                 onError: ex => AgentCoreLog.Error($"[AgentCore] Retry error: {ex.Message}")
             );
         }
@@ -261,6 +281,96 @@ namespace AgentCore.Editor.UI
 
             // Phase 4.5: 清空文件变更面板
             _fileChangeSummaryPanel?.ClearAndHide();
+        }
+
+        /// <summary>
+        /// 按 turn.Id 在当前 AgentLoop 的对话历史中查找对应的 <see cref="ConversationTurn"/>。
+        /// </summary>
+        /// <param name="turnId">turn ID（即消息气泡的 MessageId）。</param>
+        /// <returns>找到的 turn；未找到或 <c>_agentLoop</c> 为空时返回 null。</returns>
+        private ConversationTurn FindTurnById(string turnId)
+        {
+            if (_agentLoop == null || string.IsNullOrEmpty(turnId)) return null;
+
+            var history = _agentLoop.ConversationHistory;
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                if (history[i].Id == turnId) return history[i];
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 为消息气泡接上 Fork 按钮：设置点击回调 + 依据 turn.MessageEndIndex 设置初始可用性。
+        /// </summary>
+        /// <param name="bubble">目标气泡（可能为 null，调用方无需先判空）。</param>
+        /// <param name="turn">气泡对应的对话轮次。</param>
+        /// <param name="isLastTurn">
+        /// 该 turn 是否是会话中最后一个 turn。旧版本会话数据没有 MessageEndIndex 快照
+        /// （值为 -1），但如果 fork 点恰好是最后一条消息，"复制到此为止"等价于"复制全部
+        /// 历史"，不需要精确边界，因此仍然允许 fork（与 SessionManager.ForkSession 的
+        /// 安全特例保持一致）。
+        /// </param>
+        private void WireForkButton(MessageBubble bubble, ConversationTurn turn, bool isLastTurn)
+        {
+            if (bubble == null || turn == null) return;
+
+            bubble.OnForkClicked = OnForkButtonClicked;
+            bool available = turn.MessageEndIndex >= 0 || isLastTurn;
+            bubble.SetForkAvailable(available);
+        }
+
+        /// <summary>
+        /// Fork 按钮点击处理：从当前会话截断复制到一个新会话，并立即切换过去。
+        /// </summary>
+        /// <param name="turnId">Fork 点对应的 turn.Id（即气泡的 MessageId）。</param>
+        private void OnForkButtonClicked(string turnId)
+        {
+            if (string.IsNullOrEmpty(turnId)) return;
+
+            if (_agentLoop == null)
+            {
+                AgentCoreLog.Warning("[AgentCore] Cannot fork: AgentLoop not initialized.");
+                return;
+            }
+
+            var sourceSessionId = SessionManager.Instance.CurrentSessionId;
+            if (string.IsNullOrEmpty(sourceSessionId))
+            {
+                AgentCoreLog.Warning("[AgentCore] Cannot fork: no active session.");
+                return;
+            }
+
+            if (_agentLoop.CurrentState != AgentState.Idle)
+            {
+                AgentCoreLog.Warning("[AgentCore] Cannot fork while agent is busy.");
+                return;
+            }
+
+            // Fork 前先保存当前会话，确保 ForkSession 读到的是最新历史
+            // （ForkSession 内部对"源会话恰好是当前活动会话"有内存优先读取的兜底，
+            // 但显式保存一次更保险，尤其是 MessageCount/Turns 引用可能已被后续操作替换）。
+            try
+            {
+                SessionManager.Instance.ForceSave(
+                    new List<ChatMessage>(_agentLoop.Messages),
+                    new List<ConversationTurn>(_agentLoop.ConversationTurns));
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"[AgentCore] Error saving current session before fork: {ex.Message}");
+                return;
+            }
+
+            var forked = SessionManager.Instance.ForkSession(sourceSessionId, turnId);
+            if (forked == null)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Fork failed for turn {turnId} — see previous warning for reason.");
+                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.fork.failed", "Fork 失败"), false);
+                return;
+            }
+
+            SwitchToSession(forked.Id);
         }
 
         /// <summary>
@@ -288,6 +398,7 @@ namespace AgentCore.Editor.UI
             for (int i = 0; i < history.Count; i++)
             {
                 var turn = history[i];
+                bool isLastTurn = (i == history.Count - 1);
 
                 if (turn.Role == "user")
                 {
@@ -296,6 +407,7 @@ namespace AgentCore.Editor.UI
 
                     // 用户消息气泡
                     var bubble = new MessageBubble(turn.Id, "user", turn.Content);
+                    WireForkButton(bubble, turn, isLastTurn);
                     _messageBubbles[turn.Id] = bubble;
                     _messageListManager?.AddItem(bubble);
                 }
@@ -305,6 +417,7 @@ namespace AgentCore.Editor.UI
                     var turnView = EnsureAssistantTurnView(turn.Id);
                     turnView.RestoreThinking(turn);
                     var bubble = turnView.EnsureBubble(turn.Id, turn.Content, isStreaming: false);
+                    WireForkButton(bubble, turn, isLastTurn);
                     _messageBubbles[turn.Id] = bubble;
 
                     // 恢复 Self-Challenge 卡片（v1.5.0-alpha2）

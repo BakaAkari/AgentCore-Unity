@@ -230,3 +230,60 @@
     color: #ffb0b0;
     background-color: rgba(192, 112, 112, 0.2);
 }
+
+/* --- 气泡底部（Fork 按钮） --- */
+#bubble-footer {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 4px;
+    /* 默认不占空间；只有存在可见子元素（fork-button 未被 DisplayStyle.None 隐藏）时才显示，
+       避免所有旧会话/未完成轮次上都留一条空白条。 */
+    height: auto;
+}
+
+#footer-spacer {
+    flex-grow: 1;
+}
+
+/* --- Fork 按钮（气泡右下角） --- */
+.bubble-fork-button {
+    margin-left: 6px;
+    margin-right: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    font-size: 9px;
+    border-radius: 3px;
+    border-width: 1px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #999999;
+    -unity-text-align: middle-center;
+}
+
+.bubble-fork-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #d4d4d4;
+}
+
+.bubble-fork-button:active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.bubble-fork-button:disabled {
+    opacity: 0.35;
+}
+
+.message-bubble--user .bubble-fork-button {
+    color: #a0c4e8;
+    border-color: rgba(160, 196, 232, 0.25);
+}
+
+.message-bubble--user .bubble-fork-button:hover {
+    color: #ffffff;
+    background-color: rgba(160, 196, 232, 0.2);
+}

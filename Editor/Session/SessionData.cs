@@ -450,6 +450,14 @@ namespace AgentCore.Editor.Session
         public SelfChallengeData SelfChallenge { get; set; }
 
         /// <summary>
+        /// Fork 支持：此 turn 完成时 LLM 消息历史长度快照（见 <see cref="ConversationTurn.MessageEndIndex"/>）。
+        /// -1（默认值）表示未记录/不可作为 Fork 点——旧版本会话数据反序列化后自然是 -1，
+        /// Fork UI 据此禁用该消息上的 Fork 按钮，不会用不可靠边界切出坏历史。
+        /// </summary>
+        [JsonProperty("message_end_index", NullValueHandling = NullValueHandling.Ignore, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public int MessageEndIndex { get; set; } = -1;
+
+        /// <summary>
         /// 从运行时 ConversationTurn 创建可序列化版本。
         /// </summary>
         public static SerializableConversationTurn FromConversationTurn(ConversationTurn turn)
@@ -467,7 +475,8 @@ namespace AgentCore.Editor.Session
                 RawAssistantContent = string.IsNullOrEmpty(turn.RawAssistantContent) ? null : turn.RawAssistantContent,
                 PlanningTraceState = turn.PlanningTraceState,
                 Timestamp = turn.Timestamp,
-                SelfChallenge = turn.SelfChallenge
+                SelfChallenge = turn.SelfChallenge,
+                MessageEndIndex = turn.MessageEndIndex
             };
 
             if (turn.ToolCalls != null && turn.ToolCalls.Count > 0)
@@ -503,7 +512,8 @@ namespace AgentCore.Editor.Session
                 ReasoningDurationMs = ReasoningDurationMs,
                 RawAssistantContent = RawAssistantContent ?? string.Empty,
                 PlanningTraceState = PlanningTraceState,
-                SelfChallenge = SelfChallenge
+                SelfChallenge = SelfChallenge,
+                MessageEndIndex = MessageEndIndex
             };
 
             // 通过 internal set 直接恢复原始 Id 和 Timestamp，

@@ -647,12 +647,17 @@ namespace AgentCore.Editor.Core
                     {
                         AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Resume LLM call was cancelled.");
                         assistantTurn.IsStreaming = false;
+                        // BUG2 fix: 与 SendMessageAsync 同理，取消时必须显式收尾 reasoning 计时状态，
+                        // 否则 ThinkingDrawer 计时器悬空运行。
+                        CompleteReasoningIfNeeded(assistantTurn);
                         SetState(AgentState.Idle);
                     }
                     catch (Exception ex)
                     {
                         AgentCoreLog.Error($"[AgentCore] Error during resume LLM call: {ex}");
                         assistantTurn.IsStreaming = false;
+                        // BUG2 fix: 异常中断同理。
+                        CompleteReasoningIfNeeded(assistantTurn);
                         EmitEvent(AgentEvent.ErrorEvent(ex, "Domain Reload 恢复"));
                         SetState(AgentState.Error);
                         SetState(AgentState.Idle);

@@ -85,6 +85,13 @@ namespace AgentCore.Editor.Core
                 if (ct.IsCancellationRequested)
                 {
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore]{logPrefix} Cancelled during LLM call.");
+                    // BUG2 fix (real root cause): 取消是协作式的——StreamingResponseParser 检测到
+                    // ct.IsCancellationRequested 后静默 return，不抛异常，CallLLMStreamAsync 正常返回。
+                    // 这里的 break 从不经过任何 catch(OperationCanceledException) 分支，导致
+                    // CompleteReasoningIfNeeded 从未被调用，ThinkingDrawer 计时器悬空续跑。
+                    // 必须在 break 前显式收尾 reasoning 状态。
+                    CompleteReasoningIfNeeded(assistantTurn);
+                    assistantTurn.IsStreaming = false;
                     break;
                 }
 
@@ -142,6 +149,10 @@ namespace AgentCore.Editor.Core
                 if (ct.IsCancellationRequested)
                 {
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore]{logPrefix} Cancelled during tool execution.");
+                    // BUG2 fix: 同一类协作式取消问题——工具执行阶段被取消时同样需要显式收尾 reasoning，
+                    // 否则若本轮已经产生过 reasoning token（BeginReasoningIfNeeded 已置位），计时器会悬空。
+                    CompleteReasoningIfNeeded(assistantTurn);
+                    assistantTurn.IsStreaming = false;
                     break;
                 }
 
@@ -365,6 +376,9 @@ namespace AgentCore.Editor.Core
                 // 兜底：如果返回 null，使用流式累积的已清洗内容
                 _messages.Add(ChatMessage.Assistant(assistantTurn.Content));
             }
+
+            // Fork 支持：assistant turn 在此刻真正完成（纯文本回复，循环结束），记录快照。
+            assistantTurn.MessageEndIndex = _messages.Count;
 
             // 空正文检测（含纯空白符）：reasoning-only 回复（GLM 把预算全用在思考、没输出正文）不再填
             // "[系统提示]" 占位文本，而是标记为空 —— UI 侧据此移除空正文气泡（保留 reasoning 折叠区）。

@@ -1,4 +1,5 @@
-﻿using AgentCore.Editor.Core;
+﻿using System;
+using AgentCore.Editor.Core;
 using AgentCore.Editor.Utils;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -39,7 +40,10 @@ namespace AgentCore.Editor.UI
             // #10：初始化改异步，Bootstrap 加载完成前拦截发送，避免 system prompt 尚未就绪即发起对话。
             if (!_agentLoop.IsInitialized)
             {
-                AgentCoreLog.Warning("[AgentCore] AgentLoop is still initializing, please wait.");
+                // [DIAG-BUG1] 记录"点击发送但被初始化未完成拦截"的确切时刻，
+                // 与 InitializeAsync/BootstrapLoader 的 [DIAG] 耗时日志时间戳对照，
+                // 可判断当时卡在哪个阶段。
+                AgentCoreLog.Warning($"[AgentCore][DIAG] OnSendClicked: BLOCKED because AgentLoop not initialized yet, at {DateTime.Now:HH:mm:ss.fff}");
                 UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.initializing", "初始化中…"), false);
                 return;
             }
@@ -62,8 +66,10 @@ namespace AgentCore.Editor.UI
             _inputField.value = "";
             _inputField.Focus();
 
-            // 添加用户消息气泡
-            AddUserMessage(text);
+            // 添加用户消息气泡：ID 先在 UI 层生成，再传给 SendMessageAsync 让它复用同一个 ID
+            // 作为真实 turn.Id——否则气泡 MessageId 和 turn.Id 不一致，Fork 按钮找不到对应的 turn。
+            var userTurnId = Guid.NewGuid().ToString();
+            AddUserMessage(text, userTurnId);
 
             // 用户主动发送新消息 → 强制回到底部并恢复自动追底
             ScrollToBottom(force: true);
@@ -73,7 +79,7 @@ namespace AgentCore.Editor.UI
 
             // 异步发送消息
             AsyncHelper.RunAsync(
-                () => _agentLoop.SendMessageAsync(text),
+                () => _agentLoop.SendMessageAsync(text, userTurnId),
                 onError: ex =>
                 {
                     AgentCoreLog.Error($"[AgentCore] SendMessage error: {ex.Message}");

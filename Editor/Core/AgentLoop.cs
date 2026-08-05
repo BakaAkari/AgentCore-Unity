@@ -213,7 +213,24 @@ namespace AgentCore.Editor.Core
         /// <param name="ct">取消令牌</param>
         public async Task InitializeAsync(CancellationToken ct = default)
         {
-            if (!TryBeginInitialize()) return;
+            // [DIAG-BUG1] 整个 InitializeAsync 总耗时 + 各阶段分段耗时，用于定位"打开 Chat 窗口后
+            // 长时间初始化很慢"的卡点在哪一步。同时用于 SlowOperationDiagnostics 自动落盘（见下方）。
+            var diagSw = System.Diagnostics.Stopwatch.StartNew();
+            var diagBreakdown = new System.Text.StringBuilder();
+            void DiagStep(string label)
+            {
+                var line = $"[AgentCore][DIAG] {label}, elapsed={diagSw.ElapsedMilliseconds}ms";
+                AgentCoreLog.Warning(line);
+                diagBreakdown.AppendLine(line);
+            }
+            DiagStep("InitializeAsync: START");
+
+            if (!TryBeginInitialize())
+            {
+                DiagStep("InitializeAsync: TryBeginInitialize returned false (already initialized)");
+                return;
+            }
+            DiagStep("InitializeAsync: TryBeginInitialize (ToolAutoDiscovery) done");
 
             // v1.14.3: 必须在 CompleteInitialize（内部同步访问 ActiveModelConfig.ModelName）之前
             // 完成，否则 fetch 尚未返回时 modelName 仍为空，请求会带 model="" 被网关拒绝
@@ -227,7 +244,8 @@ namespace AgentCore.Editor.Core
             {
                 var ensureTask = AgentCoreProviderProfiles.instance.EnsureDefaultProfileWithAutoModelAsync();
                 var delayTask = Task.Delay(Timeout.Infinite, timeoutCts.Token);
-                await Task.WhenAny(ensureTask, delayTask);
+                var winner = await Task.WhenAny(ensureTask, delayTask);
+                DiagStep($"InitializeAsync: EnsureDefaultProfileWithAutoModelAsync race done (winner={(winner == ensureTask ? "ensureTask" : "8s-timeout")})");
 
                 // 超时场景下 ensureTask 可能仍在后台跑；即便内部已 try/catch，此处额外吸收一层，
                 // 避免 unobserved task exception（不阻塞，不影响本次初始化流程）。
@@ -238,8 +256,38 @@ namespace AgentCore.Editor.Core
                 }, TaskScheduler.Default);
             }
 
-            var systemPrompt = await LoadBootstrapSystemPromptAsync(ct);
+            // BUG1 预防：LoadBootstrapSystemPromptAsync 内部含磁盘扫描（脚本统计/命名空间分布/
+            // 用户文件读取），此前唯一没有超时保护的一段——若磁盘异常慢（网络盘/云同步盘/AV拦截），
+            // 会导致初始化无限期挂起，用户看到的"初始化中…"永远不结束、发送按钮永远不可用。
+            // 用 5s 超时包一层（正常路径实测远低于此，见诊断包：903ms/233ms/26ms）：超时即放弃、
+            // 降级为默认 system prompt，保证初始化流程本身永不真正卡死；用户仍能正常使用
+            // （只是首轮缺少项目上下文，可后续手动刷新）。
+            string systemPrompt;
+            using (var bootstrapTimeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, bootstrapTimeoutCts.Token))
+            {
+                try
+                {
+                    systemPrompt = await LoadBootstrapSystemPromptAsync(linkedCts.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested && bootstrapTimeoutCts.IsCancellationRequested)
+                {
+                    AgentCoreLog.Error("[AgentCore] Bootstrap loading exceeded 5s timeout — falling back to default system prompt. " +
+                        "This usually indicates a slow disk / cloud-synced project folder / antivirus interference. " +
+                        "See Library/AgentCore/slow_init_diagnostics.log for details.");
+                    _deferredContext = null;
+                    systemPrompt = DefaultSystemPrompt;
+                }
+            }
+            DiagStep("InitializeAsync: LoadBootstrapSystemPromptAsync done");
+
             CompleteInitialize(systemPrompt);
+            DiagStep("InitializeAsync: CompleteInitialize done, TOTAL");
+
+            // BUG1 预防：超过 3s 自动落盘一份持久诊断报告（不依赖用户手动导出/碰巧截图）。
+            // 阈值选 3s：正常路径通常 <1s（见诊断包实测：903ms/233ms/26ms），3s 足以过滤噪音
+            // 又能捕捉到真正的异常慢启动。
+            SlowOperationDiagnostics.ReportIfSlow("InitializeAsync", diagSw.ElapsedMilliseconds, 3000, diagBreakdown.ToString());
         }
 
         /// <summary>
@@ -257,7 +305,9 @@ namespace AgentCore.Editor.Core
             // Phase 2.5: 使用 ToolAutoDiscovery 自动发现并注册原生工具
             try
             {
+                var diagToolSw = System.Diagnostics.Stopwatch.StartNew();
                 ToolAutoDiscovery.DiscoverAndRegisterAll();
+                AgentCoreLog.Warning($"[AgentCore][DIAG] ToolAutoDiscovery.DiscoverAndRegisterAll took {diagToolSw.ElapsedMilliseconds}ms, {ToolRegistry.Instance.Count} tools registered.");
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ToolAutoDiscovery completed, {ToolRegistry.Instance.Count} tools registered.");
             }
             catch (Exception ex)
@@ -429,9 +479,16 @@ namespace AgentCore.Editor.Core
         /// </para>
         /// </summary>
         /// <param name="userMessage">用户输入的消息文本</param>
+        /// <param name="userTurnId">
+        /// 可选：预先生成的 user turn ID。用于 Fork 按钮场景——UI 层需要在调用本方法之前
+        /// 就把消息气泡的 <c>MessageId</c> 定下来（用户点击发送按钮的瞬间即创建气泡，
+        /// 早于本方法内部真正创建 <see cref="ConversationTurn"/>），若不传入同一个 ID，
+        /// UI 侧气泡 ID 与真实 turn.Id 会不一致，导致气泡上挂的 Fork 按钮找不到对应的 turn。
+        /// 传 null 时内部自动生成新 GUID（原有行为不变）。
+        /// </param>
         /// <exception cref="InvalidOperationException">当 Agent 未初始化或非 Idle 状态时抛出</exception>
         /// <exception cref="ArgumentException">当消息为空时抛出</exception>
-        public async Task SendMessageAsync(string userMessage)
+        public async Task SendMessageAsync(string userMessage, string userTurnId = null)
         {
             // 1. 参数校验
             if (string.IsNullOrWhiteSpace(userMessage))
@@ -460,7 +517,18 @@ namespace AgentCore.Editor.Core
 
             // 3. 添加用户消息到历史
             _messages.Add(ChatMessage.User(userMessage));
-            var userTurn = new ConversationTurn("user", userMessage);
+            var userTurn = new ConversationTurn("user", userMessage)
+            {
+                // Fork 支持：user turn 在这一刻即完成（不会再有后续消息追加到它身上），
+                // 直接记录快照。
+                MessageEndIndex = _messages.Count
+            };
+            // UI 层可能在调用本方法之前就已经用同一个 ID 创建了消息气泡（见 userTurnId 参数注释），
+            // 这里覆盖掉构造函数生成的默认 GUID，确保气泡 MessageId 与真实 turn.Id 一致。
+            if (!string.IsNullOrEmpty(userTurnId))
+            {
+                userTurn.Id = userTurnId;
+            }
             _conversationTurns.Add(userTurn);
 
             // 标记会话内容已变更，确保保存时更新 UpdatedAt
@@ -588,12 +656,18 @@ namespace AgentCore.Editor.Core
             {
                 AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] SendMessageAsync was cancelled.");
                 assistantTurn.IsStreaming = false;
+                // BUG2 fix: 取消发生在 reasoning 流式过程中时，CompleteReasoningIfNeeded 从未被调用，
+                // 导致 ThinkingDrawer 的计时器（250ms Every）永久悬空运行，UI 表现为"思考折叠窗口
+                // 一直在读秒"。取消路径必须像正常完成路径一样，显式收尾 reasoning 状态。
+                CompleteReasoningIfNeeded(assistantTurn);
                 SetState(AgentState.Idle);
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"[AgentCore] Error during SendMessageAsync: {ex}");
                 assistantTurn.IsStreaming = false;
+                // BUG2 fix: 异常中断同理，reasoning 计时器不应悬空。
+                CompleteReasoningIfNeeded(assistantTurn);
 
                 // 发送结构化错误事件（携带异常类型、HTTP 状态码、堆栈等）
                 EmitEvent(AgentEvent.ErrorEvent(ex, "LLM 对话请求"));

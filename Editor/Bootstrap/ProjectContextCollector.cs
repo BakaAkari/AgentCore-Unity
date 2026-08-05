@@ -246,6 +246,8 @@ namespace AgentCore.Editor.Bootstrap
         private static string BuildHeavyContent(string assetsPath, MainThreadSnapshot snapshot, CancellationToken ct)
         {
             var sb = new StringBuilder();
+            var diagSw = System.Diagnostics.Stopwatch.StartNew();
+            AgentCoreLog.Warning("[AgentCore][DIAG] BuildHeavyContent: START (background thread disk scan)");
 
             try
             {
@@ -258,11 +260,13 @@ namespace AgentCore.Editor.Bootstrap
                 sb.AppendLine("### 项目规模");
                 sb.Append(GetProjectStatsOffline(assetsPath, ct));
                 sb.AppendLine();
+                AgentCoreLog.Warning($"[AgentCore][DIAG] BuildHeavyContent: GetProjectStatsOffline done, elapsed={diagSw.ElapsedMilliseconds}ms");
 
                 ct.ThrowIfCancellationRequested();
                 sb.AppendLine("### 脚本命名空间分布");
                 sb.Append(GetNamespaceDistributionOffline(assetsPath, ct));
                 sb.AppendLine();
+                AgentCoreLog.Warning($"[AgentCore][DIAG] BuildHeavyContent: GetNamespaceDistributionOffline done, elapsed={diagSw.ElapsedMilliseconds}ms");
 
                 ct.ThrowIfCancellationRequested();
                 sb.AppendLine("### 自定义 Tags & Layers");
@@ -275,6 +279,7 @@ namespace AgentCore.Editor.Bootstrap
             }
             catch (OperationCanceledException)
             {
+                AgentCoreLog.Warning($"[AgentCore][DIAG] BuildHeavyContent: CANCELLED, elapsed={diagSw.ElapsedMilliseconds}ms");
                 throw;
             }
             catch (Exception ex)
@@ -283,6 +288,7 @@ namespace AgentCore.Editor.Bootstrap
                 AgentCoreLog.Warning($"[AgentCore] ProjectContextCollector heavy error: {ex}");
             }
 
+            AgentCoreLog.Warning($"[AgentCore][DIAG] BuildHeavyContent: TOTAL elapsed={diagSw.ElapsedMilliseconds}ms");
             return sb.ToString();
         }
 

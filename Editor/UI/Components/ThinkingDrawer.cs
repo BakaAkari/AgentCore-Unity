@@ -320,6 +320,31 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
+        /// BUG1(第二起) 结构性预防：强制结束计时，若当前仍在 running 状态。
+        /// <para>
+        /// 背景：Core 层的 reasoning 计时状态（<c>_reasoningActive</c>）是整个 assistant turn
+        /// 生命周期内共享的单例字段，但 UI 层每一轮 LLM 调用都会创建一个独立的 <see cref="ThinkingDrawer"/>
+        /// （见 <see cref="AssistantTurnView.BeginNewRound"/>）。两者靠 Core 在每轮结束时 emit 一次
+        /// <c>ReasoningCompleted</c> 事件维持同步——这是个单点：只要某一轮因为任何时序/边界情况
+        /// （已发现两类：协作式取消的裸 break、以及尚未定位的第二类真实复现路径）没有触发该事件，
+        /// 这一轮的 drawer 就会永久停在 running 状态，标题读秒永不停止。
+        /// </para>
+        /// <para>
+        /// 不再对 Core 侧继续做"猜时序、打地鼠式补洞"，改为 UI 侧自愈：<see cref="AssistantTurnView.BeginNewRound"/>
+        /// 每次创建新一轮之前，新一轮的开始本身就是"上一轮必然已经结束"的强证据 —— 调用此方法强制
+        /// 结束上一轮的计时，不依赖 Core 是否正确 emit 了对应事件。若 Core 随后仍补发一次迟到的
+        /// <c>ReasoningCompleted</c>，<see cref="Complete"/> 的 early-return 保证幂等，不会有副作用。
+        /// </para>
+        /// </summary>
+        public void ForceCompleteIfRunning()
+        {
+            if (!_isRunning) return;
+
+            var elapsedMs = System.Math.Max(0, (EditorTime - _startedAt) * 1000.0);
+            Complete(elapsedMs, _source);
+        }
+
+        /// <summary>
         /// 标记 reasoning 完成。
         /// </summary>
         /// <param name="durationMs">累计耗时毫秒。</param>

@@ -46,6 +46,10 @@ namespace AgentCore.Editor.Bootstrap
         /// </summary>
         public async Task<BootstrapContext> LoadAsync(CancellationToken ct = default)
         {
+            // [DIAG-BUG1] Bootstrap 各步骤分段耗时，用于定位 "打开 Chat 窗口后长时间初始化很慢" 的卡点。
+            var diagSw = System.Diagnostics.Stopwatch.StartNew();
+            AgentCoreLog.Warning("[AgentCore][DIAG] BootstrapLoader.LoadAsync: START");
+
             var settings = AgentCoreSettings.instance;
             var context = new BootstrapContext();
 
@@ -67,8 +71,10 @@ namespace AgentCore.Editor.Bootstrap
                 try
                 {
                     fastProject = ProjectContextCollector.Collect();
+                    AgentCoreLog.Warning($"[AgentCore][DIAG] BootstrapLoader: ProjectContextCollector.Collect (fast, main thread) done, elapsed={diagSw.ElapsedMilliseconds}ms");
                     // Heavy 扫描：CollectHeavyAsync 在此处（主线程）完成 Unity 快照后转入后台线程
                     heavyProjectTask = ProjectContextCollector.CollectHeavyAsync(ct);
+                    AgentCoreLog.Warning($"[AgentCore][DIAG] BootstrapLoader: ProjectContextCollector.CollectHeavyAsync dispatched (main-thread snapshot done), elapsed={diagSw.ElapsedMilliseconds}ms");
                 }
                 catch (Exception ex)
                 {
@@ -81,6 +87,7 @@ namespace AgentCore.Editor.Bootstrap
 
             // 1. SOUL.md — 内置角色定义（不可变）
             context.Soul = await LoadEmbeddedResourceAsync("SOUL.md", projectRoot, ct);
+            AgentCoreLog.Warning($"[AgentCore][DIAG] BootstrapLoader: SOUL.md loaded, elapsed={diagSw.ElapsedMilliseconds}ms");
             if (string.IsNullOrEmpty(context.Soul))
             {
                 AgentCoreLog.Warning("[AgentCore] SOUL.md not found, using default.");
@@ -89,6 +96,7 @@ namespace AgentCore.Editor.Bootstrap
 
             // 1+. SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL）
             context.SoulExtension = await LoadUserFileAsync("SOUL.ext.md", projectRoot, ct);
+            AgentCoreLog.Warning($"[AgentCore][DIAG] BootstrapLoader: SOUL.ext.md loaded, elapsed={diagSw.ElapsedMilliseconds}ms");
             if (!string.IsNullOrEmpty(context.SoulExtension))
             {
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded SOUL.ext.md ({context.SoulExtension.Length} chars)");
@@ -96,6 +104,7 @@ namespace AgentCore.Editor.Bootstrap
 
             // 2. TOOLS — 拆分为 Core（永驻 system prompt）和 Deferred（首轮注入）
             await LoadToolsSplitAsync(context, projectRoot, ct);
+            AgentCoreLog.Warning($"[AgentCore][DIAG] BootstrapLoader: LoadToolsSplitAsync done, elapsed={diagSw.ElapsedMilliseconds}ms");
 
             // 3. PROJECT.md — 自动收集项目信息（Fast + Heavy）
             if (settings.autoProjectContext)
@@ -112,6 +121,7 @@ namespace AgentCore.Editor.Bootstrap
                     if (heavyProjectTask != null)
                     {
                         var heavy = await heavyProjectTask;
+                        AgentCoreLog.Warning($"[AgentCore][DIAG] BootstrapLoader: heavyProjectTask (CollectHeavyAsync background scan) awaited, elapsed={diagSw.ElapsedMilliseconds}ms");
                         if (!string.IsNullOrEmpty(heavy))
                         {
                             sb.Append(heavy);
@@ -129,6 +139,7 @@ namespace AgentCore.Editor.Bootstrap
 
             // 3+. PROJECT.md（用户） — 项目约定与个人偏好
             context.Workspace = await LoadUserFileAsync("PROJECT.md", projectRoot, ct);
+            AgentCoreLog.Warning($"[AgentCore][DIAG] BootstrapLoader: PROJECT.md (user) loaded, TOTAL elapsed={diagSw.ElapsedMilliseconds}ms");
             if (!string.IsNullOrEmpty(context.Workspace))
             {
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Loaded PROJECT.md ({context.Workspace.Length} chars)");
