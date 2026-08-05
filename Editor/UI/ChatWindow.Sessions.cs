@@ -301,6 +301,15 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
+            // Bug 2 修复 (2026-08-04): UI 层同步加一道 IsInitialized 快速失败检查，
+            // 避免初始化未完成时点击切换先跑一段 async 流程才在 AgentLoop 内部失败。
+            // 真正的防线在 AgentLoop.TryBeginLoadSession，这里只是提前拦截、给出即时反馈。
+            if (!_agentLoop.IsInitialized)
+            {
+                AgentCoreLog.Warning("[AgentCore] Cannot switch session while AgentLoop is still initializing.");
+                return;
+            }
+
             try
             {
                 // 1. 保存当前会话（ForceSave 内部会跳过无用户消息的空会话）
@@ -341,6 +350,20 @@ namespace AgentCore.Editor.UI
                 onError: ex =>
                 {
                     AgentCoreLog.Error($"[AgentCore] Error switching session: {ex.Message}");
+
+                    // Bug 2 兜底 (2026-08-04): 会话切换过程中若抛出未预期异常（例如 P0-1 修复前
+                    // 曾发生的 ApplyLoadedSession NRE），此前只打日志、UI 停在半死状态——
+                    // 后续所有工具调用静默失败或被拒绝，用户毫无提示。
+                    // 强制复位到一个已知安全的新会话状态，避免 UI 卡死不可用。
+                    try
+                    {
+                        OnNewSessionClicked();
+                        AgentCoreLog.Warning("[AgentCore] Session switch failed unexpectedly; reset to a new session to recover UI state.");
+                    }
+                    catch (Exception resetEx)
+                    {
+                        AgentCoreLog.Error($"[AgentCore] Failed to recover after session switch error: {resetEx.Message}");
+                    }
                 });
         }
 

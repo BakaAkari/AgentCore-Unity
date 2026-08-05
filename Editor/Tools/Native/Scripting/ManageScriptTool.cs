@@ -262,8 +262,13 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             var isNew = !File.Exists(fullPath);
             File.WriteAllText(fullPath, content);
 
+            // Bug 1 修复 (2026-08-04): 此前紧跟一次无参 AssetDatabase.Refresh()，
+            // 会触发全项目资源扫描（日志实证：仅改7个文件却触发122s CompileScripts +
+            // 128s Untracked扫描）。ImportAsset(path, ForceUpdate) 已经保证了这一个
+            // 文件被强制重新导入（ForceUpdate 是必需的——File.WriteAllText 绕过了 Unity
+            // 文件监视，若不强制，快速连续写入可能因 mtime 粒度被判定为"未变化"而不
+            // 重新导入），无需再触发全项目 Refresh。
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
-            AssetDatabase.Refresh();
 
             return ToolResponse.OkWithData(new JObject
             {
@@ -300,8 +305,9 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             ToolHelpers.EnsureDirectoryExists(fullPath);
             File.WriteAllText(fullPath, content);
 
+            // Bug 1 修复 (2026-08-04): 同 HandleWrite —— 去掉多余的全项目 Refresh()，
+            // 只保留必需的单文件 ForceUpdate 导入。
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
-            AssetDatabase.Refresh();
 
             return ToolResponse.OkWithData(new JObject
             {

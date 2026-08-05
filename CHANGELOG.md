@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.7] - 2026-08-05
+
+### Fixed
+- **会话切换 NRE 竞态修复**：`AgentLoop.LoadSession`/`LoadSessionAsync` 的前置校验（`TryBeginLoadSession`）此前只检查 `CurrentState == Idle`，未检查 `_isInitialized`。在 `InitializeAsync()` 尚未完成时（如网络慢、Bootstrap 加载慢）用户切换会话，会导致 `_compressionMetrics` 为 null 传入 `ApplyLoadedSession`，抛出 NullReferenceException 并使会话状态残留为半死态，后续所有工具调用静默失败。现已对齐发消息路径已有的 `_isInitialized` 检查。
+- **会话切换失败兜底复位**：`ChatWindow.Sessions.cs` 的 `SwitchToSession` 增加 UI 层快速失败检查，并在异步切换异常的 catch 分支中调用 `ResetConversation()` 强制复位到安全的新会话状态，避免 UI 卡在半死态。
+- **manage_script 写入去掉多余全项目 Refresh**：`HandleWrite`/`HandleCreate` 此前在单文件 `AssetDatabase.ImportAsset(ForceUpdate)` 之后又调用无参 `AssetDatabase.Refresh()`，触发全项目资源扫描（实测单次改动触发 100+ 秒 CompileScripts/Untracked 扫描），是连续写脚本场景下 8 分钟 "Hold on" 阻塞的主要贡献因素之一。现已移除多余的全量 Refresh，只保留必需的单文件导入。
+
+### Changed
+- **工具调用 FAIL 日志补充异常详情**：`ToolCallDispatcher` 的完成日志此前只打印 `FAIL (Xms)`，不带任何错误信息，导致排查工具失败原因时完全没有线索。现已附加 `result.Error` 内容。
+
 ## [1.14.6] - 2026-08-04
 
 ### Fixed

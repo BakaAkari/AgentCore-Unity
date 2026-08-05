@@ -746,6 +746,20 @@ namespace AgentCore.Editor.Core
                 return false;
             }
 
+            // Bug 2 修复 (2026-08-04): 会话切换路径此前只检查 CurrentState==Idle，
+            // 没检查 _isInitialized —— 但 CurrentState 在构造函数里就已默认是 Idle，
+            // 而 _isInitialized 及其依赖字段（如 _compressionMetrics）要等 InitializeAsync()
+            // 异步链跑完才就位。这两个状态之间存在一段"看起来空闲但其实没初始化完"的窗口。
+            // 若用户在此窗口内触发会话切换（网络慢/Bootstrap加载慢时更容易撞上），会进入
+            // ApplyLoadedSession 对着仍是 null 的 _compressionMetrics 调用实例方法，
+            // 抛 NullReferenceException，导致会话切换半途失败、UI 卡在错误状态。
+            // 对齐发消息路径（TryBeginSendMessage）已有的同款检查，补齐这道防线。
+            if (!_isInitialized)
+            {
+                AgentCoreLog.Warning("[AgentCore] Cannot load session while AgentLoop is not yet initialized. Wait for initialization to complete.");
+                return false;
+            }
+
             if (CurrentState != AgentState.Idle)
             {
                 AgentCoreLog.Warning("[AgentCore] Cannot load session while agent is busy.");

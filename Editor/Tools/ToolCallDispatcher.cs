@@ -347,7 +347,17 @@ namespace AgentCore.Editor.Tools
 
                 stopwatch.Stop();
 
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Tool '{toolName}' completed: {(result.Success ? "OK" : "FAIL")} ({stopwatch.Elapsed.TotalMilliseconds:F1}ms)");
+                // Bug 1 修复 (2026-08-04): 此前 FAIL 结果只打印 "FAIL (Xms)"，不带任何错误详情，
+                // 导致排查阻塞/失败问题时完全没有线索（原始报告里的日志盲区）。
+                // result.Error 由各工具的 ToolResponse.Fail(...) 填充，现在一并记录。
+                if (result.Success)
+                {
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Tool '{toolName}' completed: OK ({stopwatch.Elapsed.TotalMilliseconds:F1}ms)");
+                }
+                else
+                {
+                    AgentCoreLog.Warning($"{LogPrefix}Tool '{toolName}' completed: FAIL ({stopwatch.Elapsed.TotalMilliseconds:F1}ms) — {result.Error}");
+                }
 
                 return new ToolCallResult(
                     toolCall,
