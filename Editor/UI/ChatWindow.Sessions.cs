@@ -397,6 +397,9 @@ namespace AgentCore.Editor.UI
                 // 3.6 Phase 6.0.4: 切换会话后更新上下文使用情况面板
                 UpdateContextUsagePanel();
 
+                // v1.14.10: 切换会话后同步思考强度下拉——不同会话可能保存了不同的覆盖值。
+                _reasoningLevelSelector?.SyncFromAgentLoop(_agentLoop);
+
                 // 4. 刷新会话列表（更新高亮）
                 RefreshSessionList();
 
@@ -432,6 +435,10 @@ namespace AgentCore.Editor.UI
                 // 直通状态无感知地延续到新对话。Domain Reload 仍保留（SessionState），
                 // Editor 完全重启自然归零。
                 ClearPendingToolConfirmations();
+
+                // v1.14.10: 新会话的思考强度回到 auto（AgentLoop.ResetConversation 内部已把
+                // ReasoningEffortOverride 置 null），这里同步下拉显示，避免残留上一个会话的选择。
+                _reasoningLevelSelector?.SyncFromAgentLoop(_agentLoop);
 
                 // 2. 刷新会话列表
                 RefreshSessionList();

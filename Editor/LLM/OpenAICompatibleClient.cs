@@ -27,7 +27,8 @@ namespace AgentCore.Editor.LLM
             List<ChatMessage> messages,
             List<ToolDefinition> tools = null,
             CancellationToken ct = default,
-            int? contentMaxTokens = null)
+            int? contentMaxTokens = null,
+            string reasoningLevelOverride = null)
         {
             var settings = AgentCoreSettings.instance;
             var apiKey = ActiveModelConfig.ApiKey;
@@ -49,7 +50,7 @@ namespace AgentCore.Editor.LLM
                     : settings.GetEffectiveMaxTokens()
             };
 
-            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request);
+            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request, reasoningLevelOverride);
             var url = endpoint.TrimEnd('/') + "/chat/completions";
             AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model={model} messages={messages.Count}");
 
@@ -117,7 +118,8 @@ namespace AgentCore.Editor.LLM
             Action<StreamChunk> onChunk,
             List<ToolDefinition> tools = null,
             CancellationToken ct = default,
-            int? contentMaxTokens = null)
+            int? contentMaxTokens = null,
+            string reasoningLevelOverride = null)
         {
             var settings = AgentCoreSettings.instance;
             var apiKey = ActiveModelConfig.ApiKey;
@@ -139,7 +141,7 @@ namespace AgentCore.Editor.LLM
                     : settings.GetEffectiveMaxTokens()
             };
 
-            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request);
+            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request, reasoningLevelOverride);
             var url = endpoint.TrimEnd('/') + "/chat/completions";
             AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url} model={model} messages={messages.Count}");
 

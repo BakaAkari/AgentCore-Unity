@@ -155,6 +155,55 @@ namespace AgentCore.Editor.UI.Components
             _roundsContainer.Add(separator);
         }
 
+        /// <summary>
+        /// v1.14.10: 把"过程轮次"（非最后一轮）的可见 content 渲染为次要样式的旁白文字，
+        /// 插入对应轮次区域（ThinkingDrawer 下方、ToolSlot 上方）。
+        /// <para>
+        /// 背景：部分模型（实测 DeepSeek-V4-Flash）习惯在每轮工具调用前输出一句过渡说明
+        /// （"让我检查……"），这些说明此前和最终报告被无差别拼接进同一个 MessageBubble，
+        /// 用户视觉上无法区分"过程旁白"与"正式回复"（见 ConversationTurn.RoundContents 类注释）。
+        /// </para>
+        /// <para>
+        /// 只在最终定格画面（<c>FinalizeAssistantMessage</c>）调用一次，不参与流式过程的
+        /// 实时渲染——流式阶段仍是整段堆在一起显示（与此前行为一致），生成完成后才重新
+        /// 按轮次整理展示。样式：小字号、次要灰色，视觉上明显弱于正式回复的 MessageBubble，
+        /// 但不做折叠/展开交互（不是 ThinkingDrawer，语义不同——这是"agent 说过的话"，
+        /// 不是"内部思考过程"，用户可能仍想直接看到，只是不应该和最终结论混同）。
+        /// </para>
+        /// </summary>
+        /// <param name="roundIndex">轮次下标（0-based，对应 <see cref="_rounds"/> 里的 RoundSection）。</param>
+        /// <param name="text">该轮次的过程性旁白文字（已去除首尾空白，非空才会调用本方法）。</param>
+        public void ShowRoundNarration(int roundIndex, string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (roundIndex < 0 || roundIndex >= _rounds.Count) return;
+
+            var section = _rounds[roundIndex];
+
+            var narrationLabel = new Label(text.Trim());
+            narrationLabel.AddToClassList("round-narration-text");
+            narrationLabel.style.whiteSpace = WhiteSpace.Normal;
+            narrationLabel.style.fontSize = 12;
+            narrationLabel.style.color = new StyleColor(new UnityEngine.Color(0.58f, 0.58f, 0.58f));
+            narrationLabel.style.marginLeft = 8;
+            narrationLabel.style.marginRight = 8;
+            narrationLabel.style.marginTop = 2;
+            narrationLabel.style.marginBottom = 4;
+            narrationLabel.selection.isSelectable = true;
+
+            // 插在 ThinkingDrawer 之后、ToolSlot 之前——与该轮次的思考/工具调用顺序对齐
+            // （用户阅读顺序：先看这轮在想什么 → 这轮说了什么 → 这轮调了什么工具）。
+            var sectionContainer = section.ToolSlot.parent;
+            if (sectionContainer == null)
+            {
+                // 兜底：找不到父容器时直接加到 ToolSlot 前面（理论上不会发生，BeginNewRound
+                // 里 ThinkingDrawer/ToolSlot 总是被 Add 进同一个 sectionContainer）。
+                return;
+            }
+            int toolSlotIndex = sectionContainer.IndexOf(section.ToolSlot);
+            sectionContainer.Insert(toolSlotIndex >= 0 ? toolSlotIndex : 0, narrationLabel);
+        }
+
         #endregion
 
         #region Self-Challenge

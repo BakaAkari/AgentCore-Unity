@@ -685,6 +685,13 @@ namespace AgentCore.Editor.Core
             content = StripBlock(content, SelfChallengeConfig.NodeAOpenMarker, SelfChallengeConfig.NodeACloseMarker);
             content = StripBlock(content, SelfChallengeConfig.NodeAContinuationOpenMarker, SelfChallengeConfig.NodeAContinuationCloseMarker);
             content = StripBlock(content, SelfChallengeConfig.NodeBOpenMarker, SelfChallengeConfig.NodeBCloseMarker);
+
+            // v1.14.10: 标签块本身已剥离, 但部分模型（实测 DeepSeek-V4-Flash）会在标签**之前**
+            // 额外复述一遍系统提示词里的框架说明文字（根因见 PromptEchoScrubber 类注释）。
+            // 这段复述文本落在标签外, StripBlock 不处理（设计上标签外都是合法 visible 内容）,
+            // 这里用完整字符串（非流式 chunk 碎片, 正则能匹配到完整句子）做一次追加净化。
+            content = PromptEchoScrubber.Scrub(content);
+
             return content;
         }
 

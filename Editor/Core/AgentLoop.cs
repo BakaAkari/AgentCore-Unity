@@ -67,6 +67,50 @@ namespace AgentCore.Editor.Core
         public bool IsInitialized => _isInitialized;
 
         /// <summary>
+        /// v1.14.9: 当前会话级 Reasoning Effort 快捷覆盖（chat 面板下拉选择，类似 Codex/Claude Code
+        /// 的思考强度切换）。null = 不覆盖，跟随全局/Profile 设置
+        /// (<see cref="AgentCore.Editor.Config.ActiveModelConfig.ReasoningEffort"/>)。
+        /// 由 <see cref="SetReasoningEffortOverride"/> 设置，随当前会话持久化（见
+        /// <see cref="Session.SessionData.ReasoningEffortOverride"/>）。
+        /// </summary>
+        public string ReasoningEffortOverride { get; private set; }
+
+        /// <summary>
+        /// v1.14.10: 设置当前会话的 Reasoning Effort 快捷覆盖（UI 下拉菜单调用入口）。
+        /// <para>
+        /// 修复此前的断层：<see cref="Session.SessionManager.SetReasoningEffortOverride"/> 只会
+        /// 落盘 + 更新 SessionManager 内部的 _currentSession 缓存，不会驱动 AgentLoop 的运行时
+        /// <see cref="ReasoningEffortOverride"/> 属性——导致用户选完档位立刻发消息，实际用的还是
+        /// 旧值（要等下次 ApplyLoadedSession，即切换会话或重启才会生效）。本方法一次调用同时驱动
+        /// 两处同步，UI 层不需要记住"要调两个地方"的顺序。
+        /// </para>
+        /// </summary>
+        /// <param name="level">"auto"/"off"/"low"/"medium"/"high"；null 或 "auto" = 清除覆盖。</param>
+        /// <returns>是否成功（当前无活跃会话时返回 false，见
+        /// <see cref="Session.SessionManager.SetReasoningEffortOverride"/> 的失败条件）。</returns>
+        public bool SetReasoningEffortOverride(string level)
+        {
+            var sessionId = SessionManager.Instance.CurrentSessionId;
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                AgentCoreLog.Warning("[AgentCore] SetReasoningEffortOverride: no active session, cannot persist override.");
+                return false;
+            }
+
+            bool persisted = SessionManager.Instance.SetReasoningEffortOverride(sessionId, level);
+            if (!persisted) return false;
+
+            // 与 SessionManager 内部的归一化规则保持一致（"auto"/null/空 → null），避免运行时
+            // 属性和持久化值出现不一致的两套真相来源。
+            var normalized = string.IsNullOrWhiteSpace(level) || level.Trim().ToLowerInvariant() == "auto"
+                ? null
+                : level.Trim().ToLowerInvariant();
+            ReasoningEffortOverride = normalized;
+
+            return true;
+        }
+
+        /// <summary>
         /// 对话轮次历史（只读视图），供 UI 层显示。
         /// </summary>
         public IReadOnlyList<ConversationTurn> ConversationHistory => _conversationTurns;
@@ -646,8 +690,15 @@ namespace AgentCore.Editor.Core
                 // 8. 回到 Idle 状态
                 //   WaitingForClarification 由 HandleNodeAConclusionForFinalResponse 设置, 不覆盖
                 //   ReviewingAnswer 由 HandleFinalResponse Node B 触发设置, 由 TriggerNodeBAsync 完成时恢复, 不覆盖
+                //   WaitingForUserInput 由 RunToolCallLoopAsync 在 ask_user 挂起时设置(见 AgentLoop.Runner.cs:145),
+                //   此处必须同样排除——否则 ask_user 触发后 SendMessageAsync 从 RunToolCallLoopAsync 返回时会
+                //   立刻把刚设置的 WaitingForUserInput 覆盖回 Idle（BUG: ask_user 挂起态被瞬间抹掉，
+                //   UI 卡在等待输入的外观但 CurrentState 实际已是 Idle，导致后续状态流转/并发保护判断错误）。
+                //   用 _pendingUserInputToolCallId（真正的数据源）而非仅比较 CurrentState 更可靠：
+                //   即使 CurrentState 因其他路径已被改写，只要挂起的 ask_user 尚未被应答，就不能回 Idle。
                 if (CurrentState != AgentState.WaitingForClarification &&
-                    CurrentState != AgentState.ReviewingAnswer)
+                    CurrentState != AgentState.ReviewingAnswer &&
+                    string.IsNullOrEmpty(_pendingUserInputToolCallId))
                 {
                     SetState(AgentState.Idle);
                 }
@@ -742,6 +793,15 @@ namespace AgentCore.Editor.Core
             _messages.Clear();
             _conversationTurns.Clear();
             _isInitialized = false;
+
+            // v1.14.9(修正 v2): 新会话必须清空"假完成恢复"状态，否则旧会话遗留的
+            // _blankRecoveryAttempted=true 会让新会话第一轮的真实故障被跳过拦截。
+            _blankRecoveryAttempted = false;
+            _consecutiveSilentRounds = 0;
+
+            // v1.14.9: 新会话的 Reasoning Effort 覆盖回到 auto（null），不继承上一个会话的选择——
+            // 与 Codex/Claude Code 的"新对话默认强度"行为一致，避免用户忘记自己上一轮开了 high。
+            ReasoningEffortOverride = null;
 
             // 3.5 Phase 4.5: 清空文件变更追踪器和持久化数据
             _fileChangeTracker?.Clear();
@@ -859,6 +919,17 @@ namespace AgentCore.Editor.Core
             _messages.Clear();
             _conversationTurns.Clear();
             _fileChangeTracker?.Clear();
+
+            // v1.14.9(修正 v2): 切换/加载会话必须清空"假完成恢复"状态。现在触发条件是
+            // "单次空回复即拦截"，不再依赖历史里上一条消息是否也是空的，所以这里不需要
+            // 按恢复后的历史回填任何东西——无条件清零即可，任何会话加载完成后的第一次
+            // 空回复都会被立刻拦截。
+            _blankRecoveryAttempted = false;
+            _consecutiveSilentRounds = 0;
+
+            // v1.14.9: 还原该会话保存的 Reasoning Effort 覆盖（会话粘滞设计——用户在这个会话里
+            // 选过 high，切走再切回来应该还是 high，不会静默丢失选择）。
+            ReasoningEffortOverride = session.ReasoningEffortOverride;
 
             var restoredMessages = session.ToMessages();
             var restoredTurns = session.ToConversationTurns();

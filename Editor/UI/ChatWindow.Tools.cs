@@ -1,3 +1,4 @@
+using System;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.UI.Components;
 using UnityEngine;
@@ -121,6 +122,61 @@ namespace AgentCore.Editor.UI
         {
             var group = EnsureToolCallGroup();
             group.ReportReceivingArguments(evt.ToolName, evt.ProgressCharCount);
+        }
+
+        /// <summary>
+        /// 处理"连续空正文轮次"检测事件（v1.14.9）：把 <see cref="_currentToolCallGroup"/>
+        /// 的计数同步为当前值。计数为 0 时 <see cref="ToolCallGroup"/> 自行隐藏提示。
+        /// </summary>
+        /// <param name="evt">SilentRoundDetected 事件</param>
+        private void HandleSilentRoundDetected(AgentEvent evt)
+        {
+            var group = EnsureToolCallGroup();
+            group.UpdateSilentRoundCount(evt.ConsecutiveSilentRounds);
+        }
+
+        /// <summary>
+        /// 处理"大任务假完成、已自动恢复重试一次"事件（v1.14.9）。
+        /// <para>
+        /// 不新建气泡（这轮本身没有产出任何可展示内容），只在状态行给一条轻量、非报错性质
+        /// 的可见提示，让用户知道系统检测到了刚才那轮"6分钟思考、什么都没交付"的情况，
+        /// 并且正在主动重试，而不是把这次失败完全隐藏、让用户以为要再手动催一次。
+        /// </para>
+        /// </summary>
+        private void HandleLargeTaskRecoveryTriggered(AgentEvent evt)
+        {
+            UpdateStatusLabel(
+                AgentCore.Editor.L10n.Loc.Tr("chat.status.largeTaskRecovery", "检测到规划阶段未产出内容，已自动重试一次"),
+                isError: false,
+                isActive: true);
+        }
+
+        /// <summary>
+        /// 处理"大任务假完成自动恢复重试后仍然失败"事件（v1.14.9）。
+        /// <para>
+        /// 此时已经是第二次空手而归（reasoning 耗尽预算两次，零工具调用零文字），
+        /// 不再第三次静默循环等用户自己发现"又断了"——展示一条用户可见的失败气泡
+        /// （复用 ShowError 的 role="error" + 重试按钮模式），明确引导用户拆分/收束需求。
+        /// </para>
+        /// </summary>
+        private void HandleLargeTaskRecoveryFailed(AgentEvent evt)
+        {
+            var message = AgentCore.Editor.L10n.Loc.Tr(
+                "chat.error.largeTaskRecoveryFailed",
+                "规划阶段连续两次未能产出方案或操作（模型思考耗尽预算但没有输出）。任务描述可能过于宏大或模糊——建议将需求拆分成更小、更具体的请求后重试。");
+
+            var messageId = Guid.NewGuid().ToString();
+            var bubble = new MessageBubble(messageId, "error", message);
+            _messageBubbles[messageId] = bubble;
+            _messageListManager?.AddItem(bubble);
+
+            if (!string.IsNullOrEmpty(_lastUserMessage))
+            {
+                var retryMessage = _lastUserMessage;
+                bubble.AddRetryButton(() => RetryLastMessage(retryMessage));
+            }
+
+            ScrollToBottom(force: true);
         }
 
         /// <summary>

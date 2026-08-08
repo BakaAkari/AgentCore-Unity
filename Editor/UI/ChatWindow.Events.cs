@@ -87,6 +87,18 @@ namespace AgentCore.Editor.UI
                     _agentStatusLine?.Tick();
                     break;
 
+                case AgentEventType.SilentRoundDetected:
+                    HandleSilentRoundDetected(evt);
+                    break;
+
+                case AgentEventType.LargeTaskRecoveryTriggered:
+                    HandleLargeTaskRecoveryTriggered(evt);
+                    break;
+
+                case AgentEventType.LargeTaskRecoveryFailed:
+                    HandleLargeTaskRecoveryFailed(evt);
+                    break;
+
                 case AgentEventType.LoopRoundStarted:
                     HandleLoopRoundStarted(evt);
                     break;
@@ -138,6 +150,7 @@ namespace AgentCore.Editor.UI
                 case AgentEventType.ToolCallCompleted:   // 工具结果入历史
                 case AgentEventType.ToolCallFailed:      // 失败结果入历史
                 case AgentEventType.Error:               // 错误可能改变历史/状态
+                case AgentEventType.LargeTaskRecoveryTriggered: // v1.14.9: 恢复时注入了一条 system 消息入历史
                     return true;
                 default:
                     return false;

@@ -23,12 +23,16 @@ namespace AgentCore.Editor.LLM
         /// <param name="contentMaxTokens">content 部分的 token 预算覆盖（可选）。
         /// 传入时使用 GetEffectiveMaxTokens(contentMaxTokens) 计算实际 max_tokens，
         /// 适用于压缩等需要较小 content 输出的场景。</param>
+        /// <param name="reasoningLevelOverride">v1.14.10: 会话级思考强度快捷覆盖
+        /// （"auto"/"off"/"low"/"medium"/"high"，null/空/"auto" = 不覆盖）。
+        /// 见 <see cref="RequestEnrichment.BuildEnrichedJson"/> 同名参数。</param>
         /// <returns>完整的 Chat Completion 响应</returns>
         Task<ChatCompletionResponse> ChatCompletionAsync(
             List<ChatMessage> messages,
             List<ToolDefinition> tools = null,
             CancellationToken ct = default,
-            int? contentMaxTokens = null);
+            int? contentMaxTokens = null,
+            string reasoningLevelOverride = null);
 
         /// <summary>
         /// 流式 Chat Completion 调用。
@@ -39,12 +43,15 @@ namespace AgentCore.Editor.LLM
         /// <param name="tools">工具定义列表（可选）</param>
         /// <param name="ct">取消令牌</param>
         /// <param name="contentMaxTokens">content 部分的 token 预算覆盖（可选）</param>
+        /// <param name="reasoningLevelOverride">v1.14.10: 会话级思考强度快捷覆盖，见
+        /// <see cref="ChatCompletionAsync"/> 同名参数。</param>
         /// <returns>完成后返回拼接好的完整 assistant 消息</returns>
         Task<ChatMessage> ChatCompletionStreamAsync(
             List<ChatMessage> messages,
             Action<StreamChunk> onChunk,
             List<ToolDefinition> tools = null,
             CancellationToken ct = default,
-            int? contentMaxTokens = null);
+            int? contentMaxTokens = null,
+            string reasoningLevelOverride = null);
     }
 }

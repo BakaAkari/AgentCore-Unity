@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.10] - 2026-08-08
+
+### Added
+- **会话级思考强度快捷切换（Reasoning Level Selector）**：chat 面板输入区新增下拉（Auto/Off/Low/Med/High），类似 Codex/Claude Code 的思考强度开关，随会话保存、切换会话立即生效。新增 `ReasoningParamMapper`：UI/会话层只暴露与供应商无关的抽象等级，具体映射到协议字段（`reasoning_effort` / `thinking.budget_tokens` / `reasoning.effort` + `chat_template_kwargs.thinking`）按供应商特征分组决定，不按模型名逐个特判，未匹配时安全退化到已知默认分支。
+- **跨会话全文检索（`search_sessions` 工具）**：同一 tag 下的会话历史可互相检索关键词，返回命中片段而非整份内容；强制要求指定 tag（不支持无 tag 的全局搜索），扫描文件数与返回结果数均有硬顶，避免 token 消耗随会话数量线性增长失控。
+- **诊断日志**：连续假完成/大任务恢复触发相关事件均带日志，便于复现问题时定位。
+
+### Fixed
+- **DeepSeek-V4-Flash（经 vLLM 0.25.1 部署）reasoning 内容整段混入正文，思考折叠条完全收不到内容**：根因是 vLLM 该模型的 reasoning parser 默认初始状态是 CONTENT，需要显式传入 `chat_template_kwargs.thinking=true` 才会拆分到独立的 reasoning 字段。已在 `RequestEnrichment.InjectReasoning` 与 `ReasoningParamMapper.ApplyVllmHosted` 中修正，经 curl 直连 vLLM 实测验证。
+- **模型（实测 DeepSeek-V4-Flash）在 Self-Challenge 结构化输出标签前逐字复述系统提示词框架说明文字，泄漏到用户可见正文**：根因是提示词把"标签结束后该做什么"的说明写在标签**之外**，模型误当成需要先输出的内容。已将相关说明挪到标签内部（Step 5 / Step 4 收尾处），并新增通用 `PromptEchoScrubber` 对标签外文本做兜底净化（不按模型特判，对所有模型统一生效）。
+- **高吞吐模型下，最终回复的流式分块 flush 被字符阈值拉长触发间隔，表现为"一大段文字瞬间跳出 + 停顿近1秒"**：新增时间阈值兜底（80ms），字符/时间双阈值任一先到即触发 flush，不再单纯依赖字符累积速度。
+- **多轮工具调用循环中，过程性旁白文字（"让我检查……"）与最终结论无差别拼接进同一气泡，用户无法区分"过程" vs "结论"**：新增 `ConversationTurn.RoundContents` 按轮次归档可见 content，UI 侧非最后一轮渲染为次要样式旁白，仅最后一轮作为正式回复气泡突出显示。
+
+### Changed
+- **默认输入区高度**：`min-height` 44px → 88px，修正输入栏/下拉栏/发送按钮总高度不一致的视觉问题。
+- **默认 Provider Profile 的 endpoint**：由内网 NewAPI 网关（`172.16.248.201:34567`，需额外网络权限才能访问）改为直连 vLLM 实例（`172.16.248.60:8000`），避免新用户因网络权限问题无法使用默认配置；代价是暂时无法通过网关统计单用户用量，待后续按需切回或加代理层。
+
+## [1.14.9] - 2026-08-08
+
+### Fixed
+- **"假完成"（空 content + 零 tool_calls）被静默当作合法终态接受，用户体感为"喊它继续，思考数分钟后什么也没做也不说明原因"**：实机复现证实这种空回复从不是合法的终态——不存在"模型这轮确实无话可说，交白卷合理"的正当场景。改为单次立即拦截：检测到即自动注入恢复提示重试一次；若重试仍空手而归，直接展示用户可见的失败提示（带重试按钮），不再第三次静默循环。
+- **连续多轮无文字反馈时，UI 与"真正卡死"在视觉上无法区分**：新增 `SilentRoundDetected` 事件，UI 侧显式呈现"已连续 N 轮无文字说明，仍在正常执行中"，不做行为拦截，只是诚实反映当前循环状态。
+
 ## [1.14.8] - 2026-08-05
 
 ### Added

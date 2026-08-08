@@ -169,7 +169,37 @@ namespace AgentCore.Editor.Core
         /// 不依赖任何自驱动 timer。
         /// </para>
         /// </summary>
-        ToolCallProgress
+        ToolCallProgress,
+
+        // === v1.14.9 新增 ===
+
+        /// <summary>
+        /// 本轮 LLM 调用完成但正文（content）为空/纯空白（GLM reasoning 吃满 max_tokens
+        /// 预算导致），或本轮正文非空（用于清零计数）。
+        /// <para>
+        /// 背景：这种"空正文"回复此前只写 <see cref="AgentCoreLog"/> Warning，UI 完全无感知——
+        /// 代码层面工具调用/LLM 请求都正常收尾，没有任何异常、超时或红线触发，但用户在界面上
+        /// 看到的是连续多轮纯读秒、零文字反馈，与真正卡死在视觉上无法区分（"体感阻断"）。
+        /// 该事件让 UI 把这一客观事实（"已连续 N 轮无文字说明"）显式呈现出来，不做任何行为
+        /// 拦截或卡死判定，只是诚实反映当前循环状态。
+        /// </para>
+        /// </summary>
+        SilentRoundDetected,
+
+        /// <summary>
+        /// v1.14.9: 检测到"假完成"（reasoning 耗尽预算导致空 content + 零 tool_calls，
+        /// 恰好发生在 ask_user 收敛用户方向之后的大任务窗口内），已自动注入恢复提示并
+        /// 重试一次。UI 侧据此显示一条轻量提示（如"检测到规划阶段未产出内容，已自动重试"），
+        /// 让用户知道系统在主动处理这次失败，而不是静默地开始下一轮 reasoning。
+        /// </summary>
+        LargeTaskRecoveryTriggered,
+
+        /// <summary>
+        /// v1.14.9: 大任务假完成的自动恢复重试本身也失败了（依然空 content + 零 tool_calls）。
+        /// 不再第三次静默循环，UI 侧据此展示一条用户可见的失败气泡（带重试按钮），
+        /// 明确告知"规划阶段连续两次未能产出方案"，引导用户拆分/收束需求或重新描述任务。
+        /// </summary>
+        LargeTaskRecoveryFailed
     }
 
     #endregion
@@ -279,6 +309,12 @@ namespace AgentCore.Editor.Core
         public double ProgressElapsedMs { get; }
 
         /// <summary>
+        /// 连续空正文轮次计数（<see cref="AgentEventType.SilentRoundDetected"/> 时有值）；
+        /// 0 表示本轮正文非空，用于清零 UI 侧计数器。
+        /// </summary>
+        public int ConsecutiveSilentRounds { get; }
+
+        /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
         private AgentEvent(
@@ -302,7 +338,8 @@ namespace AgentCore.Editor.Core
             SelfChallengeData selfChallenge = null,
             string turnId = null,
             int progressCharCount = 0,
-            double progressElapsedMs = 0)
+            double progressElapsedMs = 0,
+            int consecutiveSilentRounds = 0)
         {
             Type = type;
             State = state;
@@ -325,6 +362,7 @@ namespace AgentCore.Editor.Core
             TurnId = turnId;
             ProgressCharCount = progressCharCount;
             ProgressElapsedMs = progressElapsedMs;
+            ConsecutiveSilentRounds = consecutiveSilentRounds;
         }
 
         #region Phase 1 工厂方法
@@ -439,6 +477,44 @@ namespace AgentCore.Editor.Core
                 messageId: messageId,
                 progressCharCount: charCount,
                 progressElapsedMs: elapsedMs
+            );
+        }
+
+        /// <summary>
+        /// 创建"本轮空正文"检测事件（v1.14.9）。
+        /// </summary>
+        /// <param name="consecutiveSilentRounds">连续空正文轮次数；0 = 本轮非空，清零 UI 计数。</param>
+        /// <param name="messageId">所属 assistant turn 的唯一标识。</param>
+        public static AgentEvent SilentRoundDetected(int consecutiveSilentRounds, string messageId = null)
+        {
+            return new AgentEvent(
+                AgentEventType.SilentRoundDetected,
+                messageId: messageId,
+                consecutiveSilentRounds: consecutiveSilentRounds
+            );
+        }
+
+        /// <summary>
+        /// 创建"大任务假完成、已自动恢复重试一次"事件（v1.14.9）。
+        /// </summary>
+        /// <param name="messageId">所属 assistant turn 的唯一标识。</param>
+        public static AgentEvent LargeTaskRecoveryTriggered(string messageId = null)
+        {
+            return new AgentEvent(
+                AgentEventType.LargeTaskRecoveryTriggered,
+                messageId: messageId
+            );
+        }
+
+        /// <summary>
+        /// 创建"大任务假完成自动恢复重试后仍然失败"事件（v1.14.9）。
+        /// </summary>
+        /// <param name="messageId">所属 assistant turn 的唯一标识。</param>
+        public static AgentEvent LargeTaskRecoveryFailed(string messageId = null)
+        {
+            return new AgentEvent(
+                AgentEventType.LargeTaskRecoveryFailed,
+                messageId: messageId
             );
         }
 
@@ -839,6 +915,35 @@ namespace AgentCore.Editor.Core
         /// </para>
         /// </summary>
         public int MessageEndIndex { get; set; } = -1;
+
+        /// <summary>
+        /// v1.14.10: 按 LLM 调用轮次分段的可见 content 快照（每个多轮工具调用循环里，
+        /// 每轮 <c>CallLLMStreamAsync</c> 产生的可见文本单独存一段）。
+        /// <para>
+        /// 背景：<see cref="Content"/> 字段跨多轮工具调用无差别 <c>+=</c> 累积，UI 侧只有一个
+        /// 共享的 MessageBubble 渲染整段拼接文本。部分模型（实测 DeepSeek-V4-Flash）习惯在
+        /// 每轮工具调用前输出一句过渡说明（"让我检查……"），这些说明和最终报告被拼接进同一段
+        /// 文字，用户视觉上无法区分"过程旁白"与"正式回复"。而 <see cref="Reasoning"/> 侧已经
+        /// 靠 UI 的 <c>AssistantTurnView.RoundSection</c> 做到了按轮次隔离展示（独立
+        /// ThinkingDrawer），Content 侧原本没有对应机制——这是本字段要补的缺口。
+        /// </para>
+        /// <para>
+        /// 设计取舍：不改动 <see cref="Content"/> 本身（LLM 历史/压缩/Fork/持久化多处依赖，
+        /// 动它风险极高），只新增这个并行列表供 UI 按轮次渲染参考；<see cref="Content"/> 继续
+        /// 保留全量拼接语义不变，向后兼容旧会话数据（本字段为空列表时 UI 退化为整段显示，
+        /// 即当前行为，不会因为字段缺失而报错或空白）。
+        /// </para>
+        /// </summary>
+        public List<string> RoundContents { get; set; } = new List<string>();
+
+        /// <summary>
+        /// v1.14.10: 与 <see cref="RoundContents"/> 配套 —— 当前正在累积、尚未归档的轮次
+        /// content 缓冲区。每次 <see cref="RunToolCallLoopAsync"/> 新一轮 LLM 调用开始时，
+        /// 上一轮的缓冲区内容会被归档进 <see cref="RoundContents"/>，此缓冲区清空重新累积。
+        /// 不参与序列化（纯运行时状态，session 落盘时已经归档完毕）。
+        /// </summary>
+        [Newtonsoft.Json.JsonIgnore]
+        public System.Text.StringBuilder CurrentRoundContentBuffer { get; } = new System.Text.StringBuilder();
 
         /// <summary>
         /// 创建一个新的对话轮次。

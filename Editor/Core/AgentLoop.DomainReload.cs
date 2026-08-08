@@ -641,7 +641,17 @@ namespace AgentCore.Editor.Core
                         // RunToolCallLoopAsync 内部已包含自动保存逻辑
                         await RunToolCallLoopAsync(assistantTurn, toolDefinitions, ct, " Resume");
 
-                        SetState(AgentState.Idle);
+                        // ask_user 恢复状态流转 bug 修复（与 AgentLoop.cs SendMessageAsync 同源问题）：
+                        // 若本轮 resume 内又立刻触发了新的 ask_user 挂起，RunToolCallLoopAsync 已经把
+                        // CurrentState 设为 WaitingForUserInput 并 return——这里原先无条件 SetState(Idle)
+                        // 会把刚设置的等待态瞬间覆盖掉。同样需要用 _pendingUserInputToolCallId 判断，
+                        // 且要排除 WaitingForClarification / ReviewingAnswer（与 SendMessageAsync 保持一致）。
+                        if (CurrentState != AgentState.WaitingForClarification &&
+                            CurrentState != AgentState.ReviewingAnswer &&
+                            string.IsNullOrEmpty(_pendingUserInputToolCallId))
+                        {
+                            SetState(AgentState.Idle);
+                        }
                     }
                     catch (OperationCanceledException)
                     {

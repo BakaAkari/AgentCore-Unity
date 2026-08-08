@@ -128,6 +128,9 @@ namespace AgentCore.Editor.UI
         /// <summary>取消按钮</summary>
         private Button _cancelButton;
 
+        /// <summary>思考强度快捷切换下拉（v1.14.10，会话级覆盖，见 ReasoningLevelSelector 类注释）。</summary>
+        private AgentCore.Editor.UI.Components.ReasoningLevelSelector _reasoningLevelSelector;
+
 
         /// <summary>Agent 状态行（消息流底部，文件变更面板上方）</summary>
         private AgentStatusLine _agentStatusLine;
@@ -276,6 +279,23 @@ namespace AgentCore.Editor.UI
             _sendButton = rootVisualElement.Q<Button>("send-button");
             _cancelButton = rootVisualElement.Q<Button>("cancel-button");
             _scrollToBottomButton = rootVisualElement.Q<Button>("scroll-to-bottom-button");
+
+            // v1.14.10: 挂载思考强度快捷切换下拉到输入按钮区（发送按钮之前），
+            // 避免重复挂载 (CreateGUI 可能因 domain reload 多次调用，与 MountLanguageSelector 同款判空)。
+            var inputButtons = rootVisualElement.Q<VisualElement>("input-buttons");
+            if (inputButtons != null)
+            {
+                var existingSelector = inputButtons.Q<AgentCore.Editor.UI.Components.ReasoningLevelSelector>();
+                if (existingSelector != null)
+                {
+                    _reasoningLevelSelector = existingSelector;
+                }
+                else
+                {
+                    _reasoningLevelSelector = new AgentCore.Editor.UI.Components.ReasoningLevelSelector();
+                    inputButtons.Insert(0, _reasoningLevelSelector);
+                }
+            }
 
             // 3.5 查询 Hub 导航与面板 UI 元素引用
             _contextSidebar = rootVisualElement.Q<VisualElement>("context-sidebar");
@@ -517,6 +537,11 @@ namespace AgentCore.Editor.UI
 
                 // ask_user：若 domain reload 前有挂起的提问，恢复挂起状态并重建面板
                 TryRestorePendingAskUser();
+
+                // v1.14.10: 恢复会话后同步思考强度下拉的显示值——TryRestoreSession 内部会
+                // 走 AgentLoop.ApplyLoadedSession，此时 ReasoningEffortOverride 已经是恢复出的
+                // 会话保存值，晚于此处调用才能读到正确的值。
+                _reasoningLevelSelector?.SyncFromAgentLoop(_agentLoop);
 
                 // 刷新会话列表
                 RefreshSessionList();

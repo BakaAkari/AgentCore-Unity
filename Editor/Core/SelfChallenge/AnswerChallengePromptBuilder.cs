@@ -93,12 +93,15 @@ namespace AgentCore.Editor.Core.SelfChallenge
             sb.Append("    - Verification needed 1: {具体做什么}\n");
             sb.Append("    - ...\n\n");
 
-            sb.Append(SelfChallengeConfig.NodeBCloseMarker).Append("\n\n");
-
-            sb.Append("**禁止**:\n");
+            // v1.14.10: 与 IntentChallengePromptBuilder 同一根因/同一修复 —— 原本这段"禁止"
+            // 清单写在 NodeBCloseMarker 之后, 部分模型会把"标签后的说明文字"误当成需要先输出的
+            // 内容而逐字复述。挪到 Step 4 内部、close marker 之前, 明确它是 Step 4 输出的一部分。
+            sb.Append("**本 Step 4 输出的禁止事项**(仍属于本 Step 4 输出, 不要在这之前额外复述):\n");
             sb.Append("- 写\"draft 看起来没问题\"/\"已经足够完整\" 这类模糊评价\n");
             sb.Append("- 跳过任何 Step\n");
-            sb.Append("- Verdict 不做选择(必须勾选 PASS/REVISE/BLOCK 其中一个)\n");
+            sb.Append("- Verdict 不做选择(必须勾选 PASS/REVISE/BLOCK 其中一个)\n\n");
+
+            sb.Append(SelfChallengeConfig.NodeBCloseMarker).Append("\n\n");
 
             return sb.ToString();
         }

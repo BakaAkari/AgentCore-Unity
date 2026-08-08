@@ -121,11 +121,17 @@ namespace AgentCore.Editor.Core.SelfChallenge
             sb.Append("- 跳过 Step 5\n");
             sb.Append("- 在 corrected judgement 里逃避(例如原本 A=yes 修正为 A=no 但没解释理由)\n\n");
 
-            sb.Append(SelfChallengeConfig.NodeACloseMarker).Append("\n\n");
+            // v1.14.10: 原本这段"完成 5 个 Step 后该怎么做"的指令写在 NodeACloseMarker **之后**，
+            // 意图是"标签结束后, 你接下来该做什么"。但实测 DeepSeek-V4-Flash 会把这段
+            // "标签后的动作说明"误当成"标签前需要先输出的内容", 逐字复述一遍才开始正式输出
+            // <intent_challenge> 块, 导致这段复述文本(不属于块内, 提取器按设计不剥离标签外文本)
+            // 泄漏到用户可见的正文里。根治方式: 把这段动作说明挪到 Step 5 内部、close marker
+            // **之前**, 让模型清楚这是 Step 5 输出的最后一部分, 不是"看完就该复述"的独立指令。
+            sb.Append("**Step 5 完成后的下一步动作**(仍属于本 Step 5 输出, 不要在这之前额外复述这条规则):\n");
+            sb.Append("- 若上面的结论是\"都不命中, 直接执行\"→ 紧接着开始调工具或直接回答, **不要**重复输出这条规则本身\n");
+            sb.Append("- 若上面的结论是\"命中组合 X\"→ 紧接着直接输出 `[CLARIFICATION NEEDED]` 反问, 禁止调工具, **不要**重复输出这条规则本身\n\n");
 
-            sb.Append("完成上述 5 个 Step 后:\n");
-            sb.Append("- 若 Step 5 修正后的结论是\"都不命中, 直接执行\"→ 开始调工具或直接回答\n");
-            sb.Append("- 若 Step 5 修正后的结论是\"命中组合 X\"→ 直接输出 `[CLARIFICATION NEEDED]` 反问, 禁止调工具\n");
+            sb.Append(SelfChallengeConfig.NodeACloseMarker).Append("\n\n");
 
             return sb.ToString();
         }

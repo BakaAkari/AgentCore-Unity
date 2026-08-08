@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -38,6 +39,15 @@ namespace AgentCore.Editor.UI.Components
         private const string ArrowCollapsed = ">";
         private const string ArrowExpanded = "v";
 
+        /// <summary>
+        /// v1.14.9: 连续空正文轮次达到该值后，提示文案从"继续执行中"升级为醒目的
+        /// "仍在正常执行中"警示（配合 <see cref="AccentOrange"/> 边框色）。
+        /// 3 轮的取值理由：单轮 reasoning 预算耗尽属偶发正常现象，1-2 轮不足以构成体感阻断；
+        /// 诊断实证（Profiler 对抗校验会话）里真正让用户产生"卡住了"感知的两段分别是 19/27
+        /// 与 6/6 轮连续空正文，3 轮足以在噪音和有效预警之间取得平衡。
+        /// </summary>
+        private const int SilentRoundWarningThreshold = 3;
+
         #endregion
 
         #region UI 元素
@@ -71,6 +81,11 @@ namespace AgentCore.Editor.UI.Components
         private bool _isReceivingArgs;
         private string _receivingToolName;
         private int _receivingChars;
+
+        // v1.14.9: 连续空正文轮次计数 — reasoning 吃满 max_tokens 预算导致本轮无可见文字，
+        // 但工具调用/LLM 请求本身正常收尾，代码层面无异常/无超时/无红线。此前该情况对用户
+        // 完全不可见，长任务下与真正卡死体感无法区分。
+        private int _consecutiveSilentRounds;
 
         #endregion
 
@@ -315,6 +330,18 @@ namespace AgentCore.Editor.UI.Components
             UpdateSummaryText();
         }
 
+        /// <summary>
+        /// v1.14.9: 更新"连续空正文轮次"计数。0 = 撤下提示（本轮已有实质文字输出或计数被重置）。
+        /// 不做任何卡死判定或行为拦截，只是把这一客观事实呈现给用户。
+        /// </summary>
+        /// <param name="consecutiveSilentRounds">当前连续空正文轮次数。</param>
+        public void UpdateSilentRoundCount(int consecutiveSilentRounds)
+        {
+            _consecutiveSilentRounds = Math.Max(0, consecutiveSilentRounds);
+            UpdateSummaryText();
+            UpdateHeaderAccentColor();
+        }
+
         #endregion
 
         #region 私有方法
@@ -449,6 +476,16 @@ namespace AgentCore.Editor.UI.Components
                     : AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.receivingArgsNamed", "接收参数中: {0} ({1} 字符)", _receivingToolName, _receivingChars));
             }
 
+            // v1.14.9: 连续空正文轮次提示 — 代码层面一切正常（工具调用/LLM 请求均正常收尾，
+            // 无异常无超时），但用户在界面上已经连续多轮看不到任何文字说明。达到警示阈值时
+            // 追加醒目提示，让用户明确知道"系统仍在正常推进，只是本轮暂无文字"，与真卡死区分开。
+            if (_consecutiveSilentRounds > 0)
+            {
+                parts.Add(_consecutiveSilentRounds >= SilentRoundWarningThreshold
+                    ? AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.silentRoundsWarning", "连续 {0} 轮无文字说明，仍在正常执行中", _consecutiveSilentRounds)
+                    : AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.silentRounds", "本轮无文字说明，继续执行中", _consecutiveSilentRounds));
+            }
+
             _summaryLabel.text = parts.Count > 0
                 ? $"[{string.Join(" | ", parts)}]"
                 : "";
@@ -491,7 +528,11 @@ namespace AgentCore.Editor.UI.Components
         {
             Color accentColor;
 
-            if (_runningCalls > 0)
+            if (_consecutiveSilentRounds >= SilentRoundWarningThreshold)
+            {
+                accentColor = AccentOrange; // v1.14.9: 连续多轮无文字说明 - 橙色警示（非错误，仅提示）
+            }
+            else if (_runningCalls > 0)
             {
                 accentColor = AccentBlue; // 执行中 - 蓝色
             }

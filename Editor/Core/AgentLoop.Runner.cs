@@ -53,6 +53,10 @@ namespace AgentCore.Editor.Core
             // 已发出警告的工具集合（同一工具在同一循环内只警告一次）
             var warnedTools = new HashSet<string>();
 
+            // v1.14.9: 每次进入本循环（无论是新消息触发还是 ask_user 应答后的 Resume）都重置
+            // "连续空正文"计数，不继承上一次循环遗留的状态
+            _consecutiveSilentRounds = 0;
+
             // 同一工具对同一目标重复调用检测 —— 防止 LLM 在单文件/单目标上无限循环
             var perToolTargetCallCount = new Dictionary<string, int>();
             const int toolTargetRepeatWarningThreshold = 4;
@@ -100,6 +104,42 @@ namespace AgentCore.Editor.Core
                     assistantMessage.ToolCalls == null ||
                     assistantMessage.ToolCalls.Count == 0)
                 {
+                    // v1.14.9(修正 v2): "假完成"检测 —— content 为空/空白 且 零 tool_calls。
+                    // 诊断实证（DUST2 fork diag + 实机 Editor.log）：reasoning 耗尽预算后交出的
+                    // 这种"空回复"会被下面的 HandleFinalResponse 当作合法的"纯文本回复,循环
+                    // 结束"静默接受 —— 用户体感是"喊它继续,它想了 6 分钟,什么也没干,也不说
+                    // 为什么，只能再催一次"。这里在真正判定为终态之前拦一次。
+                    //
+                    // 【二次修正】用户实机复现（会话 ba64e1fa，2026-08-07 15:xx）证实：单次空回复
+                    // 本身就是 100% 确定的故障状态——不存在"模型这轮确实无话可说,交白卷是合理
+                    // 行为"的正当场景（零 tool_calls + 空 content 从不是合法的终态）。之前要求
+                    // "连续两次"才拦截是过度谨慎，导致用户第一次遇到就已经是真实故障、却要忍受
+                    // 一次静默失败才能触发保护。现在改为：只要这一轮命中就立刻拦截 + 自动恢复，
+                    // 不再依赖"上一轮是否也空"这个历史条件。
+                    bool isBlankNoToolCalls = assistantMessage != null &&
+                        string.IsNullOrWhiteSpace(assistantMessage.Content) &&
+                        (assistantMessage.ToolCalls == null || assistantMessage.ToolCalls.Count == 0);
+
+                    if (isBlankNoToolCalls && !_blankRecoveryAttempted)
+                    {
+                        _blankRecoveryAttempted = true;
+                        AgentCoreLog.Warning(
+                            $"[AgentCore]{logPrefix} Detected fake-completion (empty content + zero tool_calls). " +
+                            "Injecting recovery prompt and retrying once instead of silently finalizing.");
+
+                        EmitEvent(AgentEvent.LargeTaskRecoveryTriggered(assistantTurn?.Id));
+
+                        _messages.Add(ChatMessage.System(
+                            "[SYSTEM] 你刚才的思考未能在预算内产出任何文字说明或工具调用（空回复）。" +
+                            "这通常发生在任务范围较大、试图在一次连续思考中规划完整个方案时。" +
+                            "请不要重新完整思考一遍——直接用 3-8 步的简要计划列出接下来要做什么（每步一行，" +
+                            "点名具体工具/文件/系统），然后从第一步开始执行。不要输出空回复。"));
+
+                        // 不 finalize，continue 让 while 循环发起下一轮 CallLLMStreamAsync，
+                        // 复用现有循环机制而不是另起一条嵌套调用路径。
+                        continue;
+                    }
+
                     // 纯文本回复 — 循环结束
                     HandleFinalResponse(assistantMessage, assistantTurn);
                     break;
@@ -233,6 +273,15 @@ namespace AgentCore.Editor.Core
                         finalMessage.ToolCalls.Clear();
                     }
 
+                    // v1.14.9(修正 v2): 这条"强制止损"调用本身若又是空回复（reasoning 耗尽预算），
+                    // 不再重试——止损路径本来就是因为反复失败/重复调用才触发的，再次空手而归
+                    // 说明模型已经彻底卡住，直接标记为"已尝试恢复"让 HandleFinalResponse
+                    // 走失败上报分支（error 气泡 + 重试按钮），而不是静默回到 Idle。
+                    if (finalMessage == null || string.IsNullOrWhiteSpace(finalMessage.Content))
+                    {
+                        _blankRecoveryAttempted = true;
+                    }
+
                     HandleFinalResponse(finalMessage, assistantTurn);
                     break;
                 }
@@ -289,6 +338,13 @@ namespace AgentCore.Editor.Core
                         finalMessage.ToolCalls.Clear();
                     }
 
+                    // v1.14.9(修正 v2): 同上——重复调用止损的收尾调用若仍是空回复，直接标记为
+                    // 已尝试恢复，走失败上报而不是静默终态。
+                    if (finalMessage == null || string.IsNullOrWhiteSpace(finalMessage.Content))
+                    {
+                        _blankRecoveryAttempted = true;
+                    }
+
                     HandleFinalResponse(finalMessage, assistantTurn);
                     break;
                 }
@@ -324,6 +380,13 @@ namespace AgentCore.Editor.Core
                     summaryMessage.ToolCalls.Clear();
                 }
 
+                // v1.14.9(修正 v2): 轮次/Token 上限总结调用本身若又是空回复，同样直接标记为
+                // 已尝试恢复，走失败上报而不是静默终态——用户已经等了整整一轮总结却什么都没拿到。
+                if (summaryMessage == null || string.IsNullOrWhiteSpace(summaryMessage.Content))
+                {
+                    _blankRecoveryAttempted = true;
+                }
+
                 HandleFinalResponse(summaryMessage, assistantTurn);
             }
 
@@ -357,6 +420,11 @@ namespace AgentCore.Editor.Core
         {
             CompleteReasoningIfNeeded(assistantTurn);
 
+            // v1.14.10: ArchiveCurrentRoundContent 只在"下一轮开始时"归档"上一轮"的缓冲区——
+            // 循环的最后一轮永远没有"下一轮"来触发这次归档，这里补上收尾点的归档，确保
+            // RoundContents 完整覆盖所有轮次（含最后一轮），不遗漏。
+            ArchiveCurrentRoundContent(assistantTurn);
+
             // 标记流式结束
             assistantTurn.IsStreaming = false;
 
@@ -388,6 +456,26 @@ namespace AgentCore.Editor.Core
                 // 归一化为空串，避免空白符流入下游（Node A/B 分析、历史）造成误判。
                 assistantTurn.Content = string.Empty;
                 AgentCoreLog.Warning("[AgentCore] HandleFinalResponse: Assistant content is empty/whitespace (reasoning-only turn); UI will drop the empty content bubble.");
+
+                // v1.14.9(修正 v2): 走到这里意味着"单次拦截"已经拦过一次仍然空手而归
+                // （_blankRecoveryAttempted 已在主循环里置为 true），或者是本方法被非主循环
+                // 路径（WaitingForClarification 强制降级 / 三处"强制止损"总结重试）直接调用、
+                // 完全没经过拦截层。两种情况都不能再悄悄接受为终态——用户已经等了一轮 reasoning
+                // 却什么都没拿到。给一条用户可见的失败提示（带重试按钮）。
+                if (_blankRecoveryAttempted)
+                {
+                    AgentCoreLog.Warning("[AgentCore] Auto-recovery also produced an empty final response. Surfacing failure to user instead of silently finalizing.");
+                    EmitEvent(AgentEvent.LargeTaskRecoveryFailed(assistantTurn.Id));
+
+                    // 恢复流程已经走到"报告失败"这一步，重置状态——要求下次再命中空回复时
+                    // 重新从"单次拦截"开始，而不是直接判定为失败。
+                    _blankRecoveryAttempted = false;
+                }
+            }
+            else
+            {
+                // 只要本轮产出了实质内容（非空 content），"假完成"检测状态即告一段落。
+                _blankRecoveryAttempted = false;
             }
 
             // Phase 9: Node A 完成后的分派 — 若结论 = 反问用户, 进入 WaitingForClarification 状态

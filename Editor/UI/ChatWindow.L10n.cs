@@ -85,6 +85,9 @@ namespace AgentCore.Editor.UI
             var cancelBtn = rootVisualElement.Q<Button>("cancel-button");
             if (cancelBtn != null)
                 cancelBtn.text = Loc.Tr("chat.input.cancel", "取消");
+
+            // v1.14.10: 思考强度下拉的选项文案（Auto/Off/Low/Med/High）随语言刷新。
+            _reasoningLevelSelector?.RefreshDisplayNames();
         }
 
         /// <summary>

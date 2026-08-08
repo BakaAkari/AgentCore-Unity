@@ -35,9 +35,13 @@ namespace AgentCore.Editor.Config
         // 被网关拒绝（HTTP 400）。现由 EnsureDefaultProfileIfEmpty（仅创建）+
         // EnsureDefaultProfileWithAutoModelAsync（创建 + fetch 模型名）两个入口分别供
         // UI 层（Settings 面板，自带状态提示）和运行时初始化路径（AgentLoop.InitializeAsync）调用。
+        // v1.14.11: 改为直连 sourceai（172.16.248.60）上的 vLLM 实例（DeepSeek-V4-Flash，
+        // TP8+EP，已用 curl 验证 /v1/models 与 /v1/chat/completions 均 200）。该地址同样仅
+        // 企业内网可达；vLLM 未设 --api-key，不校验鉴权头，故 API Key 占位值改为无意义的
+        // "sk-xxx"（此前网关地址的真实 key 已随之失效，不再需要）。
         private const string DefaultProfileName = "Default";
-        private const string DefaultProfileEndpoint = "http://172.16.248.201:34567/v1";
-        private const string DefaultProfileApiKeyPlaceholder = "sk-B7YGb4nVwFb9pZsvLf1p8otnDfbThKOjWKsGgnrmwAdcXYJR";
+        private const string DefaultProfileEndpoint = "http://172.16.248.60:8000/v1";
+        private const string DefaultProfileApiKeyPlaceholder = "sk-xxx";
 
         /// <summary>数据 schema 版本，供将来迁移用。</summary>
         [SerializeField] private int schemaVersion = 1;

@@ -48,6 +48,8 @@ namespace AgentCore.Editor.Core
         /// <param name="tools">工具定义列表（可选）</param>
         /// <param name="ct">取消令牌</param>
         /// <param name="onStatusUpdate">状态更新回调（可选）</param>
+        /// <param name="reasoningLevelOverride">v1.14.10: 会话级思考强度快捷覆盖，透传给
+        /// <see cref="ILLMClient.ChatCompletionStreamAsync"/> 同名参数。</param>
         /// <returns>完整的 assistant ChatMessage</returns>
         public async Task<ChatMessage> ExecuteStreamWithRetryAsync(
             ILLMClient client,
@@ -55,7 +57,8 @@ namespace AgentCore.Editor.Core
             Action<StreamChunk> onChunk,
             List<ToolDefinition> tools = null,
             CancellationToken ct = default,
-            Action<string> onStatusUpdate = null)
+            Action<string> onStatusUpdate = null,
+            string reasoningLevelOverride = null)
         {
             Exception lastException = null;
             int actualAttempts = 0;
@@ -72,7 +75,7 @@ namespace AgentCore.Editor.Core
                         await Task.Delay(RetryDelayMs * attempt, ct); // 递增延迟
                     }
 
-                    var result = await client.ChatCompletionStreamAsync(messages, onChunk, tools, ct);
+                    var result = await client.ChatCompletionStreamAsync(messages, onChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride);
 
                     // v1.6.5+: 流式路径不做空内容重试
                     // 原因：reasoning chunks 已通过 onChunk 发送到 UI，重试会导致重复输出

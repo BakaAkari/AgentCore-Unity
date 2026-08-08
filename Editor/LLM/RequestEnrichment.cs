@@ -22,8 +22,15 @@ namespace AgentCore.Editor.LLM
         /// </para>
         /// </summary>
         /// <param name="request">强类型请求对象</param>
+        /// <param name="reasoningLevelOverride">
+        /// v1.14.10: 会话级思考强度快捷覆盖（chat 面板下拉选择，类似 Codex/Claude Code）。
+        /// null/空字符串/"auto" = 不覆盖，走 <see cref="ActiveModelConfig.ReasoningEffort"/> 的
+        /// 全局默认值（现状行为，本参数缺省时完全等价于修改前的行为）；其他值经
+        /// <see cref="ReasoningParamMapper.ParseLevel"/> 解析后，按当前 endpoint/modelName 的
+        /// 供应商特征组装成具体协议字段，覆盖全局默认。
+        /// </param>
         /// <returns>增强后的 JSON 字符串，可直接作为 HTTP body 发送</returns>
-        public static string BuildEnrichedJson(ChatCompletionRequest request)
+        public static string BuildEnrichedJson(ChatCompletionRequest request, string reasoningLevelOverride = null)
         {
             // Step 1: 序列化为 JObject（保留 null 移除语义由 JsonHelper 控制）
             var baseJson = JsonHelper.Serialize(request);
@@ -35,10 +42,16 @@ namespace AgentCore.Editor.LLM
                 InjectStreamOptions(body);
             }
 
-            // Step 3: 注入 reasoning 参数（若用户启用）。
-            // 白名单外的供应商由 client 层通过 RequestPruningRegistry 在发送前 strip 掉；
-            // 这里保持"按用户意图注入"的单一职责，不做供应商判断。
-            if (ActiveModelConfig.EnableReasoningOutput)
+            // Step 3: 注入 reasoning 参数。
+            // v1.14.10: 会话覆盖优先于全局设置——ParseLevel 对 null/空/"auto" 统一返回 Auto，
+            // Auto 时 ReasoningParamMapper.ApplyLevel 直接 no-op，退回到下面的全局默认路径，
+            // 保证"没有设置覆盖"时行为与修改前完全一致。
+            var overrideLevel = ReasoningParamMapper.ParseLevel(reasoningLevelOverride);
+            if (overrideLevel != ReasoningParamMapper.ReasoningLevel.Auto)
+            {
+                ReasoningParamMapper.ApplyLevel(body, overrideLevel, ActiveModelConfig.Endpoint, ActiveModelConfig.ModelName);
+            }
+            else if (ActiveModelConfig.EnableReasoningOutput)
             {
                 InjectReasoning(body, ActiveModelConfig.ReasoningEffort, ActiveModelConfig.ReasoningMaxTokens);
             }
@@ -98,6 +111,28 @@ namespace AgentCore.Editor.LLM
 
             // 即使 reasoning 为空对象 {}，也要注入 — 这是触发 OpenRouter 返回 reasoning_content 的最低要求
             body["reasoning"] = reasoning;
+
+            // v1.14.10: 部分模型（实测 DeepSeek-V4-Flash 经 vLLM 0.25.1 部署）的服务端
+            // reasoning parser 默认初始状态是 CONTENT，不会主动拆分 <think> 标签到独立的
+            // reasoning/reasoning_content delta 字段 —— 除非请求体显式传入
+            // chat_template_kwargs.thinking=true（vLLM 专属扩展字段，透传给 chat template
+            // 和 reasoning parser 的 thinking 开关）。缺失时思考内容会整段混入正常 content，
+            // UI 侧 ThinkingDrawer 收不到任何 reasoning token，用户看到的是"思考过程被当成
+            // 正文消息发了出来"。见 vllm/parser/deepseek_v4.py:
+            //   thinking = bool(chat_kwargs.get("thinking") or chat_kwargs.get("enable_thinking"))
+            //              and chat_kwargs.get("reasoning_effort") != "none"
+            //   initial_state = REASONING if thinking else CONTENT
+            // 已用 curl 直连 vLLM 实测验证：加上此字段后 delta 从 content 变为 reasoning 字段。
+            // 该字段是 vLLM 专属扩展，非 vLLM 供应商若报错会被 RequestPruningRegistry 的
+            // error-driven learning 自动学习剔除（同一套现有安全网），不需要按供应商特判。
+            if (body["chat_template_kwargs"] is JObject existingKwargs)
+            {
+                existingKwargs["thinking"] = true;
+            }
+            else
+            {
+                body["chat_template_kwargs"] = new JObject { ["thinking"] = true };
+            }
         }
 
         /// <summary>

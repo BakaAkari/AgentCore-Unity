@@ -172,9 +172,64 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
+            // v1.14.10: 按轮次分段展示 —— turn.RoundContents 记录了每轮 LLM 调用产生的可见
+            // content 片段（见 ConversationTurn.RoundContents 类注释）。非最后一段渲染为次要
+            // 样式的"过程旁白"插入对应轮次区域，只有最后一段（真正的最终回复）用主
+            // MessageBubble 突出显示 —— 不再是"整段无差别拼接"。
+            //
+            // 向后兼容：RoundContents 为空（旧版本代码路径未采集，或本 turn 走了非
+            // RunToolCallLoopAsync 的特殊路径）时，finalBubbleContent 保持 fullContent 原样，
+            // 退化为此前的"整段显示"行为，不会因为字段缺失导致内容丢失或空白。
+            string finalBubbleContent = fullContent;
+            var turnForNarration = FindTurnById(messageId);
+            if (turnForNarration != null && turnForNarration.RoundContents.Count > 0)
+            {
+                var rounds = turnForNarration.RoundContents;
+
+                // v1.14.10 fix: RoundContents[0] 永远是"首轮 LLM 调用开始前"的归档占位
+                // （此时还没有任何一轮真正产生过 token，天然是空字符串），不对应任何真实的
+                // RoundSection。真正的映射是 RoundContents[i] 对应 AssistantTurnView._rounds[i-1]
+                // （i>=1）——即 RoundContents 下标比 RoundSection 下标多一位偏移，因为归档动作
+                // 发生在"下一轮开始时"，第 1 次归档（值必为空）发生在第 1 轮刚开始、尚无 RoundSection
+                // 对应的时间点。此前实现直接用 rounds[i] 对应 _rounds[i]（未偏移），会把上一轮
+                // 说的话错误贴到下一轮的 RoundSection 上，比不做这个功能还糟——已在原地修正，
+                // 不是新增的兜底分支。
+                if (_assistantTurnViews.TryGetValue(messageId, out var turnView))
+                {
+                    // rounds[1..Count-2] 是"过程轮次"的旁白，对应 _rounds[0..Count-3]。
+                    // rounds[Count-1]（最后一段）是最终回复，不在这里展示为旁白。
+                    for (int i = 1; i < rounds.Count - 1; i++)
+                    {
+                        turnView.ShowRoundNarration(i - 1, rounds[i]);
+                    }
+                }
+
+                // 最后一段作为正式回复内容；若最后一段是空白（该轮只调工具没有可见文字），
+                // 向前找最近一段非空内容兜底，避免主气泡完全空白（宁可显示"稍旧"的内容，
+                // 不显示空气泡——空气泡对用户是更差的体验，且此前从未出现过这个信号）。
+                string lastRound = rounds[rounds.Count - 1];
+                if (!string.IsNullOrWhiteSpace(lastRound))
+                {
+                    finalBubbleContent = lastRound;
+                }
+                else
+                {
+                    for (int i = rounds.Count - 2; i >= 0; i--)
+                    {
+                        if (!string.IsNullOrWhiteSpace(rounds[i]))
+                        {
+                            finalBubbleContent = rounds[i];
+                            break;
+                        }
+                    }
+                    // 所有分段都是空白（理论上不会发生，因为外层已经判断 fullContent 非空白）：
+                    // 保留 fullContent 原样作为最终兜底，不改变现有行为。
+                }
+            }
+
             if (_messageBubbles.TryGetValue(messageId, out var bubble))
             {
-                bubble.FinalizeContent(fullContent);
+                bubble.FinalizeContent(finalBubbleContent);
 
                 // Fork 接线：此刻 assistantTurn.MessageEndIndex 已经由 HandleFinalResponse
                 // 同步设置完毕（在 EmitEvent 触发本回调之前），可以安全查询。

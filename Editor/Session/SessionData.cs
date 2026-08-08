@@ -85,6 +85,15 @@ namespace AgentCore.Editor.Session
         public bool TitleManuallySet { get; set; }
 
         /// <summary>
+        /// v1.14.9: 会话级 Reasoning Effort 快捷覆盖（chat 面板下拉选择，类似 Codex/Claude Code
+        /// 的思考强度切换）。取值 "auto"/"low"/"medium"/"high"；null/空 = 不覆盖，跟随全局/Profile
+        /// 设置（<see cref="AgentCore.Editor.Config.ActiveModelConfig.ReasoningEffort"/>）。
+        /// 会话粘滞：选定后持续生效直到用户手动改，随会话保存/加载。
+        /// </summary>
+        [JsonProperty("reasoning_effort_override", NullValueHandling = NullValueHandling.Ignore)]
+        public string ReasoningEffortOverride { get; set; }
+
+        /// <summary>
         /// 从 AgentLoop 的运行时数据创建 SessionData。
         /// </summary>
         /// <param name="messages">LLM 消息历史</param>
@@ -115,7 +124,10 @@ namespace AgentCore.Editor.Session
                 // v1.12.0: 保留会话组织字段（tag / 归档 / 手动命名标记），与 Id/Title 一样从已有会话继承
                 Tag = existingSession?.Tag,
                 Archived = existingSession?.Archived ?? false,
-                TitleManuallySet = existingSession?.TitleManuallySet ?? false
+                TitleManuallySet = existingSession?.TitleManuallySet ?? false,
+                // v1.14.9: 会话级 Reasoning Effort 覆盖同样从已有会话继承（AutoSave/ForceSave 每轮都会
+                // 重新调用本方法构建新 SessionData，若不继承会在下一次自动保存时被悄悄清空）。
+                ReasoningEffortOverride = existingSession?.ReasoningEffortOverride
             };
 
             // 转换 ChatMessage -> SerializableChatMessage

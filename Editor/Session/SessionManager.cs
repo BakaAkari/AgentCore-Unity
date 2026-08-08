@@ -353,6 +353,53 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
+        /// v1.14.9: 设置会话级 Reasoning Effort 快捷覆盖（chat 面板下拉选择）。
+        /// 传入 null / 空字符串 / "auto" 表示清除覆盖（回到跟随全局/Profile 设置）。
+        /// </summary>
+        /// <param name="sessionId">会话 ID</param>
+        /// <param name="effort">"auto"/"low"/"medium"/"high"；null 或 "auto" = 清除覆盖</param>
+        /// <returns>是否成功</returns>
+        public bool SetReasoningEffortOverride(string sessionId, string effort)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                AgentCoreLog.Warning($"{LogPrefix}Cannot set reasoning effort override on session with empty Id.");
+                return false;
+            }
+
+            try
+            {
+                var session = SessionStorage.Load(sessionId);
+                if (session == null)
+                {
+                    AgentCoreLog.Warning($"{LogPrefix}Session not found for set reasoning effort override: {sessionId}");
+                    return false;
+                }
+
+                // "auto" 与 null/空 语义一致 —— 都代表"不覆盖，跟随全局默认"，统一归一化为 null，
+                // 避免序列化出 "auto" 字符串后又要在读取侧再判断一次。
+                var normalized = string.IsNullOrWhiteSpace(effort) || effort.Trim().ToLowerInvariant() == "auto"
+                    ? null
+                    : effort.Trim().ToLowerInvariant();
+                session.ReasoningEffortOverride = normalized;
+                SessionStorage.Save(session);
+
+                if (CurrentSessionId == sessionId && _currentSession != null)
+                {
+                    _currentSession.ReasoningEffortOverride = normalized;
+                }
+
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session reasoning effort override set: {sessionId} -> {(normalized ?? "<auto>")}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Failed to set reasoning effort override on session {sessionId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// 设置会话归档状态。
         /// </summary>
         /// <param name="sessionId">会话 ID</param>

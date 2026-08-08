@@ -371,6 +371,182 @@ namespace AgentCore.Editor.Session
             }
         }
 
+        /// <summary>
+        /// 跨会话全文检索（v1.14.9+ Session tag 互通）。
+        /// <para>
+        /// 设计要点（对应 plans/session-search-tags.md 讨论结论）：
+        /// 1. <b>强制按 tag scope</b>——不支持无 tag 的全局搜索，从设计上堵住"越搜越大"失控；
+        /// 2. <b>返回片段（snippet），不是整份消息</b>——避免匹配到的 session 内容直接顶爆调用方 token 预算；
+        /// 3. <b>扫描文件数硬顶</b> <paramref name="maxScanFiles"/>——tag 下 session 很多时只扫最近
+        ///    更新的那部分，不是无限扫描；命中数硬顶 <paramref name="limit"/>；
+        /// 4. 排除 <paramref name="excludeSessionId"/>（通常是调用方自己的当前会话），
+        ///    检索"其他"会话没有意义搜自己正在进行的对话。
+        /// </para>
+        /// <para>
+        /// 本方法只做只读文本匹配，不反序列化完整 <see cref="SessionData"/> 消息对象树——
+        /// 直接在原始 JSON 文本上做大小写不敏感的子串匹配，兼顾简单和到几百个 session 文件的性能。
+        /// </para>
+        /// </summary>
+        /// <param name="tag">会话 tag（必填，大小写不敏感精确匹配）。</param>
+        /// <param name="query">检索关键词（必填，大小写不敏感子串匹配）。</param>
+        /// <param name="limit">最多返回的命中结果数（含所有 session 汇总）。</param>
+        /// <param name="maxScanFiles">最多扫描的 session 文件数（按 UpdatedAt 降序，即最近更新的优先）。</param>
+        /// <param name="excludeSessionId">排除的会话 ID（通常是调用方自己），可为 null。</param>
+        /// <returns>检索结果（含是否被截断的提示信息）。</returns>
+        public static SessionSearchResult SearchSessions(
+            string tag,
+            string query,
+            int limit,
+            int maxScanFiles,
+            string excludeSessionId = null)
+        {
+            var result = new SessionSearchResult();
+
+            if (string.IsNullOrWhiteSpace(tag) || string.IsNullOrWhiteSpace(query))
+            {
+                return result;
+            }
+
+            try
+            {
+                var directory = GetSessionDirectory();
+                if (!Directory.Exists(directory))
+                {
+                    return result;
+                }
+
+                var files = Directory.GetFiles(directory, "*.json");
+
+                // 1. 先只解析摘要字段筛出 tag 匹配的 session，按 UpdatedAt 降序排列，
+                //    再按 maxScanFiles 截断——保证"扫描哪些文件"这一步本身就是有界的。
+                var candidates = new List<(string file, SessionSummary summary)>();
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        var sessionId = Path.GetFileNameWithoutExtension(file);
+                        if (!string.IsNullOrEmpty(excludeSessionId) &&
+                            string.Equals(sessionId, excludeSessionId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var json = File.ReadAllText(file);
+                        var summary = ParseSummary(json);
+                        if (summary == null) continue;
+                        if (string.IsNullOrEmpty(summary.Tag) ||
+                            !string.Equals(summary.Tag, tag, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        candidates.Add((file, summary));
+                    }
+                    catch (Exception ex)
+                    {
+                        AgentCoreLog.Warning($"{LogPrefix}Failed to parse session file for search {Path.GetFileName(file)}: {ex.Message}");
+                    }
+                }
+
+                candidates.Sort((a, b) => b.summary.UpdatedAt.CompareTo(a.summary.UpdatedAt));
+                result.MatchedTagSessionCount = candidates.Count;
+
+                bool scanTruncated = candidates.Count > maxScanFiles;
+                if (scanTruncated)
+                {
+                    candidates = candidates.Take(maxScanFiles).ToList();
+                }
+                result.ScanTruncated = scanTruncated;
+                result.ScannedSessionCount = candidates.Count;
+
+                // 2. 逐个 session 全文匹配 Messages[].Content，产出片段级结果。
+                foreach (var (file, summary) in candidates)
+                {
+                    if (result.Hits.Count >= limit) break;
+
+                    SessionData session;
+                    try
+                    {
+                        var json = File.ReadAllText(file);
+                        session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
+                    }
+                    catch (Exception ex)
+                    {
+                        AgentCoreLog.Warning($"{LogPrefix}Failed to load session content for search {summary.Id}: {ex.Message}");
+                        continue;
+                    }
+
+                    if (session?.Messages == null) continue;
+
+                    var hitsInSession = new List<SessionSearchSnippet>();
+                    foreach (var msg in session.Messages)
+                    {
+                        if (string.IsNullOrEmpty(msg.Content)) continue;
+
+                        int searchFrom = 0;
+                        while (true)
+                        {
+                            int idx = msg.Content.IndexOf(query, searchFrom, StringComparison.OrdinalIgnoreCase);
+                            if (idx < 0) break;
+
+                            hitsInSession.Add(new SessionSearchSnippet
+                            {
+                                Role = msg.Role,
+                                Snippet = BuildSnippet(msg.Content, idx, query.Length)
+                            });
+
+                            searchFrom = idx + query.Length;
+                        }
+                    }
+
+                    if (hitsInSession.Count == 0) continue;
+
+                    result.Hits.Add(new SessionSearchHit
+                    {
+                        SessionId = summary.Id,
+                        Title = summary.Title,
+                        UpdatedAt = summary.UpdatedAt,
+                        MatchCount = hitsInSession.Count,
+                        // 单个 session 内的片段本身也不能无界返回——最多附 3 条代表性片段，
+                        // 其余只体现在 MatchCount 里，需要更多细节时用 sessionId 精确 LoadSession。
+                        Snippets = hitsInSession.Take(3).ToList()
+                    });
+                }
+
+                // 命中次数降序，同分按最近更新降序 —— 让最相关 + 最新的结果排前面。
+                result.Hits.Sort((a, b) =>
+                {
+                    int byCount = b.MatchCount.CompareTo(a.MatchCount);
+                    return byCount != 0 ? byCount : b.UpdatedAt.CompareTo(a.UpdatedAt);
+                });
+
+                if (result.Hits.Count > limit)
+                {
+                    result.Hits = result.Hits.Take(limit).ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}SearchSessions failed: {ex.Message}");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 截取命中点前后各 <paramref name="contextChars"/> 字符构成片段，两端截断处加 "…" 提示。
+        /// </summary>
+        private static string BuildSnippet(string content, int matchIndex, int matchLength, int contextChars = 200)
+        {
+            int start = Math.Max(0, matchIndex - contextChars);
+            int end = Math.Min(content.Length, matchIndex + matchLength + contextChars);
+
+            var snippet = content.Substring(start, end - start);
+            if (start > 0) snippet = "…" + snippet;
+            if (end < content.Length) snippet += "…";
+            return snippet;
+        }
+
         #endregion
 
         #region 私有方法
@@ -424,5 +600,50 @@ namespace AgentCore.Editor.Session
         /// <summary>用户是否手动设置过标题</summary>
         [JsonProperty("title_manually_set", NullValueHandling = NullValueHandling.Ignore, DefaultValueHandling = DefaultValueHandling.Ignore)]
         public bool TitleManuallySet { get; set; }
+    }
+
+    /// <summary>
+    /// <see cref="SessionStorage.SearchSessions"/> 的完整返回结果。
+    /// </summary>
+    [Serializable]
+    public class SessionSearchResult
+    {
+        /// <summary>命中的会话列表（片段级，已按相关度排序并截断到 limit）。</summary>
+        public List<SessionSearchHit> Hits { get; set; } = new List<SessionSearchHit>();
+
+        /// <summary>该 tag 下匹配到的会话总数（截断前）。</summary>
+        public int MatchedTagSessionCount { get; set; }
+
+        /// <summary>实际扫描的会话数（应用 maxScanFiles 截断后）。</summary>
+        public int ScannedSessionCount { get; set; }
+
+        /// <summary>是否因 maxScanFiles 限制而未扫描到该 tag 下的全部会话——调用方应据此判断是否需要缩小范围或换关键词重新搜索。</summary>
+        public bool ScanTruncated { get; set; }
+    }
+
+    /// <summary>单个会话内的检索命中汇总。</summary>
+    [Serializable]
+    public class SessionSearchHit
+    {
+        public string SessionId { get; set; }
+        public string Title { get; set; }
+        public DateTime UpdatedAt { get; set; }
+
+        /// <summary>该会话内命中的总次数（可能大于 Snippets.Count，因为片段数被截断到 3 条）。</summary>
+        public int MatchCount { get; set; }
+
+        /// <summary>代表性片段（最多 3 条），需要更多细节时应显式加载该 SessionId 的完整内容。</summary>
+        public List<SessionSearchSnippet> Snippets { get; set; } = new List<SessionSearchSnippet>();
+    }
+
+    /// <summary>单条命中片段。</summary>
+    [Serializable]
+    public class SessionSearchSnippet
+    {
+        /// <summary>该片段所属消息的角色（user/assistant/tool）。</summary>
+        public string Role { get; set; }
+
+        /// <summary>命中点前后各 ~200 字符的上下文片段。</summary>
+        public string Snippet { get; set; }
     }
 }

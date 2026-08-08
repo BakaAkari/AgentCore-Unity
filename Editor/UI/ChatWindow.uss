@@ -401,7 +401,7 @@
     background-color: #383838;
     border-top-width: 1px;
     border-top-color: #555555;
-    min-height: 44px;
+    min-height: 88px;
     max-height: 260px;
 }
 
@@ -464,6 +464,57 @@
     flex-shrink: 0;
     align-items: flex-end;
     margin-bottom: 0;
+}
+
+/* 思考强度快捷切换下拉（v1.14.10）：与 #send-button / #cancel-button 同一套设计语言——
+   28px 高、6px 圆角、无边框，颜色沿用输入框深色底（#2b2b2b）+ 蓝色 focus 强调（#4a86c8），
+   而不是 Unity 默认的浅灰色下拉框外观，保持与整个 chat 面板深色主题一致。 */
+.agentcore-reasoning-level-selector {
+    flex-direction: row;
+    align-items: center;
+    flex-grow: 0;
+    flex-shrink: 0;
+    margin: 0 4px 0 0;
+}
+
+.agentcore-reasoning-level-selector__popup {
+    width: 64px;
+    min-width: 64px;
+    max-width: 64px;
+    height: 28px;
+    flex-grow: 0;
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
+    background-color: #2b2b2b;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #555555;
+    justify-content: center;
+}
+
+.agentcore-reasoning-level-selector__popup:hover {
+    background-color: #333333;
+    border-color: #666666;
+}
+
+.agentcore-reasoning-level-selector__popup:focus {
+    border-color: #4a86c8;
+}
+
+/* PopupField 真实的内部结构是 unity-base-popup-field__text（文字）+ __arrow（箭头），
+   没有 __input/__label 这类子类名（此前 C# 里 Q<Label>(className: "unity-base-field__label")
+   隐藏标签的写法命中的是不存在的类名，一直没生效——这里改用验证过真实存在的 __text）。 */
+.agentcore-reasoning-level-selector__popup .unity-base-popup-field__text {
+    color: #d4d4d4;
+    font-size: 12px;
+    -unity-text-align: middle-center;
+    margin: 0;
+    padding: 0;
+}
+
+.agentcore-reasoning-level-selector__popup .unity-base-popup-field__arrow {
+    -unity-background-image-tint-color: #999999;
 }
 
 #send-button {

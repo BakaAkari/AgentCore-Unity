@@ -82,6 +82,22 @@ namespace AgentCore.Editor.Core
             // v1.14.5: 每轮 LLM 调用重置工具调用参数接收进度节流状态
             ResetToolCallProgressState();
 
+            // v1.14.10: 每轮 LLM 调用重置 content/reasoning flush 的时间戳节流状态，
+            // 避免跨轮次残留的时间戳导致本轮第一次 flush 判断失真（虽然实际影响很小，
+            // 但与 ResetToolCallProgressState 保持同一"每轮清零"习惯，便于排查）。
+            _lastContentFlushUtc = null;
+            _lastReasoningFlushUtc = null;
+
+            // v1.14.10: 归档上一轮累积在 CurrentRoundContentBuffer 里的可见 content 到
+            // RoundContents（本轮真正开始前，即"上一轮已经彻底结束"的时间点）。首轮进入时
+            // buffer 为空，Append 会被 HandleContentToken 内的判空跳过，Archive 也无操作，
+            // 行为安全。见 ConversationTurn.RoundContents 类注释：目的是让 UI 侧能区分
+            // "过程轮次的过渡旁白" vs "最后一轮的正式回复"，不影响 Content 字段本身的语义。
+            if (assistantTurn != null)
+            {
+                ArchiveCurrentRoundContent(assistantTurn);
+            }
+
             // Phase 9: 每次 LLM 调用前重置 SelfChallenge extractors (Node A / Node B stream 抽取器)
             ResetSelfChallengeExtractorsForNewRound();
 
@@ -98,7 +114,10 @@ namespace AgentCore.Editor.Core
                 chunk => OnStreamChunkReceived(chunk, assistantTurn, ct),
                 tools: effectiveTools,
                 ct: ct,
-                onStatusUpdate: status => EmitEvent(AgentEvent.ErrorEvent($"[Retry] {status}"))
+                onStatusUpdate: status => EmitEvent(AgentEvent.ErrorEvent($"[Retry] {status}")),
+                // v1.14.10: 会话级思考强度快捷覆盖（chat 面板下拉选择），随 ConversationTurn
+                // 而非 AgentLoop 全局状态存在——每条独立会话可以有不同的覆盖值。
+                reasoningLevelOverride: ReasoningEffortOverride
             );
 
             // Phase 9: 如果 Node A 结构校验失败, 触发独立小会话 correction retry (v0.9 §11.5)
@@ -113,12 +132,27 @@ namespace AgentCore.Editor.Core
             // v1.6.5+: 空内容检测 — GLM-5.2 reasoning 吃光 maxTokens 时 content 为空
             // 流式路径不能在 FallbackRouter 中重试（reasoning chunks 已发送到 UI）
             // 这里检测空内容并记录警告，上层 HandleFinalResponse 会显示 fallback 消息
+            //
+            // v1.14.9: 除了日志，同时驱动 UI 侧"连续空正文轮次"可见提示 —— 此前这条 Warning
+            // 只落 Editor.log，用户在界面上看到的是连续多轮纯读秒零反馈，代码层面工具调用/LLM
+            // 请求又都正常收尾（无异常/无超时/无红线），体感上跟真卡死无法区分。见诊断包
+            // AgentCore_Profiler性能分析报告的对抗性校验（2026-08-07）：单次会话内连续 19/27
+            // 与 6/6 轮空正文，用户两次手动追问"卡住了"。
             if (assistantMessage != null && string.IsNullOrEmpty(assistantMessage.Content))
             {
                 AgentCore.Editor.Utils.AgentCoreLog.Warning(
                     "[AgentCore] LLM returned empty content. " +
                     "Reasoning may have consumed the entire max_tokens budget. " +
                     "Consider increasing maxTokens or reducing reasoningMaxTokens.");
+
+                _consecutiveSilentRounds++;
+                EmitEvent(AgentEvent.SilentRoundDetected(_consecutiveSilentRounds, assistantTurn?.Id));
+            }
+            else if (_consecutiveSilentRounds > 0)
+            {
+                // 本轮有实质文字输出 — 清零计数并通知 UI 撤下提示
+                _consecutiveSilentRounds = 0;
+                EmitEvent(AgentEvent.SilentRoundDetected(0, assistantTurn?.Id));
             }
 
             return assistantMessage;
@@ -206,6 +240,9 @@ namespace AgentCore.Editor.Core
             {
                 CompleteReasoningIfNeeded(assistantTurn);
                 assistantTurn.Content += delta.VisibleContent;
+                // v1.14.10: 与 Content 同步累积到"当前轮次缓冲区"，供 ArchiveCurrentRoundContent
+                // 在下一轮开始时归档进 RoundContents（按轮次分段展示，见该字段类注释）。
+                assistantTurn.CurrentRoundContentBuffer.Append(delta.VisibleContent);
                 // v1.14.5: content 与 reasoning 统一为"分块 flush"策略 —— 之前 v1.8.5 曾
                 // 全累积到 Done 才一次性 emit(为消除逐字 200+ms/帧阻塞), 但副作用是最终回复
                 // 正文完全没有流式感, 用户反馈"看不出任何进度"。reasoning 侧在 v1.8.8 已经改为
@@ -227,13 +264,18 @@ namespace AgentCore.Editor.Core
         /// v1.14.5: 判断累积的 content 是否达到中间 flush 阈值。
         /// 触发条件（任一先到）：
         /// - buffer 含 "\n\n"（段落边界，语义完整点）
-        /// - buffer 长度 >= ContentFlushCharThreshold（兜底）
+        /// - buffer 长度 >= ContentFlushCharThreshold（兜底，防止极端场景单帧渲染过大）
+        /// - 距上次 flush 已过 ContentFlushIntervalMs（v1.14.10: 时间兜底，根治高吞吐模型下
+        ///   "字符阈值被生成速度拉长触发间隔"导致的可见卡顿——见 <see cref="ContentFlushIntervalMs"/>）
         /// 与 <see cref="ShouldFlushPendingReasoning"/> 保持同一节流哲学。
         /// </summary>
         private bool ShouldFlushPendingContent()
         {
             if (_pendingStreamContent == null || _pendingStreamContent.Length == 0) return false;
             if (_pendingStreamContent.Length >= ContentFlushCharThreshold) return true;
+            if (_lastContentFlushUtc.HasValue &&
+                (DateTime.UtcNow - _lastContentFlushUtc.Value).TotalMilliseconds >= ContentFlushIntervalMs)
+                return true;
             var text = _pendingStreamContent.ToString();
             return text.Contains("\n\n");
         }
@@ -246,6 +288,7 @@ namespace AgentCore.Editor.Core
             if (_pendingStreamContent == null || _pendingStreamContent.Length == 0) return;
             var chunk = _pendingStreamContent.ToString();
             _pendingStreamContent.Clear();
+            _lastContentFlushUtc = DateTime.UtcNow;
             if (assistantTurn != null)
             {
                 EmitEvent(AgentEvent.StreamToken(chunk, assistantTurn.Id));
@@ -257,6 +300,19 @@ namespace AgentCore.Editor.Core
         /// 太小又变逐字流式重新引入高频问题；太大失去流式感。
         /// </summary>
         private const int ContentFlushCharThreshold = 200;
+
+        /// <summary>
+        /// v1.14.10: content 分块 flush 的时间阈值（毫秒）。字符阈值在生成速度足够快时
+        /// （实测 DeepSeek-V4-Flash 在 vLLM 0.25.1 + CUDA graph 下达到 ~80 tok/s，约每
+        /// 0.7-1s 才攒够 200 字符）会被拉长，UI 侧表现为"一大段文字瞬间跳出 + 停顿近1秒"，
+        /// 与预期的"持续吐字"流式感相悖。80ms 与 <see cref="StreamingTextElement.FlushIntervalMs"/>
+        /// (16ms, ~1帧) 及其内部渲染节流叠加后仍在可接受范围，且明显快于人眼可分辨的"卡顿"阈值
+        /// （~100-150ms），根治问题而不再受模型生成速度影响。
+        /// </summary>
+        private const int ContentFlushIntervalMs = 80;
+
+        /// <summary>v1.14.10: 上一次 content flush 的时间戳，用于时间阈值判断。每轮 LLM 调用开始时重置。</summary>
+        private DateTime? _lastContentFlushUtc;
 
         /// <summary>
         /// v1.14.5: 流式结束/出错时的收尾 flush —— 清空 <see cref="ShouldFlushPendingContent"/>/
@@ -336,11 +392,16 @@ namespace AgentCore.Editor.Core
         /// 触发条件 (任一先到):
         /// - buffer 含 "\n\n" (段落边界, 语义完整点)
         /// - buffer 长度 >= ReasoningFlushCharThreshold (兜底)
+        /// - 距上次 flush 已过 ContentFlushIntervalMs (v1.14.10: 时间兜底, 与 content 侧
+        ///   <see cref="ShouldFlushPendingContent"/> 同一根因/同一修复, 复用同一常量)
         /// </summary>
         private bool ShouldFlushPendingReasoning()
         {
             if (_pendingStreamReasoning == null || _pendingStreamReasoning.Length == 0) return false;
             if (_pendingStreamReasoning.Length >= ReasoningFlushCharThreshold) return true;
+            if (_lastReasoningFlushUtc.HasValue &&
+                (DateTime.UtcNow - _lastReasoningFlushUtc.Value).TotalMilliseconds >= ContentFlushIntervalMs)
+                return true;
             // ToString + IndexOf 每次都 alloc — 但 reasoning append 频率低于 content, 可接受.
             // 未来若成为热点可改为增量扫描 (记录上次扫描位置).
             var text = _pendingStreamReasoning.ToString();
@@ -355,11 +416,15 @@ namespace AgentCore.Editor.Core
             if (_pendingStreamReasoning == null || _pendingStreamReasoning.Length == 0) return;
             var chunk = _pendingStreamReasoning.ToString();
             _pendingStreamReasoning.Clear();
+            _lastReasoningFlushUtc = DateTime.UtcNow;
             if (assistantTurn != null)
             {
                 EmitEvent(AgentEvent.ReasoningToken(chunk, assistantTurn.Id, _pendingStreamReasoningSource));
             }
         }
+
+        /// <summary>v1.14.10: 上一次 reasoning flush 的时间戳，用于时间阈值判断。每轮 LLM 调用开始时重置。</summary>
+        private DateTime? _lastReasoningFlushUtc;
 
         /// <summary>
         /// v1.8.6: 累积 stream 期的 UI reasoning, 完成时一次性 emit.
@@ -376,6 +441,38 @@ namespace AgentCore.Editor.Core
         private const int ReasoningFlushCharThreshold = 200;
 
         // === v1.14.5: 工具调用参数接收进度节流状态 ===
+
+        /// <summary>当前工具调用循环内连续出现"空正文"轮次的计数（v1.14.9）。</summary>
+        /// <remarks>
+        /// 由 <see cref="RunToolCallLoopAsync"/> 在每次新用户消息触发的循环开始前重置为 0；
+        /// 每轮 <see cref="CallLLMStreamAsync"/> 检测到空 content 时自增并 EmitEvent 通知 UI，
+        /// 一旦某轮 content 非空则清零并同样 EmitEvent（0）以清除 UI 侧提示。
+        /// </remarks>
+        private int _consecutiveSilentRounds;
+
+        /// <summary>
+        /// v1.14.9(修正 v2): "假完成"（空 content + 零 tool_calls）检测采用单次立即拦截——
+        /// 第一次出现就自动重试一次，不再等待"连续两次"才触发。
+        /// <para>
+        /// 【设计演变】最初版本用 <c>_isLargeTaskMode</c>（仅在 ask_user 收敛后置位）作为触发门槛，
+        /// 但实机验证（Editor.log 绝对行号 1099231-1099494，2026-08-07）发现：真实复现的假完成
+        /// 大多发生在用户直接打字续接（<c>ChatWindow.Input.OnSendClicked -> SendMessageAsync</c>），
+        /// 完全不经过 <c>ResumeFromUserInput</c>——旧设计把"是否值得恢复"绑定在"事件入口类型"上
+        /// 而非"上一轮实际发生了什么"，导致覆盖面缺口。中间版本改为"连续两次才拦截"（基于历史
+        /// 事实而非路径类型），但实机复测（同日 16 时段会话）证明"单次空回复 + 长时间无响应 +
+        /// 状态栏就绪"本身已是不可接受的故障，不存在"正常情况下就该交白卷"的合法场景——遂改为
+        /// 见 <see cref="RunToolCallLoopAsync"/> 内联判断：只要 isBlankNoToolCalls 成立且
+        /// <see cref="_blankRecoveryAttempted"/> 尚为 false，立即拦截重试；不再需要跨轮持久的
+        /// "上一轮是否为空"标记字段。
+        /// </para>
+        /// </summary>
+
+        /// <summary>
+        /// v1.14.9: 针对当前这次"连续假完成"是否已经尝试过一次自动恢复。
+        /// 防止恢复重试本身再次假完成时陷入无限重试——只自动恢复 1 次，
+        /// 第二次同样命中则直接给用户可见的失败提示（含重试按钮）。
+        /// </summary>
+        private bool _blankRecoveryAttempted;
 
         /// <summary>本轮 LLM 调用中，当前正在接收参数的工具调用累积字符数（跨多个 delta）。</summary>
         private int _toolCallProgressCharCount;
@@ -416,6 +513,26 @@ namespace AgentCore.Editor.Core
             _toolCallProgressLastEmittedUtc = null;
             _toolCallProgressStartedUtc = null;
             _toolCallProgressToolName = null;
+        }
+
+        /// <summary>
+        /// v1.14.10: 把 <see cref="ConversationTurn.CurrentRoundContentBuffer"/> 里累积的、
+        /// 属于"上一轮"的可见 content 归档进 <see cref="ConversationTurn.RoundContents"/>，
+        /// 并清空缓冲区供本轮重新累积。
+        /// <para>
+        /// 调用时机：<see cref="CallLLMStreamAsync"/> 每轮开始时（即"上一轮"已经彻底结束、
+        /// 本轮尚未产生任何 token 之前）。空缓冲区（比如某一轮 LLM 只调工具、完全没有可见文字）
+        /// 也会归档一个空字符串占位——这样 UI 侧按 RoundContents 下标对应轮次时不会因为
+        /// "某轮没有 content"而导致后续轮次下标错位。
+        /// </para>
+        /// </summary>
+        private void ArchiveCurrentRoundContent(ConversationTurn assistantTurn)
+        {
+            if (assistantTurn == null) return;
+
+            var buffer = assistantTurn.CurrentRoundContentBuffer;
+            assistantTurn.RoundContents.Add(buffer.ToString());
+            buffer.Clear();
         }
 
         /// <summary>

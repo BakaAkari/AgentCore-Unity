@@ -92,10 +92,15 @@ namespace AgentCore.Editor.Core
                 $"[针对你刚才通过 ask_user 提出的问题：\"{question}\"] 我{source}：{answer}\n请据此继续之前的任务。";
             _messages.Add(ChatMessage.User(continuation));
 
+            // v1.14.9(修正): 不再在此单独置位——"假完成"检测已改为纯粹基于历史事实
+            // (_lastFinalResponseWasBlank)判断，不依赖"是否刚从 ask_user 恢复"这一路径类型。
+            // 见 AgentLoop.LLM.cs 中 _lastFinalResponseWasBlank 的设计修正说明。
+
             // 清空挂起状态
             _pendingUserInputToolCallId = null;
             _pendingUserInputQuestion = null;
             _pendingUserInputOptions = null;
+
             try { DomainReloadState.instance.ClearPendingAskUser(); }
             catch (Exception ex) { AgentCoreLog.Warning($"[AgentCore][ask_user] ClearPendingAskUser failed: {ex.Message}"); }
 
