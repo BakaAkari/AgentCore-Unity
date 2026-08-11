@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.12] - 2026-08-11
+
+### Fixed
+- **流式助手消息"截断、切回完整"（多轮工具调用时正文被截掉大部分）**：根因由 v1.14.11 诊断日志实证——
+  `FinalizeAssistantMessage` 在多轮时用 `RoundContents` 的"最后一段"（最后一个 LLM 调用的流式 content）
+  覆盖完整 `turn.Content` 作为主气泡内容源。实测某 turn 完整 content=2004 字符、最后一段仅 246 字符，
+  实时 finalize 用 246 覆盖导致正文被截掉约 88%；切走再切回因 `RebuildMessageBubbles` 用完整
+  `turn.Content` 重建而"变完整"，正是该 bug 的"切回完整"现象。
+  - 修复（A 方案）：`finalBubbleContent` 恒等于完整 `turn.Content`，主气泡始终显示完整正文；
+    `RoundContents` 仅用于渲染"过程旁白"（中间轮弱化小字 `ShowRoundNarration`），不再覆盖主气泡内容源。
+  - 取舍：多轮时中间轮旁白会与主气泡完整内容有少量重复——"内容重复（旁白为弱化小字）优先于内容丢失"，
+    保证用户始终看到完整正文。
+  - 回归看门狗：原 DIAG 收紧为仅当再次出现"最终化后内容缩短"（`finalBubbleContent.Length < fullContent.Length`）
+    时以 `[AGENTCORE][DIAG][REGRESSION] ... truncated=YES` 打印，修复生效则不再触发。
+
+## [1.14.11] - 2026-08-09
+
+### Diagnostics (诊断版本 — 用于定位流式助手消息"截断、切回完整"问题，非功能性发布)
+
+> 目的：某类设备上偶发"单个会话 assistant 消息看起来文字被截断/不完整，切换到别的会话再切回就完整"。
+> 本版本**只加日志、不改变渲染行为**。请用户尝试复现，并把复现时的 Console 日志回传，用于实证根因。
+
+- **新增诊断日志（`FinalizeAssistantMessage`）**：在最终化助手消息时打印
+  `fullContent.Length`（事件 Content，Source 侧完整跨轮值）vs
+  `finalBubbleContent.Length`（实际渲染的主气泡内容）vs `rounds.Count`（RoundContents 轮次分段数）。
+  用于实证"实时 finalize 路径用 RoundContents 最后一段作主气泡、切回 Rebuild 路径用完整 turn.Content"这一
+  数据源不一致是否是多轮工具调用 turn 上的截断根因。日志带 `[AgentCore][DIAG]` 前缀，仅在触发时打印一条。
+
+- 上下文：本次改动不含任何渲染/逻辑修复，仅版本号 bump + 诊断日志，便于区分"正在更新中的诊断版本"。
+
 ## [1.14.10] - 2026-08-08
 
 ### Added

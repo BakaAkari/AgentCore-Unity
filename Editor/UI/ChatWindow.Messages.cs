@@ -172,10 +172,12 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
-            // v1.14.10: 按轮次分段展示 —— turn.RoundContents 记录了每轮 LLM 调用产生的可见
-            // content 片段（见 ConversationTurn.RoundContents 类注释）。非最后一段渲染为次要
-            // 样式的"过程旁白"插入对应轮次区域，只有最后一段（真正的最终回复）用主
-            // MessageBubble 突出显示 —— 不再是"整段无差别拼接"。
+            // v1.14.10 起: 按轮次分段展示 —— turn.RoundContents 记录了每轮 LLM 调用产生的可见
+            // content 片段（见 ConversationTurn.RoundContents 类注释），其中"中间轮"内容渲染为
+            // 次要样式的"过程旁白"插入对应轮次区域，帮助用户区分"过程" vs "结论"。
+            // v1.14.12 fix: 主气泡内容源恒为完整 turn.Content（finalBubbleContent），不再用
+            // RoundContents 的"最后一段"覆盖——因为多轮时最后一段 ≠ 完整回复，会导致正文截断
+            // （详见下方 fix 注释）。RoundContents 只用于渲染过程旁白，不是主气泡的内容源。
             //
             // 向后兼容：RoundContents 为空（旧版本代码路径未采集，或本 turn 走了非
             // RunToolCallLoopAsync 的特殊路径）时，finalBubbleContent 保持 fullContent 原样，
@@ -197,34 +199,41 @@ namespace AgentCore.Editor.UI
                 if (_assistantTurnViews.TryGetValue(messageId, out var turnView))
                 {
                     // rounds[1..Count-2] 是"过程轮次"的旁白，对应 _rounds[0..Count-3]。
-                    // rounds[Count-1]（最后一段）是最终回复，不在这里展示为旁白。
+                    // rounds[Count-1]（最后一段）不单独展示为旁白——它已完整包含在主气泡
+                    // 的 fullContent 里（见下），无需重复。
                     for (int i = 1; i < rounds.Count - 1; i++)
                     {
                         turnView.ShowRoundNarration(i - 1, rounds[i]);
                     }
                 }
 
-                // 最后一段作为正式回复内容；若最后一段是空白（该轮只调工具没有可见文字），
-                // 向前找最近一段非空内容兜底，避免主气泡完全空白（宁可显示"稍旧"的内容，
-                // 不显示空气泡——空气泡对用户是更差的体验，且此前从未出现过这个信号）。
-                string lastRound = rounds[rounds.Count - 1];
-                if (!string.IsNullOrWhiteSpace(lastRound))
-                {
-                    finalBubbleContent = lastRound;
-                }
-                else
-                {
-                    for (int i = rounds.Count - 2; i >= 0; i--)
-                    {
-                        if (!string.IsNullOrWhiteSpace(rounds[i]))
-                        {
-                            finalBubbleContent = rounds[i];
-                            break;
-                        }
-                    }
-                    // 所有分段都是空白（理论上不会发生，因为外层已经判断 fullContent 非空白）：
-                    // 保留 fullContent 原样作为最终兜底，不改变现有行为。
-                }
+                // v1.14.12 fix (A 方案): 移除"最后一段 rounds[Count-1] 覆盖主气泡"的逻辑。
+                // 背景（v1.14.11 DIAG 已实证）：rounds[Count-1] 只是"最后一个 LLM 调用的
+                // 流式 content"，在多轮工具调用下**不等于**最终完整回复 —— 实测某 turn 完整
+                // content=2004 字符，rounds[Count-1] 仅 246 字符，实时 finalize 用 246 覆盖
+                // 主气泡导致正文被截掉 88%（切走再切回因 RebuildMessageBubbles 用完整
+                // turn.Content 重建而"变完整"）。
+                // 修复：finalBubbleContent 恒等于 fullContent（完整 turn.Content），主气泡始终
+                // 显示完整正文；RoundContents 仅用于渲染"过程旁白"（上面 ShowRoundNarration），
+                // 不再覆盖主气泡内容源。
+                // 取舍：多轮时中间轮旁白会与主气泡完整内容有部分重复——但这是"内容重复
+                // （旁白为弱化小字）优先于内容丢失"的取舍，保证用户始终能看到完整正文。
+                // 向后兼容：RoundContents 为空（旧路径/未采集）时 finalBubbleContent =
+                // fullContent 原样，与此前"整段显示"行为一致。
+            }
+
+            // [DIAG v1.14.11→v1.14.12] 回归看门狗（修复后）：本应在 v1.14.12 fix 之后
+            // finalBubbleContent == fullContent，不再发生缩短。仅当修复意外失效
+            // （finalBubbleContent.Length < fullContent.Length，即再次出现截断信号）时打印。
+            // 若没有任何设备再打这条日志，说明修复生效；一旦有人复现到截断，这里会立即
+            // 以 truncated=YES 报警，便于回归定位。
+            if (turnForNarration != null &&
+                finalBubbleContent.Length < fullContent.Length)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info(
+                    $"[AgentCore][DIAG][REGRESSION] FinalizeAssistantMessage: fullContent.Length={fullContent.Length}, " +
+                    $"finalBubbleContent.Length={finalBubbleContent.Length}, rounds.Count=" +
+                    $"{turnForNarration.RoundContents.Count}, msgId={messageId}, truncated=YES");
             }
 
             if (_messageBubbles.TryGetValue(messageId, out var bubble))
