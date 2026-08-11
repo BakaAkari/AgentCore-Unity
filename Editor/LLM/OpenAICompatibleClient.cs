@@ -305,7 +305,17 @@ namespace AgentCore.Editor.LLM
                 {
                     foreach (var toolCall in message.ToolCalls)
                     {
-                        if (!string.IsNullOrEmpty(toolCall.Id))
+                        // v1.14.13 fix: 门禁兜底 —— 即使源头(ToolCallBuilder.Build)已补 id，
+                        // 老数据/特殊路径仍可能让 assistant.tool_calls[].id 为空/空白。空 id 发回
+                        // API 会被严格 pydantic 校验以 `id: missing` 400 拒绝，这里在发送前兜底：
+                        // 空/空白 id 也动态补一个唯一且合规的 id（不静默跳过、不用固定占位符，
+                        // 避免多个空 id 工具调用共享同一 id 造成配对错乱），避免把坏消息交给服务端 400。
+                        // 正常路径下该分支不触发（源头已保证非空）；触发仅见于历史遗留数据。
+                        if (string.IsNullOrWhiteSpace(toolCall.Id))
+                        {
+                            toolCall.Id = Guid.NewGuid().ToString();
+                        }
+                        else
                         {
                             toolCall.Id = SanitizeToolCallId(toolCall.Id);
                         }
@@ -406,12 +416,11 @@ namespace AgentCore.Editor.LLM
                 // 策略 2 也失败
             }
 
-            // 策略 3：最后手段 — 将整个 arguments 作为纯文本包装
+            // 策略 3：最后手段 — 将整个 arguments 作为纯文本包装。
+            // v1.14.13 note(Bug A 已实测证伪): 曾怀疑此处二次转义，经 sourceai vLLM(8000)
+            // 实测带 id 的 _raw_arguments 形态被正常解析(200 OK)，该层转义为合法 JSON 所需，非 bug。请勿改。
             AgentCoreLog.Warning($"[AgentCore] Unable to fully repair tool arguments, wrapping as raw text. Original (first 200 chars): {arguments.Substring(0, Math.Min(200, arguments.Length))}");
-            // 用 Newtonsoft.Json 安全序列化为字符串值，确保所有特殊字符被正确转义
             var safeContent = Newtonsoft.Json.JsonConvert.SerializeObject(arguments);
-            // safeContent 现在是一个带引号的合法 JSON 字符串，如 "\"...escaped content...\""
-            // 我们需要把它包装成一个对象
             return $"{{\"_raw_arguments\": {safeContent}}}";
         }
 
@@ -581,7 +590,16 @@ namespace AgentCore.Editor.LLM
 
             public ToolCall Build() => new()
             {
-                Id = Id,
+                // v1.14.13 fix: 流式 tool_call id 可能因模型/网关返回的第一片 chunk 未带 id、
+                // 或 id 格式异常被解析器吞掉而缺失，导致最终 ToolCall.Id 为空。空 id 发回
+                // API 会被严格 pydantic 校验以 `id: missing` 直接 400 拒绝（实测：大 arguments
+                // 多 chunk 时触发）。这里在源头兜底：id 为空/空白时动态生成一个唯一且合规的 id
+                // （与系统 ConversationTurn.Id 同源的 GUID 格式，连字符在 Bedrock 正则
+                // ^[a-zA-Z0-9_-]+$ 中合规），保证 assistant.tool_calls[].id 非空，且与后续
+                // tool 消息的 tool_call_id 源出一致（该 ToolCall 是两边共用的唯一 id 源）。
+                Id = string.IsNullOrWhiteSpace(Id)
+                    ? Guid.NewGuid().ToString()
+                    : Id,
                 Type = "function",
                 Function = new FunctionCall
                 {

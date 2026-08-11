@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.13] - 2026-08-11
+
+### Fixed
+- **流式 tool_call 缺 id 导致 LLM API HTTP 400（`id: missing`）**：深层嵌套 C# 脚本（大 arguments、多 chunk 流式）
+  触发时，流式 tool_call 的 `id` 只首片携带，大 arguments 多 chunk 下 `builder.Id` 未累积成功 → `ToolCall.Build()`
+  产出缺 id 对象；发送前旧逻辑 `if(!string.IsNullOrEmpty(toolCall.Id))` 对空 id 跳过不补 → 空 id 消息发回 API，
+  被严格 pydantic 校验以 `ChatCompletionMessageFunctionToolCallParam.id` *Field required* 直接 400 拒绝（已用
+  sourceai vLLM(8000) 真实请求复现：缺 id → 400 完全同构；带 id/_raw_arguments → 200 OK）。
+  - 修复：`ToolCallBuilder.Build()` 源头——id 为空/空白时动态生成唯一且合规的 id
+    （`Guid.NewGuid()`，与 `ConversationTurn.Id` 同源，连字符在 Bedrock `^[a-zA-Z0-9_-]+$` 合规，
+    不用固定占位符避免多空 id 共享）；`SanitizeMessageToolCalls` 发送前门禁兜底——空/空白 id 也补唯一 id，
+    保证发送时每条 tool_call 都有非空 id，不再触发 `id: missing` 400。
+- **注记（Bug A 已实测证伪，非改动）**：`SanitizeToolArguments` 策略 3 的 `_raw_arguments` 兜底曾被怀疑产生
+  "二次转义污染"，经 vLLM 实测该层转义是构造合法 JSON 所必需（带 id 的 `_raw_arguments` 形态 200 OK），
+  行为保持不变。
+
 ## [1.14.12] - 2026-08-11
 
 ### Fixed
