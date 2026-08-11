@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **注记（Bug A 已实测证伪，非改动）**：`SanitizeToolArguments` 策略 3 的 `_raw_arguments` 兜底曾被怀疑产生
   "二次转义污染"，经 vLLM 实测该层转义是构造合法 JSON 所必需（带 id 的 `_raw_arguments` 形态 200 OK），
   行为保持不变。
+- **DeepSeek-V4 被误判为"无原生推理"导致叠加 Self-Challenge → 过度思考/过度决策**：`ModelCapabilityDetector.NativeReasoningPrefixes`
+  仅匹配 `"deepseek-r"`（R 系列），漏判 `deepseek-v` 前缀的 DeepSeek-V4-Flash；此类模型本身是推理驱动（vLLM
+  带 `--reasoning-parser deepseek_v4`），却因 `HasNativeReasoning=false` 未逃逸 Self-Challenge Node A，每个 >15 字请求被强制
+  "意图挑战"（≥3 种解读+歧义+选定理由），与 native thinking 叠加成双重思考。
+  - 修复：前缀 `"deepseek-r"` → `"deepseek"`（家族级匹配），DeepSeek 全系（V4/R1/R 及未来新系列）统一判为 native reasoning，
+    逃逸 Node A，去掉应用层重复挑战。已核实不影响 Node B（内容判断）、`ReasoningParamMapper`（独立
+    `DetectProviderGroup`）、token 上限表（独立维度）。
 
 ## [1.14.12] - 2026-08-11
 

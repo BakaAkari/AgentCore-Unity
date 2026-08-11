@@ -39,7 +39,7 @@ namespace AgentCore.Editor.Core
             "o3-",               // OpenAI o3 系列
             "o4-",               // OpenAI o4 系列
             "gpt-5",             // GPT-5
-            "deepseek-r",        // DeepSeek R 系列(推理模型)
+            "deepseek",          // DeepSeek 全系(推理驱动, R1/R/V4 系列均带 native reasoning; 按家族前缀匹配避免逐模型硬编码). v1.14.13 fix: 原仅 "deepseek-r", 漏判 DeepSeek-V4-Flash(deepseek-v 前缀)导致其被叠加 Self-Challenge 应用层挑战 → 双重思考/过度决策.
             "gemini-2.5",        // Gemini 2.5 Pro(具备 thinking)
             "glm-5",             // GLM-5 系列(Z.ai reasoning model, 含 5.2 量化变体如 W4AFP8)
         };
