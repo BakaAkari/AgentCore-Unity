@@ -86,17 +86,58 @@ namespace AgentCore.Editor.Skills
 
         /// <summary>
         /// 返回本次会话使用的所有搜索目录（供 UI / diagnostics 显示）。
+        /// 顺序即优先级：项目外部目录在前（可覆盖内置），插件内置 Builtin 目录在后。
         /// </summary>
         public IReadOnlyList<string> GetSearchDirectories()
         {
-            var dirs = new List<string>();
+            return GetScanRoots().Select(r => r.Path).ToList();
+        }
+
+        /// <summary>
+        /// 每个扫描根：路径 + 是否内置。内置根位于插件包内 <c>Editor/Skills/Builtin/</c>，随包分发。
+        /// 外部项目目录（.agents/skills 等）在前，内置在后 ⇒ 同名时外部优先（<see cref="EnsureScanned"/> 先扫先得）。
+        /// </summary>
+        private IReadOnlyList<SkillScanRoot> GetScanRoots()
+        {
+            var roots = new List<SkillScanRoot>();
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (projectRoot != null)
             {
-                dirs.Add(Path.Combine(projectRoot, ".agents", "skills"));
-                dirs.Add(Path.Combine(projectRoot, "Assets", ".agents", "skills"));
+                // 外部（项目内）—— 最高优先级，可覆盖内置
+                roots.Add(new SkillScanRoot(Path.Combine(projectRoot, ".agents", "skills"), isBuiltin: false));
+                roots.Add(new SkillScanRoot(Path.Combine(projectRoot, "Assets", ".agents", "skills"), isBuiltin: false));
             }
-            return dirs;
+
+            // 内置（插件包内）—— 出厂能力，随包分发，无同名外部 skill 时生效
+            var builtinRoot = BuiltinSkillsRoot;
+            if (builtinRoot != null)
+                roots.Add(new SkillScanRoot(builtinRoot, isBuiltin: true));
+
+            return roots;
+        }
+
+        /// <summary>
+        /// 插件内置 skill 目录的绝对路径（<c>&lt;package&gt;/Editor/Skills/Builtin</c>）。
+        /// 用 <see cref="UnityEditor.PackageManager.PackageInfo.FindForAssembly"/> 定位包路径——比硬编码
+        /// <c>Packages/com.agentcore.unity/...</c> 更健壮（无论包以 file:/tgz/embedded 方式被引用都能命中）。
+        /// 解析失败时返回 null（内置 skill 不可用但不阻塞外部目录）。
+        /// </summary>
+        private static string BuiltinSkillsRoot
+        {
+            get
+            {
+                try
+                {
+                    var pkg = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(SkillRegistry).Assembly);
+                    if (pkg == null) return null;
+                    var root = Path.Combine(pkg.resolvedPath, "Editor", "Skills", "Builtin");
+                    return Directory.Exists(root) ? root : null;
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
         }
 
         private void EnsureScanned()
@@ -105,13 +146,13 @@ namespace AgentCore.Editor.Skills
 
             try
             {
-                foreach (var dir in GetSearchDirectories())
+                foreach (var root in GetScanRoots())
                 {
-                    if (!Directory.Exists(dir)) continue;
-                    ScanDirectory(dir);
+                    if (!Directory.Exists(root.Path)) continue;
+                    ScanDirectory(root);
                 }
 
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][Skills] Registry scan complete: {_skills.Count} skill(s) found.");
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][Skills] Registry scan complete: {_skills.Count} skill(s) found ({(IsBuiltinCount())} builtin).");
             }
             catch (Exception ex)
             {
@@ -123,25 +164,36 @@ namespace AgentCore.Editor.Skills
             }
         }
 
+        private int IsBuiltinCount()
+        {
+            int n = 0;
+            foreach (var kv in _skills) if (kv.Value.IsBuiltin) n++;
+            return n;
+        }
+
         /// <summary>
-        /// 扫描单个目录下所有子目录中的 SKILL.md 文件。
+        /// 扫描单个扫描根下所有子目录中的 SKILL.md 文件。
         /// </summary>
-        private void ScanDirectory(string skillsRoot)
+        private void ScanDirectory(SkillScanRoot root)
         {
             try
             {
-                foreach (var subDir in Directory.EnumerateDirectories(skillsRoot))
+                foreach (var subDir in Directory.EnumerateDirectories(root.Path))
                 {
                     var skillFile = Path.Combine(subDir, "SKILL.md");
                     if (!File.Exists(skillFile)) continue;
 
-                    var meta = TryBuildMetadata(subDir, skillFile);
+                    var meta = TryBuildMetadata(subDir, skillFile, root.IsBuiltin);
                     if (meta == null) continue;
 
                     if (_skills.ContainsKey(meta.Name))
                     {
-                        AgentCoreLog.Warning($"[AgentCore][Skills] Duplicate skill name '{meta.Name}'. " +
-                                         $"Existing: {_skills[meta.Name].FilePath}; ignoring: {meta.FilePath}");
+                        if (!meta.IsBuiltin)
+                        {
+                            AgentCoreLog.Warning($"[AgentCore][Skills] Duplicate skill name '{meta.Name}'. " +
+                                             $"Existing: {_skills[meta.Name].FilePath}; ignoring: {meta.FilePath}");
+                        }
+                        // 内置 skill 因外部同名而跳过 = 预期的"外部覆盖内置"，不视为错误，不 print warning。
                         continue;
                     }
 
@@ -150,14 +202,14 @@ namespace AgentCore.Editor.Skills
             }
             catch (Exception ex)
             {
-                AgentCoreLog.Warning($"[AgentCore][Skills] Failed to scan '{skillsRoot}': {ex.Message}");
+                AgentCoreLog.Warning($"[AgentCore][Skills] Failed to scan '{root.Path}': {ex.Message}");
             }
         }
 
         /// <summary>
         /// 从 SKILL.md 文件构建元数据（不缓存全文）。
         /// </summary>
-        private static SkillMetadata TryBuildMetadata(string skillDir, string skillFile)
+        private static SkillMetadata TryBuildMetadata(string skillDir, string skillFile, bool isBuiltin)
         {
             try
             {
@@ -178,7 +230,8 @@ namespace AgentCore.Editor.Skills
                     category: category,
                     version: version,
                     filePath: skillFile,
-                    charCount: raw.Length);
+                    charCount: raw.Length,
+                    isBuiltin: isBuiltin);
             }
             catch (Exception ex)
             {
@@ -213,6 +266,22 @@ namespace AgentCore.Editor.Skills
                 return trimmed.Length > 120 ? trimmed.Substring(0, 120) + "..." : trimmed;
             }
             return string.Empty;
+        }
+
+        /// <summary>
+        /// 一个 skill 扫描根：目录路径 + 是否内置。
+        /// 内置根在插件包内（随包分发）；外部根在项目内（可覆盖内置）。
+        /// </summary>
+        private readonly struct SkillScanRoot
+        {
+            public readonly string Path;
+            public readonly bool IsBuiltin;
+
+            public SkillScanRoot(string path, bool isBuiltin)
+            {
+                Path = path;
+                IsBuiltin = isBuiltin;
+            }
         }
     }
 }

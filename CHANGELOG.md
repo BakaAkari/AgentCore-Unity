@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.14] - 2026-08-14
+
+### Fixed
+- **流式 tool_call 缺 `function.name` 导致 LLM API HTTP 400（`function.name Field required`）**：
+  v1.14.13 修复了流式 tool_call 缺 `id` 导致的 400，但同一缺陷族里还有一个漏修字段 `function.name`。
+  当流式首片 chunk 中的 `function.name` 未被拼装到（大 arguments 多 chunk 分片、服务端只发
+  `arguments` 增量等）时，`ToolCallBuilder.FunctionName` 为空 → `Build()` 原样构造
+  `Function.Name=null` → 发送前 `JsonHelper` 以 `NullValueHandling.Ignore` 序列化把 `name` 键整体省略，
+  发出 `"function":{"arguments":...}` → 被 vLLM 严格 pydantic 判别式 union 以
+  `ChatCompletionMessageFunctionToolCallParam.function.name` *Field required* 直接 400 拒绝
+  （实测 diag_20260814_153523，与 v1.14.13 的 `id: missing` 完全同构）。
+  - 修复（与 v1.14.13 修 id 平行）：`ToolCallBuilder.Build()` 源头——`function.name` 为空/空白时
+    不再构造残缺的 function tool_call（name 语义上必须是真实工具名，不能编造 GUID，否则会污染历史、
+    且 ToolCallDispatcher 报 Unknown tool），而是**返回 null 丢弃该残缺 tool_call**（不写入历史、
+    不发回 API），并记告警提示收窄单次工具调用体积/重试；`ChatCompletionStreamAsync` 收集处过滤
+    null；`SanitizeMessageToolCalls` 发送前门禁兜底——历史遗留/其它写路径的缺 name tool_call 一并
+    剔除并同步清扫配对的 `role:"tool"` 消息（避免悬空 tool_call_id 让模型侧无法配对），保证发送时
+    每条 assistant tool_call 都有非空 name，不再触发 `function.name Field required` 400。
+
+### Added
+- **内置 Skill（Builtin）分发机制**：新增包内 `Editor/Skills/Builtin/` 目录，随包分发一组出厂
+  skill（asset-pipeline / object-creation / scene-authoring / scene-navigation），引用与当前工具架构
+  对齐的 `manage_*` 原生工具。`SkillRegistry` 外部项目目录（`.agents/skills` 等）在前、内置目录在后，
+  同名时外部优先覆盖内置（不视为错误、不 print warning）；`SkillMetadata`/`load_skills` 增加 `is_builtin`
+  标记供诊断/列表展示。内置 skill 不污染项目目录，能力随包分发。
+
 ## [1.14.13] - 2026-08-11
 
 ### Fixed

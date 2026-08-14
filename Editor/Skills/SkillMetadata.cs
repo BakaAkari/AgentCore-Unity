@@ -32,13 +32,20 @@ namespace AgentCore.Editor.Skills
         /// <summary>估算的 token 数（char / 3 的经验值，与 <see cref="Bootstrap.BootstrapContext.EstimateTokenCount"/> 一致）。</summary>
         public int EstimatedTokens => CharCount / 3;
 
+        /// <summary>
+        /// 是否为插件内置 skill（来自包内 <c>Editor/Skills/Builtin/</c>，随包分发，不可由项目修改）。
+        /// 外部项目目录中的同名 skill 会覆盖内置（外部优先）。
+        /// </summary>
+        public bool IsBuiltin { get; }
+
         public SkillMetadata(
             string name,
             string description,
             string category,
             string version,
             string filePath,
-            int charCount)
+            int charCount,
+            bool isBuiltin = false)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = description ?? string.Empty;
@@ -46,6 +53,7 @@ namespace AgentCore.Editor.Skills
             Version = string.IsNullOrWhiteSpace(version) ? "1.0" : version;
             FilePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
             CharCount = charCount;
+            IsBuiltin = isBuiltin;
         }
     }
 }

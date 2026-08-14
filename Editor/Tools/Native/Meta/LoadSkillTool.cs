@@ -158,12 +158,13 @@ namespace AgentCore.Editor.Tools.Native.Meta
                     ["category"] = s.Category,
                     ["version"] = s.Version,
                     ["estimated_tokens"] = s.EstimatedTokens,
+                    ["is_builtin"] = s.IsBuiltin,
                     ["is_loaded"] = state != null && state.IsLoaded(s.Name)
                 }))
             };
 
             return ToolResponse.OkWithData(result,
-                $"Found {all.Count} available skill(s). Use action=load with a name to activate one.");
+                $"Found {all.Count} available skill(s) ({all.Count(s => s.IsBuiltin)} builtin). Use action=load with a name to activate one.");
         }
 
         private ToolResponse HandleLoad(JObject parameters)

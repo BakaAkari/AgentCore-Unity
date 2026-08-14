@@ -222,7 +222,14 @@ namespace AgentCore.Editor.LLM
                 // 构建完整的 tool_calls 列表
                 foreach (var builder in toolCallBuilders.Values)
                 {
-                    toolCalls.Add(builder.Build());
+                    // v1.14.14 fix: Build() 在 function.name 缺失时返回 null（数据不完整），
+                    // 这里跳过而非加入列表，避免把残缺的 assistant tool_call 写进历史 / 发回 API
+                    // 触发 vLLM `function.name Field required` 400。
+                    var built = builder.Build();
+                    if (built != null)
+                    {
+                        toolCalls.Add(built);
+                    }
                 }
 
                 // 返回拼接好的完整 assistant 消息
@@ -299,6 +306,10 @@ namespace AgentCore.Editor.LLM
         {
             if (messages == null) return;
 
+            // v1.14.14 fix: 收集缺失 function.name 的 assistant tool_call 的 id，
+            // 用于第二遍同步剔除其配对的 tool 消息，避免悬空的 tool_call_id 让模型侧无法配对。
+            var droppedToolCallIds = new HashSet<string>();
+
             foreach (var message in messages)
             {
                 if (message.ToolCalls != null && message.ToolCalls.Count > 0)
@@ -324,12 +335,59 @@ namespace AgentCore.Editor.LLM
                         {
                             toolCall.Function.Arguments = SanitizeToolArguments(toolCall.Function.Arguments);
                         }
+
+                        // v1.14.14 fix: 门禁兜底（同 id 的平行字段）—— function.name 缺失时，
+                        // 该 assistant tool_call 是不完整的（发回 vLLM 会因缺 name 返回
+                        // `function.name Field required` 400，且 ToolCallDispatcher 无法按名派发）。
+                        // 正常路径下 Build() 已拦截新生成的缺 name tool_call；此分支只兜底历史遗留
+                        // 数据/其它写路径写入的坏消息——把它们从列表剔除，并记下 id 用于清扫配对 tool 消息。
+                        if (string.IsNullOrWhiteSpace(toolCall.Function?.Name))
+                        {
+                            AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                                "[AgentCore] Sanitize: dropping assistant tool_call with empty function.name (id=" +
+                                (string.IsNullOrEmpty(toolCall.Id) ? "(generated)" : toolCall.Id) +
+                                ") to avoid vLLM 'function.name Field required' 400.");
+                            droppedToolCallIds.Add(toolCall.Id);
+                        }
                     }
                 }
 
                 if (message.Role == "tool" && !string.IsNullOrEmpty(message.ToolCallId))
                 {
                     message.ToolCallId = SanitizeToolCallId(message.ToolCallId);
+                }
+            }
+
+            if (droppedToolCallIds.Count == 0) return;
+
+            // 第二遍：过滤掉缺 name 的 assistant tool_call，并同步剔除配对的 tool 消息
+            // （避免悬空 tool_call_id，否则模型侧无法配对 tool_use/tool_result）。
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                var message = messages[i];
+
+                if (message.Role == "assistant" && message.ToolCalls != null && message.ToolCalls.Count > 0)
+                {
+                    var filtered = message.ToolCalls.FindAll(
+                        tc => !droppedToolCallIds.Contains(tc.Id) && !string.IsNullOrWhiteSpace(tc.Function?.Name));
+                    message.ToolCalls = filtered.Count > 0 ? filtered : null;
+
+                    // v1.14.14 防御：若该 assistant 消息的所有 tool_call 都被剔除且正文也为空，
+                    // 会退化成 {role:assistant} 空消息，可能又被服务端以 content 缺失 400。
+                    // 补一个可见占位正文，避免引入新的坏消息。
+                    if (filtered.Count == 0 && string.IsNullOrEmpty(message.Content))
+                    {
+                        message.Content = "(tool_call dropped: function.name missing from stream)";
+                    }
+                }
+                else if (message.Role == "tool" && !string.IsNullOrEmpty(message.ToolCallId)
+                         && droppedToolCallIds.Contains(message.ToolCallId))
+                {
+                    // 该 tool 消息对应的 assistant tool_call 已被剔除，作为整体移除，
+                    // 保持 tool_messages 与 assistant tool_calls 配对完整，避免模型侧解析错乱。
+                    // 因消息定序由 AgentLoop 保证（assistant 在前、其 tool 结果紧随其后），
+                    // 这里只按 id 配对移除，不额外假设位置。
+                    messages.RemoveAt(i);
                 }
             }
         }
@@ -588,7 +646,11 @@ namespace AgentCore.Editor.LLM
             public string FunctionName { get; set; }
             public StringBuilder ArgumentsBuilder { get; } = new();
 
-            public ToolCall Build() => new()
+            /// <summary>
+            /// 累积流式工具调用并生成最终 <see cref="ToolCall"/>。
+            /// 可能返回 null —— 表示该 tool_call 数据不完整、不可用，调用方应跳过而不是发回 API。
+            /// </summary>
+            public ToolCall Build()
             {
                 // v1.14.13 fix: 流式 tool_call id 可能因模型/网关返回的第一片 chunk 未带 id、
                 // 或 id 格式异常被解析器吞掉而缺失，导致最终 ToolCall.Id 为空。空 id 发回
@@ -597,16 +659,37 @@ namespace AgentCore.Editor.LLM
                 // （与系统 ConversationTurn.Id 同源的 GUID 格式，连字符在 Bedrock 正则
                 // ^[a-zA-Z0-9_-]+$ 中合规），保证 assistant.tool_calls[].id 非空，且与后续
                 // tool 消息的 tool_call_id 源出一致（该 ToolCall 是两边共用的唯一 id 源）。
-                Id = string.IsNullOrWhiteSpace(Id)
-                    ? Guid.NewGuid().ToString()
-                    : Id,
-                Type = "function",
-                Function = new FunctionCall
+                var id = string.IsNullOrWhiteSpace(Id) ? Guid.NewGuid().ToString() : Id;
+
+                // v1.14.14 fix: 与 id 同源但漏修的字段 —— function.name。流式首片 chunk 中的
+                // function.name 若未被拼装到（大 arguments 多 chunk 分片、服务端只发 arguments
+                // 增量等），FunctionName 为空。若原样构造 Function.Name=null，JsonHelper 以
+                // NullValueHandling.Ignore 序列化会把 name 键整体省略，发出
+                // "function":{"arguments":...} —— vLLM pydantic 判别式 union 对它报
+                // `function.name -> Field required` 直接 400（实测 diag_20260814_153523）。
+                // 与 id 不同，name 语义上必须是真实工具名、不能编造 GUID（编造会污染历史、
+                // 且 ToolCallDispatcher 会报 Unknown tool），因此这里不伪造名字而是返回 null，
+                // 由调用方跳过该残缺 tool_call（不写入历史、不发回 API），并记告警提示重试/缩体积。
+                if (string.IsNullOrWhiteSpace(FunctionName))
                 {
-                    Name = FunctionName,
-                    Arguments = SanitizeToolArguments(ArgumentsBuilder.ToString())
+                    AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                        "[AgentCore] Streamed tool_call has no function.name; dropping this tool call " +
+                        "(avoids sending a malformed assistant tool_call that vLLM would reject with " +
+                        "'function.name Field required'). Consider narrowing the single tool_call, or retry.");
+                    return null;
                 }
-            };
+
+                return new ToolCall
+                {
+                    Id = id,
+                    Type = "function",
+                    Function = new FunctionCall
+                    {
+                        Name = FunctionName,
+                        Arguments = SanitizeToolArguments(ArgumentsBuilder.ToString())
+                    }
+                };
+            }
         }
     }
 }
