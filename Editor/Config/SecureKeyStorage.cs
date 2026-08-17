@@ -10,6 +10,7 @@ namespace AgentCore.Editor.Config
     {
         private const string MEM0_API_KEY = "AgentCore_Mem0_ApiKey";
         private const string LIGHTRAG_API_KEY = "AgentCore_LightRAG_ApiKey";
+        private const string VISION_API_KEY = "AgentCore_Vision_ApiKey";
 
         // v1.13.0: Provider Profile 分键前缀。每个 profile 的 apiKey 存储为
         // "AgentCore_ProfileKey_<profileId>"。LLM apiKey 单一真源 = 各 profile 分键存储。
@@ -54,6 +55,34 @@ namespace AgentCore.Editor.Config
         /// </summary>
         public static bool HasLightRAGApiKey()
             => !string.IsNullOrEmpty(GetLightRAGApiKey());
+
+        // --- Vision API Key (视觉模型独立配置, v1.15.0) ---
+        // 与主模型 Provider Profile 完全隔离的固定单键:视觉模型只有一个配置,不可热切换。
+        // 不进 git,不参与 profile 分键。
+
+        /// <summary>
+        /// 设置视觉模型 API Key(固定单键,与主模型 profile 隔离)。
+        /// </summary>
+        public static void SetVisionApiKey(string key)
+            => EditorPrefs.SetString(VISION_API_KEY, key ?? "");
+
+        /// <summary>
+        /// 获取视觉模型 API Key。
+        /// </summary>
+        public static string GetVisionApiKey()
+            => EditorPrefs.GetString(VISION_API_KEY, "");
+
+        /// <summary>
+        /// 检查是否已设置视觉模型 API Key。
+        /// </summary>
+        public static bool HasVisionApiKey()
+            => !string.IsNullOrEmpty(GetVisionApiKey());
+
+        /// <summary>
+        /// 删除视觉模型 API Key。
+        /// </summary>
+        public static void DeleteVisionApiKey()
+            => EditorPrefs.DeleteKey(VISION_API_KEY);
 
         // --- Provider Profile API Key（v1.13.0）---
         // 按 profileId 分键存储，不进 git，不与 legacy LLM_API_KEY 冲突。

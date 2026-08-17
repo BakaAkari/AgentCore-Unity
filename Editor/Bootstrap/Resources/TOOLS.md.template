@@ -51,8 +51,8 @@
 
 ### User wants to work with assets
 - Search/create/delete/move asset files → **manage_asset**
-- Prefab create/instantiate/apply/unpack → **manage_prefab**
-- ScriptableObject CRUD → **manage_scriptable_object**
+- Prefab create/instantiate/apply/unpack → **manage_prefab** (activate Scripting)
+- ScriptableObject CRUD → **manage_scriptable_object** (activate Scripting)
 - Material create/modify/batch → **manage_material** (activate Material)
 - **Shader create/modify** → **manage_shader** (activate Shader)
 - **Animation clip / AnimatorController / state machine** → **manage_animation** (activate Animation)
@@ -90,6 +90,26 @@
 - Long-term cross-session memories → **manage_memory** (activate Cloud)
 - Project knowledge base (RAG) → **manage_knowledge** (activate Cloud)
 - Workspace config (PROJECT.md / SOUL.ext.md) → **manage_workspace_config**
+
+### User wants to SEE a view / verify visual execution (Vision Model)
+- **vision_analyze** (activate Meta; action=capture → PNG files; action=analyze → PNG + Vision Model text description) — USE FOR:
+  - User asks to "see the view" / "check the game screen" / "verify how it looks" / "看画面 / 看效果 / 看 UI 对不对 / 看我执行的视觉结果"
+  - You just performed a **visual** change (UI layout, material colors, scene arrangement, prefab placement, rendering) and want to self-confirm the result before claiming done.
+  - Debugging visual-only issues (clipping, misalignment, color, object not visible) that code inspection cannot confirm.
+- **Choose `source` by intent (don't just use auto blindly)**:
+  - `game` — the **real running render** (main camera). Use for: verifying actual rendering/runtime effect (post-processing, particles, runtime UI), matching what the player sees.
+  - `scene` — the **user's current SceneView view** (camera follows what the user is looking at). Use for: aligning with what the user describes/discusses ("look at this wall"), user's current framing/layout, edit-time arrangement. Output is a **clean geometry render** (no grid/gizmo/selection overlay).
+  - `game_and_scene` — both, for **comparing** effect (e.g. user frames position A in scene but the game renders position B → spot the discrepancy).
+  - `auto` (default) — PlayMode→`game`, Edit→`scene`.
+- **Result metadata (no visual guessing)**: every result returns `view=` (camera position / pivot / rotation) and `selection=` (current selection's instanceId/name/path/position from the Selection API). Use these to correlate the image with what the user is looking at / has selected — **never guess what is selected or where from the pixels**; read the returned metadata.
+- **Two-stage / region zoom (`region` param) — USE FOR seeing far / small / occluded detail**: whole-view screenshots downscale fine detail, so the model often misses small or distant objects. When you need a closer look, do a two-stage call:
+  1. `action=analyze` (no region) → overview + identify a suspicious area ("left-center, small dark box near the base").
+  2. `action=analyze region="x,y,w,h"` with normalized viewport coords (0-1, **bottom-left origin**) → returns the cropped PNG for that area, so the model sees raw pixels instead of a downscaled whole view. Example: `region="0.3,0.4,0.2,0.2"` zooms into the left-lower area. This is **optional**: omit it for a normal whole-view analyze. Region is applied to the same rendered frame (crop of the full image), not a camera re-frame, and the output filename carries `_crop_<x>_<y>_<w>_<h>`.
+- **⚠ Activation**: `vision_analyze` is OnDemand — even though it appears in "Available Tools", it is NOT in your active tool schema until you call `request_tools action:activate categories:["Meta"]`. If a call returns "not available / not found", activate it first, then retry.
+- **⚠ Vision Model not configured**: `action=analyze` fails with a config hint when the Vision Model is not enabled/configured (Project Settings > AgentCore > Model & Agent → Vision Model card). **Do NOT retry blindly** — instead:
+  1. Tell the user Vision Model is not configured and where to enable it (endpoint/model/apiKey).
+  2. `action=capture` works **without** a vision model (pure PNG); or use `manage_camera:render_to_texture` / `execute_code` to save the image, then report the file path to the user.
+  3. Only retry analyze after the user confirms they configured it.
 
 ---
 

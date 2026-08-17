@@ -164,7 +164,17 @@ namespace AgentCore.Editor.Tools.Infrastructure
                     attr.Visibility,
                     attr.ReadOnlyActions,
                     attr.PlaymodeHardBlockedActions,
-                    attr.PlaymodeRuntimeSafeActions);
+                    attr.PlaymodeRuntimeSafeActions)
+                    // G.1 认知对齐：以 [AgentTool] 特性的 Description 为 LLM 认知的单一真源。
+                    // 工具类 Metadata => 里写的 description 多为占位/简化版，直接喂 LLM 会丢失
+                    // USE FOR / NOT FOR / ACTIVATE WHEN 等认知，导致五花八门的 LLM 用错工具。
+                    // 覆盖规则（择优，防退化）：两者取更长/信息量更大的一份——
+                    //   绝大多数工具 [AgentTool] 描述远详于 Metadata（以 attr 为真源补齐认知）；
+                    //   个别反向情况（如新工具 Metadata 先写全、attr 未同步）保留更长者，不机械覆盖丢细节。
+                    .WithDescription(
+                        (string.IsNullOrWhiteSpace(attr.Description) || baseMeta.Description.Length > attr.Description.Length)
+                            ? baseMeta.Description
+                            : attr.Description);
             }
 
             public ToolMetadata Metadata => _metadata;

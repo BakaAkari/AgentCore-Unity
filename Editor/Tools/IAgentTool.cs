@@ -251,6 +251,32 @@ namespace AgentCore.Editor.Tools
                 playmodeHardBlockedActions,
                 playmodeRuntimeSafeActions);
         }
+
+        /// <summary>
+        /// 返回一个仅 Description 不同的副本。
+        /// <para>
+        /// G.1 治理层：<see cref="ToolAutoDiscovery"/> 用 <c>[AgentTool]</c> 特性的
+        /// Description 作为 LLM 认知的"单一真源"。工具类在 <c>Metadata =&gt;</c> 里写的
+        /// description 多为占位/简化版，喂给 LLM 会丢失认知；此方法让治理层在装饰器里
+        /// 用 <c>[AgentTool]</c> 的完整描述覆盖之，避免双轨漂移。
+        /// </para>
+        /// </summary>
+        public ToolMetadata WithDescription(string description)
+        {
+            return new ToolMetadata(
+                Name,
+                description ?? Description,
+                Category,
+                ParametersSchema,
+                RequiresMainThread,
+                RiskLevel,
+                Capabilities,
+                RequiresConfirmation,
+                Visibility,
+                ReadOnlyActions,
+                PlaymodeHardBlockedActions,
+                PlaymodeRuntimeSafeActions);
+        }
     }
 
     #endregion

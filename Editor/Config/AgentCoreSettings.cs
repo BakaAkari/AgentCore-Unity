@@ -44,7 +44,7 @@ namespace AgentCore.Editor.Config
 
         // --- 版本迁移 ---
         /// <summary>Current settings schema version. Bumped whenever migrations add/remove fields.</summary>
-        public const int CurrentVersion = 22;
+        public const int CurrentVersion = 23;
 
         /// <summary>Persisted schema version of this settings asset. Compared against <see cref="CurrentVersion"/> to trigger MigrateSettings.</summary>
         [SerializeField] private int settingsVersion = 0;
@@ -75,6 +75,19 @@ namespace AgentCore.Editor.Config
         // 热插拔:每轮实时读取,无需重启。selfChallengeEnabled=false 时此开关无意义。
         [Tooltip("Enable model-tier escape — advanced models with native reasoning skip Self-Challenge to avoid duplicate thinking cost")]
         public bool selfChallengeEscapeEnabled = true;
+
+        // --- Vision Model (v1.15.0: 独立视觉模型配置) ---
+        // 视觉模型是固定的单一配置(不可热切换),与主模型 Provider Profile 完全隔离:
+        // 主模型走 multi-profile 体系,视觉模型只有一组 endpoint/model + 独立 apiKey(SecureKeyStorage)。
+        // 由 VisionModelConfig 静态类统一解析,供 vision_analyze 工具(截图→视觉模型→文字描述)。
+        [Tooltip("Enable the Vision Model — lets the agent capture Game/Scene View and get a text description to self-correct")]
+        public bool visionEnabled = false;
+
+        [Tooltip("Vision model endpoint (OpenAI-compatible base URL), independent from the main model profile")]
+        public string visionEndpoint = "";
+
+        [Tooltip("Vision model name (vision-capable), e.g. qwen-vl-7b / gpt-4o")]
+        public string visionModel = "";
 
         // --- Memory / Knowledge Base (optional cloud services) ---
         [Tooltip("Enable mem0 memory service")]
@@ -327,6 +340,14 @@ namespace AgentCore.Editor.Config
             if (settingsVersion < 22)
             {
                 AgentCoreLog.Info("[AgentCore] Settings migrated from v21 to v22 (legacy llm endpoint/model fields removed, use Provider Profiles instead)");
+            }
+
+            // v23: v1.15.0 Vision Model 独立配置 — 新增 visionEnabled/visionEndpoint/visionModel 三个字段。
+            // 无数据操作: 新字段在 Unity 反序列化旧数据时取默认值(visionEnabled=false, 其余空串),
+            // 默认未启用即不干扰现有主模型行为。视觉 API Key 独立存于 SecureKeyStorage, 与本迁移无关。
+            if (settingsVersion < 23)
+            {
+                AgentCoreLog.Info("[AgentCore] Settings migrated from v22 to v23 (added independent Vision Model config fields)");
             }
 
             settingsVersion = CurrentVersion;

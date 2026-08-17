@@ -45,6 +45,16 @@ namespace AgentCore.Editor.Config.Settings.Pages
         // 记录哪些 profile 已经触发过一次首次 auto-fetch，避免每帧重复触发
         private readonly HashSet<string> _autoFetchTriggered = new HashSet<string>();
 
+        // ── Vision Model 卡片状态（独立单一配置，不参与 profile context 机制）──
+        private readonly List<string> _visionModels = new List<string>();
+        private bool _visionFetchRunning;
+        private string _visionFetchStatus;
+        private bool _visionTestRunning;
+        private string _visionTestStatus;
+        private bool _visionApiKeyDirty;
+        private string _visionApiKeyInput;
+        private int _visionSelectedModelIndex = -1;
+
         // ── IAgentCoreSettingsPage ──
 
         public string Id => "model-agent";
@@ -74,6 +84,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.Space(12);
             DrawSelfChallengeCard(context);
+
+            EditorGUILayout.Space(12);
+            DrawVisionModelCard(context);
 
             // ── 应用延迟操作 ──
             if (_pendingOps.Count > 0)
@@ -647,6 +660,210 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             if (running) context.State.RunningTasks.Add(key);
             else context.State.RunningTasks.Remove(key);
+        }
+
+        // ── Vision Model 卡片（v1.15.0：独立单一配置，不可热切换）──
+
+        private void DrawVisionModelCard(AgentCoreSettingsContext context)
+        {
+            var settings = context.Settings;
+            context.Ui.DrawCard(
+                "Vision Model",
+                "Optional vision-capable model (independent of the main model profile). Lets the agent capture Game/Scene View and get a text description to self-correct its visual work. Disabled by default. Not hot-swappable — a single fixed configuration save and apply.",
+                () =>
+                {
+                    EditorGUI.BeginChangeCheck();
+
+                    settings.visionEnabled = EditorGUILayout.Toggle(
+                        new GUIContent("Enable Vision Model", "When enabled, vision_analyze tool is available to the agent (capture Game/Scene View → vision model text description)."),
+                        settings.visionEnabled);
+
+                    bool prevEnabled = GUI.enabled;
+                    GUI.enabled = prevEnabled && settings.visionEnabled;
+
+                    settings.visionEndpoint = EditorGUILayout.TextField(
+                        new GUIContent("Endpoint", "Vision model OpenAI-compatible base URL (independent from main model)."),
+                        settings.visionEndpoint ?? "");
+
+                    DrawVisionApiKeyField();
+
+                    // Model 输入 + Refresh Models
+                    EditorGUILayout.BeginHorizontal();
+                    settings.visionModel = EditorGUILayout.TextField(
+                        new GUIContent("Model", "Vision-capable model name (e.g. qwen-vl-plus, gpt-4o-mini, internvl)."),
+                        settings.visionModel ?? "");
+                    GUI.enabled = prevEnabled && settings.visionEnabled && !_visionFetchRunning;
+                    if (GUILayout.Button(_visionFetchRunning ? "..." : "Refresh Models", GUILayout.Width(120)))
+                    {
+                        TriggerVisionFetchModels(settings);
+                    }
+                    GUI.enabled = prevEnabled;
+                    EditorGUILayout.EndHorizontal();
+
+                    // Refresh 出的模型下拉（便捷选择；手动输入仍优先）
+                    DrawVisionModelDropdown(settings);
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        settings.SaveSettings();
+                    }
+
+                    // 状态行
+                    if (!string.IsNullOrEmpty(_visionFetchStatus))
+                        EditorGUILayout.HelpBox(_visionFetchStatus, _visionFetchStatus.StartsWith("[FAIL]") ? MessageType.Error : MessageType.Info);
+                    if (!string.IsNullOrEmpty(_visionTestStatus))
+                        EditorGUILayout.HelpBox(_visionTestStatus, _visionTestStatus.StartsWith("[FAIL]") ? MessageType.Error : MessageType.Info);
+
+                    // Test Connection
+                    EditorGUILayout.BeginHorizontal();
+                    GUI.enabled = prevEnabled && settings.visionEnabled && !_visionTestRunning;
+                    if (GUILayout.Button(_visionTestRunning ? "Testing..." : "Test Connection", GUILayout.Width(150)))
+                    {
+                        TriggerVisionTestConnection(settings);
+                    }
+                    GUI.enabled = prevEnabled;
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+                });
+        }
+
+        private void DrawVisionApiKeyField()
+        {
+            // 首次绘制: 若已存 key, 显示掩码占位; 未存则空。
+            if (_visionApiKeyInput == null)
+            {
+                _visionApiKeyInput = SecureKeyStorage.HasVisionApiKey() ? "••••••••" : "";
+                _visionApiKeyDirty = false;
+            }
+
+            string display = _visionApiKeyInput;
+            var newInput = EditorGUILayout.PasswordField(
+                new GUIContent("API Key", "Vision model API key (optional — some local vision servers are keyless). Stored per-user, never committed."),
+                display);
+
+            if (newInput != display)
+            {
+                _visionApiKeyInput = newInput;
+                _visionApiKeyDirty = true;
+
+                // 用户在掩码上输入新值(或清空): 立即写入 SecureKeyStorage。
+                // 占位串(••••••••)保持已存 key 不变; 换成了任意其他新值则覆盖/清除。
+                string stored = SecureKeyStorage.GetVisionApiKey();
+                if (!string.Equals(newInput, "••••••••", StringComparison.Ordinal) && newInput != stored)
+                {
+                    if (string.IsNullOrEmpty(newInput))
+                    {
+                        if (SecureKeyStorage.HasVisionApiKey()) SecureKeyStorage.DeleteVisionApiKey();
+                    }
+                    else
+                    {
+                        SecureKeyStorage.SetVisionApiKey(newInput);
+                    }
+                }
+            }
+        }
+
+        private void DrawVisionModelDropdown(AgentCoreSettings settings)
+        {
+            if (_visionModels == null || _visionModels.Count == 0)
+            {
+                _visionSelectedModelIndex = -1;
+                return;
+            }
+
+            var options = _visionModels.ToArray();
+            int current = _visionModels.FindIndex(m =>
+                string.Equals(m, settings.visionModel?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (current < 0) current = _visionSelectedModelIndex;
+
+            int wasRunning = GUI.enabled ? 1 : 0;
+            GUI.enabled = wasRunning == 1;
+            int newIndex = EditorGUILayout.Popup(
+                new GUIContent("Select Model", "Pick from the fetched list (overwrites the Model field)."),
+                current < 0 ? 0 : current,
+                options);
+            GUI.enabled = wasRunning == 1;
+
+            if (newIndex >= 0 && newIndex < _visionModels.Count &&
+                !string.Equals(_visionModels[newIndex], settings.visionModel?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                _visionSelectedModelIndex = newIndex;
+                settings.visionModel = _visionModels[newIndex];
+                settings.SaveSettings();
+            }
+        }
+
+        private void TriggerVisionFetchModels(AgentCoreSettings settings)
+        {
+            if (string.IsNullOrWhiteSpace(settings.visionEndpoint))
+            {
+                _visionFetchStatus = "[FAIL] Enter a Vision Endpoint first, then Refresh Models.";
+                return;
+            }
+            var endpoint = settings.visionEndpoint.Trim();
+            var apiKey = SecureKeyStorage.GetVisionApiKey();
+            _visionFetchRunning = true;
+            _visionFetchStatus = "Fetching models...";
+
+            AsyncHelper.RunAsync(async () =>
+            {
+                try
+                {
+                    var models = await _service.FetchModelsAsync(endpoint, apiKey);
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        _visionModels.Clear();
+                        if (models != null) _visionModels.AddRange(models);
+                        _visionSelectedModelIndex = -1;
+                        _visionFetchStatus = (models != null && models.Count > 0)
+                            ? $"[OK] Found {models.Count} models — pick one below (or type it manually)."
+                            : "[OK] Endpoint reachable, but returned no models.";
+                        _visionFetchRunning = false;
+                    });
+                }
+                catch (Exception ex)
+                {
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        _visionFetchStatus = $"[FAIL] {ex.Message}";
+                        _visionFetchRunning = false;
+                    });
+                }
+            });
+        }
+
+        private void TriggerVisionTestConnection(AgentCoreSettings settings)
+        {
+            if (string.IsNullOrWhiteSpace(settings.visionEndpoint))
+            {
+                _visionTestStatus = "[FAIL] Enter a Vision Endpoint first, then Test Connection.";
+                return;
+            }
+            var endpoint = settings.visionEndpoint.Trim();
+            var apiKey = SecureKeyStorage.GetVisionApiKey();
+            _visionTestRunning = true;
+            _visionTestStatus = "Testing...";
+
+            AsyncHelper.RunAsync(async () =>
+            {
+                try
+                {
+                    var message = await _service.TestConnectionAsync(endpoint, apiKey);
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        _visionTestStatus = message;
+                        _visionTestRunning = false;
+                    });
+                }
+                catch (Exception ex)
+                {
+                    AsyncHelper.RunOnMainThread(() =>
+                    {
+                        _visionTestStatus = $"[FAIL] {ex.Message}";
+                        _visionTestRunning = false;
+                    });
+                }
+            });
         }
     }
 }

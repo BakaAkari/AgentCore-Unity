@@ -25,7 +25,9 @@ namespace AgentCore.Editor.Tools.Native.Meta
             "Categories include: Specialized (UI, physics, audio, lighting, camera, terrain, timeline, etc.), " +
             "Extended (build, packages, tests, profiler, optimization, navigation, input, etc.), " +
             "Cloud (memory, knowledge base), Scripting (execute_code — restricted). " +
-            "Always check request_tools list before telling the user you cannot do something — the capability may be in an unactivated category.",
+            "Always check request_tools list before telling the user you cannot do something — the capability may be in an unactivated category. " +
+            "USE FOR: whenever a tool call fails with 'not available / not found / not in your tool list', or when the user's task clearly needs a capability outside your current tool set — list first to see what categories exist, then activate the matching one. " +
+            "NOT FOR: actually performing that capability (you must call the real tool AFTER activation, in your next response); re-activating an already-visible AlwaysVisible tool (those need no activation).",
         Category = "Meta",
         RequiresMainThread = false,
         RiskLevel = ToolRiskLevel.Low,

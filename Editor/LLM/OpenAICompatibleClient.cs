@@ -97,17 +97,12 @@ namespace AgentCore.Editor.LLM
         /// <summary>
         /// 发送 POST 请求并返回响应对象 + 已读响应体字符串。
         /// 调用方负责 <c>Dispose</c> 返回的 <see cref="HttpResponseMessage"/>。
+        /// v1.15.0: HTTP 发送委托给通用 <see cref="OpenAIChatTransporter.PostAsync"/>（主/视觉复用同一发送端，
+        /// 本类保留 ActiveModelConfig 连接参数 + enrichment/pruning 策略在上层）。
         /// </summary>
         private static async Task<(HttpResponseMessage, string)> SendPostAsync(
             string url, string apiKey, string body, CancellationToken ct)
-        {
-            var client = HttpClientFactory.GetClient();
-            using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
-            httpRequest.Content = new StringContent(body, Encoding.UTF8, "application/json");
-            var response = await client.SendAsync(httpRequest, ct);
-            var responseBody = await response.Content.ReadAsStringAsync();
-            return (response, responseBody);
-        }
+            => await OpenAIChatTransporter.PostAsync(url, apiKey, body, ct);
 
         /// <summary>
         /// 流式 Chat Completion 调用。
@@ -244,15 +239,11 @@ namespace AgentCore.Editor.LLM
         /// <summary>
         /// 发送 POST 请求并以 <see cref="HttpCompletionOption.ResponseHeadersRead"/> 模式返回，
         /// 用于流式响应。调用方负责 <c>Dispose</c>。
+        /// v1.15.0: HTTP 发送委托给通用 <see cref="OpenAIChatTransporter.PostStreamAsync"/>。
         /// </summary>
         private static async Task<HttpResponseMessage> SendPostForStreamAsync(
             string url, string apiKey, string body, CancellationToken ct)
-        {
-            var client = HttpClientFactory.GetClient();
-            using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
-            httpRequest.Content = new StringContent(body, Encoding.UTF8, "application/json");
-            return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        }
+            => await OpenAIChatTransporter.PostStreamAsync(url, apiKey, body, ct);
 
         /// <summary>
         /// 累积工具调用的增量数据。

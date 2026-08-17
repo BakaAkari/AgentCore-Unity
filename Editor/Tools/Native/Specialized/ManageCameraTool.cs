@@ -16,16 +16,25 @@ namespace AgentCore.Editor.Tools.Native.Specialized
     /// Creates, configures, inspects, aligns, and renders Unity Camera components.
     /// </summary>
     [AgentTool("manage_camera",
-        Description = "Unity Camera component management — create, configure, inspect, align, and render, plus SceneView camera control (v1.9.7 G09). " +
+        Description = "Unity Camera component management — create, configure, inspect, align, and render, plus SceneView camera control (v1.9.7 G09 + orbit/pan/dolly/frame). " +
                       "Actions: create (new Camera with configurable properties), get_info (FOV/near/far/clear/culling/depth), " +
                       "configure (modify any Camera property), look_at (point camera at world position), " +
                       "align_to_view (match Scene View camera), create_render_texture (create RT asset), " +
                       "render_to_texture (capture camera output to file), list_cameras (all cameras with priority), set_main_camera (tag as MainCamera), " +
                       "get_scene_view (read SceneView pivot/size/rotation/orthographic/in2DMode — the Editor's own viewport camera), " +
                       "set_scene_view (write SceneView pivot/size/rotation/orthographic/in2DMode — programmatically frame the SceneView on a location). " +
+                      "RELATIVE/NAVIGATION actions (rotate the perspective to look around the scene, all operate on SceneView.lastActiveSceneView): " +
+                      "orbit_scene_view (rotate view around its pivot by azimuth_delta deg [left/right, + = clockwise from above] + elevation_delta deg [up/down, + = look up]; keeps pivot fixed — THE way to circle an object), " +
+                      "pan_scene_view (shift the view sideways along the camera's own right (dx) and up (dy) axes, in world units — move sideways without turning; dx>0 shifts right, dy>0 shifts up), " +
+                      "dolly_scene_view (adjust Scene View zoom by scaling size — the view's diagonal measure. factor>1 grows the view (objects appear SMALLER / zoomed out, see whole scene), 0<factor<1 shrinks the view (objects appear LARGER / zoomed in, see detail). Behavior is identical in orthographic and perspective. To zoom IN for detail pass e.g. factor=0.5; to zoom OUT pass e.g. factor=2), " +
+                      "frame_selected (frame the current selection's bounds — snap the camera to look at the selected object's center at a fitting distance). " +
                       "USE FOR: camera setup, adjusting perspective/orthographic, rendering screenshots, aligning camera to current view, driving SceneView from a script. " +
+                      "HOW TO LOOK AROUND A SCENE (visual/inspection): 1) get_scene_view to read current pivot/size/rotation, 2) frame_selected (or set_scene_view pivot=target) to establish a stable look-at target, " +
+                      "3) orbit_scene_view with small deltas (e.g. ±30-45°) to circle around the target from different angles, 4) dolly_scene_view (factor 0.5 to zoom IN for detail, 2 to zoom OUT for overview), " +
+                      "5) pan_scene_view to slide the view sideways when the target is off-center, 6) get_scene_view or render_to_texture / vision to confirm the new view. " +
+                      "Prefer RELATIVE increments (orbit/pan/dolly) over computing absolute rotation/position — they preserve the look-at target. " +
                       "NOT FOR: Cinemachine virtual cameras (use manage_cinemachine), post-processing effects, camera animation (use Timeline). " +
-                      "ACTIVATE WHEN: user mentions 'camera', 'FOV', 'render texture', 'screenshot', 'camera alignment', 'main camera', 'scene view', 'frame scene view'.",
+                      "ACTIVATE WHEN: user mentions 'camera', 'FOV', 'render texture', 'screenshot', 'camera alignment', 'main camera', 'scene view', 'frame scene view', 'look around', 'rotate view', 'orbit', 'pan', 'zoom', '视角', '旋转镜头', '环绕', '平移'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true)]
@@ -34,7 +43,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
             ""type"": ""object"",
             ""properties"": {
-                ""action"": { ""type"": ""string"", ""enum"": [""create"", ""get_info"", ""configure"", ""look_at"", ""align_to_view"", ""create_render_texture"", ""render_to_texture"", ""list_cameras"", ""set_main_camera"", ""get_scene_view"", ""set_scene_view""], ""description"": ""Camera action to perform"" },
+                ""action"": { ""type"": ""string"", ""enum"": [""create"", ""get_info"", ""configure"", ""look_at"", ""align_to_view"", ""create_render_texture"", ""render_to_texture"", ""list_cameras"", ""set_main_camera"", ""get_scene_view"", ""set_scene_view"", ""orbit_scene_view"", ""pan_scene_view"", ""dolly_scene_view"", ""frame_selected""], ""description"": ""Camera action to perform"" },
+                ""azimuth_delta"": { ""type"": ""number"", ""description"": ""(orbit_scene_view) Degrees to rotate the view around the pivot horizontally (yaw). + = clockwise when viewed from above (like right-drag)."" },
+                ""elevation_delta"": { ""type"": ""number"", ""description"": ""(orbit_scene_view) Degrees to rotate the view vertically (pitch). + = look up. Clamped to avoid flipping past the pole."" },
+                ""dx"": { ""type"": ""number"", ""description"": ""(pan_scene_view) Horizontal pan in world units along the camera's own RIGHT axis. + = shift view right (scene appears to move left)."" },
+                ""dy"": { ""type"": ""number"", ""description"": ""(pan_scene_view) Vertical pan in world units along the camera's own UP axis. + = shift view up (scene appears to move down)."" },
+                ""factor"": { ""type"": ""number"", ""description"": ""(dolly_scene_view) SceneView zoom multiplier scaling the view's diagonal size (>0, default 1). factor>1 GROWS the view (objects appear smaller — zoom out, see whole scene); 0<factor<1 SHRINKS the view (objects appear larger — zoom in, see detail). Same in orthographic & perspective. e.g. 0.5 = zoom in for detail, 2 = zoom out for overview."" },
                 ""pivot"": { ""type"": ""object"", ""description"": ""(set_scene_view) Vector3 {x,y,z} — SceneView orbit pivot (world space)."", ""properties"": { ""x"": { ""type"": ""number"" }, ""y"": { ""type"": ""number"" }, ""z"": { ""type"": ""number"" } }, ""required"": [""x"", ""y"", ""z""] },
                 ""size"": { ""type"": ""number"", ""description"": ""(set_scene_view) Scalar SceneView zoom (approx camera distance from pivot)."" },
                 ""orthographic"": { ""type"": ""boolean"", ""description"": ""(set_scene_view / create / configure) Toggle orthographic projection. For set_scene_view: toggles SceneView orthographic viewport."" },
@@ -70,7 +84,9 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         /// </summary>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "manage_camera",
-            description: "Create, configure, inspect, align, and render Unity Cameras",
+            description: "Create, configure, inspect, align, and render Unity Cameras, plus SceneView camera navigation (orbit/pan/dolly/frame). " +
+                         "HOW TO LOOK AROUND: 1) get_scene_view, 2) frame_selected or set pivot to a target, 3) orbit_scene_view (azimuth_delta/elevation_delta ±30-45°) to circle, " +
+                         "4) dolly_scene_view (factor 0.5 to zoom in for detail, 2 to zoom out for overview), 5) pan_scene_view (dx/dy) to slide, 6) get_scene_view / vision to confirm. Prefer relative increments over absolute transforms.",
             category: "Specialized",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -100,8 +116,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     case "set_main_camera": response = HandleSetMainCamera(parameters); break;
                     case "get_scene_view": response = HandleGetSceneView(parameters); break;
                     case "set_scene_view": response = HandleSetSceneView(parameters); break;
+                    case "orbit_scene_view": response = HandleOrbitSceneView(parameters); break;
+                    case "pan_scene_view": response = HandlePanSceneView(parameters); break;
+                    case "dolly_scene_view": response = HandleDollySceneView(parameters); break;
+                    case "frame_selected": response = HandleFrameSelected(parameters); break;
                     default:
-                        response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: create, get_info, configure, look_at, align_to_view, create_render_texture, render_to_texture, list_cameras, set_main_camera, get_scene_view, set_scene_view");
+                        response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: create, get_info, configure, look_at, align_to_view, create_render_texture, render_to_texture, list_cameras, set_main_camera, get_scene_view, set_scene_view, orbit_scene_view, pan_scene_view, dolly_scene_view, frame_selected");
                         break;
                 }
             }
@@ -332,6 +352,136 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 ["in_2d_mode"] = view.in2DMode
             };
             return ToolResponse.OkWithData(data, $"SceneView updated ({applied.Count} field(s) applied).");
+        }
+
+        // ─── Camera-navigation actions (orbit / pan / dolly / frame) — operate on the Editor SceneView camera (2022.3.50f1) ──
+        // These let the LLM 'look around' a scene with RELATIVE increments — the preferred way to inspect from
+        // different angles without computing absolute rotation/position (which loses the look-at target).
+        private ToolResponse HandleOrbitSceneView(JObject parameters)
+        {
+            var view = SceneView.lastActiveSceneView;
+            if (view == null) return ToolResponse.Fail("No active SceneView. Open a Scene View window in the Editor and try again.");
+
+            double azDelta = 0, elDelta = 0;
+            bool hasAz = parameters["azimuth_delta"] != null;
+            bool hasEl = parameters["elevation_delta"] != null;
+            if (hasAz) azDelta = parameters["azimuth_delta"].Value<double>();
+            if (hasEl) elDelta = parameters["elevation_delta"].Value<double>();
+            if (!hasAz && !hasEl)
+                return ToolResponse.Fail("Provide at least one of azimuth_delta or elevation_delta (degrees).");
+
+            // yaw around world up
+            if (hasAz)
+            {
+                var yaw = Quaternion.AngleAxis((float)azDelta, Vector3.up);
+                view.rotation = yaw * view.rotation;
+            }
+
+            // pitch around the camera's local right axis, clamped to avoid flipping past the pole
+            if (hasEl)
+            {
+                var right = view.camera != null ? view.camera.transform.right : view.rotation * Vector3.right;
+                var pitch = Quaternion.AngleAxis((float)elDelta, right);
+                var newRot = pitch * view.rotation;
+                // Prevent gimbal flip: keep the camera's up from inverting (dot(newUp, worldUp) must stay positive).
+                var worldUp = Vector3.up;
+                var newUp = newRot * Vector3.up;
+                if (Vector3.Dot(newUp, worldUp) <= 0.01f)
+                    return ToolResponse.Fail($"elevation_delta={elDelta} would flip the view over the pole; request a smaller value (e.g. ±5-10°) instead.");
+                view.rotation = newRot;
+            }
+
+            view.Repaint();
+            var data = SceneViewData(view);
+            return ToolResponse.OkWithData(data,
+                $"SceneView orbited (azimuth_delta={(hasAz ? (object)azDelta : "n/a")}, elevation_delta={(hasEl ? (object)elDelta : "n/a")}). New rotation={view.rotation.eulerAngles}.");
+        }
+
+        private ToolResponse HandlePanSceneView(JObject parameters)
+        {
+            var view = SceneView.lastActiveSceneView;
+            if (view == null) return ToolResponse.Fail("No active SceneView. Open a Scene View window in the Editor and try again.");
+
+            if (parameters["dx"] == null && parameters["dy"] == null)
+                return ToolResponse.Fail("Provide at least one of dx or dy (world units).");
+
+            var right = view.camera != null ? view.camera.transform.right : view.rotation * Vector3.right;
+            var up = view.camera != null ? view.camera.transform.up : view.rotation * Vector3.up;
+            var offset = Vector3.zero;
+            var appliedDx = parameters["dx"] != null ? parameters["dx"].Value<float>() : 0f;
+            var appliedDy = parameters["dy"] != null ? parameters["dy"].Value<float>() : 0f;
+            if (appliedDx != 0f) offset += right * appliedDx;
+            if (appliedDy != 0f) offset += up * appliedDy;
+
+            view.pivot += offset;
+            view.Repaint();
+            return ToolResponse.OkWithData(SceneViewData(view),
+                $"SceneView panned by ({appliedDx}, {appliedDy}) world units (right/up axes). New pivot={view.pivot}.");
+        }
+
+        private ToolResponse HandleDollySceneView(JObject parameters)
+        {
+            var view = SceneView.lastActiveSceneView;
+            if (view == null) return ToolResponse.Fail("No active SceneView. Open a Scene View window in the Editor and try again.");
+
+            var factor = parameters["factor"] != null ? parameters["factor"].Value<float>() : 1f;
+            if (factor <= 0f)
+                return ToolResponse.Fail($"factor must be > 0 (got {factor}). Use 0<factor<1 to zoom in (view shrinks, objects appear larger); factor>1 to zoom out (view grows, objects appear smaller).");
+
+            // SceneView.size is the view's diagonal measure. Scaling it changes how much of the scene
+            // fits in the viewport — identical in orthographic and perspective (NOT a camera-distance change).
+            var newSize = view.size * factor;
+            if (newSize <= 0f)
+                return ToolResponse.Fail($"Computed size {newSize} is non-positive; dolly would collapse the view. Pick a factor closer to 1.");
+
+            view.size = newSize;
+            view.Repaint();
+            return ToolResponse.OkWithData(SceneViewData(view),
+                $"SceneView dollied by factor={factor} ({(factor > 1f ? "zoom out — view grew, objects appear smaller" : "zoom in — view shrank, objects appear larger")}). New size={view.size:F3} (view diagonal ≈{view.size:F3}).");
+        }
+
+        private ToolResponse HandleFrameSelected(JObject parameters)
+        {
+            var view = SceneView.lastActiveSceneView;
+            if (view == null) return ToolResponse.Fail("No active SceneView. Open a Scene View window in the Editor and try again.");
+
+            var go = Selection.activeGameObject;
+            if (go == null)
+                return ToolResponse.Fail("Nothing is selected. Select an object in the Hierarchy/Scene (or use set_scene_view with an explicit pivot) before calling frame_selected.");
+
+            var mesh = go.GetComponent<MeshRenderer>();
+            if (mesh != null)
+            {
+                view.Frame(mesh.bounds, true);
+            }
+            else
+            {
+                // No renderer (e.g. empty GO, camera, light): frame a 1-unit box around the object's position.
+                var size = 1f;
+                view.size = size;
+                view.pivot = go.transform.position;
+                view.Repaint();
+            }
+
+            return ToolResponse.OkWithData(SceneViewData(view), $"Framed selected object '{go.name}' (instanceId={go.GetInstanceID()}).");
+        }
+
+        private static JObject SceneViewData(SceneView view)
+        {
+            return new JObject
+            {
+                ["pivot"] = ToolHelpers.Vector3ToJson(view.pivot),
+                ["size"] = view.size,
+                ["rotation"] = new JObject
+                {
+                    ["x"] = view.rotation.x, ["y"] = view.rotation.y, ["z"] = view.rotation.z, ["w"] = view.rotation.w
+                },
+                ["rotation_euler"] = ToolHelpers.Vector3ToJson(view.rotation.eulerAngles),
+                ["orthographic"] = view.orthographic,
+                ["in_2d_mode"] = view.in2DMode,
+                ["camera_position"] = view.camera != null ? ToolHelpers.Vector3ToJson(view.camera.transform.position) : null,
+                ["camera_forward"] = view.camera != null ? ToolHelpers.Vector3ToJson(view.camera.transform.forward) : null
+            };
         }
 
         private ToolResponse HandleAlignToView(JObject parameters)

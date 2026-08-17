@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-08-17
+
+### Added
+- **视觉感知（Vision）功能**：新增 `vision_analyze` 工具（OnDemand, Category=Meta），
+  捕获 Unity Game View / SceneView / 命名 Camera 为干净渲染 PNG，并经独立配置的视觉模型
+  （默认内网 GLM-4.6V-Flash；与主模型 Provider Profile 完全隔离的独立 VISION_API_KEY 单键）
+  返回文本描述用于自校正。`source=auto|game|scene|camera|game_and_scene` 按意图选渲渲染源；
+  结果附 `view=`（camera/pivot/rotation）与 `selection=`（Selection 元数据）——不靠像素猜选中。
+  - 配套：`VisionModelConfig`（未配置时自动填内网 8001 GLM 端点 + 自动选首个模型，软状态不阻塞）、
+    `VisionLLMClient`、通用 `OpenAIChatTransporter`（主/视觉复用同一 HTTP 发送端，
+    `OpenAICompatibleClient.SendPostAsync/流式` 委托之）、`SecureKeyStorage` VISION_API_KEY、
+    Model & Agent 设置页 Vision 卡片。
+  - **`region` 两阶段 zoom**：`region="x,y,w,h"`（归一化 viewport 坐标 0-1，左下原点）对整帧
+    裁剪出局部 PNG，用于看清远处/细小/被遮挡细节——先整图 analyze 定位可疑区，再 region zoom
+    细看。crop 文件名带 `_crop_<x>_<y>_<w>_<h>`。
+
+### Changed
+- **工具认知对齐（治本，修复 LLM 用错工具的根因）**：LLM 实际读到的是 `ToolMetadata.Description`
+  （工具类 `Metadata =>` 里），而详实的 USE FOR / NOT FOR / ACTIVATE WHEN 认知写在
+  `[AgentTool]` 特性里——此前 56/57 个工具的 `Metadata` 是空壳（44 个 <200 字），详实认知
+  从未喂给 LLM，导致驱动模型的工具调用错乱。
+  - `ToolMetadata` 新增 `WithDescription`；`ToolAutoDiscovery.RiskEnrichedTool` 装配时
+    对 description **择优覆盖**（取 `[AgentTool]` 与 `Metadata` 中更长/更全者），一处架构改动
+    56 个工具认知立即对齐，且定义"工具自身 description = 单一认知源（择优）"规则，永不 drift、
+    不退化。写工具认知写 `[AgentTool] Description` 即可，系统自动取更全者喂 LLM。
+  - 补 2 个精准缺口：`vision_analyze` description 补 REGION ZOOM 两阶段认知；
+    `request_tools` 补 USE FOR / NOT FOR 辨异骨架。
+  - `TOOLS.md.template` 决策树按真实 Category 全量核查，修复 `manage_prefab` /
+    `manage_scriptable_object` 缺失的 `activate Scripting` 提示；SOUL/TOOLS 补充
+    vision_analyze 的 region/两阶段引导。
+
 ## [1.14.14] - 2026-08-14
 
 ### Fixed

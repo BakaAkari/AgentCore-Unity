@@ -287,16 +287,20 @@ namespace AgentCore.Editor.Core
             using (var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8)))
             {
                 var ensureTask = AgentCoreProviderProfiles.instance.EnsureDefaultProfileWithAutoModelAsync();
+                // v1.15.0: 视觉「从未配置」时自动填默认端点 + 选第一个模型。软状态，失败不阻塞；
+                // 与主模型同享 8s 超时窗口（视觉 fetch 同样可能网络慢），不额外延长初始化。
+                var ensureVisionTask = VisionModelConfig.EnsureDefaultWithAutoModelAsync();
                 var delayTask = Task.Delay(Timeout.Infinite, timeoutCts.Token);
-                var winner = await Task.WhenAny(ensureTask, delayTask);
-                DiagStep($"InitializeAsync: EnsureDefaultProfileWithAutoModelAsync race done (winner={(winner == ensureTask ? "ensureTask" : "8s-timeout")})");
+                var winner = await Task.WhenAny(
+                    Task.WhenAll(ensureTask, ensureVisionTask), delayTask);
+                DiagStep($"InitializeAsync: EnsureDefaultProfile+Vision auto-config race done (winner={(winner == delayTask ? "8s-timeout" : "ensure-done")})");
 
                 // 超时场景下 ensureTask 可能仍在后台跑；即便内部已 try/catch，此处额外吸收一层，
                 // 避免 unobserved task exception（不阻塞，不影响本次初始化流程）。
-                _ = ensureTask.ContinueWith(t =>
+                _ = Task.WhenAll(ensureTask, ensureVisionTask).ContinueWith(t =>
                 {
                     if (t.Exception != null)
-                        AgentCoreLog.Warning($"[AgentCore] EnsureDefaultProfileWithAutoModelAsync background continuation error: {t.Exception.Message}");
+                        AgentCoreLog.Warning($"[AgentCore] EnsureDefault auto-config background continuation error: {t.Exception.Message}");
                 }, TaskScheduler.Default);
             }
 
