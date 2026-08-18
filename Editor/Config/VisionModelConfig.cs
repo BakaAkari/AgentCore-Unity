@@ -22,17 +22,11 @@ namespace AgentCore.Editor.Config
     public static class VisionModelConfig
     {
         // ── Vision 默认配置硬编码值（对齐主模型 DefaultProfile* 的「唯一真源」写法）──
-        // v1.15.0: 视觉模型在「从未配置」（三字段全为初始状态）时，自动填入默认内网视觉端点，
-        // 并异步 fetch 模型列表取第一个作为 visionModel（仿 AgentCoreProviderProfiles 的
-        // TryAutoSelectFirstModelAsync）。用户一旦改过任一字段即不再自动覆盖（可控、不强制）。
+        // v1.15.0: 视觉模型在「从未配置」时自动填入默认内网视觉端点，并异步 fetch 模型列表
+        // 取第一个作为 visionModel（仿 AgentCoreProviderProfiles 的 TryAutoSelectFirstModelAsync）。
         // 该地址仅企业内网可达，与主模型默认 8000 同一内网 vLLM 栈。
+        // 模型名不写死：由 baseURL 的 /models 列表取第一个 id 原样使用（单一真源=服务端列表）。
         internal const string DefaultEndpoint = "http://172.16.248.60:8001/v1";
-
-        /// <summary>
-        /// 视觉默认模型名（v1.15.x 规范化）。首次自动填充时优先从服务端模型列表选取匹配本名的模型
-        /// （忽略大小写，避免服务端返回小写别名）并写入 visionModel，用户无需进设置刷新。
-        /// </summary>
-        internal const string DefaultModel = "GLM-4.6V-Flash";
 
         /// <summary>视觉模型是否启用（总开关）。未启用 = vision_analyze 工具不暴露给 agent。</summary>
         public static bool IsEnabled
@@ -40,7 +34,11 @@ namespace AgentCore.Editor.Config
 
         /// <summary>
         /// 用户是否已「显式配置过」视觉模型——任一字段（enabled / endpoint / model）脱离初始状态即视为已配置。
+        /// <para>
         /// 判定依据：一旦用户动过任何一项，自动默认填充就不再覆盖（对齐主模型「profile 存在即不重建」的幂等精神）。
+        /// <b>v1.15.2 起仅用于把关 endpoint 的自动填充</b>（空 endpoint 且从未配置过才填默认）；
+        /// model 的自动选取不归此 gate 管——model 只由「为空」触发，与 enabled 无关（否则启用视觉会阻断自动选模型）。
+        /// </para>
         /// </summary>
         public static bool IsUserConfigured
             => AgentCoreSettings.instance != null
@@ -67,45 +65,99 @@ namespace AgentCore.Editor.Config
             => SecureKeyStorage.GetVisionApiKey();
 
         /// <summary>
-        /// 视觉「从未配置」时自动填充默认值：填默认 endpoint，并异步 fetch 模型列表取第一个填入 modelName。
+        /// 视觉「model 未配置」时自动填充默认值：填默认 endpoint（若空），并异步 fetch
+        /// baseURL 的可用模型列表，<b>取第一个</b>填入 visionModel。用户要的是"取服务端第一个",
+        /// 不写死任何模型名。
         /// <para>
-        /// 对齐主模型 <see cref="AgentCoreProviderProfiles.EnsureDefaultProfileWithAutoModelAsync"/> 的幂等设计：
-        /// 仅当 <see cref="IsUserConfigured"/> 为 false（三字段全初始）时才动手。用户改过任何一项 → 直接返回，
-        /// 永不覆盖用户已有配置。静默失败：fetch 失败只记 Warning，不抛异常、不阻塞初始化。
+        /// 幂等设计：仅当 <see cref="ModelName"/> 为空时才 fetch（填上后下次不再重复）；endpoint
+        /// 仅在为空时填默认。用户已填的 model/endpoint 永不覆盖。
         /// </para>
         /// <para>
-        /// 专供运行时初始化路径（<c>AgentLoop.InitializeAsync</c>）调用；Settings 面板的视觉卡片自带
-        /// Refresh Models / 手动输入，不重复触发本方法以避免重复 fetch。
+        /// 注意（v1.15.2 修复的坑）：旧版用 <see cref="IsUserConfigured"/> 做 gate，而该判定含
+        /// <c>visionEnabled</c> —— 用户一旦勾选 Enable，IsUserConfigured 变 true → 整个自动 fetch 被
+        /// 跳过 → 视觉启用时 model 永远空白。现改为<b>仅以 model 为空为触发条件</b>，与 enabled 无关：
+        /// 视觉启用后若 model 空，仍会取第一个补上。
+        /// </para>
+        /// <para>
+        /// 专供运行时初始化路径（<c>AgentLoop.InitializeAsync</c>）与设置页 Enable 切换时调用；
+        /// Settings 面板的视觉卡片自带 Refresh Models / 手动输入，不重复触发本方法以避免重复 fetch。
         /// </para>
         /// </summary>
         public static async Task EnsureDefaultWithAutoModelAsync()
         {
-            // 用户已配置过任何一项 → 不覆盖（幂等）。
-            if (IsUserConfigured)
-                return;
-
             var settings = AgentCoreSettings.instance;
             if (settings == null)
                 return;
 
-            // 默认值直接写死为规范大写（GLM-4.6V-Flash），不依赖服务端列表/大小写，避免产生小写错值。
-            // 填默认 endpoint（同步，主线程安全：字段直接写 + SaveSettings）。
-            // enabled 保持 false（不强制启用），只补 endpoint/model，由用户决定是否开启视觉——「不强制」。
-            bool changed = false;
-            if (string.IsNullOrWhiteSpace(settings.visionEndpoint))
+            // endpoint 为空且用户从未配置过 endpoint → 填默认内网视觉端点（不强制启用）。
+            // 注意：这里 endpoint 的"是否覆盖"用 IsUserConfigured 判定，避免覆盖用户自定义 endpoint；
+            // 但 model 的自动选取不归此 gate 管（见下，model 只由"为空"触发）。
+            if (string.IsNullOrWhiteSpace(settings.visionEndpoint) && !IsUserConfigured)
             {
                 settings.visionEndpoint = DefaultEndpoint;
-                changed = true;
+                settings.SaveSettings();
+                AgentCoreLog.Info($"[AgentCore] Vision: auto-filled default endpoint {DefaultEndpoint} (never configured).");
             }
+
+            // model 为空 → fetch baseURL 列表取第一个（核心需求；与 enabled 无关）。
             if (string.IsNullOrWhiteSpace(settings.visionModel))
             {
-                settings.visionModel = DefaultModel;
-                changed = true;
+                await TryAutoSelectFirstVisionModelAsync();
             }
-            if (changed)
+        }
+
+        /// <summary>
+        /// 异步 fetch 指定 endpoint 的可用模型列表，取第一个填入 visionModel（仅当仍为空时）。
+        /// <para>
+        /// 选取规则：取 <c>models[0]</c>，原样使用，不做任何大小写改写——以服务端 /models 列表为单一真源
+        /// （vLLM 的 model 名匹配大小写敏感，列表返回的 id 即服务端能接受的名字）。
+        /// 对齐主模型 <see cref="AgentCoreProviderProfiles"/> 的 TryAutoSelectFirstModelAsync 模式。
+        /// </para>
+        /// 静默失败：fetch 失败只记 Warning，不抛异常、不阻塞调用方。
+        /// </summary>
+        private static async Task TryAutoSelectFirstVisionModelAsync()
+        {
+            try
             {
-                settings.SaveSettings();
-                AgentCoreLog.Info($"[AgentCore] Vision: auto-filled default endpoint {DefaultEndpoint} + model {DefaultModel} (never configured).");
+                var settings = AgentCoreSettings.instance;
+                if (settings == null)
+                    return;
+
+                var endpoint = settings.visionEndpoint?.Trim();
+                if (string.IsNullOrWhiteSpace(endpoint))
+                    return;
+
+                var service = new ModelSettingsService();
+                var models = await service.FetchModelsAsync(endpoint, SecureKeyStorage.GetVisionApiKey());
+                if (models == null || models.Count == 0)
+                {
+                    AgentCoreLog.Info("[AgentCore] Vision: endpoint reachable but returned no models; model left empty.");
+                    return;
+                }
+
+                // 选取 = 服务端 /models 列表第一个 id，原样使用，不做任何大小写改写。
+                // （vLLM 的 model 名匹配是大小写敏感的；/models 返回的 id 就是服务端能接受的名字，
+                //  信它即黄金标准。统一小写/规范化写死均会制造 404，主模型 DS 一直这么走从未出错。）
+                string picked = models[0];
+
+                AsyncHelper.RunOnMainThread(() =>
+                {
+                    var current = AgentCoreSettings.instance;
+                    // 仅当仍为空时写入；若等待期间用户已手动填了 model，则不覆盖。
+                    if (current != null && string.IsNullOrWhiteSpace(current.visionModel))
+                    {
+                        current.visionModel = picked;
+                        current.SaveSettings();
+                        // modelsList 在插值表达式外先算好，避免在插值字符串里嵌套带双引号的字符串字面量
+                        // （C# 插值表达式内引号不按外层字符串转义规则，提取变量最清晰可靠）。
+                        string modelsList = string.Join(", ", models);
+                        AgentCoreLog.Info($"[AgentCore] Vision: auto-selected model '{picked}' at {endpoint} (list: [{modelsList}]).");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Vision auto-select first model failed: {ex.Message}");
             }
         }
 

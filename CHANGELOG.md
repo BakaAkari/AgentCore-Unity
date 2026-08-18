@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.3] - 2026-08-18
+
+### Fixed
+- **Vision 模型自动选取重做**：插件启用后自动从 baseURL 的 `/models` 列表取第一个模型填入 `visionModel`（不写死任何模型名，纯取服务端列表第一个 id 原样使用、零大小写改写——以服务端列表为单一真源，vLLM 的 model 名匹配大小写敏感，列表返回的 id 即服务端能接受的名字）。
+- **修复启用视觉后自动选模型被阻断的根因**：旧实现用 `IsUserConfigured` 做 gate，而该判定含 `visionEnabled`——用户勾选 Enable 时 `IsUserConfigured` 变 true → 整个自动 fetch 被跳过 → 视觉启用时 model 永远空白。现改为仅以 `visionModel` 为空为触发条件，与 enabled 无关。
+- **设置页 Enable 切换即触发自动选取**：勾选 "Enable Vision Model" 从 false→true 且 model 为空时，自动发起 fetch 取第一个模型（无需手动点 Refresh 再选）。
+- 移除 v1.15.2 写死的 `DefaultModel = "GLM-4.6V-Flash"` 常量及规范化补丁代码。
+
 ## [1.15.2] - 2026-08-17
 
 ### Fixed

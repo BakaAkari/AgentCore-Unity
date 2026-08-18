@@ -674,13 +674,20 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     EditorGUI.BeginChangeCheck();
 
+                    bool wasEnabled = settings.visionEnabled;
                     settings.visionEnabled = EditorGUILayout.Toggle(
                         new GUIContent("Enable Vision Model", "When enabled, vision_analyze tool is available to the agent (capture Game/Scene View → vision model text description)."),
                         settings.visionEnabled);
 
+                    // 启用瞬间 false→true 且 model 仍空 → 自动 fetch baseURL 列表取第一个模型。
+                    // （v1.15.2 起不写死模型名，取服务端第一个；见 VisionModelConfig.EnsureDefaultWithAutoModelAsync）
+                    if (!wasEnabled && settings.visionEnabled && string.IsNullOrWhiteSpace(settings.visionModel))
+                    {
+                        AsyncHelper.RunAsync(async () => await VisionModelConfig.EnsureDefaultWithAutoModelAsync());
+                    }
+
                     bool prevEnabled = GUI.enabled;
                     GUI.enabled = prevEnabled && settings.visionEnabled;
-
                     settings.visionEndpoint = EditorGUILayout.TextField(
                         new GUIContent("Endpoint", "Vision model OpenAI-compatible base URL (independent from main model)."),
                         settings.visionEndpoint ?? "");
