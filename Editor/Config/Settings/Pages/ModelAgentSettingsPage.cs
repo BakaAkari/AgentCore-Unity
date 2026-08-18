@@ -53,7 +53,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private string _visionTestStatus;
         private bool _visionApiKeyDirty;
         private string _visionApiKeyInput;
-        private int _visionSelectedModelIndex = -1;
 
         // ── IAgentCoreSettingsPage ──
 
@@ -466,11 +465,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
             GUI.enabled = true;
 
             EditorGUILayout.EndHorizontal();
-
-            context.Ui.DrawStatusLabel(
-                context.State.GetStatusMessage(FetchStatusKeyPrefix + profile.id),
-                context.State.GetStatusLevel(FetchStatusKeyPrefix + profile.id),
-                miniLabel: true);
         }
 
         // ── Connection Actions ──
@@ -486,9 +480,15 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
             GUI.enabled = true;
 
+            // 刷新 + 测试状态统一显示在 Test Connection 按钮右侧（与 vision 卡片同款：内联、不换行、不占上下布局）
+            context.Ui.DrawStatusLabel(
+                context.State.GetStatusMessage(FetchStatusKeyPrefix + profile.id),
+                context.State.GetStatusLevel(FetchStatusKeyPrefix + profile.id),
+                miniLabel: true);
             context.Ui.DrawStatusLabel(
                 context.State.GetStatusMessage(TestStatusKeyPrefix + profile.id),
-                context.State.GetStatusLevel(TestStatusKeyPrefix + profile.id));
+                context.State.GetStatusLevel(TestStatusKeyPrefix + profile.id),
+                miniLabel: true);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
         }
@@ -687,11 +687,29 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                     DrawVisionApiKeyField();
 
-                    // Model 输入 + Refresh Models
+                    // Model 选择: 有刷新出的列表 → Popup(选即写回), 否则 → TextField(手输)。与主模型 DrawModelSelector 同款"二选一", 不并列两个控件。
                     EditorGUILayout.BeginHorizontal();
-                    settings.visionModel = EditorGUILayout.TextField(
-                        new GUIContent("Model", "Vision-capable model name (e.g. qwen-vl-plus, gpt-4o-mini, internvl)."),
-                        settings.visionModel ?? "");
+                    EditorGUILayout.PrefixLabel(new GUIContent("Model", "Vision-capable model name. When a fetched list is available you pick from the dropdown (writes back immediately); otherwise type it manually."));
+                    if (_visionModels.Count > 0)
+                    {
+                        var currentIdx = _visionModels.FindIndex(m =>
+                            string.Equals(m, settings.visionModel?.Trim(), StringComparison.OrdinalIgnoreCase));
+                        if (currentIdx < 0) currentIdx = 0;
+                        int pickedIdx = EditorGUILayout.Popup(currentIdx, _visionModels.ToArray());
+                        if (pickedIdx >= 0 && pickedIdx < _visionModels.Count &&
+                            !string.Equals(_visionModels[pickedIdx], settings.visionModel?.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            settings.visionModel = _visionModels[pickedIdx];
+                            // 选中即保存（与主模型 DrawModelSelector 的 picked→UpdateProfile 同语义），
+                            // 不依赖外层 EndChangeCheck 的隐式触发，确保切换后立刻落盘生效。
+                            settings.SaveSettings();
+                        }
+                    }
+                    else
+                    {
+                        // 手输: 直接赋值, 由卡片外层 EndChangeCheck(见下)统一 SaveSettings。
+                        settings.visionModel = EditorGUILayout.TextField(settings.visionModel ?? "");
+                    }
                     GUI.enabled = prevEnabled && settings.visionEnabled && !_visionFetchRunning;
                     if (GUILayout.Button(_visionFetchRunning ? "..." : "Refresh Models", GUILayout.Width(120)))
                     {
@@ -700,21 +718,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     GUI.enabled = prevEnabled;
                     EditorGUILayout.EndHorizontal();
 
-                    // Refresh 出的模型下拉（便捷选择；手动输入仍优先）
-                    DrawVisionModelDropdown(settings);
-
                     if (EditorGUI.EndChangeCheck())
                     {
                         settings.SaveSettings();
                     }
 
-                    // 状态行
-                    if (!string.IsNullOrEmpty(_visionFetchStatus))
-                        EditorGUILayout.HelpBox(_visionFetchStatus, _visionFetchStatus.StartsWith("[FAIL]") ? MessageType.Error : MessageType.Info);
-                    if (!string.IsNullOrEmpty(_visionTestStatus))
-                        EditorGUILayout.HelpBox(_visionTestStatus, _visionTestStatus.StartsWith("[FAIL]") ? MessageType.Error : MessageType.Info);
-
-                    // Test Connection
+                    // Test Connection（刷新/测试状态内联显示在本行右侧, 与主模型 Provider Profiles 同款, 不换行不占上下布局）
                     EditorGUILayout.BeginHorizontal();
                     GUI.enabled = prevEnabled && settings.visionEnabled && !_visionTestRunning;
                     if (GUILayout.Button(_visionTestRunning ? "Testing..." : "Test Connection", GUILayout.Width(150)))
@@ -722,6 +731,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         TriggerVisionTestConnection(settings);
                     }
                     GUI.enabled = prevEnabled;
+                    context.Ui.DrawStatusLabel(_visionFetchStatus, VisionStatusLevel(_visionFetchStatus, _visionFetchRunning), miniLabel: true);
+                    context.Ui.DrawStatusLabel(_visionTestStatus, VisionStatusLevel(_visionTestStatus, _visionTestRunning), miniLabel: true);
                     GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
                 });
@@ -763,36 +774,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
         }
 
-        private void DrawVisionModelDropdown(AgentCoreSettings settings)
-        {
-            if (_visionModels == null || _visionModels.Count == 0)
-            {
-                _visionSelectedModelIndex = -1;
-                return;
-            }
-
-            var options = _visionModels.ToArray();
-            int current = _visionModels.FindIndex(m =>
-                string.Equals(m, settings.visionModel?.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (current < 0) current = _visionSelectedModelIndex;
-
-            int wasRunning = GUI.enabled ? 1 : 0;
-            GUI.enabled = wasRunning == 1;
-            int newIndex = EditorGUILayout.Popup(
-                new GUIContent("Select Model", "Pick from the fetched list (overwrites the Model field)."),
-                current < 0 ? 0 : current,
-                options);
-            GUI.enabled = wasRunning == 1;
-
-            if (newIndex >= 0 && newIndex < _visionModels.Count &&
-                !string.Equals(_visionModels[newIndex], settings.visionModel?.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                _visionSelectedModelIndex = newIndex;
-                settings.visionModel = _visionModels[newIndex];
-                settings.SaveSettings();
-            }
-        }
-
         private void TriggerVisionFetchModels(AgentCoreSettings settings)
         {
             if (string.IsNullOrWhiteSpace(settings.visionEndpoint))
@@ -814,9 +795,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     {
                         _visionModels.Clear();
                         if (models != null) _visionModels.AddRange(models);
-                        _visionSelectedModelIndex = -1;
                         _visionFetchStatus = (models != null && models.Count > 0)
-                            ? $"[OK] Found {models.Count} models — pick one below (or type it manually)."
+                            ? $"[OK] Found {models.Count} models"
                             : "[OK] Endpoint reachable, but returned no models.";
                         _visionFetchRunning = false;
                     });
@@ -864,6 +844,24 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     });
                 }
             });
+        }
+
+        /// <summary>
+        /// 把 vision 刷新/测试的本地状态字符串 + 运行标记映射为 <see cref="SettingsStatusLevel"/>，
+        /// 供 <see cref="AgentCoreSettingsUi.DrawStatusLabel"/> 着色。对齐主模型 Provider Profiles 的状态级语义：
+        /// 运行中=Loading，[FAIL]=Error，[OK]=Success，空/其他=None。
+        /// </summary>
+        private static SettingsStatusLevel VisionStatusLevel(string status, bool running)
+        {
+            if (running)
+                return SettingsStatusLevel.Loading;
+            if (string.IsNullOrEmpty(status))
+                return SettingsStatusLevel.None;
+            if (status.StartsWith("[FAIL]"))
+                return SettingsStatusLevel.Error;
+            if (status.StartsWith("[OK]"))
+                return SettingsStatusLevel.Success;
+            return SettingsStatusLevel.None;
         }
     }
 }

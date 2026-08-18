@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.2] - 2026-08-17
+
+### Fixed
+- **视觉默认模型名规范为 `GLM-4.6V-Flash`（大写）**：默认值直接写死为规范大写，不再从服务端 `/models` 列表取排序后第一个（曾因服务端返回小写 `glm-4.6v-flash` 导致首次自动填充落盘小写、请求 404 `model does not exist`）。首次未配置时直接写 `visionModel = "GLM-4.6V-Flash"`，干净无补丁（移除此前为修正小写而加入的规范化/服务端选取补丁代码）。
+- **Vision 设置页 Model 下拉选中即保存**：Popup 选模型后立即 `SaveSettings()`（对齐主模型 DrawModelSelector 的 picked→保存语义），不再依赖顶层 `EndChangeCheck` 的隐式触发，避免"选了下拉但 model 字段/落盘未更新"。
+- **Vision/Provider 设置状态提示统一**：刷新与测试状态均以 miniLabel 内联显示在 Test Connection 按钮右侧（对齐主模型 `DrawStatusLabel` 用法），不再用会换行、占上下布局的 `HelpBox`；成功文案精简为 `Found N models`。
+
+### Changed
+- **SOUL.md 补 §2.5b 诊断纪律**：先取证再归因，运行时可观测事实（运行时值/持久化状态/日志/报错/最小复现）为裁判；读码逻辑与运行时矛盾时停止读码、插一次性 DIAG 日志拿实证；不被技术细节或第三方归因带偏，回退到"用户真正需要什么"。
+
 ## [1.15.0] - 2026-08-17
 
 ### Added

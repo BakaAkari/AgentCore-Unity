@@ -28,6 +28,12 @@ namespace AgentCore.Editor.Config
         // 该地址仅企业内网可达，与主模型默认 8000 同一内网 vLLM 栈。
         internal const string DefaultEndpoint = "http://172.16.248.60:8001/v1";
 
+        /// <summary>
+        /// 视觉默认模型名（v1.15.x 规范化）。首次自动填充时优先从服务端模型列表选取匹配本名的模型
+        /// （忽略大小写，避免服务端返回小写别名）并写入 visionModel，用户无需进设置刷新。
+        /// </summary>
+        internal const string DefaultModel = "GLM-4.6V-Flash";
+
         /// <summary>视觉模型是否启用（总开关）。未启用 = vision_analyze 工具不暴露给 agent。</summary>
         public static bool IsEnabled
             => AgentCoreSettings.instance != null && AgentCoreSettings.instance.visionEnabled;
@@ -82,54 +88,24 @@ namespace AgentCore.Editor.Config
             if (settings == null)
                 return;
 
+            // 默认值直接写死为规范大写（GLM-4.6V-Flash），不依赖服务端列表/大小写，避免产生小写错值。
             // 填默认 endpoint（同步，主线程安全：字段直接写 + SaveSettings）。
-            // 注意：enabled 保持 false（不强制启用），只补 endpoint/model，由用户决定是否开启视觉——「不强制」。
+            // enabled 保持 false（不强制启用），只补 endpoint/model，由用户决定是否开启视觉——「不强制」。
+            bool changed = false;
             if (string.IsNullOrWhiteSpace(settings.visionEndpoint))
             {
                 settings.visionEndpoint = DefaultEndpoint;
+                changed = true;
+            }
+            if (string.IsNullOrWhiteSpace(settings.visionModel))
+            {
+                settings.visionModel = DefaultModel;
+                changed = true;
+            }
+            if (changed)
+            {
                 settings.SaveSettings();
-                AgentCoreLog.Info($"[AgentCore] Vision: auto-filled default endpoint {DefaultEndpoint} (never configured).");
-            }
-
-            await TryAutoSelectFirstVisionModelAsync();
-        }
-
-        /// <summary>
-        /// 异步 fetch 默认端点的可用模型列表，取第一个填入 visionModel（仅当仍为空时）。
-        /// 静默失败：fetch 失败只记 Warning，不抛异常、不阻塞调用方。
-        /// </summary>
-        private static async Task TryAutoSelectFirstVisionModelAsync()
-        {
-            try
-            {
-                var settings = AgentCoreSettings.instance;
-                if (settings == null)
-                    return;
-
-                var endpoint = settings.visionEndpoint?.Trim();
-                if (string.IsNullOrWhiteSpace(endpoint))
-                    return;
-
-                var service = new ModelSettingsService();
-                var models = await service.FetchModelsAsync(endpoint, SecureKeyStorage.GetVisionApiKey());
-                if (models == null || models.Count == 0)
-                    return;
-
-                AsyncHelper.RunOnMainThread(() =>
-                {
-                    var current = AgentCoreSettings.instance;
-                    // 仅当仍为空时写入；若等待期间用户已手动填了 model，则不覆盖。
-                    if (current != null && string.IsNullOrWhiteSpace(current.visionModel))
-                    {
-                        current.visionModel = models[0];
-                        current.SaveSettings();
-                        AgentCoreLog.Info($"[AgentCore] Vision: auto-selected first available model '{models[0]}' at {endpoint}.");
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Warning($"[AgentCore] Vision auto-select default model failed: {ex.Message}");
+                AgentCoreLog.Info($"[AgentCore] Vision: auto-filled default endpoint {DefaultEndpoint} + model {DefaultModel} (never configured).");
             }
         }
 
