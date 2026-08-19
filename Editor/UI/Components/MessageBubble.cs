@@ -651,6 +651,22 @@ namespace AgentCore.Editor.UI.Components
             }
         }
 
+        /// <summary>
+        /// 运行时向已创建的气泡附加一张图（data URL）。供「assistant 发送截图」工具完成回调注入；幂等（已有图则替换）。
+        /// </summary>
+        /// <param name="imageDataUrl">完整 data URL（data:image/...;base64,...）。null/空忽略。</param>
+        public void AttachImage(string imageDataUrl)
+        {
+            if (string.IsNullOrEmpty(imageDataUrl)) return;
+            // 已有图则先移除旧 Image 元素，避免同一气泡多次注入叠加
+            if (_bubbleImage != null && _bubbleImage.parent != null && _bubbleContent != null)
+            {
+                _bubbleImage.RemoveFromHierarchy();
+                _bubbleImage = null;
+            }
+            TryAttachImage(imageDataUrl);
+        }
+
         private void SetupCopyButton()
         {
             if (_copyButton == null) return;

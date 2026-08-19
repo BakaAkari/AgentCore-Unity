@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config;
+using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools.Infrastructure;
 using Newtonsoft.Json.Linq;

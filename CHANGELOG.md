@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-08-19
+
+### Added
+- 用户聊天上传图像：输入区 `+` 附件按钮选择图片 → 降采样 → data URL → 发送并在用户气泡渲染；`vision_analyze` 新增 `source=user_image` 可读取分析用户上传的图（`UserImageStore`）
+- agent 主动向聊天发送截图：新增 `send_image` 工具（`source=scene/game/user_image` 捕获/取图），工具完成后在 assistant 气泡渲染该图并持久化到会话（`SendImageStore` + `turn.ImageDataUrl`），重开会话可恢复显示
+- 输入区右下角布局重排：取消按钮改为无文字方块符号 `◼`（28×24，避免挤占对话窗口宽度）；`+` 与思考强度 auto 下拉置于发送按钮下方一排、与发送按钮中心对齐
+
+### Fixed
+- 会话恢复时 user 气泡未还原 `turn.ImageDataUrl` 的图（重开丢失），现 user 与 assistant 均按 `turn.ImageDataUrl` 恢复
+- 取消按钮的 L10n 文案（`chat.input.cancel`）会覆盖 uxml 的方块符号，改为不受 L10n 覆盖
+
 ## [1.15.4] - 2026-08-19
 
 ### Added

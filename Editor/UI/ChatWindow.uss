@@ -489,7 +489,7 @@
     align-items: center;
     flex-grow: 0;
     flex-shrink: 0;
-    margin: 0 4px 0 0;
+    margin: 0; /* v1.16.0 Align fix: 去掉 margin-right:4px，使 reasoning 下拉与 send-button（margin 0）右边界对齐、同宽 → 中心对齐 */
 }
 
 .agentcore-reasoning-level-selector__popup {
@@ -533,7 +533,7 @@
 }
 
 #send-button {
-    width: 60px;
+    width: 64px;
     height: 28px;
     font-size: 13px;
     -unity-font-style: bold;
@@ -559,15 +559,14 @@
 }
 
 #cancel-button {
-    width: 60px;
-    height: 28px;
-    font-size: 13px;
-    -unity-font-style: bold;
+    width: 28px;  /* v1.16.0: 与 attach(+) 同尺寸的小号按钮，避免挤占对话窗口宽度 */
+    height: 24px;
+    font-size: 14px; /* ■ 方块符号尺寸 */
     background-color: #c84a4a;
-    border-radius: 6px;
+    border-radius: 4px;
     border-width: 0;
     color: #ffffff;
-    margin: 0 0 0 4px;
+    margin: 0 4px 0 0; /* 与 send-button 的间距 */
     padding: 0;
     display: none;
 }
@@ -578,6 +577,51 @@
 
 #cancel-button:active {
     background-color: #b83a3a;
+}
+
+/* 输入区右下角两行：上排 send/cancel；下排 + 与思考强度(auto)左侧对齐，整体居右（v1.16.0） */
+#input-right-col {
+    flex-direction: column;
+    align-items: flex-end;
+    flex-shrink: 0;
+    margin: 0 0 0 4px;
+}
+
+#input-top-row {
+    flex-direction: row;
+    align-items: flex-end;
+    flex-shrink: 0;
+}
+
+#input-bottom-row {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    margin: 4px 0 0 0;
+}
+
+#input-ai-selector-slot {
+    margin: 0 0 0 4px;
+}
+
+#attach-button {
+    width: 28px;
+    height: 24px;
+    font-size: 16px;
+    background-color: #3a3a3a;
+    border-radius: 4px;
+    border-width: 0;
+    color: #d4d4d4;
+    padding: 0;
+    margin: 0;
+}
+
+#attach-button:hover {
+    background-color: #4a4a4a;
+}
+
+#attach-button:active {
+    background-color: #2a2a2a;
 }
 
 /* --- 内嵌工具确认面板 --- */

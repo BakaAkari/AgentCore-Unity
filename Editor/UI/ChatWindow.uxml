@@ -51,9 +51,18 @@
                 <ui:TextField name="input-field" multiline="true" />
               </ui:ScrollView>
               <ui:VisualElement name="input-buttons">
-                <ui:Button name="attach-button" text="+ 图" tooltip="上传图片给 Agent 查看（按钮选择文件）" />
-                <ui:Button name="send-button" text="发送" />
-                <ui:Button name="cancel-button" text="取消" />
+                <!-- 右下角两行：上排 send/cancel；下排 + 与思考强度(auto)左侧对齐，整体居右 -->
+                <ui:VisualElement name="input-right-col">
+                  <ui:VisualElement name="input-top-row">
+                    <ui:Button name="cancel-button" text="■" tooltip="停止当前操作" />
+                    <ui:Button name="send-button" text="发送" />
+                  </ui:VisualElement>
+                  <ui:VisualElement name="input-bottom-row">
+                    <ui:Button name="attach-button" text="+" tooltip="上传图片给 Agent 查看（按钮选择文件）" />
+                    <!-- 思考强度(auto)下拉由 C# 动态插入到此 slot，位于 + 右侧 -->
+                    <ui:VisualElement name="input-ai-selector-slot" />
+                  </ui:VisualElement>
+                </ui:VisualElement>
               </ui:VisualElement>
             </ui:VisualElement>
           </ui:VisualElement>

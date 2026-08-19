@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
@@ -71,6 +72,10 @@ namespace AgentCore.Editor.UI
         {
             var turnView = EnsureAssistantTurnView(messageId);
             var bubble = turnView.EnsureBubble(messageId, "", isStreaming: true);
+            // v1.16.0: 若该 turn 已带图（send_image 先于正文完成），气泡创建即渲染
+            var turnForImage = _agentLoop?.ConversationHistory?.FirstOrDefault(t => t.Id == messageId);
+            if (!string.IsNullOrEmpty(turnForImage?.ImageDataUrl))
+                bubble.AttachImage(turnForImage.ImageDataUrl);
             _messageBubbles[messageId] = bubble;
             _currentAssistantTurnId = messageId;
             ScrollToBottom(force: true); // 新消息气泡添加，强制滚动到底部
@@ -470,7 +475,7 @@ namespace AgentCore.Editor.UI
                     restoreGroup = null;
 
                     // 用户消息气泡
-                    var bubble = new MessageBubble(turn.Id, "user", turn.Content);
+                    var bubble = new MessageBubble(turn.Id, "user", turn.Content, imageDataUrl: turn.ImageDataUrl);
                     WireForkButton(bubble, turn, isLastTurn);
                     _messageBubbles[turn.Id] = bubble;
                     _messageListManager?.AddItem(bubble);
@@ -481,6 +486,9 @@ namespace AgentCore.Editor.UI
                     var turnView = EnsureAssistantTurnView(turn.Id);
                     turnView.RestoreThinking(turn);
                     var bubble = turnView.EnsureBubble(turn.Id, turn.Content, isStreaming: false);
+                    // v1.16.0: 恢复 assistant 发送的截图（send_image 产物）
+                    if (!string.IsNullOrEmpty(turn.ImageDataUrl))
+                        bubble.AttachImage(turn.ImageDataUrl);
                     WireForkButton(bubble, turn, isLastTurn);
                     _messageBubbles[turn.Id] = bubble;
 

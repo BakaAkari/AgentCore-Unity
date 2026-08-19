@@ -82,9 +82,8 @@ namespace AgentCore.Editor.UI
             if (sendBtn != null)
                 sendBtn.text = Loc.Tr("chat.input.send", "发送");
 
-            var cancelBtn = rootVisualElement.Q<Button>("cancel-button");
-            if (cancelBtn != null)
-                cancelBtn.text = Loc.Tr("chat.input.cancel", "取消");
+            // v1.16.0: cancel 按钮改为无文字方块符号 ■（uxml 固定 text="■"），不再做 L10n 文案覆盖
+            // （此前这里 cancelBtn.text=Loc.Tr("chat.input.cancel","取消") 会覆盖 uxml 的 ■，导致方块方案失效）
 
             // v1.14.10: 思考强度下拉的选项文案（Auto/Off/Low/Med/High）随语言刷新。
             _reasoningLevelSelector?.RefreshDisplayNames();

@@ -296,7 +296,13 @@ namespace AgentCore.Editor.UI
                 else
                 {
                     _reasoningLevelSelector = new AgentCore.Editor.UI.Components.ReasoningLevelSelector();
-                    inputButtons.Insert(0, _reasoningLevelSelector);
+                    // v1.16.0: 思考强度(auto)下拉放在 send 下方一排、attach(+) 的右侧（input-ai-selector-slot）;
+                    // 兜底：若 slot 不存在则退回插到 input-buttons 行首。
+                    var aiSlot = inputButtons.Q<VisualElement>("input-ai-selector-slot");
+                    if (aiSlot != null)
+                        aiSlot.Add(_reasoningLevelSelector);
+                    else
+                        inputButtons.Insert(0, _reasoningLevelSelector);
                 }
             }
 

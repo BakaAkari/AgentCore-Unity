@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.UI.Components;
 using UnityEngine;
@@ -211,6 +212,18 @@ namespace AgentCore.Editor.UI
             else
             {
                 AgentCoreLog.Warning($"[AgentCore.UI] HandleToolCallCompleted: 未找到 key={key} 的卡片, 当前 keys=[{string.Join(", ", _activeToolCards.Keys)}]");
+            }
+
+            // v1.16.0: assistant 发送截图到聊天 — send_image 工具完成后，把图注入 assistant 气泡并持久化到 turn。
+            if (string.Equals(evt.ToolName, "send_image", StringComparison.OrdinalIgnoreCase)
+                && AgentCore.Editor.Core.SendImageStore.TryGetCurrent(out var sentImageUrl))
+            {
+                AgentCore.Editor.Core.SendImageStore.Clear(); // 消费掉，避免重复注入
+                // 持久化到 turn（单一真源）；若气泡尚未创建，由 AddAssistantMessageBubble / RebuildMessageBubbles 按 turn.ImageDataUrl 渲染。
+                var turn = _agentLoop?.ConversationHistory?.FirstOrDefault(t => t.Id == evt.MessageId);
+                if (turn != null) turn.ImageDataUrl = sentImageUrl;
+                if (_messageBubbles.TryGetValue(evt.MessageId, out var bubble))
+                    bubble.AttachImage(sentImageUrl);
             }
         }
 
