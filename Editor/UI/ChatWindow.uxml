@@ -51,6 +51,7 @@
                 <ui:TextField name="input-field" multiline="true" />
               </ui:ScrollView>
               <ui:VisualElement name="input-buttons">
+                <ui:Button name="attach-button" text="+ 图" tooltip="上传图片给 Agent 查看（按钮选择文件）" />
                 <ui:Button name="send-button" text="发送" />
                 <ui:Button name="cancel-button" text="取消" />
               </ui:VisualElement>

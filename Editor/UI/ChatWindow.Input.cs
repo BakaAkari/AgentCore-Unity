@@ -8,6 +8,9 @@ namespace AgentCore.Editor.UI
 {
     public partial class ChatWindow
     {
+        /// <summary>待发送的用户图 data URL（按钮/粘贴上传后暂存，OnSendClicked 时并入本轮发送并清空）。</summary>
+        private string _pendingAttachImageDataUrl;
+
         #region 用户操作
 
         /// <summary>
@@ -62,6 +65,10 @@ namespace AgentCore.Editor.UI
             // 记录最后一条用户消息（用于错误重试）
             _lastUserMessage = text;
 
+            // 读取并清空待发送图（按钮/粘贴上传的），供气泡显示与发送共用；无图则为 null（纯文本）
+            var imageDataUrl = _pendingAttachImageDataUrl;
+            _pendingAttachImageDataUrl = null;
+
             // 清空输入框
             _inputField.value = "";
             _inputField.Focus();
@@ -69,7 +76,7 @@ namespace AgentCore.Editor.UI
             // 添加用户消息气泡：ID 先在 UI 层生成，再传给 SendMessageAsync 让它复用同一个 ID
             // 作为真实 turn.Id——否则气泡 MessageId 和 turn.Id 不一致，Fork 按钮找不到对应的 turn。
             var userTurnId = Guid.NewGuid().ToString();
-            AddUserMessage(text, userTurnId);
+            AddUserMessage(text, userTurnId, imageDataUrl);
 
             // 用户主动发送新消息 → 强制回到底部并恢复自动追底
             ScrollToBottom(force: true);
@@ -79,13 +86,93 @@ namespace AgentCore.Editor.UI
 
             // 异步发送消息
             AsyncHelper.RunAsync(
-                () => _agentLoop.SendMessageAsync(text, userTurnId),
+                () => _agentLoop.SendMessageAsync(text, userTurnId, imageDataUrl),
                 onError: ex =>
                 {
                     AgentCoreLog.Error($"[AgentCore] SendMessage error: {ex.Message}");
                     DismissPendingIndicator();
                 }
             );
+        }
+
+        /// <summary>
+        /// 上传图片按钮点击处理（按钮选择本地图片 → data URL → 作为本轮用户消息带图发送）。
+        /// <para>与粘贴图像共用同一套「图进 UserImageStore + 主模型收到提示 → vision_analyze source=user_image」闭环。
+        /// 图片不塞进主 LLM 上下文（base64 是噪音），主模型只收到一句「用户上传了图，可调 vision_analyze source=user_image」提示。</para>
+        /// </summary>
+        private void OnAttachClicked()
+        {
+            try
+            {
+                var path = UnityEditor.EditorUtility.OpenFilePanel(
+                    AgentCore.Editor.L10n.Loc.Tr("chat.attach.title", "选择图片"),
+                    "",
+                    "png,jpg,jpeg");
+                if (string.IsNullOrEmpty(path)) return; // 用户取消
+
+                var bytes = System.IO.File.ReadAllBytes(path);
+                if (bytes.Length == 0)
+                {
+                    AgentCoreLog.Warning("[AgentCore] Attach image: selected file is empty.");
+                    return;
+                }
+
+                // 限制图片体积，避免 base64 膨胀撑爆上下文；超过 ~2MB 降至可接受范围
+                var texture = new Texture2D(2, 2);
+                if (!texture.LoadImage(bytes))
+                {
+                    UnityEngine.Object.DestroyImmediate(texture);
+                    AgentCoreLog.Warning("[AgentCore] Attach image: not a valid image file.");
+                    return;
+                }
+                // 大型图降采样到 maxSide 1024，控制 data URL 体积（最近邻，API 均经验证存在：
+                // GetPixels32 / SetPixels32 / EncodeToPNG）。原图无需降采样时直接用。
+                const int maxSide = 1024;
+                int w = texture.width, h = texture.height;
+                if (w > maxSide || h > maxSide)
+                {
+                    float scale = w >= h ? (float)maxSide / w : (float)maxSide / h;
+                    int nw = System.Math.Max(1, (int)(w * scale));
+                    int nh = System.Math.Max(1, (int)(h * scale));
+                    var srcPixels = texture.GetPixels32();
+                    var dstPixels = new Color32[nw * nh];
+                    for (int y = 0; y < nh; y++)
+                    {
+                        int sy = (int)(y / scale);
+                        for (int x = 0; x < nw; x++)
+                        {
+                            int sx = (int)(x / scale);
+                            dstPixels[y * nw + x] = srcPixels[sy * w + sx];
+                        }
+                    }
+                    var scaled = new Texture2D(nw, nh, TextureFormat.RGBA32, false);
+                    scaled.SetPixels32(dstPixels);
+                    scaled.Apply();
+                    UnityEngine.Object.DestroyImmediate(texture);
+                    texture = scaled;
+                }
+                var png = texture.EncodeToPNG();
+                if (png == null || png.Length == 0)
+                {
+                    AgentCoreLog.Warning("[AgentCore] Attach image: encode failed.");
+                    return;
+                }
+                var dataUrl = "data:image/png;base64," + Convert.ToBase64String(png);
+
+                // 暂存待发送图，复用 OnSendClicked 的状态守卫 + AsyncHelper 发送路径（含 NewSession/DomainReload 一致性处理）。
+                _pendingAttachImageDataUrl = dataUrl;
+
+                // 纯图无文本时，给输入框填一句占位，让 OnSendClicked 的非空文本校验通过且主模型知道要看图。
+                if (string.IsNullOrEmpty(_inputField?.value?.Trim()))
+                    _inputField.value = AgentCore.Editor.L10n.Loc.Tr("chat.attach.defaultText", "[用户上传了一张图像]");
+
+                OnSendClicked();
+            }
+            catch (System.Exception ex)
+            {
+                AgentCoreLog.Error($"[AgentCore] Attach image error: {ex.Message}");
+                _pendingAttachImageDataUrl = null;
+            }
         }
 
         /// <summary>

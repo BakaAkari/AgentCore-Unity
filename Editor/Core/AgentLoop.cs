@@ -536,7 +536,7 @@ namespace AgentCore.Editor.Core
         /// </param>
         /// <exception cref="InvalidOperationException">当 Agent 未初始化或非 Idle 状态时抛出</exception>
         /// <exception cref="ArgumentException">当消息为空时抛出</exception>
-        public async Task SendMessageAsync(string userMessage, string userTurnId = null)
+        public async Task SendMessageAsync(string userMessage, string userTurnId = null, string imageDataUrl = null)
         {
             // 1. 参数校验
             if (string.IsNullOrWhiteSpace(userMessage))
@@ -564,13 +564,23 @@ namespace AgentCore.Editor.Core
             var ct = _currentCts.Token;
 
             // 3. 添加用户消息到历史
-            _messages.Add(ChatMessage.User(userMessage));
+            // v1.16: 用户图支持。图不塞进主模型上下文（base64 是噪音，且主模型多不支持看图）；
+            // 改为主模型收到一句短提示去调 vision_analyze source=user_image，工具再从 UserImageStore 读图。
+            var hasUserImage = !string.IsNullOrEmpty(imageDataUrl);
+            var llmUserContent = hasUserImage
+                ? userMessage + "\n\n[AgentCore] 用户本轮上传了一张图像（按钮/粘贴的附件）。如需查看或分析这张图，调用 vision_analyze 工具并设 source=user_image（配合 prompt），视觉模型会描述它。"
+                : userMessage;
+            _messages.Add(ChatMessage.User(llmUserContent));
+            if (hasUserImage)
+                AgentCore.Editor.Core.UserImageStore.Set(imageDataUrl);
             var userTurn = new ConversationTurn("user", userMessage)
             {
                 // Fork 支持：user turn 在这一刻即完成（不会再有后续消息追加到它身上），
                 // 直接记录快照。
                 MessageEndIndex = _messages.Count
             };
+            if (hasUserImage)
+                userTurn.ImageDataUrl = imageDataUrl;
             // UI 层可能在调用本方法之前就已经用同一个 ID 创建了消息气泡（见 userTurnId 参数注释），
             // 这里覆盖掉构造函数生成的默认 GUID，确保气泡 MessageId 与真实 turn.Id 一致。
             if (!string.IsNullOrEmpty(userTurnId))

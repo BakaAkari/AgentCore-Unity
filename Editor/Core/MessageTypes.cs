@@ -869,6 +869,13 @@ namespace AgentCore.Editor.Core
         /// <summary>最终回复气泡内容；不得包含已抽取的 thinking / planning trace。</summary>
         public string Content { get; set; }
 
+        /// <summary>
+        /// 可选图像（data URL，如 data:image/png;base64,...）。null = 纯文本消息。
+        /// user 上传图（按钮/粘贴）与 assistant 截图共用此字段；void 系列消息为 null。
+        /// 保持 null 时完全向后兼容旧会话数据；仅当非 null 时 UI 气泡才渲染图像。
+        /// </summary>
+        public string ImageDataUrl { get; set; }
+
         /// <summary>完整 thinking / reasoning 内容；不进入 LLM 消息历史。</summary>
         public string Reasoning { get; set; }
 

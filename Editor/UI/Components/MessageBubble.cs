@@ -70,6 +70,9 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>气泡内容容器</summary>
         private VisualElement _bubbleContent;
 
+        /// <summary>气泡内显示的图像（用户上传图 / 截图），无图时为 null。</summary>
+        private UnityEngine.UIElements.Image _bubbleImage;
+
         /// <summary>气泡根元素</summary>
         private VisualElement _bubbleRoot;
 
@@ -122,7 +125,7 @@ namespace AgentCore.Editor.UI.Components
         /// <param name="role">角色标识：&quot;user&quot; / &quot;assistant&quot; / &quot;error&quot;</param>
         /// <param name="content">初始消息内容（可为空）</param>
         /// <param name="isStreaming">是否为流式输出模式（仅助手消息有效）</param>
-        public MessageBubble(string messageId, string role, string content = "", bool isStreaming = false)
+        public MessageBubble(string messageId, string role, string content = "", bool isStreaming = false, string imageDataUrl = null)
         {
             MessageId = messageId;
             Role = role;
@@ -158,6 +161,7 @@ namespace AgentCore.Editor.UI.Components
             var timeLabel = this.Q<Label>("time-label");
             _contentLabel = this.Q<Label>("content-label");
             _bubbleContent = this.Q<VisualElement>("bubble-content");
+            TryAttachImage(imageDataUrl);
             _copyButton = this.Q<Button>("copy-button");
             _forkButton = this.Q<Button>("fork-button");
 
@@ -598,6 +602,55 @@ namespace AgentCore.Editor.UI.Components
         /// 保证复制粘贴到别处仍是 markdown 源码。
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// 若气泡挂有图像（data URL），解码并显示在内容上方。
+        /// 无图 / 空 / 解析失败时静默跳过（纯文本消息完全不受影响）。
+        /// </summary>
+        private void TryAttachImage(string imageDataUrl)
+        {
+            if (string.IsNullOrEmpty(imageDataUrl))
+                return;
+            if (_bubbleContent == null)
+                return;
+
+            try
+            {
+                // data URL 形如 data:image/png;base64,<data> —— 取逗号后的 base64 部分
+                var comma = imageDataUrl.IndexOf(",", StringComparison.Ordinal);
+                if (comma < 0) return;
+                var b64 = imageDataUrl.Substring(comma + 1);
+                var bytes = System.Convert.FromBase64String(b64);
+                if (bytes == null || bytes.Length == 0) return;
+
+                var tex = new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, false);
+                if (!UnityEngine.ImageConversion.LoadImage(tex, bytes))
+                {
+                    UnityEngine.Object.DestroyImmediate(tex);
+                    return;
+                }
+
+                var img = new UnityEngine.UIElements.Image
+                {
+                    image = tex,
+                    scaleMode = UnityEngine.ScaleMode.ScaleToFit,
+                    name = "bubble-image"
+                };
+                // 视觉上限：避免大图撑爆气泡；等比例缩放看 Unity 的 ScaleToFit 自动处理高度
+                img.style.maxHeight = 320;
+                img.style.maxWidth = 1000;
+                img.style.marginBottom = 6;
+                img.style.flexGrow = 1;
+                img.style.alignSelf = Align.FlexStart;
+
+                _bubbleContent.Insert(0, img);
+                _bubbleImage = img;
+            }
+            catch (System.Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] MessageBubble image attach failed: {ex.Message}");
+            }
+        }
+
         private void SetupCopyButton()
         {
             if (_copyButton == null) return;

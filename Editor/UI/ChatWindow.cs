@@ -124,6 +124,7 @@ namespace AgentCore.Editor.UI
 
         /// <summary>发送按钮</summary>
         private Button _sendButton;
+        private Button _attachButton;
 
         /// <summary>取消按钮</summary>
         private Button _cancelButton;
@@ -278,6 +279,7 @@ namespace AgentCore.Editor.UI
             _inputScrollView = rootVisualElement.Q<ScrollView>("input-scroll-view");
             _inputField = rootVisualElement.Q<TextField>("input-field");
             _sendButton = rootVisualElement.Q<Button>("send-button");
+            _attachButton = rootVisualElement.Q<Button>("attach-button");
             _cancelButton = rootVisualElement.Q<Button>("cancel-button");
             _scrollToBottomButton = rootVisualElement.Q<Button>("scroll-to-bottom-button");
 
@@ -333,6 +335,7 @@ namespace AgentCore.Editor.UI
 
             // 4. 绑定按钮事件
             _sendButton?.RegisterCallback<ClickEvent>(_ => OnSendClicked());
+            _attachButton?.RegisterCallback<ClickEvent>(_ => OnAttachClicked());
             _cancelButton?.RegisterCallback<ClickEvent>(_ => OnCancelClicked());
             _scrollToBottomButton?.RegisterCallback<ClickEvent>(_ => OnScrollToBottomClicked());
 

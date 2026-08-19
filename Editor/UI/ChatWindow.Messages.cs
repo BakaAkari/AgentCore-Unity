@@ -24,9 +24,9 @@ namespace AgentCore.Editor.UI
         /// <c>userTurnId</c> 是同一个值，否则气泡 MessageId 与真实 turn.Id 不一致，
         /// Fork 按钮会找不到对应的 turn。
         /// </param>
-        private void AddUserMessage(string content, string messageId)
+        private void AddUserMessage(string content, string messageId, string imageDataUrl = null)
         {
-            var bubble = new MessageBubble(messageId, "user", content);
+            var bubble = new MessageBubble(messageId, "user", content, imageDataUrl: imageDataUrl);
             // user turn 的 MessageEndIndex 由 AgentLoop.SendMessageAsync 在方法开头同步设置
             // （不经过任何 await），是调用方可以依赖的不变量——一旦气泡创建，对应 turn 必然
             // 会在随后的同步代码路径里被标记为"已完成"，因此这里可以直接启用 fork，

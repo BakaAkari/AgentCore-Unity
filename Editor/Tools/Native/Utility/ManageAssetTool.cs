@@ -245,22 +245,32 @@ namespace AgentCore.Editor.Tools.Native.Utility
                     info["labels"] = new JArray(labels);
                 }
 
-                // Sub-assets
-                var subAssets = AssetDatabase.LoadAllAssetsAtPath(path);
-                if (subAssets.Length > 1)
+                // Sub-assets. Skip for scene assets (.unity): LoadAllAssetsAtPath on a scene returns the
+                // scene's objects, and Unity refuses to read scene objects on a threaded path - it spams
+                // "Do not use ReadObjectThreaded on scene objects!". Scene files have no meaningful sub-assets
+                // to enumerate here, so bail out before touching them.
+                if (asset is SceneAsset)
                 {
-                    var subArray = new JArray();
-                    foreach (var sub in subAssets)
+                    info["subAssets"] = null;
+                }
+                else
+                {
+                    var subAssets = AssetDatabase.LoadAllAssetsAtPath(path);
+                    if (subAssets.Length > 1)
                     {
-                        if (sub == null || sub == asset) continue;
-                        subArray.Add(new JObject
+                        var subArray = new JArray();
+                        foreach (var sub in subAssets)
                         {
-                            ["name"] = sub.name,
-                            ["type"] = sub.GetType().Name
-                        });
+                            if (sub == null || sub == asset) continue;
+                            subArray.Add(new JObject
+                            {
+                                ["name"] = sub.name,
+                                ["type"] = sub.GetType().Name
+                            });
+                        }
+                        if (subArray.Count > 0)
+                            info["subAssets"] = subArray;
                     }
-                    if (subArray.Count > 0)
-                        info["subAssets"] = subArray;
                 }
 
                 return ToolResponse.OkWithData(info, $"Asset info for '{path}'.");
