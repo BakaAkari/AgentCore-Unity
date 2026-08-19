@@ -99,14 +99,43 @@ namespace AgentCore.Editor.UI
             var active = sessions.Where(s => !s.Archived).ToList();
             var archived = sessions.Where(s => s.Archived).ToList();
 
-            // 活动会话按 tag 分组：已登记 tag 按 registry 顺序（bucket 0）；未登记 tag 字典序（bucket 1）；
-            // null/空 tag 归入"未分类"（bucket 2，排在最后）。registry 缺失时所有 tag 落入 bucket 1，行为等同旧版。
+            // 活动会话按 tag 分组。分组间排序由 SessionTagSortMode 决定：
+            //   置顶 tag 恒在最前（任一模式都优先），未分类(null)恒在最后；
+            //   其余按所选模式（Manual=registry order / Name=字典序 / Modified=最近UpdatedAt / Created=最早CreatedAt）。
             var registryOrder = SessionTagRegistry.LoadOrderMap();
-            var groups = active
-                .GroupBy(s => string.IsNullOrEmpty(s.Tag) ? null : s.Tag)
-                .OrderBy(g => g.Key == null ? 2 : (registryOrder.ContainsKey(g.Key) ? 0 : 1))
-                .ThenBy(g => g.Key != null && registryOrder.TryGetValue(g.Key, out var o) ? o : int.MaxValue)
-                .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+            var sortMode = SessionTagRegistry.GetSortMode();
+            var grouped = active
+                .GroupBy(s => string.IsNullOrEmpty(s.Tag) ? null : s.Tag);
+            // 置顶恒优先；未分类(null)恒最后；其余按所选排序模式排 tag。
+            IEnumerable<IGrouping<string, SessionSummary>> groups;
+            switch (sortMode)
+            {
+                case SessionTagSortMode.Name:
+                    groups = grouped
+                        .OrderByDescending(g => g.Key != null && SessionTagRegistry.IsTagPinned(g.Key))
+                        .ThenBy(g => g.Key == null ? 2 : 0)
+                        .ThenBy(g => g.Key ?? "", StringComparer.OrdinalIgnoreCase);
+                    break;
+                case SessionTagSortMode.Modified:
+                    groups = grouped
+                        .OrderByDescending(g => g.Key != null && SessionTagRegistry.IsTagPinned(g.Key))
+                        .ThenBy(g => g.Key == null ? 2 : 0)
+                        .ThenByDescending(g => g.Max(s => s.UpdatedAt)); // 最近更新的 tag 在前
+                    break;
+                case SessionTagSortMode.Created:
+                    groups = grouped
+                        .OrderByDescending(g => g.Key != null && SessionTagRegistry.IsTagPinned(g.Key))
+                        .ThenBy(g => g.Key == null ? 2 : 0)
+                        .ThenByDescending(g => g.Min(s => s.CreatedAt)); // 最早创建的 tag 在前
+                    break;
+                default: // Manual（默认）：registry order + 未登记字典序
+                    groups = grouped
+                        .OrderByDescending(g => g.Key != null && SessionTagRegistry.IsTagPinned(g.Key))
+                        .ThenBy(g => g.Key == null ? 2 : (registryOrder.ContainsKey(g.Key) ? 0 : 1))
+                        .ThenBy(g => g.Key != null && registryOrder.TryGetValue(g.Key, out var o) ? o : int.MaxValue)
+                        .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+                    break;
+            }
 
             foreach (var group in groups)
             {
@@ -117,6 +146,11 @@ namespace AgentCore.Editor.UI
                 var headerText = $"{tagDisplay} ({ordered.Count})";
 
                 var foldout = BuildSessionGroupFoldout(prefKey, headerText, defaultExpanded: true, ordered, currentId, showTagChip: false, tagName: tagKey);
+                // 置顶 tag：在组头右侧加一个 pin 图标标识（非 emoji，用内置 EditorIcon）。
+                if (tagKey != null && SessionTagRegistry.IsTagPinned(tagKey))
+                {
+                    AddPinIconToFoldout(foldout);
+                }
                 _sessionListContainer.Add(foldout);
             }
 
@@ -141,6 +175,92 @@ namespace AgentCore.Editor.UI
                     }
                 });
             }
+        }
+
+        /// <summary>
+        /// 给会话列表右上的排序按钮设置上下箭头文本符号（▲▼，非 emoji，任何字体都可靠渲染）。
+        /// 用两个垂直堆叠的 Label，语义清晰且不依赖可能缺失的内置图标名（d_ArrowUp/d_ArrowDown 在 2022.3 取不到）。
+        /// </summary>
+        private static void TryApplySortButtonIcon(Button button)
+        {
+            if (button == null) return;
+            button.text = string.Empty;
+
+            var up = new Label("▲"); // ▲
+            var down = new Label("▼"); // ▼
+            up.style.fontSize = 9;
+            down.style.fontSize = 9;
+            up.style.unityTextAlign = TextAnchor.MiddleCenter;
+            down.style.unityTextAlign = TextAnchor.MiddleCenter;
+            up.pickingMode = PickingMode.Ignore;
+            down.pickingMode = PickingMode.Ignore;
+
+            button.Add(up);
+            button.Add(down);
+            button.style.flexDirection = FlexDirection.Column;
+            button.style.alignItems = Align.Center;
+            button.style.justifyContent = Justify.Center;
+            button.style.paddingTop = 0;
+            button.style.paddingBottom = 0;
+            button.style.paddingLeft = 0;
+            button.style.paddingRight = 0;
+        }
+
+        /// <summary>
+        /// 在组头右侧添加一个置顶标记（▲ 文本符号，非 emoji，任何字体都可靠渲染），标识该 tag 已置顶。
+        /// 把标记作为组头 Toggle 的最后一个子元素，margin-left:auto 使其靠右对齐。
+        /// </summary>
+        private static void AddPinIconToFoldout(Foldout foldout)
+        {
+            if (foldout == null) return;
+            Toggle headerToggle = foldout.Q<Toggle>();
+            if (headerToggle == null) return;
+            try
+            {
+                var icon = new Label("▲"); // ▲
+                icon.tooltip = AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.pinnedTooltip", "已置顶");
+                icon.style.fontSize = 10;
+                icon.style.width = 14;
+                icon.style.height = 14;
+                icon.style.marginLeft = Length.Auto(); // 靠右对齐
+                icon.style.alignSelf = Align.Center;
+                icon.style.unityTextAlign = TextAnchor.MiddleCenter;
+                icon.style.opacity = 0.85f;
+                icon.pickingMode = PickingMode.Ignore;
+                headerToggle.Add(icon);
+            }
+            catch (System.Exception ex)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Warning($"[AgentCore] AddPinIconToFoldout failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>弹出 tag 排序模式选择菜单（会话列表右上排序按钮触发）。只影响 tag 分组顺序，不影响组内 session 排序。</summary>
+        private void ShowTagSortMenu()
+        {
+            var menu = new GenericMenu();
+            var current = SessionTagRegistry.GetSortMode();
+
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagSort.alpha", "按名称排序")),
+                current == SessionTagSortMode.Name, () =>
+                {
+                    SessionTagRegistry.SetSortMode(SessionTagSortMode.Name);
+                    RefreshSessionList();
+                });
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagSort.modified", "按修改时间排序")),
+                current == SessionTagSortMode.Modified, () =>
+                {
+                    SessionTagRegistry.SetSortMode(SessionTagSortMode.Modified);
+                    RefreshSessionList();
+                });
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagSort.created", "按创建时间排序")),
+                current == SessionTagSortMode.Created, () =>
+                {
+                    SessionTagRegistry.SetSortMode(SessionTagSortMode.Created);
+                    RefreshSessionList();
+                });
+
+            menu.ShowAsContext();
         }
 
         /// <summary>EditorPrefs 中存储分组 Foldout 折叠状态的 key 前缀（per-user / per-machine，跨 Unity 重启保留）。</summary>
@@ -588,24 +708,14 @@ namespace AgentCore.Editor.UI
 
             menu.AddSeparator("");
 
-            // 置顶
-            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.pinTop", "置顶")), false, () =>
+            // 置顶 / 取消置顶（toggle）：已置顶的 tag 显示"取消置顶"。
+            var pinned = SessionTagRegistry.IsTagPinned(tagName);
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr(
+                pinned ? "session.tagMenu.unpin" : "session.tagMenu.pinTop",
+                pinned ? "取消置顶" : "置顶")), false, () =>
             {
-                SessionTagRegistry.PinTagToTop(tagName);
-                RefreshSessionList();
-            });
-
-            // 上移
-            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.moveUp", "上移")), false, () =>
-            {
-                SessionTagRegistry.MoveTagUp(tagName);
-                RefreshSessionList();
-            });
-
-            // 下移
-            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("session.tagMenu.moveDown", "下移")), false, () =>
-            {
-                SessionTagRegistry.MoveTagDown(tagName);
+                if (pinned) SessionTagRegistry.UnpinTag(tagName);
+                else SessionTagRegistry.PinTagToTop(tagName);
                 RefreshSessionList();
             });
 

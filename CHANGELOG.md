@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.4] - 2026-08-19
+
+### Added
+- 会话列表右上新增排序按钮：点击可切换 tag 按名称 / 修改时间 / 创建时间排序（默认按创建时间）
+
+### Changed
+- 归档抽屉中带 tag 的会话，tag 标识改为左侧对齐
+- 右键 tag 菜单移除上移 / 下移，仅保留置顶；置顶的 tag 在组头最右侧显示 ▲ 标记
+- 视觉观察闭环（observe loop）：manage_camera 导航与 vision_analyze 观察同一 SceneView 组成闭环引导
+
 ## [1.15.3] - 2026-08-18
 
 ### Fixed

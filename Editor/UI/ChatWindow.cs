@@ -177,6 +177,7 @@ namespace AgentCore.Editor.UI
 
         /// <summary>新建会话按钮</summary>
         private Button _newSessionButton;
+        private Button _sessionSortButton;
 
         /// <summary>会话列表滚动视图</summary>
         private ScrollView _sessionListScrollView;
@@ -302,6 +303,7 @@ namespace AgentCore.Editor.UI
             _chatPanel = rootVisualElement.Q<VisualElement>("chat-panel");
             _extensionPanelHost = rootVisualElement.Q<VisualElement>("extension-panel-host");
             _newSessionButton = rootVisualElement.Q<Button>("new-session-button");
+            _sessionSortButton = rootVisualElement.Q<Button>("session-sort-button");
             _sessionListScrollView = rootVisualElement.Q<ScrollView>("session-list-scroll");
             _sessionListContainer = rootVisualElement.Q<VisualElement>("session-list-container");
 
@@ -340,6 +342,12 @@ namespace AgentCore.Editor.UI
 
             // 4.5 绑定会话侧边栏按钮事件
             _newSessionButton?.RegisterCallback<ClickEvent>(_ => OnNewSessionClicked());
+            // v1.x: 会话列表右上的排序按钮——点击弹出 tag 排序模式菜单（只影响 tag 分组顺序）。
+            if (_sessionSortButton != null)
+            {
+                _sessionSortButton?.RegisterCallback<ClickEvent>(_ => ShowTagSortMenu());
+                TryApplySortButtonIcon(_sessionSortButton);
+            }
 
             // 4.6 消息滚动区域检测用户手动上翻（禁用自动追底）
             if (_messageScrollView != null)

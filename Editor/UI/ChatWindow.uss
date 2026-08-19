@@ -248,6 +248,21 @@
     background-color: #3a76b8;
 }
 
+/* 会话列表右上排序按钮：小图标按钮，低调融入侧边栏 */
+#session-sort-button {
+    width: 20px;
+    height: 22px;
+    padding: 0;
+    margin: 0 6px 0 2px;
+    border-width: 0;
+    background-color: transparent;
+}
+
+#session-sort-button:hover {
+    background-color: #3a3a3a;
+    border-radius: 3px;
+}
+
 /* 会话列表滚动区域 */
 #session-list-scroll {
     flex-grow: 1;
@@ -1721,12 +1736,13 @@
 
 .session-item-tag-chip {
     margin-right: 6px;
+    margin-bottom: 3px;
     padding: 1px 6px 1px 6px;
     background-color: rgb(60, 90, 130);
     color: rgb(220, 230, 245);
     font-size: 10px;
     border-radius: 3px;
     -unity-text-align: middle-center;
-    align-self: center;
+    align-self: flex-start; /* 归档区 tag chip 顶部靠左对齐（父级 .session-item 为 column 布局） */
     flex-shrink: 0;
 }

@@ -16,7 +16,10 @@
         <ui:VisualElement name="session-sidebar-content">
           <!-- 侧边栏头部 -->
           <ui:VisualElement name="sidebar-header">
-            <ui:Label name="sidebar-title" text="会话列表" />
+            <ui:VisualElement name="sidebar-title-group" style="flex-direction: row; align-items: center; flex-grow: 1;">
+              <ui:Label name="sidebar-title" text="会话列表" />
+              <ui:Button name="session-sort-button" tooltip="排序方式" />
+            </ui:VisualElement>
             <ui:Button name="new-session-button" text="+ 新建" tooltip="新建会话" />
           </ui:VisualElement>
           <!-- 会话列表滚动区域 -->

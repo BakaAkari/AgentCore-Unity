@@ -43,7 +43,7 @@ This is the correct workflow when you need to inspect a 3D scene from different 
 
 5. **`pan_scene_view`** with `dx` / `dy` (world units) → slide sideways **without turning** (`dx` along camera's own right axis, `dy` along its up axis). Use when the target is off-center.
 
-6. **Confirm** — re-run `get_scene_view` (returns `camera_position`/`camera_forward` too) or `vision_analyze` on a fresh screenshot.
+6. **OBSERVE LOOP (observe, then re-navigate if needed)** — don't stop after one framing. After navigating, call `vision_analyze source=scene action=analyze` (prompt = the user's visual question) to SEE the current view. `vision_analyze source=scene` observes **the same `SceneView.lastActiveSceneView`** these navigation actions drive, so they compose into a closed loop: navigate → observe → if the description shows the target is still unclear / out of frame / occluded / too small, re-navigate (steps 3–5) → observe again → repeat until you can answer, then stop (after ~3–4 repositions without convergence, report what you've seen and ask). **The vision model only describes the fixed frame you hand it — it does NOT propose camera moves; you decide the next viewpoint.** Requires both `manage_camera` (activate `Specialized`) and `vision_analyze` (activate `Meta`).
 
 > **Prefer relative increments (orbit/pan/dolly) over computing absolute `rotation`/`pivot`** — relative ops keep the look-at target stable and are far easier to reason about.
 

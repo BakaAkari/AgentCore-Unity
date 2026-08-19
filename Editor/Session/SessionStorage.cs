@@ -332,6 +332,7 @@ namespace AgentCore.Editor.Session
                 Id = id,
                 Title = obj.Value<string>("title") ?? "未命名会话",
                 UpdatedAt = obj.Value<DateTime?>("updated_at") ?? DateTime.MinValue,
+                CreatedAt = obj.Value<DateTime?>("created_at") ?? DateTime.MinValue,
                 MessageCount = obj.Value<int?>("message_count") ?? 0,
                 Tag = obj.Value<string>("tag"),
                 Archived = obj.Value<bool?>("archived") ?? false,
@@ -584,6 +585,10 @@ namespace AgentCore.Editor.Session
         /// <summary>最后更新时间</summary>
         [JsonProperty("updated_at")]
         public DateTime UpdatedAt { get; set; }
+
+        /// <summary>创建时间（UTC）。旧版本 session 无该字段时为 DateTime.MinValue。</summary>
+        [JsonProperty("created_at")]
+        public DateTime CreatedAt { get; set; }
 
         /// <summary>消息总数</summary>
         [JsonProperty("message_count")]

@@ -7,7 +7,7 @@ using Newtonsoft.Json;
 
 namespace AgentCore.Editor.Session
 {
-    /// <summary>tag 元数据条目：名称 + 显示顺序（越小越靠前）。未来可扩展 Color 等字段。</summary>
+    /// <summary>tag 元数据条目：名称 + 显示顺序（越小越靠前）+ 是否置顶。未来可扩展 Color 等字段。</summary>
     public class TagMetadata
     {
         [JsonProperty("name")]
@@ -15,6 +15,23 @@ namespace AgentCore.Editor.Session
 
         [JsonProperty("order")]
         public int Order { get; set; }
+
+        /// <summary>是否置顶。置顶 tag 在任何排序模式下恒排在最前（不进排序键，仅按置顶优先）。</summary>
+        [JsonProperty("pinned", DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool IsPinned { get; set; }
+    }
+
+    /// <summary>tag 列表排序模式（持久化到 EditorPrefs）。</summary>
+    public enum SessionTagSortMode
+    {
+        /// <summary>手动顺序：registry 的 order 字段 + 未登记字典序（默认，等同历史行为）。</summary>
+        Manual = 0,
+        /// <summary>按 tag 名称字母序（A→Z，大小写不敏感）。</summary>
+        Name = 1,
+        /// <summary>按修改时间：tag 内 session 最近 UpdatedAt 最大者优先（降序）。</summary>
+        Modified = 2,
+        /// <summary>按创建时间：tag 内 session 最早 CreatedAt 最小者优先（降序，即最老在前）。</summary>
+        Created = 3
     }
 
     /// <summary>tag registry 文件根对象（预留未来加其他配置的余地）。</summary>
@@ -133,47 +150,27 @@ namespace AgentCore.Editor.Session
             AgentCoreLog.Info($"{LogPrefix}Renamed tag {oldName} -> {trimmedNew} ({affected.Count} sessions updated).");
         }
 
-        /// <summary>把 tag 置顶（order = min-1 或 0）。</summary>
+        /// <summary>把 tag 置顶（IsPinned=true，保留其 order 以便取消置顶后恢复原顺序）。</summary>
         public static void PinTagToTop(string tagName)
         {
             if (string.IsNullOrEmpty(tagName)) return;
             var all = LoadAll();
             EnsureRegistered(all, tagName);
-            // 找到最小 order，置为它 - 1（或者重新分配整个数组）。
-            // 简单起见：把目标移到最前，然后重排 0..N-1 保持稳定。
             var entry = all.FirstOrDefault(t => string.Equals(t.Name, tagName, StringComparison.OrdinalIgnoreCase));
             if (entry == null) return;
-            all.Remove(entry);
-            all.Insert(0, entry);
-            RenumberOrder(all);
+            entry.IsPinned = true;
             SaveAll(all);
         }
 
-        /// <summary>tag 上移一位。若已在顶部则不动。</summary>
-        public static void MoveTagUp(string tagName)
+        /// <summary>取消置顶（IsPinned=false）。仅当该 tag 当前已置顶时有效；未登记则先登记（不置顶）。</summary>
+        public static void UnpinTag(string tagName)
         {
             if (string.IsNullOrEmpty(tagName)) return;
             var all = LoadAll();
             EnsureRegistered(all, tagName);
-            all = all.OrderBy(t => t.Order).ToList();
-            var idx = all.FindIndex(t => string.Equals(t.Name, tagName, StringComparison.OrdinalIgnoreCase));
-            if (idx <= 0) return;
-            (all[idx - 1], all[idx]) = (all[idx], all[idx - 1]);
-            RenumberOrder(all);
-            SaveAll(all);
-        }
-
-        /// <summary>tag 下移一位。若已在底部则不动。</summary>
-        public static void MoveTagDown(string tagName)
-        {
-            if (string.IsNullOrEmpty(tagName)) return;
-            var all = LoadAll();
-            EnsureRegistered(all, tagName);
-            all = all.OrderBy(t => t.Order).ToList();
-            var idx = all.FindIndex(t => string.Equals(t.Name, tagName, StringComparison.OrdinalIgnoreCase));
-            if (idx < 0 || idx >= all.Count - 1) return;
-            (all[idx + 1], all[idx]) = (all[idx], all[idx + 1]);
-            RenumberOrder(all);
+            var entry = all.FirstOrDefault(t => string.Equals(t.Name, tagName, StringComparison.OrdinalIgnoreCase));
+            if (entry == null) return;
+            entry.IsPinned = false;
             SaveAll(all);
         }
 
@@ -215,13 +212,30 @@ namespace AgentCore.Editor.Session
             all.Add(new TagMetadata { Name = tagName, Order = maxOrder + 1 });
         }
 
-        /// <summary>把当前顺序重新赋值为 0..N-1，保持稳定。传入的 list 应已按目标顺序排列。</summary>
-        private static void RenumberOrder(List<TagMetadata> ordered)
+        #region 排序模式（EditorPrefs 持久化）
+
+        private const string SortModePrefKey = "AgentCore.SessionOrg.SortMode";
+
+        /// <summary>读取当前 tag 排序模式（默认 Created=按创建时间；菜单不含 Manual，此默认兜底旧 EditorPrefs 值 0=Manual）。</summary>
+        public static SessionTagSortMode GetSortMode()
         {
-            for (int i = 0; i < ordered.Count; i++)
-            {
-                ordered[i].Order = i;
-            }
+            return (SessionTagSortMode)UnityEditor.EditorPrefs.GetInt(SortModePrefKey, (int)SessionTagSortMode.Created);
         }
+
+        /// <summary>保存 tag 排序模式。</summary>
+        public static void SetSortMode(SessionTagSortMode mode)
+        {
+            UnityEditor.EditorPrefs.SetInt(SortModePrefKey, (int)mode);
+        }
+
+        /// <summary>查询指定 tag 是否已置顶。未登记或不存在返回 false。</summary>
+        public static bool IsTagPinned(string tagName)
+        {
+            if (string.IsNullOrEmpty(tagName)) return false;
+            var entry = LoadAll().FirstOrDefault(t => string.Equals(t.Name, tagName, StringComparison.OrdinalIgnoreCase));
+            return entry != null && entry.IsPinned;
+        }
+
+        #endregion
     }
 }
