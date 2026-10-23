@@ -143,6 +143,16 @@ namespace AgentCore.Editor.Session
         /// <param name="compressionMetrics">压缩统计数据（会话级别）</param>
         public void SaveCurrentSession(List<ChatMessage> messages, List<ConversationTurn> turns, Core.Compression.CompressionMetrics compressionMetrics = null)
         {
+            SaveCurrentSessionCore(messages, turns, compressionMetrics, background: false);
+        }
+
+        /// <summary>
+        /// 保存当前会话的实现。<paramref name="background"/> 为 true 时 JSON 序列化与落盘在后台线程进行
+        /// （快照对象在主线程构建，见 <see cref="SessionStorage.SaveInBackground"/>）。
+        /// </summary>
+        private void SaveCurrentSessionCore(List<ChatMessage> messages, List<ConversationTurn> turns,
+            Core.Compression.CompressionMetrics compressionMetrics, bool background)
+        {
             if (string.IsNullOrEmpty(CurrentSessionId))
             {
                 AgentCoreLog.Warning($"{LogPrefix}No active session to save.");
@@ -152,7 +162,10 @@ namespace AgentCore.Editor.Session
             try
             {
                 _currentSession = SessionData.FromAgentLoop(messages, turns, compressionMetrics, _currentSession, updateTimestamp: _isDirty);
-                SessionStorage.Save(_currentSession);
+                if (background)
+                    SessionStorage.SaveInBackground(_currentSession);
+                else
+                    SessionStorage.Save(_currentSession);
                 _lastAutoSaveTime = DateTime.UtcNow;
 
                 // 保存完成后重置脏标志
@@ -528,7 +541,8 @@ namespace AgentCore.Editor.Session
                 return;
             }
 
-            SaveCurrentSession(messages, turns, compressionMetrics);
+            // 自动保存每轮触发，会话较大时序列化 + 落盘可达数十毫秒：移到后台线程
+            SaveCurrentSessionCore(messages, turns, compressionMetrics, background: true);
             AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Auto-saved session: {CurrentSessionId}");
         }
 
