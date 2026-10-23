@@ -94,11 +94,21 @@ namespace AgentCore.Editor.Tools.Safety
                 if (string.IsNullOrEmpty(absolutePath))
                     continue;
 
-                var rootInfo = WorkspacePathService.TryGetRootInfo(absolutePath);
-                if (rootInfo == null)
-                    continue;
-
-                var risk = WorkspacePathPolicy.GetRisk(rootInfo.Role);
+                WorkspaceOperationRisk risk;
+                if (SafePath.IsForbidden(absolutePath))
+                {
+                    // 机密文件（.env / 私钥 / .git/config）：任何写操作都拒绝
+                    risk = WorkspaceOperationRisk.Blocked;
+                }
+                else
+                {
+                    var rootInfo = WorkspacePathService.TryGetRootInfo(absolutePath);
+                    // 不属于任何 WorkspaceRoot（项目外）不能再当作 Safe 跳过；
+                    // 仍不直接 Blocked，因为 "target"/"source" 也可能是 "/Root/Child" 这类 GameObject 路径
+                    risk = rootInfo == null
+                        ? WorkspaceOperationRisk.HighRisk
+                        : WorkspacePathPolicy.GetRisk(rootInfo.Role);
+                }
 
                 if (targets == null)
                     targets = new List<string>();
@@ -156,8 +166,26 @@ namespace AgentCore.Editor.Tools.Safety
         /// <summary>
         /// 将工具参数中的路径解析为绝对路径。
         /// 支持：绝对路径直通、Assets/ 开头的 Unity 路径、相对路径（基于 WorkspaceRoot）。
+        /// 结果经 <see cref="Path.GetFullPath(string)"/> 折叠 <c>..</c>，否则 "Assets/../../x" 会按字符串前缀被判进根内。
         /// </summary>
         private static string ResolveToAbsolute(string pathValue, WorkspaceContext ctx)
+        {
+            var combined = CombineWithRoot(pathValue, ctx);
+            if (string.IsNullOrEmpty(combined))
+                return null;
+
+            try
+            {
+                return Path.GetFullPath(combined);
+            }
+            catch
+            {
+                // 非法路径字符等：不是文件路径（可能是 GameObject 名），交由工具自身校验
+                return null;
+            }
+        }
+
+        private static string CombineWithRoot(string pathValue, WorkspaceContext ctx)
         {
             // 已经是绝对路径
             if (Path.IsPathRooted(pathValue))

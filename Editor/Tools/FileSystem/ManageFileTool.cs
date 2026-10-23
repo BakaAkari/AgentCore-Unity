@@ -247,27 +247,9 @@ namespace AgentCore.Editor.Tools.FileSystem
         /// </summary>
         private static string ResolveSafePath(string relativePath)
         {
-            if (string.IsNullOrWhiteSpace(relativePath))
-                throw new ArgumentException("Path cannot be empty.");
-
-            // Normalize separators
-            var normalized = relativePath.Replace('\\', '/');
-
-            // Block obvious traversal attempts
-            if (normalized.Contains(".."))
-            {
-                // Resolve and verify
-                var candidate = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
-                if (!candidate.StartsWith(ProjectRoot, StringComparison.OrdinalIgnoreCase))
-                    throw new ArgumentException($"Path traversal detected: '{relativePath}' resolves outside the project directory.");
-                return candidate;
-            }
-
-            var fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
-            if (!fullPath.StartsWith(ProjectRoot, StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException($"Path '{relativePath}' resolves outside the project directory.");
-
-            return fullPath;
+            // 分量级根约束 + .. 折叠 + 链接 / 机密文件拒绝
+            // （原 StartsWith(ProjectRoot) 不带分隔符，D:\Proj2 会被当成 D:\Proj 的子目录）
+            return SafePath.ResolveUnderOrThrow(ProjectRoot, relativePath);
         }
 
         /// <summary>
@@ -275,7 +257,7 @@ namespace AgentCore.Editor.Tools.FileSystem
         /// </summary>
         private static string ToRelativePath(string absolutePath)
         {
-            if (absolutePath.StartsWith(ProjectRoot, StringComparison.OrdinalIgnoreCase))
+            if (SafePath.IsUnder(absolutePath, ProjectRoot))
             {
                 var relative = absolutePath.Substring(ProjectRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 return relative.Replace('\\', '/');

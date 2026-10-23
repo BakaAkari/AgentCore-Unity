@@ -326,15 +326,12 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (!File.Exists(fullPath))
                 return ToolResponse.Fail($"Script file not found: {path}");
 
-            var success = AssetDatabase.DeleteAsset(path);
-            if (!success)
-            {
-                // Fallback to direct file deletion
-                File.Delete(fullPath);
-                AssetDatabase.Refresh();
-            }
+            // 移到系统回收站而非永久删除；失败时如实报告，不再回退到 File.Delete
+            // （回退分支会绕过 AssetDatabase 永久删除，且不可撤销）
+            if (!AssetDatabase.MoveAssetToTrash(path))
+                return ToolResponse.Fail($"Failed to delete script '{path}' (AssetDatabase.MoveAssetToTrash returned false). The file was not removed.");
 
-            return ToolResponse.Ok($"Deleted script: {path}");
+            return ToolResponse.Ok($"Moved script to trash: {path}");
         }
 
         private ToolResponse HandleList(JObject parameters)

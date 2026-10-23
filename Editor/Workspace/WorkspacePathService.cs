@@ -51,7 +51,7 @@ namespace AgentCore.Editor.Workspace
             if (ctx?.Roots == null || string.IsNullOrEmpty(absolutePath))
                 return null;
 
-            var normPath = UnityRootResolver.NormalizePath(absolutePath).TrimEnd('/') + "/";
+            var normPath = FullNormalize(absolutePath).TrimEnd('/') + "/";
 
             WorkspaceRootInfo bestMatch = null;
             int bestLen = 0;
@@ -79,7 +79,7 @@ namespace AgentCore.Editor.Workspace
             if (ctx == null || string.IsNullOrEmpty(ctx.WorkspaceRoot) || string.IsNullOrEmpty(absolutePath))
                 return false;
 
-            var normPath = UnityRootResolver.NormalizePath(absolutePath).TrimEnd('/') + "/";
+            var normPath = FullNormalize(absolutePath).TrimEnd('/') + "/";
             var rootNorm = ctx.WorkspaceRoot.TrimEnd('/') + "/";
             return normPath.StartsWith(rootNorm, StringComparison.OrdinalIgnoreCase);
         }
@@ -93,7 +93,7 @@ namespace AgentCore.Editor.Workspace
             if (ctx == null || string.IsNullOrEmpty(ctx.UnityRoot) || string.IsNullOrEmpty(absolutePath))
                 return false;
 
-            var normPath = UnityRootResolver.NormalizePath(absolutePath).TrimEnd('/') + "/";
+            var normPath = FullNormalize(absolutePath).TrimEnd('/') + "/";
             var rootNorm = ctx.UnityRoot.TrimEnd('/') + "/";
             return normPath.StartsWith(rootNorm, StringComparison.OrdinalIgnoreCase);
         }
@@ -124,10 +124,21 @@ namespace AgentCore.Editor.Workspace
 
         // ── 私有辅助 ──────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// GetFullPath 折叠 <c>..</c> 后再统一为正斜杠。
+        /// 只做字符串前缀比较时 "Root/Assets/../../Other" 会被误判在 Root 内。
+        /// </summary>
+        private static string FullNormalize(string path)
+        {
+            try { path = System.IO.Path.GetFullPath(path); }
+            catch { /* 非法路径保持原样，前缀比较自然失败或由调用方再校验 */ }
+            return UnityRootResolver.NormalizePath(path);
+        }
+
         private static string ComputeRelative(string basePath, string fullPath)
         {
             var baseNorm = basePath.TrimEnd('/') + "/";
-            var fullNorm = UnityRootResolver.NormalizePath(fullPath).TrimEnd('/');
+            var fullNorm = FullNormalize(fullPath).TrimEnd('/');
 
             if (fullNorm.StartsWith(baseNorm, StringComparison.OrdinalIgnoreCase))
                 return fullNorm.Substring(baseNorm.Length);

@@ -286,17 +286,15 @@ namespace AgentCore.Editor.Tools.Cloud
             // 解析绝对路径（相对于项目根目录）
             string projectRoot = Path.GetFullPath(
                 Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
-            string absolutePath = Path.GetFullPath(
-                Path.Combine(projectRoot, relativePath)).Replace('\\', '/');
-
-            // 安全校验：必须在项目根目录内
-            if (!absolutePath.StartsWith(projectRoot + "/", StringComparison.OrdinalIgnoreCase))
+            // 安全校验：必须在项目根目录内，且不经过链接、不是机密文件（内容会上传到 LightRAG 服务）
+            if (!SafePath.TryResolveUnder(projectRoot, relativePath, out var resolvedPath, out var pathError))
             {
                 return ToolResponse.Fail(
                     $"安全限制：只允许索引项目根目录内的文件。\n" +
                     $"项目根目录：{projectRoot}\n" +
-                    $"请求路径：{absolutePath}");
+                    $"原因：{pathError}");
             }
+            string absolutePath = resolvedPath.Replace('\\', '/');
 
             // 校验文件存在
             if (!File.Exists(absolutePath))
@@ -459,18 +457,15 @@ namespace AgentCore.Editor.Tools.Cloud
             // 解析绝对路径
             string projectRoot = Path.GetFullPath(
                 Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
-            string absolutePath = Path.GetFullPath(
-                Path.Combine(projectRoot, relativePath)).Replace('\\', '/');
-
             // 安全校验
-            if (!absolutePath.StartsWith(projectRoot + "/", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(absolutePath, projectRoot, StringComparison.OrdinalIgnoreCase))
+            if (!SafePath.TryResolveUnder(projectRoot, relativePath, out var resolvedPath, out var pathError))
             {
                 return ToolResponse.Fail(
                     $"安全限制：只允许索引项目根目录内的文件夹。\n" +
                     $"项目根目录：{projectRoot}\n" +
-                    $"请求路径：{absolutePath}");
+                    $"原因：{pathError}");
             }
+            string absolutePath = resolvedPath.Replace('\\', '/');
 
             if (!Directory.Exists(absolutePath))
             {
@@ -499,12 +494,14 @@ namespace AgentCore.Editor.Tools.Cloud
             var excludedDirs = new[] { "/Library/", "/Temp/", "/.git/", "/obj/", "/bin/" };
             files = files.Where(f =>
             {
+                // Directory.GetFiles 在 Windows 返回反斜杠，先统一再匹配 "/Library/" 等
+                var unityPath = f.Replace('\\', '/');
                 foreach (var excluded in excludedDirs)
                 {
-                    if (f.IndexOf(excluded, StringComparison.OrdinalIgnoreCase) >= 0)
+                    if (unityPath.IndexOf(excluded, StringComparison.OrdinalIgnoreCase) >= 0)
                         return false;
                 }
-                return true;
+                return !SafePath.IsForbidden(unityPath);
             }).ToList();
 
             if (files.Count == 0)

@@ -1109,18 +1109,18 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
         private static string NormalizePath(string path, string expectedExtension)
         {
-            if (!path.StartsWith("Assets/") && !path.StartsWith("Assets\\"))
-                path = "Assets/" + path;
+            // UXML/USS 只允许落在 Assets/ 下（越界抛 ArgumentException）
+            path = AgentCore.Editor.Tools.Safety.SafePath.ToAssetPath(path, allowPackages: false);
             if (!path.EndsWith(expectedExtension, StringComparison.OrdinalIgnoreCase))
                 path += expectedExtension;
-            return path.Replace('\\', '/');
+            return path;
         }
 
         private static string GetFullAssetPath(string assetPath)
         {
             // assetPath is relative to project root (e.g. "Assets/UI/Main.uxml")
             var projectRoot = Path.GetDirectoryName(Application.dataPath);
-            return Path.GetFullPath(Path.Combine(projectRoot, assetPath));
+            return AgentCore.Editor.Tools.Safety.SafePath.ResolveUnderOrThrow(projectRoot, assetPath);
         }
 
         private static void EnsureDirectory(string fullFilePath)

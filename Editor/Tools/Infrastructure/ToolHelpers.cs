@@ -519,19 +519,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// </summary>
         public static string NormalizeAssetPath(string path)
         {
-            if (string.IsNullOrEmpty(path)) return path;
-
-            path = path.Replace("\\", "/").TrimEnd('/');
-
-            // 精确等于根目录名称时直接返回
-            if (path == "Assets" || path == "Packages") return path;
-
-            if (!path.StartsWith("Assets/") && !path.StartsWith("Packages/"))
-            {
-                path = "Assets/" + path;
-            }
-
-            return path;
+            // 补 Assets/ 前缀 + 折叠 .. + 约束在 Assets/ 或 Packages/ 之下（越界抛 ArgumentException）
+            return AgentCore.Editor.Tools.Safety.SafePath.ToAssetPath(path);
         }
 
         #endregion
