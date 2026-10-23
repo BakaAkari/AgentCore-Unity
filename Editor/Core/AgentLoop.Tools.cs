@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Core.Compression;
 using AgentCore.Editor.LLM;
+using AgentCore.Editor.Session;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
@@ -126,8 +127,11 @@ namespace AgentCore.Editor.Core
             // Phase 2 Step 11: 在工具执行前启动 Console 错误捕获
             _consoleCapture.StartCapture();
 
-            // 通过 ToolCallDispatcher 串行执行所有工具调用
-            var results = await _dispatcher.DispatchAllAsync(toolCalls, ct);
+            // 通过 ToolCallDispatcher 串行执行所有工具调用。
+            // 每个调用的开始 / 结果都暂存到 SessionState：结果要等编译结束才写入历史，
+            // 期间发生的域重载不能让已执行的调用变成"结果未知"而被模型重复执行（见 PendingToolResults）。
+            PendingToolResults.Begin(SessionManager.Instance.CurrentSessionId, toolCalls);
+            var results = await _dispatcher.DispatchAllAsync(toolCalls, ct, PendingToolResults.Complete);
 
             // Phase 2 Step 11: 停止 Console 错误捕获
             var consoleErrors = _consoleCapture.StopCapture();
@@ -312,9 +316,11 @@ namespace AgentCore.Editor.Core
                 // 本运行已被取消且新运行已开始：不能把旧结果插进新运行的历史中间。
                 // 缺失的 tool_result 由请求前的历史修复补成"已中断"合成结果。
                 AgentCoreLog.Warning($"[AgentCore] Dropped {toolMessages.Count} tool result(s) from a superseded run.");
+                PendingToolResults.Clear();
                 return;
             }
             _messages.AddRange(toolMessages);
+            PendingToolResults.Clear();
 
             AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Executed {results.Count} tool call(s), " +
                       $"added {toolMessages.Count} tool message(s) to history.");

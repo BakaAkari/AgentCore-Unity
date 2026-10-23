@@ -94,7 +94,10 @@ namespace AgentCore.Editor.Core
                     phase = InterruptPhase.Streaming;
                     break;
                 case AgentState.ExecutingTool:
-                    phase = InterruptPhase.ExecutingTool;
+                    // 整批工具都已执行完、正在等编译：结果已暂存，恢复时直接回填
+                    phase = PendingToolResults.AllCompleted(SessionManager.Instance.CurrentSessionId)
+                        ? InterruptPhase.WaitingCompilation
+                        : InterruptPhase.ExecutingTool;
                     break;
                 default:
                     phase = InterruptPhase.None;
@@ -393,7 +396,9 @@ namespace AgentCore.Editor.Core
                 sb.AppendLine("- Compilation result: Unknown (compilation status not captured)");
             }
 
-            sb.AppendLine("Please continue from where you left off. If you were in the middle of executing a tool, please retry the operation.");
+            sb.AppendLine("Please continue from where you left off. Tool results recorded before the reload are final; do not re-run those calls. " +
+                          "A tool marked as interrupted may already have applied its side effects (files written, objects created): " +
+                          "inspect the current state before deciding whether to retry it.");
 
             return sb.ToString();
         }
@@ -510,32 +515,8 @@ namespace AgentCore.Editor.Core
         {
             AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromExecutingTool: Tool '{lastToolName}' was interrupted (callId={interruptedToolCallId}).");
 
-            // 如果有未完成的 tool_call，需要补充一个 tool response 以保持消息格式合法
-            if (!string.IsNullOrEmpty(interruptedToolCallId))
-            {
-                // 检查是否已经有对应的 tool response
-                bool hasResponse = false;
-                for (int i = _messages.Count - 1; i >= 0; i--)
-                {
-                    if (_messages[i].Role == "tool" && _messages[i].ToolCallId == interruptedToolCallId)
-                    {
-                        hasResponse = true;
-                        break;
-                    }
-                    // 如果遇到了 assistant 消息，说明还没有对应的 tool response
-                    if (_messages[i].Role == "assistant") break;
-                }
-
-                if (!hasResponse)
-                {
-                    // 补充一个表示中断的 tool response
-                    _messages.Add(ChatMessage.Tool(interruptedToolCallId,
-                        $"[Tool execution interrupted by Domain Reload] The tool '{lastToolName}' was interrupted " +
-                        "because Unity triggered a code compilation and Domain Reload. " +
-                        "The tool result is unknown. Please retry the operation if needed."));
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromExecutingTool: Added placeholder tool response for {interruptedToolCallId}.");
-                }
-            }
+            // 已执行完的调用回填真实结果，未执行完的明确标注"副作用可能已生效"
+            AppendRecoveredToolResults(postReloadNote: null);
 
             // 注入恢复系统消息
             _messages.Add(ChatMessage.System(recoveryMessage));
@@ -559,40 +540,22 @@ namespace AgentCore.Editor.Core
         {
             AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromWaitingCompilation: Compilation {(compilationSucceeded ? "succeeded" : "failed")}.");
 
-            // 如果有未完成的 tool_call，补充编译结果作为 tool response
-            if (!string.IsNullOrEmpty(interruptedToolCallId))
+            string compilationResult;
+            if (compilationSucceeded)
             {
-                bool hasResponse = false;
-                for (int i = _messages.Count - 1; i >= 0; i--)
-                {
-                    if (_messages[i].Role == "tool" && _messages[i].ToolCallId == interruptedToolCallId)
-                    {
-                        hasResponse = true;
-                        break;
-                    }
-                    if (_messages[i].Role == "assistant") break;
-                }
-
-                if (!hasResponse)
-                {
-                    string compilationResult;
-                    if (compilationSucceeded)
-                    {
-                        compilationResult = "Compilation completed successfully. The script changes have been applied.";
-                    }
-                    else if (!string.IsNullOrEmpty(compilationErrors))
-                    {
-                        compilationResult = $"Compilation failed with errors:\n{compilationErrors}\nPlease fix the compilation errors.";
-                    }
-                    else
-                    {
-                        compilationResult = "Compilation completed (result unknown). Please verify the script changes.";
-                    }
-
-                    _messages.Add(ChatMessage.Tool(interruptedToolCallId, compilationResult));
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ResumeFromWaitingCompilation: Added compilation result as tool response.");
-                }
+                compilationResult = "Compilation completed successfully. The script changes have been applied.";
             }
+            else if (!string.IsNullOrEmpty(compilationErrors))
+            {
+                compilationResult = $"Compilation failed with errors:\n{compilationErrors}\nPlease fix the compilation errors.";
+            }
+            else
+            {
+                compilationResult = "Compilation completed (result unknown). Please verify the script changes.";
+            }
+
+            // 整批调用都已执行完：回填各自的真实结果，并附上编译结论
+            AppendRecoveredToolResults(postReloadNote: "[Domain Reload] This tool finished before Unity recompiled and reloaded scripts. " + compilationResult);
 
             // 注入恢复系统消息
             _messages.Add(ChatMessage.System(recoveryMessage));
@@ -605,6 +568,58 @@ namespace AgentCore.Editor.Core
         /// 触发恢复后的 LLM 调用。
         /// 创建新的 assistant 轮次并启动异步 SendMessage 流程。
         /// </summary>
+        /// <summary>
+        /// 为最后一条带 tool_calls 的 assistant 消息补齐缺失的 tool 结果：
+        /// 重载前已执行完的调用用暂存的真实结果（附 <paramref name="postReloadNote"/>），
+        /// 只开始未结束或无记录的调用写明"副作用可能已生效，先检查再决定是否重试"。
+        /// </summary>
+        private void AppendRecoveredToolResults(string postReloadNote)
+        {
+            var recorded = PendingToolResults.Take(SessionManager.Instance.CurrentSessionId);
+
+            int assistantIndex = _messages.FindLastIndex(m =>
+                m.Role == "assistant" && m.ToolCalls != null && m.ToolCalls.Count > 0);
+            if (assistantIndex < 0)
+                return;
+
+            var answered = new HashSet<string>();
+            for (int i = assistantIndex + 1; i < _messages.Count; i++)
+            {
+                if (_messages[i].Role == "tool" && !string.IsNullOrEmpty(_messages[i].ToolCallId))
+                    answered.Add(_messages[i].ToolCallId);
+            }
+
+            int restored = 0, interrupted = 0;
+            foreach (var call in _messages[assistantIndex].ToolCalls)
+            {
+                if (string.IsNullOrEmpty(call?.Id) || answered.Contains(call.Id))
+                    continue;
+
+                string content;
+                if (recorded.TryGetValue(call.Id, out var entry) && entry.Status == PendingToolResults.CallStatus.Completed)
+                {
+                    content = string.IsNullOrEmpty(postReloadNote)
+                        ? entry.Content
+                        : entry.Content + "\n\n" + postReloadNote;
+                    restored++;
+                }
+                else
+                {
+                    var toolName = call.Function?.Name ?? "(unknown)";
+                    content = $"[Tool interrupted by Domain Reload] '{toolName}' started executing but Unity reloaded scripts before it returned. " +
+                              "Its side effects may already have been applied (for example the file may already be written). " +
+                              "Inspect the current state before retrying; do not repeat the call blindly.";
+                    interrupted++;
+                }
+
+                _messages.Add(ChatMessage.Tool(call.Id, content));
+                answered.Add(call.Id);
+            }
+
+            AgentCore.Editor.Utils.AgentCoreLog.Info(
+                $"[AgentCore] Domain reload recovery: restored {restored} tool result(s), marked {interrupted} as interrupted.");
+        }
+
         private void TriggerResumeLLMCall()
         {
             AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] TriggerResumeLLMCall: Starting resumed LLM call...");

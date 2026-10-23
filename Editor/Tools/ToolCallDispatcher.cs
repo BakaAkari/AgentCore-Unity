@@ -432,7 +432,8 @@ namespace AgentCore.Editor.Tools
         /// <returns>工具调用结果列表（顺序与输入一致）</returns>
         public async Task<List<ToolCallResult>> DispatchAllAsync(
             IReadOnlyList<ToolCall> toolCalls,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            Action<ToolCallResult> onResult = null)
         {
             if (toolCalls == null || toolCalls.Count == 0)
                 return new List<ToolCallResult>();
@@ -445,6 +446,7 @@ namespace AgentCore.Editor.Tools
                 ct.ThrowIfCancellationRequested();
                 var result = await DispatchAsync(toolCall, ct);
                 results.Add(result);
+                onResult?.Invoke(result);
             }
 
             var successCount = CountSuccessful(results);
