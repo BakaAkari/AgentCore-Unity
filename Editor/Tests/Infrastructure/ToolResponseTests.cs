@@ -224,6 +224,196 @@ namespace AgentCore.Tests.Editor.Infrastructure
 
         #endregion
 
+        #region ToolResponse.Partial
+
+        private static ToolItemResult[] MixedItems()
+        {
+            return new[]
+            {
+                ToolItemResult.Succeeded("Assets/A.prefab"),
+                ToolItemResult.Failed("Assets/B.prefab", "not found"),
+                ToolItemResult.Succeeded("Assets/C.prefab")
+            };
+        }
+
+        [Test]
+        public void Partial_IsNotSuccess_AndMarkedPartial()
+        {
+            var response = ToolResponse.Partial("Replaced objects", MixedItems());
+
+            Assert.IsFalse(response.Success);
+            Assert.IsTrue(response.IsPartial);
+            Assert.AreEqual(ToolResponse.StatusPartial, response.Status);
+            Assert.AreEqual(3, response.Items.Count);
+        }
+
+        [Test]
+        public void Partial_MessageAndError_SummarizeCountsAndFailures()
+        {
+            var response = ToolResponse.Partial("Replaced objects", MixedItems());
+
+            StringAssert.StartsWith("PARTIAL:", response.Message);
+            StringAssert.Contains("2 of 3 item(s) succeeded, 1 failed", response.Message);
+            StringAssert.Contains("Assets/B.prefab (not found)", response.Error);
+            StringAssert.DoesNotContain("Assets/A.prefab", response.Error);
+        }
+
+        [Test]
+        public void Partial_ToJson_ContainsStatusItemsAndSuccessFalse()
+        {
+            var parsed = JObject.Parse(ToolResponse.Partial("op", MixedItems(), new { extra = 1 }).ToJson());
+
+            Assert.IsFalse(parsed["success"].Value<bool>());
+            Assert.AreEqual("partial", parsed["status"].Value<string>());
+            Assert.AreEqual(1, parsed["data"]["extra"].Value<int>());
+            var items = (JArray)parsed["items"];
+            Assert.AreEqual(3, items.Count);
+            Assert.IsTrue(items[0]["ok"].Value<bool>());
+            Assert.IsNull(items[0]["error"]);
+            Assert.IsFalse(items[1]["ok"].Value<bool>());
+            Assert.AreEqual("not found", items[1]["error"].Value<string>());
+        }
+
+        [Test]
+        public void Partial_ToToolResult_IsPartialWithFullJson()
+        {
+            var result = ToolResponse.Partial("op", MixedItems()).ToToolResult(7.0);
+
+            Assert.IsTrue(result.Success);
+            Assert.IsTrue(result.IsPartial);
+            Assert.IsFalse(result.IsFullSuccess);
+            Assert.IsNull(result.Error);
+            Assert.AreEqual("partial", JObject.Parse(result.Output)["status"].Value<string>());
+            Assert.AreEqual(7.0, result.ExecutionTimeMs, 0.001);
+        }
+
+        [Test]
+        public void Partial_ManyFailures_ListIsTruncated()
+        {
+            var items = new System.Collections.Generic.List<ToolItemResult> { ToolItemResult.Succeeded("ok") };
+            for (int i = 0; i < 15; i++) items.Add(ToolItemResult.Failed("t" + i, "e"));
+
+            var response = ToolResponse.Partial(null, items);
+
+            StringAssert.Contains("... and 5 more", response.Error);
+            StringAssert.Contains("1 of 16 item(s) succeeded", response.Message);
+        }
+
+        [Test]
+        public void Partial_NullItems_AreIgnored()
+        {
+            var response = ToolResponse.Partial("op", new[] { null, ToolItemResult.Failed("x", null) });
+
+            Assert.AreEqual(1, response.Items.Count);
+            Assert.AreEqual("Unknown error", response.Items[0].Error);
+        }
+
+        [Test]
+        public void OkAndFail_ToJson_HaveNoStatusOrItems()
+        {
+            var ok = JObject.Parse(ToolResponse.OkWithData(new { x = 1 }).ToJson());
+            var fail = JObject.Parse(ToolResponse.Fail("bad").ToJson());
+
+            Assert.IsNull(ok["status"]);
+            Assert.IsNull(ok["items"]);
+            Assert.IsNull(fail["status"]);
+            Assert.IsNull(fail["items"]);
+            Assert.IsFalse(ToolResponse.Ok().IsPartial);
+            Assert.IsFalse(ToolResponse.Fail("bad").IsPartial);
+        }
+
+        #endregion
+
+        #region ToolResponse.FromItems
+
+        [Test]
+        public void FromItems_AllOk_ReturnsSuccessWithItems()
+        {
+            var response = ToolResponse.FromItems("Done", new[] { ToolItemResult.Succeeded("a"), ToolItemResult.Succeeded("b") });
+
+            Assert.IsTrue(response.Success);
+            Assert.IsFalse(response.IsPartial);
+            Assert.AreEqual("Done", response.Message);
+            Assert.AreEqual(2, response.Items.Count);
+            Assert.IsTrue(response.ToToolResult().IsFullSuccess);
+        }
+
+        [Test]
+        public void FromItems_AllFailed_ReturnsFailWithEveryReason()
+        {
+            var response = ToolResponse.FromItems("Replace", new[]
+            {
+                ToolItemResult.Failed("a", "missing"),
+                ToolItemResult.Failed("b", "locked")
+            });
+
+            Assert.IsFalse(response.Success);
+            Assert.IsFalse(response.IsPartial);
+            StringAssert.Contains("0 of 2 item(s) succeeded", response.Error);
+            StringAssert.Contains("a (missing)", response.Error);
+            StringAssert.Contains("b (locked)", response.Error);
+
+            var result = response.ToToolResult();
+            Assert.IsFalse(result.Success);
+            StringAssert.StartsWith("[Error] Replace", result.GetContentForLLM());
+        }
+
+        [Test]
+        public void FromItems_Mixed_ReturnsPartial()
+        {
+            var response = ToolResponse.FromItems("op", MixedItems());
+
+            Assert.IsTrue(response.IsPartial);
+            Assert.IsFalse(response.Success);
+        }
+
+        [Test]
+        public void FromItems_Empty_ReturnsSuccess()
+        {
+            var response = ToolResponse.FromItems("nothing to do", null);
+
+            Assert.IsTrue(response.Success);
+            Assert.AreEqual(0, response.Items.Count);
+        }
+
+        #endregion
+
+        #region ToolResult.Partial
+
+        [Test]
+        public void ToolResult_Partial_GetContentForLLM_HasPartialPrefixThenOutput()
+        {
+            var result = ToolResult.Partial("{\"x\":1}");
+            var content = result.GetContentForLLM();
+
+            StringAssert.StartsWith(ToolResult.PartialPrefix, content);
+            StringAssert.Contains("NOT a full success", content);
+            StringAssert.EndsWith("{\"x\":1}", content);
+        }
+
+        [Test]
+        public void ToolResult_Partial_NullOutput_ReturnsPrefixOnly()
+        {
+            Assert.AreEqual(ToolResult.PartialPrefix, ToolResult.Partial(null).GetContentForLLM());
+        }
+
+        [Test]
+        public void ToolResult_OkAndFail_AreNotPartial()
+        {
+            Assert.IsFalse(ToolResult.Ok("x").IsPartial);
+            Assert.IsTrue(ToolResult.Ok("x").IsFullSuccess);
+            Assert.IsFalse(ToolResult.Fail("x").IsPartial);
+            Assert.IsFalse(ToolResult.Fail("x").IsFullSuccess);
+        }
+
+        [Test]
+        public void ToolResult_Partial_ToString_ContainsPartial()
+        {
+            StringAssert.Contains("Partial", ToolResult.Partial("out", 3.2).ToString());
+        }
+
+        #endregion
+
         #region ToolResult.ToString
 
         [Test]

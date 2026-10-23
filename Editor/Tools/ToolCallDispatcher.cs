@@ -93,7 +93,7 @@ namespace AgentCore.Editor.Tools
         /// <inheritdoc />
         public override string ToString()
         {
-            var status = Result.Success ? "OK" : "FAIL";
+            var status = !Result.Success ? "FAIL" : (Result.IsPartial ? "PARTIAL" : "OK");
             var policyTag = Decision.HasValue ? $" [{Decision.Value.Outcome}]" : "";
             return $"ToolCallResult[{ToolName}] {status}{policyTag} ({ExecutionTimeMs:F1}ms)";
         }
@@ -375,7 +375,12 @@ namespace AgentCore.Editor.Tools
                 // Bug 1 修复 (2026-08-04): 此前 FAIL 结果只打印 "FAIL (Xms)"，不带任何错误详情，
                 // 导致排查阻塞/失败问题时完全没有线索（原始报告里的日志盲区）。
                 // result.Error 由各工具的 ToolResponse.Fail(...) 填充，现在一并记录。
-                if (result.Success)
+                if (result.Success && result.IsPartial)
+                {
+                    // 部分成功：执行了且有效果，但并非全部目标成功，按警告级别记录
+                    AgentCoreLog.Warning($"{LogPrefix}Tool '{toolName}' completed: PARTIAL ({stopwatch.Elapsed.TotalMilliseconds:F1}ms)");
+                }
+                else if (result.Success)
                 {
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Tool '{toolName}' completed: OK ({stopwatch.Elapsed.TotalMilliseconds:F1}ms)");
                 }
@@ -451,7 +456,8 @@ namespace AgentCore.Editor.Tools
 
             var successCount = CountSuccessful(results);
             var failCount = CountFailed(results);
-            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Batch dispatch completed: {toolCalls.Count} calls, {successCount} success, {failCount} failed");
+            var partialCount = CountPartial(results);
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Batch dispatch completed: {toolCalls.Count} calls, {successCount} success ({partialCount} partial), {failCount} failed");
 
             return results;
         }
@@ -974,6 +980,19 @@ namespace AgentCore.Editor.Tools
             foreach (var r in results)
             {
                 if (r.Result.Success) count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// 统计部分成功的结果数量（已计入成功数量）。
+        /// </summary>
+        private static int CountPartial(List<ToolCallResult> results)
+        {
+            int count = 0;
+            foreach (var r in results)
+            {
+                if (r.Result.Success && r.Result.IsPartial) count++;
             }
             return count;
         }

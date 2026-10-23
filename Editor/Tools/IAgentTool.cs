@@ -329,6 +329,16 @@ namespace AgentCore.Editor.Tools
         /// <summary>执行耗时（毫秒）</summary>
         public double ExecutionTimeMs { get; }
 
+        /// <summary>
+        /// 是否为部分成功：部分目标成功、部分失败（已成功的修改保留）。
+        /// 此时 <see cref="Success"/> 仍为 true（工具确实执行并产生了效果，变更追踪等照常进行），
+        /// 但 <see cref="GetContentForLLM"/> 会明确告诉模型这不是完全成功。
+        /// </summary>
+        public bool IsPartial { get; }
+
+        /// <summary>是否完全成功（成功且非部分成功）</summary>
+        public bool IsFullSuccess => Success && !IsPartial;
+
         /// <summary>是否涉及脚本编译（用于自动编译检查）</summary>
         public bool IsCompileRelated { get; set; }
 
@@ -349,13 +359,21 @@ namespace AgentCore.Editor.Tools
         /// <summary>
         /// 私有构造函数，通过静态工厂方法创建实例。
         /// </summary>
-        private ToolResult(bool success, string output, string error, double executionTimeMs)
+        private ToolResult(bool success, string output, string error, double executionTimeMs, bool isPartial = false)
         {
             Success = success;
             Output = output;
             Error = error;
             ExecutionTimeMs = executionTimeMs;
+            IsPartial = isPartial;
         }
+
+        /// <summary>
+        /// 返回给 LLM 的部分成功前缀，<see cref="GetContentForLLM"/> 在部分成功时置于输出之前。
+        /// </summary>
+        public const string PartialPrefix =
+            "[Partial] Only part of this operation succeeded — this is NOT a full success. " +
+            "Changes that did succeed were kept. Review the failed items below before continuing.";
 
         /// <summary>
         /// 创建成功结果。
@@ -380,22 +398,39 @@ namespace AgentCore.Editor.Tools
         }
 
         /// <summary>
+        /// 创建部分成功结果：部分目标成功、部分失败。
+        /// <see cref="Success"/> 为 true（保持下游"已执行"语义），<see cref="IsPartial"/> 为 true。
+        /// </summary>
+        /// <param name="output">输出内容（应包含成功项与失败项的明细）</param>
+        /// <param name="executionTimeMs">执行耗时（毫秒）</param>
+        /// <returns>部分成功的 <see cref="ToolResult"/> 实例</returns>
+        public static ToolResult Partial(string output, double executionTimeMs = 0)
+        {
+            return new ToolResult(true, output, null, executionTimeMs, isPartial: true);
+        }
+
+        /// <summary>
         /// 获取返回给 LLM 的内容文本。
-        /// 成功时返回 Output，失败时返回格式化的错误信息。
+        /// 成功时返回 Output，部分成功时在 Output 前加 <see cref="PartialPrefix"/>，
+        /// 失败时返回格式化的错误信息。
         /// </summary>
         public string GetContentForLLM()
         {
-            return Success
-                ? Output ?? string.Empty
-                : $"[Error] {Error ?? "Unknown error"}";
+            if (!Success)
+                return $"[Error] {Error ?? "Unknown error"}";
+            if (IsPartial)
+                return string.IsNullOrEmpty(Output) ? PartialPrefix : PartialPrefix + "\n" + Output;
+            return Output ?? string.Empty;
         }
 
         /// <inheritdoc />
         public override string ToString()
         {
-            return Success
-                ? $"ToolResult.Ok({ExecutionTimeMs:F1}ms): {Truncate(Output, 100)}"
-                : $"ToolResult.Fail({ExecutionTimeMs:F1}ms): {Truncate(Error, 100)}";
+            if (!Success)
+                return $"ToolResult.Fail({ExecutionTimeMs:F1}ms): {Truncate(Error, 100)}";
+            return IsPartial
+                ? $"ToolResult.Partial({ExecutionTimeMs:F1}ms): {Truncate(Output, 100)}"
+                : $"ToolResult.Ok({ExecutionTimeMs:F1}ms): {Truncate(Output, 100)}";
         }
 
         /// <summary>截断字符串用于日志显示</summary>
