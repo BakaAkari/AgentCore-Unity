@@ -72,7 +72,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 ""count"": { ""type"": ""integer"", ""description"": ""Number of trees to place"" },
                 ""minScale"": { ""type"": ""number"", ""description"": ""Minimum tree scale (default: 0.8)"" },
                 ""maxScale"": { ""type"": ""number"", ""description"": ""Maximum tree scale (default: 1.2)"" },
-                ""onConflict"": { ""type"": ""string"", ""enum"": [""error"", ""unique"", ""overwrite""], ""description"": ""create/add_layer: what to do if an asset already exists at the target path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset."" }
+                ""onConflict"": { ""type"": ""string"", ""enum"": [""overwrite"", ""unique"", ""error""], ""description"": ""create/add_layer: what to do if an asset already exists at the target path. 'overwrite' (default) replaces the existing asset, 'unique' writes to an auto-generated unique path, 'error' fails without touching it."" }
             },
             ""required"": [""action""]
         }");
@@ -169,7 +169,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             // Ensure directory exists
             var normalizedPath = ToolHelpers.NormalizeAssetPath(assetPath);
 
-            // 目标已存在时按 onConflict 处理（默认报错，避免静默覆盖）
+            // 目标已存在时按 onConflict 处理（默认覆盖，项目由版本管理兜底）
             if (!AssetConflictPolicy.TryResolvePath(parameters, ref normalizedPath, out var conflictError, "onConflict"))
                 return ToolResponse.Fail(conflictError);
 
@@ -487,7 +487,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
             layerPath = ToolHelpers.NormalizeAssetPath(layerPath);
 
-            // 同一贴图重复 add_layer 会撞同名 layer 资产，按 onConflict 处理（默认报错）
+            // 同一贴图重复 add_layer 会撞同名 layer 资产，按 onConflict 处理（默认覆盖）
             if (!AssetConflictPolicy.TryResolvePath(parameters, ref layerPath, out var conflictError, "onConflict"))
                 return ToolResponse.Fail(conflictError);
 

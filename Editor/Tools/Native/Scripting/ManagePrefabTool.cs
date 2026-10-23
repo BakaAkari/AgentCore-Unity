@@ -93,8 +93,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 },
                 ""on_conflict"": {
                     ""type"": ""string"",
-                    ""enum"": [""error"", ""unique"", ""overwrite""],
-                    ""description"": ""create only: what to do if an asset already exists at path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset.""
+                    ""enum"": [""overwrite"", ""unique"", ""error""],
+                    ""description"": ""create only: what to do if an asset already exists at path. 'overwrite' (default) replaces the existing asset, 'unique' writes to an auto-generated unique path, 'error' fails without touching it.""
                 }
             },
             ""required"": [""action""]
@@ -170,7 +170,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (!path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
                 path += ".prefab";
 
-            // 目标已存在时按 on_conflict 处理（默认报错，避免静默覆盖）
+            // 目标已存在时按 on_conflict 处理（默认覆盖，项目由版本管理兜底）
             if (!AssetConflictPolicy.TryResolvePath(parameters, ref path, out var conflictError))
                 return ToolResponse.Fail(conflictError);
 

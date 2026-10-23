@@ -11,17 +11,17 @@ namespace AgentCore.Editor.Tools.Infrastructure
     /// </summary>
     public enum AssetConflictMode
     {
-        /// <summary>目标已存在时返回失败（默认）。</summary>
-        Error,
+        /// <summary>覆盖已有资产（默认；项目由 VCS 管理，覆盖可追溯可还原）。</summary>
+        Overwrite,
         /// <summary>改用 AssetDatabase.GenerateUniqueAssetPath 生成的新路径。</summary>
         Unique,
-        /// <summary>覆盖已有资产（旧行为）。</summary>
-        Overwrite
+        /// <summary>目标已存在时返回失败，不动已有资产。</summary>
+        Error
     }
 
     /// <summary>
-    /// 统一的 "on_conflict" 参数解析与路径冲突判定，供各 create 类 action 共用，
-    /// 避免静默覆盖用户已有资产。
+    /// 统一的 "on_conflict" 参数解析与路径冲突判定，供各 create 类 action 共用。
+    /// 默认直接覆盖（不阻断 Agent 的操作，误覆盖由版本管理还原）；需要保留已有资产时由调用方显式选择 unique / error。
     /// </summary>
     public static class AssetConflictPolicy
     {
@@ -32,11 +32,11 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// 参数说明文本（各工具 schema 中 on_conflict 的 description 与此保持一致）。
         /// </summary>
         public const string Description =
-            "What to do if an asset already exists at the target path: 'error' (default, fail without touching it), " +
-            "'unique' (write to an auto-generated unique path, e.g. 'Name 1.asset'), 'overwrite' (replace the existing asset).";
+            "What to do if an asset already exists at the target path: 'overwrite' (default, replace the existing asset), " +
+            "'unique' (write to an auto-generated unique path, e.g. 'Name 1.asset'), 'error' (fail without touching it).";
 
         /// <summary>
-        /// 解析 on_conflict 参数（兼容 camelCase onConflict），缺省为 Error。非法值抛 ArgumentException。
+        /// 解析 on_conflict 参数（兼容 camelCase onConflict），缺省为 Overwrite。非法值抛 ArgumentException。
         /// </summary>
         public static AssetConflictMode GetMode(JObject parameters)
         {
@@ -44,7 +44,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
             if (string.IsNullOrEmpty(raw))
                 raw = parameters?["onConflict"]?.ToString();
             if (string.IsNullOrEmpty(raw))
-                return AssetConflictMode.Error;
+                return AssetConflictMode.Overwrite;
 
             switch (raw.Trim().ToLowerInvariant())
             {

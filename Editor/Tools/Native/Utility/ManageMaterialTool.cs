@@ -129,8 +129,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 },
                 ""on_conflict"": {
                     ""type"": ""string"",
-                    ""enum"": [""error"", ""unique"", ""overwrite""],
-                    ""description"": ""create only: what to do if an asset already exists at material_path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset.""
+                    ""enum"": [""overwrite"", ""unique"", ""error""],
+                    ""description"": ""create only: what to do if an asset already exists at material_path. 'overwrite' (default) replaces the existing asset, 'unique' writes to an auto-generated unique path, 'error' fails without touching it.""
                 }
             },
             ""required"": [""action""]
@@ -280,7 +280,7 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 if (!path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
                     path += ".mat";
 
-                // 目标已存在时按 on_conflict 处理（默认报错，避免静默覆盖）
+                // 目标已存在时按 on_conflict 处理（默认覆盖，项目由版本管理兜底）
                 if (!AssetConflictPolicy.TryResolvePath(parameters, ref path, out var conflictError))
                     return ToolResponse.Fail(conflictError);
 

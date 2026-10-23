@@ -244,21 +244,6 @@ namespace AgentCore.Editor.UI
 
             // v1.6.5: 3 按钮布局 = Deny / Trust Low-Med / YOLO (All)
             // 不再提供"仅此一次允许"选项,任何非 Deny 都会开启会话级信任。
-            // 例外：底线操作不允许任何会话信任档，此时提供"仅此一次"，否则用户只能拒绝。
-            if (request.AllowedTrustScopes == null || request.AllowedTrustScopes.Count == 0)
-            {
-                var allowOnce = new Button(() => ResolvePendingToolConfirmation(pending, true))
-                {
-                    text = AgentCore.Editor.L10n.Loc.Tr("toolConfirmation.allowOnce", "Allow Once")
-                };
-                allowOnce.tooltip = AgentCore.Editor.L10n.Loc.Tr(
-                    "toolConfirmation.allowOnceTooltip",
-                    "仅允许这一次。受保护路径 / 执行代码 / 删除 / VCS 改写等操作每次都需要确认，YOLO 也不例外");
-                allowOnce.AddToClassList("tool-confirmation-button");
-                allowOnce.AddToClassList("tool-confirmation-button--trust");
-                buttons.Add(allowOnce);
-            }
-
             if (IsScopeAllowed(request, ToolConfirmationTrustScope.SessionLowMediumRisk))
             {
                 var trustLowMed = new Button(() => ResolvePendingToolConfirmationWithTrust(pending, ToolConfirmationTrustScope.SessionLowMediumRisk))
@@ -456,12 +441,8 @@ namespace AgentCore.Editor.UI
                 return false;
             }
 
-            // 底线操作（受保护路径 / 执行代码 / 删除 / VCS 改写）的请求不提供任何信任档，
-            // 已开启的 YOLO / Low-Med 信任也不能放行它 —— 此前 YOLO 不看 AllowedTrustScopes，直接全放。
-
-            // YOLO: 所有允许 YOLO 的工具直通
-            if (_sessionTrustScopes.Contains(ToolConfirmationTrustScope.SessionAll)
-                && IsScopeAllowed(request, ToolConfirmationTrustScope.SessionAll))
+            // YOLO: 完全不审查，所有工具直通
+            if (_sessionTrustScopes.Contains(ToolConfirmationTrustScope.SessionAll))
             {
                 return true;
             }

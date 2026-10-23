@@ -59,7 +59,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 ""json"": { ""type"": ""string"", ""description"": ""JSON string for import_json"" },
                 ""properties"": { ""type"": ""object"", ""description"": ""Key-value pairs for set_batch (propertyName: value)"" },
                 ""limit"": { ""type"": ""integer"", ""description"": ""Max results for list/find (default: 50)"" },
-                ""on_conflict"": { ""type"": ""string"", ""enum"": [""error"", ""unique"", ""overwrite""], ""description"": ""create/duplicate: what to do if an asset already exists at the target path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset."" }
+                ""on_conflict"": { ""type"": ""string"", ""enum"": [""overwrite"", ""unique"", ""error""], ""description"": ""create/duplicate: what to do if an asset already exists at the target path. 'overwrite' (default) replaces the existing asset, 'unique' writes to an auto-generated unique path, 'error' fails without touching it."" }
             },
             ""required"": [""action""]
         }");
@@ -153,7 +153,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (type == null)
                 return ToolResponse.Fail($"ScriptableObject type not found: '{typeName}'. Use list_types to see available types.");
 
-            // 目标已存在时按 on_conflict 处理（默认报错，避免静默覆盖）
+            // 目标已存在时按 on_conflict 处理（默认覆盖，项目由版本管理兜底）
             if (!AssetConflictPolicy.TryResolvePath(parameters, ref assetPath, out var conflictError))
                 return ToolResponse.Fail(conflictError);
 
@@ -340,11 +340,14 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (asset == null)
                 return ToolResponse.Fail($"ScriptableObject not found at: {assetPath}");
 
-            // 移到系统回收站而非永久删除，便于用户恢复
-            if (!AssetDatabase.MoveAssetToTrash(assetPath))
-                return ToolResponse.Fail($"Failed to move asset to trash: {assetPath}. The asset was not deleted.");
+            // 优先移到系统回收站；平台不支持回收站时直接删除（项目由版本管理兜底）
+            if (AssetDatabase.MoveAssetToTrash(assetPath))
+                return ToolResponse.Ok($"Moved ScriptableObject at {assetPath} to the OS trash (recoverable).");
 
-            return ToolResponse.Ok($"Moved ScriptableObject at {assetPath} to the OS trash (recoverable).");
+            if (!AssetDatabase.DeleteAsset(assetPath))
+                return ToolResponse.Fail($"Failed to delete ScriptableObject at: {assetPath}");
+
+            return ToolResponse.Ok($"Deleted ScriptableObject at {assetPath}.");
         }
 
         /// <summary>

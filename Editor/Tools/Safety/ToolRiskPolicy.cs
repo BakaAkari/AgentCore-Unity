@@ -144,7 +144,8 @@ namespace AgentCore.Editor.Tools.Safety
         /// <param name="targets">受影响的目标列表（路径 / GameObject 名 / Asset GUID 等）。</param>
         /// <param name="touchesProtectedPath">
         /// 写操作的目标路径是否命中受保护路径（<see cref="SafePath.IsProtected"/>，含项目外路径），
-        /// 由 <see cref="ToolPathRiskResolver"/> 给出。命中时进入"底线确认"，会话信任 / YOLO 不可跳过。
+        /// 由 <see cref="ToolPathRiskResolver"/> 给出。写操作命中时必定进入确认，
+        /// 是否放行由用户选择的审查级别决定，YOLO 直通。
         /// </param>
         /// <returns>策略决策。</returns>
         public static ToolPolicyDecision Evaluate(
@@ -187,9 +188,9 @@ namespace AgentCore.Editor.Tools.Safety
             // 只读白名单跳过 (对齐 line 209 / 228 的粒度修复语义).
             bool isReadOnlyAction = metadata.IsReadOnlyAction(action);
 
-            // 底线确认（YOLO / 会话信任也不可跳过）：受保护路径写入、执行代码、资产删除、
-            // VCS 改写历史 / 丢弃改动、修改 Agent 自身配置。确认请求不提供任何会话信任档，
-            // 用户只能逐次允许或拒绝。参考 Claude Code 受保护路径检查先于 allow 规则求值。
+            // 高影响操作一律进入确认：受保护路径写入、执行代码、资产删除、VCS 改写历史 / 丢弃改动、
+            // 修改 Agent 自身配置。与其他确认一样遵循用户选择的审查级别 —— YOLO 完全直通，
+            // Low/Med 信任因这些操作带副作用能力位而不会放行。
             if (!isReadOnlyAction && IsFloorOperation(metadata, action, touchesProtectedPath, out var floorReason))
             {
                 reasons.Add(floorReason);
@@ -201,7 +202,7 @@ namespace AgentCore.Editor.Tools.Safety
                     reasons,
                     parameterSummary,
                     targets,
-                    allowSessionTrust: false);
+                    allowSessionTrust: true);
 
                 return ToolPolicyDecision.RequireConfirmation(risk, confirmation, reasons);
             }
@@ -403,7 +404,7 @@ namespace AgentCore.Editor.Tools.Safety
         };
 
         /// <summary>
-        /// 是否属于"底线确认"操作：会话信任 / YOLO 下仍须逐次确认。
+        /// 是否属于高影响操作（无论工具声明如何都需确认；YOLO 下直通）。
         /// 调用方已排除只读白名单 action。
         /// </summary>
         private static bool IsFloorOperation(
@@ -417,7 +418,7 @@ namespace AgentCore.Editor.Tools.Safety
 
             if (touchesProtectedPath)
             {
-                reason = "Target is a protected path (ProjectSettings, manifest, .git, *.asmdef, Editor code, AgentCore itself, or outside the project); approval required every time.";
+                reason = "Target is a protected path (ProjectSettings, manifest, .git, *.asmdef, Editor code, AgentCore itself, or outside the project); explicit user approval required.";
                 return true;
             }
 
@@ -425,25 +426,25 @@ namespace AgentCore.Editor.Tools.Safety
                 metadata.RiskLevel == ToolRiskLevel.CodeExecution ||
                 metadata.IsExecuteCodeAction(action))
             {
-                reason = "Tool executes arbitrary code; approval required every time.";
+                reason = "Tool executes arbitrary code; explicit user approval required.";
                 return true;
             }
 
             if ((caps & ToolCapability.ModifyAgentConfig) != 0)
             {
-                reason = "Tool modifies AgentCore's own configuration; approval required every time.";
+                reason = "Tool modifies AgentCore's own configuration; explicit user approval required.";
                 return true;
             }
 
             if ((caps & ToolCapability.VersionControlWrite) != 0 && HasActionToken(action, VcsFloorTokens, out var vcsToken))
             {
-                reason = $"Version control '{vcsToken}' can publish, rewrite or discard work; approval required every time.";
+                reason = $"Version control '{vcsToken}' can publish, rewrite or discard work; explicit user approval required.";
                 return true;
             }
 
             if ((caps & ToolCapability.DeleteProjectFiles) != 0 && HasActionToken(action, DeleteFloorTokens, out var deleteToken))
             {
-                reason = $"'{deleteToken}' removes project files or assets; approval required every time.";
+                reason = $"'{deleteToken}' removes project files or assets; explicit user approval required.";
                 return true;
             }
 

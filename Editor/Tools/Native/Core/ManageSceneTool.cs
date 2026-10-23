@@ -23,7 +23,7 @@ namespace AgentCore.Editor.Tools.Native.Core
             "Applicable: scene-level operations (open, save, create, hierarchy inspection). " +
             "NOT for: modifying individual GameObjects (use manage_gameobject), searching for objects (use find_gameobjects), scene quality analysis (use scene_analysis). " +
             "Returns: scene list with paths and load states, or hierarchy tree with depth/components. " +
-            "Note: single-mode create/open/open_scene/new_scene refuse to run while ANY loaded scene (including additively loaded ones) has unsaved changes; save them first (save / save_scene_as) or ask the user. Additive mode never discards anything.",
+            "Note: opening a new scene discards unsaved changes in the current scene unless saved first.",
         Category = "Scene", RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium, Capabilities = ToolCapability.ModifyScene | ToolCapability.WriteProjectFiles,
         ReadOnlyActions = new[] { "get_active", "get_hierarchy", "list", "get_build_scenes", "list_open_scenes" },
@@ -303,11 +303,6 @@ namespace AgentCore.Editor.Tools.Native.Core
                 if (File.Exists(scenePath))
                     return ToolResponse.Fail($"Scene already exists at '{scenePath}'.");
 
-                // Single 模式新建会卸载所有已加载场景，先确认没有未保存修改
-                var dirtyError = CheckNoDirtyLoadedScenes("create");
-                if (dirtyError != null)
-                    return dirtyError;
-
                 // Ensure directory exists
                 ToolHelpers.EnsureDirectoryExists(scenePath);
 
@@ -345,12 +340,11 @@ namespace AgentCore.Editor.Tools.Native.Core
                 if (!File.Exists(scenePath))
                     return ToolResponse.Fail($"Scene file not found at '{scenePath}'.");
 
-                // Check for unsaved changes (Single 模式会卸载所有已加载场景，不只是 active scene)
-                if (!additive)
+                // Check for unsaved changes
+                if (!additive && EditorSceneManager.GetActiveScene().isDirty)
                 {
-                    var dirtyError = CheckNoDirtyLoadedScenes("open");
-                    if (dirtyError != null)
-                        return dirtyError;
+                    return ToolResponse.Fail(
+                        "Current scene has unsaved changes. Save first or use additive mode.");
                 }
 
                 var mode = additive ? OpenSceneMode.Additive : OpenSceneMode.Single;
@@ -474,29 +468,10 @@ namespace AgentCore.Editor.Tools.Native.Core
             try
             {
                 bool saveCurrent = ToolHelpers.GetOptionalBool(parameters, "save_current", true);
+                if (saveCurrent && !EditorSceneManager.SaveOpenScenes())
+                    return ToolResponse.Fail("Failed to save current open scenes before creating a new scene.");
+
                 var mode = ParseNewSceneMode(ToolHelpers.GetOptionalString(parameters, "mode", "single"));
-
-                if (saveCurrent)
-                {
-                    // 未命名的脏场景会让 SaveOpenScenes 弹出保存对话框（模态，阻塞 Agent），提前拒绝
-                    var untitled = GetDirtyLoadedScenes().Where(sc => string.IsNullOrEmpty(sc.path)).ToList();
-                    if (untitled.Count > 0)
-                        return ToolResponse.Fail(
-                            $"Cannot auto-save before new_scene: {untitled.Count} loaded scene(s) are untitled and have unsaved changes. " +
-                            "Use save_scene_as to give them a path first, or ask the user how to proceed.");
-
-                    if (!EditorSceneManager.SaveOpenScenes())
-                        return ToolResponse.Fail("Failed to save current open scenes before creating a new scene.");
-                }
-
-                // Single 模式会卸载所有已加载场景，确认没有残留的未保存修改（save_current=false 时生效）
-                if (mode == NewSceneMode.Single)
-                {
-                    var dirtyError = CheckNoDirtyLoadedScenes("new_scene");
-                    if (dirtyError != null)
-                        return dirtyError;
-                }
-
                 var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, mode);
                 var name = ToolHelpers.GetOptionalString(parameters, "name");
                 if (!string.IsNullOrEmpty(name))
@@ -525,13 +500,8 @@ namespace AgentCore.Editor.Tools.Native.Core
                     return ToolResponse.Fail($"Scene file not found at '{path}'.");
 
                 var mode = ParseOpenSceneMode(ToolHelpers.GetOptionalString(parameters, "mode", "single"));
-                // 不调用 SaveCurrentModifiedScenesIfUserWantsTo（会弹模态对话框阻塞 Agent），改为检查所有已加载场景
-                if (mode == OpenSceneMode.Single)
-                {
-                    var dirtyError = CheckNoDirtyLoadedScenes("open_scene");
-                    if (dirtyError != null)
-                        return dirtyError;
-                }
+                if (mode == OpenSceneMode.Single && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                    return ToolResponse.Fail("Current scene has unsaved changes. Save first or use additive mode.");
 
                 var scene = EditorSceneManager.OpenScene(path, mode);
                 return ToolResponse.OkWithData(SerializeScene(scene), $"Scene '{scene.name}' opened successfully.");
@@ -791,40 +761,6 @@ namespace AgentCore.Editor.Tools.Native.Core
             }
 
             return default;
-        }
-
-        /// <summary>
-        /// 收集所有已加载场景中 isDirty 的场景（含 additive 加载的场景）。
-        /// </summary>
-        private static System.Collections.Generic.List<Scene> GetDirtyLoadedScenes()
-        {
-            var dirty = new System.Collections.Generic.List<Scene>();
-            for (int i = 0; i < SceneManager.sceneCount; i++)
-            {
-                var scene = SceneManager.GetSceneAt(i);
-                if (scene.IsValid() && scene.isDirty)
-                    dirty.Add(scene);
-            }
-            return dirty;
-        }
-
-        /// <summary>
-        /// 会替换整个已加载场景集合的操作（Single 模式 new/open）执行前调用。
-        /// 有未保存场景时返回失败响应（列出场景），否则返回 null。
-        /// 不弹对话框、不自动保存 —— 由 Agent 先显式保存或询问用户。
-        /// </summary>
-        private static ToolResponse CheckNoDirtyLoadedScenes(string action)
-        {
-            var dirty = GetDirtyLoadedScenes();
-            if (dirty.Count == 0)
-                return null;
-
-            var list = string.Join(", ", dirty.Select(sc =>
-                string.IsNullOrEmpty(sc.path) ? $"'{(string.IsNullOrEmpty(sc.name) ? "Untitled" : sc.name)}' (untitled)" : $"'{sc.name}' ({sc.path})"));
-            return ToolResponse.Fail(
-                $"Cannot {action} in single mode: {dirty.Count} loaded scene(s) have unsaved changes that would be lost: {list}. " +
-                "Save them first (action 'save' for the active scene, 'save_scene_as' for untitled ones; use set_active_scene to target others), " +
-                "use additive mode, or ask the user whether to save or discard.");
         }
 
         private string NormalizeScenePath(string path)

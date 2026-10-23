@@ -108,24 +108,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
                 else
                 {
                     var isEditor = storeStr == "editor";
-                    var key = parameters["key"]?.Type == JTokenType.String ? parameters["key"].Value<string>() : null;
-                    if (isEditor && action == "delete_all")
-                    {
-                        // EditorPrefs.DeleteAll 会清掉整台机器所有 Unity 编辑器偏好，包括 AgentCore 的 API Key 与信任设置
-                        response = ToolResponse.Fail(
-                            "delete_all is not allowed for EditorPrefs: it wipes every editor preference on this machine, " +
-                            "including AgentCore API keys. Delete specific keys instead.");
-                    }
-                    else if (action != "has" && action != "delete_all" && IsProtectedPrefKey(key))
-                    {
-                        // 硬拒绝（与确认无关）：API Key 以明文存在 EditorPrefs 的 AgentCore_ProfileKey_<id> 等键里，
-                        // 只读白名单里的 get 原本不经确认就能把它读进对话上下文，进而发给模型服务商
-                        response = ToolResponse.Fail(
-                            $"Access to preference key '{key}' is forbidden: AgentCore's own settings and keys that look like " +
-                            "credentials (api key / token / secret / password) cannot be read or changed by tools. " +
-                            "Use 'has' to check whether it is set.");
-                    }
-                    else switch (action)
+                    switch (action)
                     {
                         case "has":
                             response = HandleHas(parameters, isEditor);
@@ -163,26 +146,6 @@ namespace AgentCore.Editor.Tools.Native.Meta
         }
 
         #region Handlers
-
-        private static readonly string[] CredentialKeyMarkers =
-        {
-            "apikey", "api_key", "api-key", "token", "secret", "password", "passwd", "credential", "privatekey", "private_key"
-        };
-
-        /// <summary>
-        /// AgentCore 自身的偏好（含 API Key、信任 / YOLO 开关）以及名字像凭据的键，工具一律不可读写。
-        /// </summary>
-        private static bool IsProtectedPrefKey(string key)
-        {
-            if (string.IsNullOrEmpty(key)) return false;
-            if (key.StartsWith("AgentCore", StringComparison.OrdinalIgnoreCase)) return true;
-            foreach (var marker in CredentialKeyMarkers)
-            {
-                if (key.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
-                    return true;
-            }
-            return false;
-        }
 
         private static ToolResponse HandleHas(JObject parameters, bool isEditor)
         {
