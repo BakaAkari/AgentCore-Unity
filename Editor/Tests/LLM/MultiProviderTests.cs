@@ -1,3 +1,5 @@
+using AgentCore.Tests.Editor;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.Config;
@@ -808,19 +810,19 @@ namespace AgentCore.Tests.Editor.LLM
         }
 
         [NUnit.Framework.Test]
-        public void AnthropicStream_Truncated_Throws()
+        public async Task AnthropicStream_Truncated_Throws()
         {
             using var stream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes("data: {\"type\":\"ping\"}\n\n"));
-            NUnit.Framework.Assert.ThrowsAsync<System.IO.EndOfStreamException>(async () =>
+            await AsyncAssert.ThrowsAsync<System.IO.EndOfStreamException>(async () =>
                 await AgentCore.Editor.LLM.Anthropic.AnthropicSseReader.ReadAsync(stream, _ => {}, default));
         }
 
         [NUnit.Framework.Test]
-        public void AnthropicStream_Cancelled_Throws()
+        public async Task AnthropicStream_Cancelled_Throws()
         {
             using var stream = new System.IO.MemoryStream();
             using var ct = new System.Threading.CancellationTokenSource(); ct.Cancel();
-            NUnit.Framework.Assert.CatchAsync<System.OperationCanceledException>(async () =>
+            await AsyncAssert.CatchAsync<System.OperationCanceledException>(async () =>
                 await AgentCore.Editor.LLM.Anthropic.AnthropicSseReader.ReadAsync(stream, _ => {}, ct.Token));
         }
 

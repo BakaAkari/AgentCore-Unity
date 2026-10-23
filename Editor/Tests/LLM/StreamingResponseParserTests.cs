@@ -1,3 +1,4 @@
+using AgentCore.Tests.Editor;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -82,9 +83,9 @@ namespace AgentCore.Tests.Editor.LLM
         }
 
         [Test]
-        public void StreamEndingWithoutDoneOrFinishReason_Throws()
+        public async Task StreamEndingWithoutDoneOrFinishReason_Throws()
         {
-            Assert.ThrowsAsync<EndOfStreamException>(async () =>
+            await AsyncAssert.ThrowsAsync<EndOfStreamException>(async () =>
                 await Parse("data: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\n"));
         }
 
@@ -97,17 +98,17 @@ namespace AgentCore.Tests.Editor.LLM
         }
 
         [Test]
-        public void ErrorPayload_ThrowsRetryableStreamError()
+        public async Task ErrorPayload_ThrowsRetryableStreamError()
         {
-            var ex = Assert.ThrowsAsync<LlmStreamErrorException>(async () =>
+            var ex = await AsyncAssert.ThrowsAsync<LlmStreamErrorException>(async () =>
                 await Parse("data: {\"error\":{\"type\":\"server_error\",\"message\":\"boom\"}}\n\n"));
             Assert.IsTrue(ex.Retryable);
         }
 
         [Test]
-        public void ErrorEvent_InvalidRequest_IsNotRetryable()
+        public async Task ErrorEvent_InvalidRequest_IsNotRetryable()
         {
-            var ex = Assert.ThrowsAsync<LlmStreamErrorException>(async () =>
+            var ex = await AsyncAssert.ThrowsAsync<LlmStreamErrorException>(async () =>
                 await Parse("event: error\ndata: {\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad\"}}\n\n"));
             Assert.IsFalse(ex.Retryable);
         }

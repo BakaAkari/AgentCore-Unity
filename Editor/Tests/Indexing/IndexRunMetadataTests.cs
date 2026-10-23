@@ -20,16 +20,22 @@ namespace AgentCore.Tests.Editor.Indexing
         private static readonly DateTime ScopeAt = new DateTime(2026, 1, 2, 12, 30, 0, DateTimeKind.Utc);
 
         private string _dir;
+        private System.Threading.SynchronizationContext _savedContext;
 
         [SetUp]
         public void SetUp()
         {
             _dir = Path.Combine(Path.GetTempPath(), "agentcore-runmeta-tests-" + Guid.NewGuid().ToString("N"));
+            // 测试用 .Result/.Wait() 同步等待；清掉 UnitySynchronizationContext，让 store 内部 await 的续延走线程池，
+            // 否则续延投递回被阻塞的主线程会死锁
+            _savedContext = System.Threading.SynchronizationContext.Current;
+            System.Threading.SynchronizationContext.SetSynchronizationContext(null);
         }
 
         [TearDown]
         public void TearDown()
         {
+            System.Threading.SynchronizationContext.SetSynchronizationContext(_savedContext);
             try
             {
                 if (Directory.Exists(_dir))

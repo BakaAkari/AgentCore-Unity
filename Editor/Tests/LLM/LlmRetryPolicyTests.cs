@@ -1,3 +1,4 @@
+using AgentCore.Tests.Editor;
 using System;
 using System.IO;
 using System.Net.Http;
@@ -159,24 +160,24 @@ namespace AgentCore.Tests.Editor.LLM
         }
 
         [Test]
-        public void Watchdog_IdleStream_ThrowsIdleTimeoutAndDisposesStream()
+        public async Task Watchdog_IdleStream_ThrowsIdleTimeoutAndDisposesStream()
         {
             var stream = new HangingStream("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n");
             var parser = new StreamingResponseParser { IdleTimeout = TimeSpan.FromMilliseconds(200) };
 
-            Assert.ThrowsAsync<LlmStreamIdleTimeoutException>(async () =>
+            await AsyncAssert.ThrowsAsync<LlmStreamIdleTimeoutException>(async () =>
                 await parser.ParseStreamAsync(stream, _ => { }));
             Assert.IsTrue(stream.Disposed);
         }
 
         [Test]
-        public void Watchdog_UserCancel_ThrowsOperationCanceled_NotTimeout()
+        public async Task Watchdog_UserCancel_ThrowsOperationCanceled_NotTimeout()
         {
             var stream = new HangingStream("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n");
             var parser = new StreamingResponseParser { IdleTimeout = TimeSpan.FromSeconds(30) };
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
-            Assert.CatchAsync<OperationCanceledException>(async () =>
+            await AsyncAssert.CatchAsync<OperationCanceledException>(async () =>
                 await parser.ParseStreamAsync(stream, _ => { }, cts.Token));
         }
     }

@@ -1,3 +1,4 @@
+using AgentCore.Tests.Editor;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -66,22 +67,22 @@ namespace AgentCore.Tests.Editor.Core
         }
 
         [Test]
-        public void NonRetryableHttpError_IsNotRetried()
+        public async Task NonRetryableHttpError_IsNotRetried()
         {
             var client = new ScriptedClient((n, _) => throw Http(401));
 
-            Assert.ThrowsAsync<Exception>(async () => await Run(NewRouter(), client));
+            await AsyncAssert.ThrowsAsync<Exception>(async () => await Run(NewRouter(), client));
             Assert.AreEqual(1, client.Calls);
         }
 
         [Test]
-        public void ConnectBudget_IsEnforced()
+        public async Task ConnectBudget_IsEnforced()
         {
             var router = NewRouter();
             router.MaxConnectRetries = 2;
             var client = new ScriptedClient((n, _) => throw Http(503));
 
-            Assert.ThrowsAsync<Exception>(async () => await Run(router, client));
+            await AsyncAssert.ThrowsAsync<Exception>(async () => await Run(router, client));
             Assert.AreEqual(3, client.Calls);
         }
 
@@ -105,7 +106,7 @@ namespace AgentCore.Tests.Editor.Core
         }
 
         [Test]
-        public void FailureAfterOutput_IsNotRetried()
+        public async Task FailureAfterOutput_IsNotRetried()
         {
             var client = new ScriptedClient((n, onChunk) =>
             {
@@ -113,27 +114,27 @@ namespace AgentCore.Tests.Editor.Core
                 throw new EndOfStreamException("cut");
             });
 
-            var ex = Assert.ThrowsAsync<Exception>(async () => await Run(NewRouter(), client));
+            var ex = await AsyncAssert.ThrowsAsync<Exception>(async () => await Run(NewRouter(), client));
             StringAssert.Contains("partial output", ex.Message);
             Assert.AreEqual(1, client.Calls);
         }
 
         [Test]
-        public void RetryAfterBeyondLimit_IsNotWaitedFor()
+        public async Task RetryAfterBeyondLimit_IsNotWaitedFor()
         {
             var client = new ScriptedClient((n, _) => throw Http(429, TimeSpan.FromMinutes(10)));
 
-            Assert.ThrowsAsync<Exception>(async () => await Run(NewRouter(), client));
+            await AsyncAssert.ThrowsAsync<Exception>(async () => await Run(NewRouter(), client));
             Assert.AreEqual(1, client.Calls);
         }
 
         [Test]
-        public void UserCancelDuringBackoff_PropagatesAsCancellation()
+        public async Task UserCancelDuringBackoff_PropagatesAsCancellation()
         {
             var client = new ScriptedClient((n, _) => throw Http(429, TimeSpan.FromSeconds(60)));
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
-            Assert.CatchAsync<OperationCanceledException>(async () => await Run(NewRouter(), client, cts.Token));
+            await AsyncAssert.CatchAsync<OperationCanceledException>(async () => await Run(NewRouter(), client, cts.Token));
             Assert.AreEqual(1, client.Calls);
         }
 
