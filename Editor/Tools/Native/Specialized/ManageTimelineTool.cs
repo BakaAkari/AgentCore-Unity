@@ -70,7 +70,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     ""type"": ""string"",
                     ""enum"": [""play"", ""pause"", ""stop""],
                     ""description"": ""Playback state""
-                }
+                },
+                ""onConflict"": { ""type"": ""string"", ""enum"": [""error"", ""unique"", ""overwrite""], ""description"": ""create only: what to do if an asset already exists at the target path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset."" }
             },
             ""required"": [""action""]
         }");
@@ -222,6 +223,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             var assetPath = ToolHelpers.GetOptionalString(parameters, "assetPath", $"Assets/Timelines/{name}.playable");
 
             var normalizedPath = ToolHelpers.NormalizeAssetPath(assetPath);
+
+            // 目标已存在时按 onConflict 处理（默认报错，避免静默覆盖）
+            if (!AssetConflictPolicy.TryResolvePath(parameters, ref normalizedPath, out var conflictError, "onConflict"))
+                return ToolResponse.Fail(conflictError);
+
             ToolHelpers.EnsureDirectoryExists(normalizedPath);
 
             // Create TimelineAsset via ScriptableObject.CreateInstance

@@ -126,6 +126,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                 ""shader_path"": {
                     ""type"": ""string"",
                     ""description"": ""Shader asset path for get_shader_info (e.g., 'Assets/Shaders/MyShader.shadergraph')""
+                },
+                ""on_conflict"": {
+                    ""type"": ""string"",
+                    ""enum"": [""error"", ""unique"", ""overwrite""],
+                    ""description"": ""create only: what to do if an asset already exists at material_path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset.""
                 }
             },
             ""required"": [""action""]
@@ -274,6 +279,10 @@ namespace AgentCore.Editor.Tools.Native.Utility
 
                 if (!path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
                     path += ".mat";
+
+                // 目标已存在时按 on_conflict 处理（默认报错，避免静默覆盖）
+                if (!AssetConflictPolicy.TryResolvePath(parameters, ref path, out var conflictError))
+                    return ToolResponse.Fail(conflictError);
 
                 var shaderName = GetStringWithFallback(parameters, "shader_name", "shaderName", "Standard");
                 var shader = Shader.Find(shaderName);

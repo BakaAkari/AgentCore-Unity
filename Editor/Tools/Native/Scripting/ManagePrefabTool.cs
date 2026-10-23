@@ -90,6 +90,11 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                     ""type"": ""string"",
                     ""enum"": [""root"", ""completely""],
                     ""description"": ""Unpack mode (default: 'root')""
+                },
+                ""on_conflict"": {
+                    ""type"": ""string"",
+                    ""enum"": [""error"", ""unique"", ""overwrite""],
+                    ""description"": ""create only: what to do if an asset already exists at path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset.""
                 }
             },
             ""required"": [""action""]
@@ -164,6 +169,10 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             // Ensure .prefab extension
             if (!path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
                 path += ".prefab";
+
+            // 目标已存在时按 on_conflict 处理（默认报错，避免静默覆盖）
+            if (!AssetConflictPolicy.TryResolvePath(parameters, ref path, out var conflictError))
+                return ToolResponse.Fail(conflictError);
 
             // Find source GameObject in scene
             var sourceGo = ToolHelpers.FindGameObject(sourceName);

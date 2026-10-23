@@ -58,7 +58,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                 ""filter"": { ""type"": ""string"", ""description"": ""Type name filter for list_types"" },
                 ""json"": { ""type"": ""string"", ""description"": ""JSON string for import_json"" },
                 ""properties"": { ""type"": ""object"", ""description"": ""Key-value pairs for set_batch (propertyName: value)"" },
-                ""limit"": { ""type"": ""integer"", ""description"": ""Max results for list/find (default: 50)"" }
+                ""limit"": { ""type"": ""integer"", ""description"": ""Max results for list/find (default: 50)"" },
+                ""on_conflict"": { ""type"": ""string"", ""enum"": [""error"", ""unique"", ""overwrite""], ""description"": ""create/duplicate: what to do if an asset already exists at the target path. 'error' (default) fails without touching it, 'unique' writes to an auto-generated unique path, 'overwrite' replaces the existing asset."" }
             },
             ""required"": [""action""]
         }");
@@ -151,6 +152,10 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             var type = FindScriptableObjectType(typeName);
             if (type == null)
                 return ToolResponse.Fail($"ScriptableObject type not found: '{typeName}'. Use list_types to see available types.");
+
+            // 目标已存在时按 on_conflict 处理（默认报错，避免静默覆盖）
+            if (!AssetConflictPolicy.TryResolvePath(parameters, ref assetPath, out var conflictError))
+                return ToolResponse.Fail(conflictError);
 
             var instance = ScriptableObject.CreateInstance(type);
             if (instance == null)
@@ -302,6 +307,8 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
             if (string.IsNullOrEmpty(destPath))
                 destPath = AssetDatabase.GenerateUniqueAssetPath(sourcePath);
+            else if (!AssetConflictPolicy.TryResolvePath(parameters, ref destPath, out var conflictError))
+                return ToolResponse.Fail(conflictError);
 
             // Ensure destination directory exists
             var dir = Path.GetDirectoryName(destPath);
@@ -333,10 +340,11 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             if (asset == null)
                 return ToolResponse.Fail($"ScriptableObject not found at: {assetPath}");
 
-            if (!AssetDatabase.DeleteAsset(assetPath))
-                return ToolResponse.Fail($"Failed to delete asset at: {assetPath}");
+            // 移到系统回收站而非永久删除，便于用户恢复
+            if (!AssetDatabase.MoveAssetToTrash(assetPath))
+                return ToolResponse.Fail($"Failed to move asset to trash: {assetPath}. The asset was not deleted.");
 
-            return ToolResponse.Ok($"Deleted ScriptableObject at {assetPath}");
+            return ToolResponse.Ok($"Moved ScriptableObject at {assetPath} to the OS trash (recoverable).");
         }
 
         /// <summary>
