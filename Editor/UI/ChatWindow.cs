@@ -503,7 +503,8 @@ namespace AgentCore.Editor.UI
             try
             {
                 // 创建 LLM 客户端
-                var llmClient = new OpenAICompatibleClient();
+                // v1.17.0: 路由客户端按 active profile 的 apiFormat 选择 OpenAI 兼容 / Anthropic 原生协议
+                var llmClient = new RoutingLLMClient();
 
                 // 创建 AgentLoop
                 var confirmationProvider = new DelegatingToolConfirmationProvider(RequestEmbeddedToolConfirmationAsync);

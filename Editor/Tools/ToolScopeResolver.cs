@@ -78,6 +78,34 @@ namespace AgentCore.Editor.Tools
         }
 
         /// <summary>
+        /// v1.17.0: 解析本会话声明的工具全集（与作用域状态无关，保证工具列表稳定 → 缓存前缀稳定）。
+        /// 未被用户禁用的工具全部声明；其中 OnDemand（scoping 启用时）与 Restricted 为延迟工具，
+        /// 只有在 <see cref="ResolveVisibleTools"/> 判定可见后才由 ToolChange 消息启用。
+        /// </summary>
+        /// <param name="deferredNames">输出：延迟工具名</param>
+        public static List<ToolMetadata> ResolveDeclaredTools(out HashSet<string> deferredNames)
+        {
+            var settings = AgentCoreSettings.instance;
+            var allTools = ToolRegistry.Instance.GetAllTools();
+            var result = new List<ToolMetadata>(allTools.Count);
+            deferredNames = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var tool in allTools)
+            {
+                var meta = tool.Metadata;
+                if (meta == null) continue;
+                if (settings.IsToolDisabled(meta.Name, meta.Category)) continue;
+
+                result.Add(meta);
+                bool deferred = meta.Visibility == ToolVisibility.Restricted
+                                || (meta.Visibility == ToolVisibility.OnDemand && settings.toolScopingEnabled);
+                if (deferred) deferredNames.Add(meta.Name);
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// 获取所有可被激活的 OnDemand 分类及其工具计数（供 request_tools 元工具使用）。
         /// </summary>
         /// <param name="scopeState">当前作用域状态（用于标记已激活分类）</param>

@@ -46,6 +46,10 @@ namespace AgentCore.Editor.LLM
             var model = VisionModelConfig.ModelName;
             var apiKey = VisionModelConfig.ApiKey;
 
+            // v1.17.0: Anthropic 端点（按 host 自动识别）走 Messages API 的 image 块
+            if (ActiveModelConfig.ResolveApiFormat(new ProviderProfile { endpoint = endpoint }) == ApiFormats.Anthropic)
+                return await AnalyzeImageAnthropicAsync(endpoint, model, apiKey, imageBase64DataUrl, prompt, ct);
+
             // OpenAI 多模态消息: content 为数组, 含 image_url + text 两部分。
             var request = new JObject
             {
@@ -114,6 +118,67 @@ namespace AgentCore.Editor.LLM
                 }
                 return text;
             }
+        }
+
+        /// <summary>v1.17.0: Anthropic Messages API 版本的图片分析（base64 image 块 + text）。</summary>
+        private static async Task<string> AnalyzeImageAnthropicAsync(
+            string endpoint, string model, string apiKey, string dataUrl, string prompt, CancellationToken ct)
+        {
+            if (!TryParseDataUrl(dataUrl, out var mediaType, out var base64))
+                throw new ArgumentException("Anthropic vision requires a base64 data URL (data:image/...;base64,...).", nameof(dataUrl));
+
+            var request = new JObject
+            {
+                ["model"] = model,
+                ["max_tokens"] = 1024,
+                ["messages"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["role"] = "user",
+                        ["content"] = new JArray
+                        {
+                            new JObject
+                            {
+                                ["type"] = "image",
+                                ["source"] = new JObject { ["type"] = "base64", ["media_type"] = mediaType, ["data"] = base64 }
+                            },
+                            new JObject { ["type"] = "text", ["text"] = prompt ?? "Describe this image in detail." }
+                        }
+                    }
+                }
+            };
+
+            var url = Anthropic.AnthropicMessagesClient.BuildMessagesUrl(endpoint);
+            var headers = Anthropic.AnthropicMessagesClient.BuildHeaders(apiKey, AuthSchemes.XApiKey);
+            using var response = await OpenAIChatTransporter.SendJsonAsync(
+                url, headers, request.ToString(Newtonsoft.Json.Formatting.None), stream: false, ct);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"Vision API error: HTTP {(int)response.StatusCode} {response.ReasonPhrase}\n{responseBody}");
+
+            var acc = Anthropic.AnthropicStreamAccumulator.FromMessage(JObject.Parse(responseBody), model);
+            if (acc.Usage != null) UsageLedger.Record(acc.Usage, "vision");
+            var text = acc.BuildMessage()?.Content;
+            if (string.IsNullOrWhiteSpace(text))
+                throw new InvalidOperationException("Vision model returned empty text content.");
+            return text;
+        }
+
+        /// <summary>解析 <c>data:&lt;media&gt;;base64,&lt;data&gt;</c>。</summary>
+        internal static bool TryParseDataUrl(string dataUrl, out string mediaType, out string base64)
+        {
+            mediaType = null;
+            base64 = null;
+            if (string.IsNullOrEmpty(dataUrl) || !dataUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return false;
+            int comma = dataUrl.IndexOf(',');
+            if (comma < 0) return false;
+            var meta = dataUrl.Substring(5, comma - 5);
+            if (!meta.EndsWith(";base64", StringComparison.OrdinalIgnoreCase)) return false;
+            mediaType = meta.Substring(0, meta.Length - ";base64".Length);
+            if (mediaType.Length == 0) mediaType = "image/png";
+            base64 = dataUrl.Substring(comma + 1);
+            return base64.Length > 0;
         }
     }
 }

@@ -30,7 +30,6 @@ namespace AgentCore.Editor.LLM
             int? contentMaxTokens = null,
             string reasoningLevelOverride = null)
         {
-            var settings = AgentCoreSettings.instance;
             var apiKey = ActiveModelConfig.ApiKey;
             var endpoint = ActiveModelConfig.Endpoint;
             var model = ActiveModelConfig.ModelName;
@@ -38,19 +37,7 @@ namespace AgentCore.Editor.LLM
             // 修复消息历史中所有 tool_calls 的 arguments，防止无效 JSON 导致服务端解析失败
             SanitizeMessageToolCalls(messages);
 
-            var request = new ChatCompletionRequest
-            {
-                Model = model,
-                Messages = messages,
-                Tools = tools?.Count > 0 ? tools : null,
-                Stream = false,
-                Temperature = ActiveModelConfig.Temperature,
-                MaxTokens = contentMaxTokens.HasValue
-                    ? settings.GetEffectiveMaxTokens(contentMaxTokens.Value)
-                    : settings.GetEffectiveMaxTokens()
-            };
-
-            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request, reasoningLevelOverride);
+            var enrichedJson = BuildRequestJson(messages, tools, false, contentMaxTokens, reasoningLevelOverride);
             var url = endpoint.TrimEnd('/') + "/chat/completions";
             AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM request: {url} model={model} messages={messages.Count}");
 
@@ -85,10 +72,19 @@ namespace AgentCore.Editor.LLM
                     throw new InvalidOperationException($"Failed to parse LLM response:\n{responseBody}");
                 }
 
-                if (result.Usage != null)
+                // v1.17.0: 归一化 usage（含缓存命中分量）+ 保留 reasoning_content 供 DeepSeek 回传
+                JObject raw = null;
+                try { raw = JObject.Parse(responseBody); } catch { /* 已成功反序列化，raw 仅用于扩展字段 */ }
+                var usage = LlmUsage.FromOpenAI(raw?["usage"] as JObject, result.Model ?? model);
+                result.NormalizedUsage = usage;
+                var message = result.GetMessage();
+                if (message != null)
                 {
-                    AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM usage: prompt={result.Usage.PromptTokens} completion={result.Usage.CompletionTokens} total={result.Usage.TotalTokens}");
+                    message.Usage = usage;
+                    var reasoning = ReasoningFieldExtractor.ExtractFromObject(raw?["choices"]?[0]?["message"] as JObject);
+                    if (!string.IsNullOrEmpty(reasoning)) message.ReasoningContent = reasoning;
                 }
+                UsageLedger.Record(usage, "openai");
 
                 return result;
             }
@@ -102,7 +98,56 @@ namespace AgentCore.Editor.LLM
         /// </summary>
         private static async Task<(HttpResponseMessage, string)> SendPostAsync(
             string url, string apiKey, string body, CancellationToken ct)
-            => await OpenAIChatTransporter.PostAsync(url, apiKey, body, ct);
+        {
+            if (ActiveModelConfig.AuthScheme != AuthSchemes.XApiKey)
+                return await OpenAIChatTransporter.PostAsync(url, apiKey, body, ct);
+            var response = await OpenAIChatTransporter.SendJsonAsync(
+                url, OpenAIChatTransporter.BuildAuthHeaders(apiKey, useXApiKey: true), body, stream: false, ct);
+            return (response, await response.Content.ReadAsStringAsync());
+        }
+
+        /// <summary>
+        /// 构建 OpenAI 兼容请求 JSON（v1.17.0 抽取）：强类型请求 → enrichment → 方言改写。
+        /// <para>
+        /// 新增：temperature 仅在注册表声明支持时发送（新一代 Claude 经网关发 temperature 会 400）；
+        /// max_tokens 按注册表的单次最大输出截断。
+        /// </para>
+        /// </summary>
+        private static string BuildRequestJson(
+            List<ChatMessage> messages, List<ToolDefinition> tools, bool stream,
+            int? contentMaxTokens, string reasoningLevelOverride)
+        {
+            var settings = AgentCoreSettings.instance;
+            var model = ActiveModelConfig.ModelName;
+            var modelProfile = ModelRegistry.Lookup(model);
+
+            // v1.17.0: OpenAI 兼容协议没有延迟声明——只发送已启用的工具，ToolChange 消息不上线
+            tools = ToolChanges.EffectiveTools(tools, messages);
+            messages = ToolChanges.StripMessages(messages);
+
+            int maxTokens = contentMaxTokens.HasValue
+                ? settings.GetEffectiveMaxTokens(contentMaxTokens.Value)
+                : settings.GetEffectiveMaxTokens();
+            if (modelProfile.MaxOutput > 0 && maxTokens > modelProfile.MaxOutput) maxTokens = modelProfile.MaxOutput;
+
+            var request = new ChatCompletionRequest
+            {
+                Model = model,
+                Messages = messages,
+                Tools = tools?.Count > 0 ? tools : null,
+                Stream = stream,
+                Temperature = modelProfile.SupportsTemperature ? ActiveModelConfig.Temperature : null,
+                MaxTokens = maxTokens
+            };
+
+            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request, reasoningLevelOverride);
+            var dialect = ActiveModelConfig.Dialect;
+            if (dialect == OpenAIDialects.Generic && !modelProfile.EchoReasoningContent) return enrichedJson;
+
+            var body = JObject.Parse(enrichedJson);
+            OpenAIDialectAdapter.Apply(body, messages, dialect, model);
+            return body.ToString(Newtonsoft.Json.Formatting.None);
+        }
 
         /// <summary>
         /// 流式 Chat Completion 调用。
@@ -116,7 +161,6 @@ namespace AgentCore.Editor.LLM
             int? contentMaxTokens = null,
             string reasoningLevelOverride = null)
         {
-            var settings = AgentCoreSettings.instance;
             var apiKey = ActiveModelConfig.ApiKey;
             var endpoint = ActiveModelConfig.Endpoint;
             var model = ActiveModelConfig.ModelName;
@@ -124,19 +168,7 @@ namespace AgentCore.Editor.LLM
             // 修复消息历史中所有 tool_calls 的 arguments，防止无效 JSON 导致服务端解析失败
             SanitizeMessageToolCalls(messages);
 
-            var request = new ChatCompletionRequest
-            {
-                Model = model,
-                Messages = messages,
-                Tools = tools?.Count > 0 ? tools : null,
-                Stream = true,
-                Temperature = ActiveModelConfig.Temperature,
-                MaxTokens = contentMaxTokens.HasValue
-                    ? settings.GetEffectiveMaxTokens(contentMaxTokens.Value)
-                    : settings.GetEffectiveMaxTokens()
-            };
-
-            var enrichedJson = RequestEnrichment.BuildEnrichedJson(request, reasoningLevelOverride);
+            var enrichedJson = BuildRequestJson(messages, tools, true, contentMaxTokens, reasoningLevelOverride);
             var url = endpoint.TrimEnd('/') + "/chat/completions";
             AgentCore.Editor.Utils.AgentCoreLog.Debug($"[AgentCore] LLM stream request: {url} model={model} messages={messages.Count}");
 
@@ -181,6 +213,8 @@ namespace AgentCore.Editor.LLM
                 var contentBuilder = new StringBuilder();
                 var toolCalls = new List<ToolCall>();
                 var toolCallBuilders = new Dictionary<int, ToolCallBuilder>();
+                var reasoningBuilder = new StringBuilder();
+                LlmUsage usage = null;
                 string finishReason = null;
 
                 await _streamParser.ParseStreamAsync(stream, chunk =>
@@ -193,6 +227,13 @@ namespace AgentCore.Editor.LLM
                             break;
 
                         case StreamChunkType.ReasoningToken:
+                            reasoningBuilder.Append(chunk.ReasoningContent);
+                            onChunk?.Invoke(chunk);
+                            break;
+
+                        case StreamChunkType.Usage:
+                            usage = chunk.Usage;
+                            if (usage != null && string.IsNullOrEmpty(usage.Model)) usage.Model = model;
                             onChunk?.Invoke(chunk);
                             break;
 
@@ -229,10 +270,14 @@ namespace AgentCore.Editor.LLM
 
                 // 返回拼接好的完整 assistant 消息
                 var content = contentBuilder.ToString();
-                return ChatMessage.Assistant(
+                var assistant = ChatMessage.Assistant(
                     string.IsNullOrEmpty(content) ? null : content,
                     toolCalls.Count > 0 ? toolCalls : null
                 );
+                if (reasoningBuilder.Length > 0) assistant.ReasoningContent = reasoningBuilder.ToString();
+                assistant.Usage = usage;
+                UsageLedger.Record(usage, "openai-stream");
+                return assistant;
             }
         }
 
@@ -243,7 +288,12 @@ namespace AgentCore.Editor.LLM
         /// </summary>
         private static async Task<HttpResponseMessage> SendPostForStreamAsync(
             string url, string apiKey, string body, CancellationToken ct)
-            => await OpenAIChatTransporter.PostStreamAsync(url, apiKey, body, ct);
+        {
+            if (ActiveModelConfig.AuthScheme != AuthSchemes.XApiKey)
+                return await OpenAIChatTransporter.PostStreamAsync(url, apiKey, body, ct);
+            return await OpenAIChatTransporter.SendJsonAsync(
+                url, OpenAIChatTransporter.BuildAuthHeaders(apiKey, useXApiKey: true), body, stream: true, ct);
+        }
 
         /// <summary>
         /// 累积工具调用的增量数据。
@@ -293,7 +343,7 @@ namespace AgentCore.Editor.LLM
         /// </para>
         /// </summary>
         /// <param name="messages">待发送的消息列表（会就地修改）</param>
-        private static void SanitizeMessageToolCalls(List<ChatMessage> messages)
+        internal static void SanitizeMessageToolCalls(List<ChatMessage> messages)
         {
             if (messages == null) return;
 
@@ -417,7 +467,7 @@ namespace AgentCore.Editor.LLM
         /// </summary>
         /// <param name="arguments">原始 arguments 字符串</param>
         /// <returns>修复后的合法 JSON 字符串</returns>
-        private static string SanitizeToolArguments(string arguments)
+        internal static string SanitizeToolArguments(string arguments)
         {
             if (string.IsNullOrEmpty(arguments))
                 return "{}";

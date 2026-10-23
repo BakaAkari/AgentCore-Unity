@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config.Settings;
+using AgentCore.Editor.LLM;
+using AgentCore.Editor.L10n;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -31,7 +34,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private const string TestStatusKeyPrefix = "model-agent.testStatus."; // + profileId
         private const string TestRunningKeyPrefix = "model-agent.testRunning."; // + profileId
         private const string FoldoutOpenKeyPrefix = "model-agent.foldout."; // + profileId, EditorPrefs bool
-        private const string OverridesFoldoutKeyPrefix = "model-agent.overridesFoldout."; // + profileId, EditorPrefs bool
+        private const string AdvancedFoldoutKeyPrefix = "model-agent.advancedFoldout."; // + profileId, EditorPrefs bool
 
         // v1.14.2: Default profile 硬编码值（名称/endpoint/apiKey）已下沉至
         // AgentCoreProviderProfiles.EnsureDefaultProfileIfEmpty（数据层单一入口）。
@@ -129,7 +132,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             try
             {
-                var models = await _service.FetchModelsAsync(p.endpoint, SecureKeyStorage.GetProfileApiKey(profileId));
+                var models = await _service.FetchModelsAsync(p, SecureKeyStorage.GetProfileApiKey(profileId));
                 if (models != null && models.Count > 0)
                 {
                     AsyncHelper.RunOnMainThread(() =>
@@ -157,7 +160,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
         private void DrawActiveProfileCard(AgentCoreSettingsContext context, AgentCoreProviderProfiles store)
         {
-            context.Ui.DrawCard("Active Profile", "The LLM provider currently used by AgentCore.", () =>
+            context.Ui.DrawCard(Loc.Tr("settings.model.activeProfile", "当前模型配置"), "The LLM provider currently used by AgentCore.", () =>
             {
                 var active = store.GetActive();
                 if (active == null && (store.Profiles == null || store.Profiles.Count == 0))
@@ -176,7 +179,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     var pp = store.Profiles[i];
                     if (pp == null) continue;
-                    names.Add(string.IsNullOrEmpty(pp.displayName) ? "(unnamed)" : pp.displayName);
+                    names.Add(string.IsNullOrEmpty(pp.displayName) ? Loc.Tr("settings.model.unnamed", "（未命名）") : pp.displayName);
                     ids.Add(pp.id);
                     if (active != null && pp.id == active.id) currentIndex = names.Count - 1;
                 }
@@ -189,12 +192,28 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     return;
                 }
 
-                int newIndex = EditorGUILayout.Popup(new GUIContent("Active Profile", "Select the Provider Profile to use. Takes effect immediately."), currentIndex, names.ToArray());
+                int newIndex = EditorGUILayout.Popup(new GUIContent(Loc.Tr("settings.model.activeProfile", "当前模型配置"), Loc.Tr("settings.model.activeHint", "选择使用的模型配置，立即生效。")), currentIndex, names.ToArray());
                 if (newIndex != currentIndex && newIndex >= 0 && newIndex < ids.Count)
                 {
                     var targetId = ids[newIndex];
                     _pendingOps.Add(() => store.SetActive(targetId));
                 }
+
+                // v1.17.0: 辅助任务（对话压缩 / 自动记忆）可指定更便宜的 profile
+                var utilNames = new List<string> { "(same as active)" };
+                utilNames.AddRange(names);
+                int utilIndex = Math.Max(0, ids.IndexOf(store.UtilityProfileId) + 1);
+                int newUtilIndex = EditorGUILayout.Popup(
+                    new GUIContent(Loc.Tr("settings.model.utility", "辅助任务模型"), Loc.Tr("settings.model.utilityHint", "用于对话压缩、自动记忆等辅助任务，可选择成本更低或速度更快的模型。")),
+                    utilIndex, utilNames.ToArray());
+                if (newUtilIndex != utilIndex)
+                {
+                    var utilId = newUtilIndex == 0 ? "" : ids[newUtilIndex - 1];
+                    _pendingOps.Add(() => store.SetUtility(utilId));
+                }
+
+                // v1.17.0: 会话用量 / 缓存命中 / 估算费用（来自供应商返回的 usage）
+                EditorGUILayout.LabelField(Loc.Tr("settings.model.usage", "会话用量"), AgentCore.Editor.LLM.UsageLedger.FormatSessionSummary(), EditorStyles.wordWrappedMiniLabel);
             });
         }
 
@@ -202,7 +221,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
         private void DrawProfileList(AgentCoreSettingsContext context, AgentCoreProviderProfiles store)
         {
-            EditorGUILayout.LabelField("Provider Profiles", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Loc.Tr("settings.model.profiles", "模型配置"), EditorStyles.boldLabel);
 
             // 快照拷贝，避免 foreach 中集合被 pendingOps 改
             var snapshot = new List<ProviderProfile>(store.Profiles);
@@ -219,7 +238,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             bool isOpen = EditorPrefs.GetBool(foldoutKey, false);
             bool isActive = store.ActiveProfileId == profile.id;
 
-            var headerLabel = string.IsNullOrEmpty(profile.displayName) ? "(unnamed)" : profile.displayName;
+            var headerLabel = string.IsNullOrEmpty(profile.displayName) ? Loc.Tr("settings.model.unnamed", "（未命名）") : profile.displayName;
             if (isActive) headerLabel += "   ● Active";
 
             EditorGUILayout.BeginVertical(GUI.skin.box);
@@ -240,7 +259,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             // --- Display Name ---
             EditorGUI.BeginChangeCheck();
-            var newDisplayName = EditorGUILayout.TextField("Display Name", profile.displayName ?? "");
+            var newDisplayName = EditorGUILayout.TextField(Loc.Tr("settings.model.displayName", "显示名称"), profile.displayName ?? "");
             if (EditorGUI.EndChangeCheck())
             {
                 store.UpdateProfile(profile.id, p => p.displayName = newDisplayName);
@@ -248,11 +267,16 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             // --- Endpoint ---
             EditorGUI.BeginChangeCheck();
-            var newEndpoint = EditorGUILayout.TextField(new GUIContent("Endpoint", "OpenAI-compatible API base URL"), profile.endpoint ?? "");
+            var newEndpoint = EditorGUILayout.TextField(new GUIContent(Loc.Tr("settings.model.endpoint", "服务地址"), Loc.Tr("settings.model.endpointHint", "模型服务的接口基础地址")), profile.endpoint ?? "");
             if (EditorGUI.EndChangeCheck())
             {
                 store.UpdateProfile(profile.id, p => p.endpoint = newEndpoint);
             }
+
+            var format = DrawStringPopup(
+                new GUIContent(Loc.Tr("settings.model.format", "接口格式"), Loc.Tr("settings.model.formatHint", "首次连接时自动探测未知网关，并记住验证成功的协议。手动选择优先。验证使用简短请求，可能产生少量费用。")),
+                profile.apiFormat, ApiFormatOptions);
+            if (format != null) store.UpdateProfile(profile.id, p => p.apiFormat = format);
 
             // --- API Key ---
             var apiKeyDisplayKey = ApiKeyDisplayKeyPrefix + profile.id;
@@ -271,6 +295,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 newKey =>
                 {
                     SecureKeyStorage.SetProfileApiKey(profile.id, newKey);
+                    store.UpdateProfile(profile.id, p => { p.verifiedConnection = null; p.verifiedCredential = null; p.connectionFailed = false; });
                     context.State.StringValues[apiKeyDisplayKey] =
                         string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
                     context.State.ClearStatus(TestStatusKeyPrefix + profile.id);
@@ -278,6 +303,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 () =>
                 {
                     SecureKeyStorage.SetProfileApiKey(profile.id, string.Empty);
+                    store.UpdateProfile(profile.id, p => { p.verifiedConnection = null; p.verifiedCredential = null; p.connectionFailed = false; });
                     context.State.StringValues[apiKeyDisplayKey] = "(not set)";
                     context.State.ClearStatus(TestStatusKeyPrefix + profile.id);
                 });
@@ -289,16 +315,21 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUILayout.Space(4);
             DrawConnectionActions(context, profile);
 
-            // --- Overrides 折叠区 ---
+            // v1.17.0: Connection details and overrides stay out of the default setup flow.
             EditorGUILayout.Space(6);
-            var overridesKey = OverridesFoldoutKeyPrefix + profile.id;
-            bool overridesOpen = EditorPrefs.GetBool(overridesKey, false);
-            bool newOverridesOpen = EditorGUILayout.Foldout(overridesOpen, "Overrides (advanced)", true);
-            if (newOverridesOpen != overridesOpen)
-                EditorPrefs.SetBool(overridesKey, newOverridesOpen);
-            if (newOverridesOpen)
+            var advancedKey = AdvancedFoldoutKeyPrefix + profile.id;
+            bool advancedOpen = EditorPrefs.GetBool(advancedKey, false);
+            bool newAdvancedOpen = EditorGUILayout.Foldout(advancedOpen,
+                Loc.Tr("settings.model.advanced", "高级设置"), true);
+            if (newAdvancedOpen != advancedOpen)
+                EditorPrefs.SetBool(advancedKey, newAdvancedOpen);
+            if (newAdvancedOpen)
             {
+                EditorGUI.indentLevel++;
+                DrawProtocolSection(store, profile);
+                EditorGUILayout.Space(6);
                 DrawOverridesSection(store, profile);
+                EditorGUI.indentLevel--;
             }
 
             // --- 底部操作行 ---
@@ -307,14 +338,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             bool prevEnabled = GUI.enabled;
             GUI.enabled = !isActive;
-            if (GUILayout.Button(isActive ? "Active" : "Set as Active", GUILayout.Width(120)))
+            if (GUILayout.Button(isActive ? Loc.Tr("settings.model.active", "当前使用") : Loc.Tr("settings.model.activate", "设为当前"), GUILayout.Width(120)))
             {
                 var targetId = profile.id;
                 _pendingOps.Add(() => store.SetActive(targetId));
             }
             GUI.enabled = prevEnabled;
 
-            if (GUILayout.Button("Duplicate", GUILayout.Width(90)))
+            if (GUILayout.Button(Loc.Tr("settings.model.duplicate", "复制"), GUILayout.Width(90)))
             {
                 var srcId = profile.id;
                 var srcName = profile.displayName;
@@ -325,14 +356,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             var origColor = GUI.color;
             GUI.color = new Color(1f, 0.6f, 0.6f);
-            if (GUILayout.Button("Delete", GUILayout.Width(80)))
+            if (GUILayout.Button(Loc.Tr("settings.model.delete", "删除"), GUILayout.Width(80)))
             {
                 var pid = profile.id;
                 var pname = profile.displayName;
                 if (EditorUtility.DisplayDialog(
                     "Delete Profile",
                     $"Delete '{pname}'? Its stored API key will also be removed.",
-                    "Delete",
+                    Loc.Tr("settings.model.delete", "删除"),
                     "Cancel"))
                 {
                     _pendingOps.Add(() => store.RemoveProfile(pid));
@@ -341,6 +372,103 @@ namespace AgentCore.Editor.Config.Settings.Pages
             GUI.color = origColor;
 
             EditorGUILayout.EndHorizontal();
+        }
+
+        // ── v1.17.0: Protocol Section ──
+
+        private static readonly string[] ApiFormatOptions = { ApiFormats.Auto, ApiFormats.OpenAI, ApiFormats.Anthropic };
+        private static readonly string[] DialectOptions =
+        {
+            OpenAIDialects.Auto, OpenAIDialects.Generic, OpenAIDialects.OpenAI, OpenAIDialects.DeepSeek,
+            OpenAIDialects.OpenRouter, OpenAIDialects.LiteLLM, OpenAIDialects.Vllm
+        };
+        private static readonly string[] AuthSchemeOptions = { AuthSchemes.Auto, AuthSchemes.Bearer, AuthSchemes.XApiKey };
+        private static readonly string[] CacheTtlOptions = { "5m", "1h" };
+
+        private void DrawProtocolSection(AgentCoreProviderProfiles store, ProviderProfile profile)
+        {
+            var pid = profile.id;
+
+            var resolvedFormat = ActiveModelConfig.ResolveApiFormat(profile);
+            if (resolvedFormat == ApiFormats.Anthropic)
+            {
+                var ttl = DrawStringPopup(
+                    new GUIContent(Loc.Tr("settings.model.cacheTtl", "缓存保留时间"), Loc.Tr("settings.model.cacheTtlHint", "提示词缓存的保留时间。延长保留时间可能增加缓存写入费用，适合对话间隔较长的场景。")),
+                    string.IsNullOrEmpty(profile.cacheTtl) ? "5m" : profile.cacheTtl, CacheTtlOptions);
+                if (ttl != null) store.UpdateProfile(pid, p => p.cacheTtl = ttl);
+            }
+            else
+            {
+                var dialect = DrawStringPopup(
+                    new GUIContent(Loc.Tr("settings.model.dialect", "兼容模式"), Loc.Tr("settings.model.dialectHint", "处理服务端的兼容差异。默认自动识别；特殊网关可手动选择对应模式。")),
+                    profile.dialect, DialectOptions);
+                if (dialect != null) store.UpdateProfile(pid, p => p.dialect = dialect);
+
+                var resolvedDialect = ActiveModelConfig.ResolveDialect(profile);
+                if (ModelRegistry.GetFamily(profile.modelName) == ModelFamily.Anthropic
+                    && resolvedDialect != OpenAIDialects.OpenRouter && resolvedDialect != OpenAIDialects.LiteLLM)
+                {
+                    EditorGUILayout.HelpBox(
+                        Loc.Tr("settings.model.cacheWarning", "此网关的缓存行为尚未确认。请根据实际缓存用量判断，不要仅凭协议推断是否命中。"),
+                        MessageType.Warning);
+                }
+            }
+
+            var auth = DrawStringPopup(
+                new GUIContent(Loc.Tr("settings.model.auth", "认证方式"), Loc.Tr("settings.model.authHint", "自动记住连接验证成功的认证方式。仅在网关有特殊要求时手动指定。")),
+                profile.authScheme, AuthSchemeOptions);
+            if (auth != null) store.UpdateProfile(pid, p => p.authScheme = auth);
+
+            DrawFallbackList(store, profile);
+        }
+
+        /// <summary>绘制字符串下拉；值改变时返回新值，否则返回 null。未知值显示为第一个选项。</summary>
+        private static string DrawStringPopup(GUIContent label, string current, string[] options)
+        {
+            int idx = Math.Max(0, Array.IndexOf(options, string.IsNullOrEmpty(current) ? options[0] : current));
+            var labels = options.Select(option => option == "auto" ? Loc.Tr("settings.model.auto", "自动")
+                : option == "generic" ? Loc.Tr("settings.model.generic", "通用")
+                : option == "5m" ? Loc.Tr("settings.model.fiveMinutes", "5 分钟")
+                : option == "1h" ? Loc.Tr("settings.model.oneHour", "1 小时") : option).ToArray();
+            int newIdx = EditorGUILayout.Popup(label, idx, labels);
+            return newIdx != idx ? options[newIdx] : null;
+        }
+
+        private void DrawFallbackList(AgentCoreProviderProfiles store, ProviderProfile profile)
+        {
+            var pid = profile.id;
+            var current = profile.fallbackProfileIds ?? new List<string>();
+
+            string NameOf(string id) => store.Profiles.FirstOrDefault(p => p?.id == id)?.displayName ?? Loc.Tr("settings.model.missing", "（已缺失）");
+
+            EditorGUILayout.LabelField(
+                new GUIContent(Loc.Tr("settings.model.fallback", "备用模型配置"), Loc.Tr("settings.model.fallbackHint", "当前配置重试后仍失败时，按顺序尝试备用配置。")),
+                new GUIContent(current.Count == 0 ? Loc.Tr("settings.model.none", "（无）") : string.Join(" -> ", current.Select(NameOf))));
+
+            EditorGUI.indentLevel++;
+            for (int i = 0; i < current.Count; i++)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField($"{i + 1}. {NameOf(current[i])}");
+                int removeAt = i;
+                if (GUILayout.Button(Loc.Tr("settings.model.remove", "移除"), GUILayout.Width(70)))
+                    _pendingOps.Add(() => store.UpdateProfile(pid, p => p.fallbackProfileIds?.RemoveAt(removeAt)));
+                EditorGUILayout.EndHorizontal();
+            }
+
+            var candidates = store.Profiles.Where(p => p != null && p.id != pid && !current.Contains(p.id)).ToList();
+            if (candidates.Count > 0)
+            {
+                var labels = new List<string> { Loc.Tr("settings.model.addFallback", "添加备用模型…") };
+                labels.AddRange(candidates.Select(p => string.IsNullOrEmpty(p.displayName) ? Loc.Tr("settings.model.unnamed", "（未命名）") : p.displayName));
+                int pick = EditorGUILayout.Popup(" ", 0, labels.ToArray());
+                if (pick > 0)
+                {
+                    var addId = candidates[pick - 1].id;
+                    _pendingOps.Add(() => store.UpdateProfile(pid, p => (p.fallbackProfileIds ??= new List<string>()).Add(addId)));
+                }
+            }
+            EditorGUI.indentLevel--;
         }
 
         // ── Overrides Section ──
@@ -432,7 +560,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var models = GetAvailableModels(context, profile.id);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel(new GUIContent("Model", "LLM model name (click Refresh to fetch from server)"));
+            EditorGUILayout.PrefixLabel(new GUIContent(Loc.Tr("settings.model.model", "模型"), Loc.Tr("settings.model.modelHint", "模型名称，点击刷新可从服务端获取。")));
 
             if (models.Count > 0)
             {
@@ -458,7 +586,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             var fetchRunningKey = FetchRunningKeyPrefix + profile.id;
             GUI.enabled = !IsRunning(context, fetchRunningKey);
-            if (GUILayout.Button(IsRunning(context, fetchRunningKey) ? "..." : "Refresh", GUILayout.Width(72)))
+            if (GUILayout.Button(IsRunning(context, fetchRunningKey) ? "..." : Loc.Tr("settings.model.refresh", "刷新"), GUILayout.Width(72)))
             {
                 FetchModels(context, profile);
             }
@@ -474,7 +602,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var testRunningKey = TestRunningKeyPrefix + profile.id;
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = !IsRunning(context, testRunningKey);
-            if (GUILayout.Button(IsRunning(context, testRunningKey) ? "Testing..." : "Test Connection", GUILayout.Width(140)))
+            if (GUILayout.Button(IsRunning(context, testRunningKey) ? Loc.Tr("settings.model.testing", "正在测试…") : Loc.Tr("settings.model.test", "测试连接"), GUILayout.Width(140)))
             {
                 TestConnection(context, profile);
             }
@@ -486,11 +614,33 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 context.State.GetStatusLevel(FetchStatusKeyPrefix + profile.id),
                 miniLabel: true);
             context.Ui.DrawStatusLabel(
-                context.State.GetStatusMessage(TestStatusKeyPrefix + profile.id),
+                LocalizeConnectionStatus(context.State.GetStatusMessage(TestStatusKeyPrefix + profile.id)),
                 context.State.GetStatusLevel(TestStatusKeyPrefix + profile.id),
                 miniLabel: true);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
+        }
+
+        private static string LocalizeConnectionStatus(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return message;
+            bool failed = message.StartsWith("[FAIL] ", StringComparison.Ordinal);
+            var detail = failed ? message.Substring(7) : message;
+            string key = detail switch
+            {
+                "No model profile configured." => "settings.model.connection.noProfile",
+                "Select a model before verifying the connection." => "settings.model.connection.selectModel",
+                "Enter a valid HTTP(S) endpoint." => "settings.model.connection.invalidUrl",
+                "Connection not verified. Check the endpoint, model and API key, or select API Format manually." => "settings.model.connection.unverified",
+                "Testing..." => "settings.model.testing",
+                _ => detail
+            };
+            var text = Loc.Tr(key, detail);
+            var match = System.Text.RegularExpressions.Regex.Match(detail,
+                @"^Connection not verified: service returned HTTP (\d{3})\. Retry later\.$");
+            if (match.Success)
+                text = Loc.Tr("settings.model.connection.serviceError", "服务返回 HTTP {0}，连接尚未验证，请稍后重试。", match.Groups[1].Value);
+            return failed ? Loc.Tr("settings.model.connection.failed", "连接失败：{0}", text) : text;
         }
 
         // ── 底部：Add Profile ──
@@ -551,6 +701,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
             if (src == null) return;
 
             var copy = ProviderProfile.Create($"{sourceName} (copy)");
+            copy.apiFormat = src.apiFormat;
+            copy.dialect = src.dialect;
+            copy.cacheTtl = src.cacheTtl;
+            copy.authScheme = src.authScheme;
+            copy.fallbackProfileIds = src.fallbackProfileIds == null ? new List<string>() : new List<string>(src.fallbackProfileIds);
             copy.endpoint = src.endpoint;
             copy.modelName = src.modelName;
             copy.overrideTemperature = src.overrideTemperature;
@@ -588,7 +743,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             {
                 try
                 {
-                    var models = await _service.FetchModelsAsync(endpoint, apiKey);
+                    var models = await _service.FetchModelsAsync(profile, apiKey);
                     AsyncHelper.RunOnMainThread(() =>
                     {
                         context.State.StringValues[AvailableModelsKeyPrefix + profileId] =
@@ -616,7 +771,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var runningKey = TestRunningKeyPrefix + profile.id;
             var statusKey = TestStatusKeyPrefix + profile.id;
             SetRunning(context, runningKey, true);
-            context.State.SetStatus(statusKey, "Testing...", SettingsStatusLevel.Loading);
+            context.State.SetStatus(statusKey, "settings.model.testing", SettingsStatusLevel.Loading);
 
             var endpoint = profile.endpoint;
             var apiKey = SecureKeyStorage.GetProfileApiKey(profile.id);
@@ -625,7 +780,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             {
                 try
                 {
-                    var message = await _service.TestConnectionAsync(endpoint, apiKey);
+                    var message = await _service.TestConnectionAsync(profile, apiKey);
                     AsyncHelper.RunOnMainThread(() =>
                     {
                         context.State.SetStatus(statusKey, message, SettingsStatusLevel.Success);
@@ -689,14 +844,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     bool prevEnabled = GUI.enabled;
                     GUI.enabled = prevEnabled && settings.visionEnabled;
                     settings.visionEndpoint = EditorGUILayout.TextField(
-                        new GUIContent("Endpoint", "Vision model OpenAI-compatible base URL (independent from main model)."),
+                        new GUIContent(Loc.Tr("settings.model.endpoint", "服务地址"), "Vision model OpenAI-compatible base URL (independent from main model)."),
                         settings.visionEndpoint ?? "");
 
                     DrawVisionApiKeyField();
 
                     // Model 选择: 有刷新出的列表 → Popup(选即写回), 否则 → TextField(手输)。与主模型 DrawModelSelector 同款"二选一", 不并列两个控件。
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.PrefixLabel(new GUIContent("Model", "Vision-capable model name. When a fetched list is available you pick from the dropdown (writes back immediately); otherwise type it manually."));
+                    EditorGUILayout.PrefixLabel(new GUIContent(Loc.Tr("settings.model.model", "模型"), "Vision-capable model name. When a fetched list is available you pick from the dropdown (writes back immediately); otherwise type it manually."));
                     if (_visionModels.Count > 0)
                     {
                         var currentIdx = _visionModels.FindIndex(m =>
@@ -733,7 +888,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     // Test Connection（刷新/测试状态内联显示在本行右侧, 与主模型 Provider Profiles 同款, 不换行不占上下布局）
                     EditorGUILayout.BeginHorizontal();
                     GUI.enabled = prevEnabled && settings.visionEnabled && !_visionTestRunning;
-                    if (GUILayout.Button(_visionTestRunning ? "Testing..." : "Test Connection", GUILayout.Width(150)))
+                    if (GUILayout.Button(_visionTestRunning ? Loc.Tr("settings.model.testing", "正在测试…") : Loc.Tr("settings.model.test", "测试连接"), GUILayout.Width(150)))
                     {
                         TriggerVisionTestConnection(settings);
                     }
@@ -829,7 +984,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var endpoint = settings.visionEndpoint.Trim();
             var apiKey = SecureKeyStorage.GetVisionApiKey();
             _visionTestRunning = true;
-            _visionTestStatus = "Testing...";
+            _visionTestStatus = Loc.Tr("settings.model.testing", "正在测试…");
 
             AsyncHelper.RunAsync(async () =>
             {

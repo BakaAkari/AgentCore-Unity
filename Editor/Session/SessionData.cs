@@ -247,6 +247,18 @@ namespace AgentCore.Editor.Session
         [JsonProperty("tool_calls", NullValueHandling = NullValueHandling.Ignore)]
         public List<SerializableToolCall> ToolCalls { get; set; }
 
+        /// <summary>v1.17.0: Anthropic thinking 块（含签名），恢复会话后仍可原样回放以命中缓存。</summary>
+        [JsonProperty("reasoning_blocks", NullValueHandling = NullValueHandling.Ignore)]
+        public List<ReasoningBlock> ReasoningBlocks { get; set; }
+
+        /// <summary>v1.17.0: OpenAI 兼容协议的 reasoning_content（DeepSeek 工具调用轮需回传）。</summary>
+        [JsonProperty("reasoning_content", NullValueHandling = NullValueHandling.Ignore)]
+        public string ReasoningContent { get; set; }
+
+        /// <summary>v1.17.0: 消息种类（仅非 Normal 时写出）。</summary>
+        [JsonProperty("kind", NullValueHandling = NullValueHandling.Ignore)]
+        public string Kind { get; set; }
+
         /// <summary>
         /// 从运行时 ChatMessage 创建可序列化版本。
         /// </summary>
@@ -258,7 +270,10 @@ namespace AgentCore.Editor.Session
             {
                 Role = msg.Role,
                 Content = msg.Content,
-                ToolCallId = msg.ToolCallId
+                ToolCallId = msg.ToolCallId,
+                ReasoningBlocks = msg.ReasoningBlocks != null && msg.ReasoningBlocks.Count > 0 ? msg.ReasoningBlocks : null,
+                ReasoningContent = string.IsNullOrEmpty(msg.ReasoningContent) ? null : msg.ReasoningContent,
+                Kind = msg.Kind == MessageKind.Normal ? null : msg.Kind.ToString()
             };
 
             if (msg.ToolCalls != null && msg.ToolCalls.Count > 0)
@@ -282,7 +297,10 @@ namespace AgentCore.Editor.Session
             {
                 Role = Role,
                 Content = Content,
-                ToolCallId = ToolCallId
+                ToolCallId = ToolCallId,
+                ReasoningBlocks = ReasoningBlocks,
+                ReasoningContent = ReasoningContent,
+                Kind = System.Enum.TryParse<MessageKind>(Kind, out var kind) ? kind : MessageKind.Normal
             };
 
             if (ToolCalls != null && ToolCalls.Count > 0)

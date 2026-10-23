@@ -601,20 +601,23 @@ namespace AgentCore.Editor.Core
                 // 内部产生的中间态把旧草稿内容当前缀拼接进去（虽然本方法末尾会用 newMessage.Content 显式覆盖回单轮值，
                 // 但清零能让这条路径的中间状态本身也语义正确，不依赖后续覆盖兜底）。
                 _turnContentBeforeCurrentRound = string.Empty;
-                var newMessage = await CallLLMStreamAsync(assistantTurn, tools: null, ct);
+                // v1.17.0: 沿用本轮的工具定义（tools: null 会改变请求最前端的 tools 段，使整段缓存失效）；
+                // 重生成只需要文本，若模型仍发起工具调用则丢弃这些调用。
+                var newMessage = await CallLLMStreamAsync(assistantTurn, _lastToolDefinitions, ct);
+                if (newMessage?.ToolCalls != null && newMessage.ToolCalls.Count > 0)
+                {
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] REVISE: dropping {newMessage.ToolCalls.Count} tool call(s) from regenerated draft.");
+                    newMessage.ToolCalls = null;
+                }
 
-                if (newMessage != null)
+                if (newMessage != null && !string.IsNullOrEmpty(newMessage.Content))
                 {
                     PrepareAssistantMessageForHistory(newMessage, assistantTurn);
-                    // 替换主历史中最后一条 assistant message
-                    for (int i = _messages.Count - 1; i >= 0; i--)
-                    {
-                        if (_messages[i] == originalDraft)
-                        {
-                            _messages[i] = newMessage;
-                            break;
-                        }
-                    }
+                    // v1.17.0: 追加而非替换原草稿——替换会改写历史（缓存前缀失效），且让 feedback 出现在
+                    // 新答案之后、语义错位。追加后历史为：草稿 → 审阅反馈 → 修订答案，前缀只增不改。
+                    _ = originalDraft;
+                    _messages.Add(newMessage);
+                    assistantTurn.MessageEndIndex = _messages.Count;
 
                     if (!string.IsNullOrEmpty(newMessage.Content))
                     {

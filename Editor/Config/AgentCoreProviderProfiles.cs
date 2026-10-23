@@ -52,6 +52,12 @@ namespace AgentCore.Editor.Config
         /// <summary>当前 active profile 的 id；空 = 用 legacy config。</summary>
         [SerializeField] private string activeProfileId = "";
 
+        /// <summary>
+        /// v1.17.0: 辅助任务（上下文压缩 / 会话标题 / 记忆提取）使用的 profile id；空 = 跟随 active。
+        /// 典型用法：主力用 Claude Opus，辅助任务用 Haiku / DeepSeek 这类便宜模型。
+        /// </summary>
+        [SerializeField] private string utilityProfileId = "";
+
         /// <summary>增删改及切换 active 时触发，供 UI 订阅刷新。</summary>
         public static event Action OnProfilesChanged;
 
@@ -79,6 +85,38 @@ namespace AgentCore.Editor.Config
         /// </summary>
         public ProviderProfile GetActive()
             => FindById(activeProfileId);
+
+        /// <summary>辅助任务 profile id（空 = 跟随 active）。</summary>
+        public string UtilityProfileId => utilityProfileId;
+
+        /// <summary>辅助任务 profile；未设置或已被删除返回 null（调用方应回落 active）。</summary>
+        public ProviderProfile GetUtility()
+            => FindById(utilityProfileId);
+
+        /// <summary>设置辅助任务 profile（空 = 跟随 active）。</summary>
+        public void SetUtility(string id)
+        {
+            utilityProfileId = id ?? "";
+            SaveAndNotify();
+        }
+
+        /// <summary>
+        /// 解析 profile 的 fallback 链（v1.17.0）：按 <see cref="ProviderProfile.fallbackProfileIds"/> 顺序，
+        /// 跳过不存在的 id、自身与重复项。
+        /// </summary>
+        public List<ProviderProfile> GetFallbackChain(ProviderProfile primary)
+        {
+            var chain = new List<ProviderProfile>();
+            if (primary?.fallbackProfileIds == null) return chain;
+            var seen = new HashSet<string> { primary.id };
+            foreach (var id in primary.fallbackProfileIds)
+            {
+                if (string.IsNullOrEmpty(id) || !seen.Add(id)) continue;
+                var p = FindById(id);
+                if (p != null) chain.Add(p);
+            }
+            return chain;
+        }
 
         /// <summary>
         /// 若 profile 列表为空，自动创建一个指向内网默认 endpoint 的 Default profile 并设为 active。
@@ -145,7 +183,7 @@ namespace AgentCore.Editor.Config
                     return;
 
                 var service = new ModelSettingsService();
-                var models = await service.FetchModelsAsync(p.endpoint, SecureKeyStorage.GetProfileApiKey(profileId));
+                var models = await service.FetchModelsAsync(p, SecureKeyStorage.GetProfileApiKey(profileId));
                 if (models == null || models.Count == 0)
                     return;
 
@@ -192,6 +230,8 @@ namespace AgentCore.Editor.Config
 
             if (activeProfileId == id)
                 activeProfileId = "";
+            if (utilityProfileId == id)
+                utilityProfileId = "";
 
             SaveAndNotify();
         }
@@ -224,7 +264,16 @@ namespace AgentCore.Editor.Config
             if (target == null)
                 return;
 
+            var previousConnection = AgentCore.Editor.LLM.GatewayDiscovery.Identity(target);
             mutate(target);
+            if (previousConnection != AgentCore.Editor.LLM.GatewayDiscovery.Identity(target))
+            {
+                target.verifiedConnection = null;
+                target.verifiedCredential = null;
+                target.cacheMetricsKnown = false;
+                target.cacheHitObserved = false;
+                target.connectionFailed = false;
+            }
             SaveAndNotify();
         }
 

@@ -143,7 +143,7 @@ namespace AgentCore.Editor.LLM
         /// 效果一致，但对某些 handler 包装的 stream 更可靠地释放底层 socket，避免 CLOSE_WAIT 累积。
         /// </para>
         /// </summary>
-        private static async Task<string> ReadLineWithIdleTimeoutAsync(
+        internal static async Task<string> ReadLineWithIdleTimeoutAsync(
             StreamReader reader, Stream responseStream, CancellationToken ct)
         {
             var readTask = reader.ReadLineAsync();
@@ -182,6 +182,16 @@ namespace AgentCore.Editor.LLM
             }
 
             var chunk = JsonHelper.Deserialize<ChatCompletionChunk>(json);
+
+            // v1.17.0: usage 通常在最后一个 choices 为空的 chunk 上（stream_options.include_usage），
+            // 旧实现在 choices 为空时直接 return，导致流式调用永远拿不到 usage/缓存命中信息。
+            var usageObj = chunk?.Usage ?? rawChunk?["usage"] as JObject;
+            if (usageObj != null && usageObj.HasValues)
+            {
+                var usage = LlmUsage.FromOpenAI(usageObj, chunk?.Model);
+                if (usage != null && !usage.IsEmpty) onChunk?.Invoke(StreamChunk.UsageReport(usage));
+            }
+
             if (chunk?.Choices == null || chunk.Choices.Count == 0) return;
 
             var choice = chunk.Choices[0];
@@ -199,6 +209,9 @@ namespace AgentCore.Editor.LLM
             if (!string.IsNullOrEmpty(delta.Content))
             {
                 onChunk?.Invoke(StreamChunk.Token(delta.Content));
+                // v1.17.0: 部分网关把最后一段文本与 finish_reason 放在同一 chunk，不能提前 return
+                if (!string.IsNullOrEmpty(choice.FinishReason))
+                    onChunk?.Invoke(StreamChunk.Finished(choice.FinishReason));
                 return;
             }
 

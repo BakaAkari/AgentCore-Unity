@@ -440,7 +440,7 @@ namespace AgentCore.Editor.UI
                 // 1.5 触发自动记忆（fire-and-forget，仅在有实际对话内容时生效）
                 try
                 {
-                    SessionManager.Instance.TriggerAutoMemory(_agentLoop.LLMClient);
+                    SessionManager.Instance.TriggerAutoMemory(AgentCore.Editor.Core.Compression.CompressionLLMClientFactory.CreateCompressionClient());
                 }
                 catch (Exception amEx)
                 {
@@ -549,6 +549,7 @@ namespace AgentCore.Editor.UI
                 // 1. 重置对话（ResetConversation 内部已包含 ForceSave + TriggerAutoMemory + 创建新会话）
                 ClearMessages();
                 _agentLoop.ResetConversation();
+                AgentCore.Editor.LLM.UsageLedger.ResetSession(); // v1.17.0: 用量/费用按对话会话统计
 
                 // 1.5 重置会话级工具信任 scope（YOLO / Trust Low-Med）。
                 // 信任生命周期绑定到"对话 session"：新建对话即失效，避免上一段对话开启的

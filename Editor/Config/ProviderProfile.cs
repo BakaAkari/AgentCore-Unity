@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace AgentCore.Editor.Config
 {
@@ -59,6 +60,39 @@ namespace AgentCore.Editor.Config
         /// <summary>追加到请求体的 JSON。空字符串 = 不追加（fallthrough 到全局默认），无需 override 位。</summary>
         public string extraRequestBody;
 
+        // === v1.17.0 多协议字段（旧资产反序列化为空字符串 = auto，行为与旧版一致）===
+
+        /// <summary>
+        /// 线协议：<c>auto</c>（默认，按 endpoint 推断）/ <c>openai</c>（/chat/completions）/
+        /// <c>anthropic</c>（原生 /v1/messages，可用 prompt caching 与 thinking 回放）。
+        /// </summary>
+        // v1.17.0: Successful generation probe; invalidated when connection settings change.
+        public string verifiedConnection;
+        public string verifiedFormat;
+        public string verifiedAuth;
+        public string verifiedCredential;
+        public bool connectionFailed;
+        public bool cacheMetricsKnown;
+        public bool cacheHitObserved;
+
+        public string apiFormat = ApiFormats.Auto;
+
+        /// <summary>
+        /// OpenAI 兼容协议的方言：<c>auto</c> / <c>generic</c> / <c>openai</c> / <c>deepseek</c> /
+        /// <c>openrouter</c> / <c>litellm</c> / <c>vllm</c>。决定缓存提示（prompt_cache_key、cache_control parts）
+        /// 与 reasoning_content 回传等差异化行为。
+        /// </summary>
+        public string dialect = OpenAIDialects.Auto;
+
+        /// <summary>Anthropic 缓存 TTL：<c>5m</c>（默认，写入 1.25×）或 <c>1h</c>（写入 2×，适合长间隔会话）。</summary>
+        public string cacheTtl = "5m";
+
+        /// <summary>鉴权头：<c>auto</c>（anthropic 用 x-api-key，其它 Bearer）/ <c>bearer</c> / <c>x-api-key</c>。</summary>
+        public string authScheme = AuthSchemes.Auto;
+
+        /// <summary>主 profile 重试耗尽后依次尝试的备用 profile id（v1.17.0）。</summary>
+        public List<string> fallbackProfileIds = new();
+
         // === 元数据 ===
 
         /// <summary>创建时间（Unix 毫秒）。</summary>
@@ -81,9 +115,45 @@ namespace AgentCore.Editor.Config
                 modelName = "",
                 reasoningEffort = "",
                 extraRequestBody = "",
+                apiFormat = ApiFormats.Auto,
+                dialect = OpenAIDialects.Auto,
+                cacheTtl = "5m",
+                authScheme = AuthSchemes.Auto,
+                fallbackProfileIds = new List<string>(),
                 createdAtUnixMs = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
                 lastUsedAtUnixMs = 0
             };
         }
+    }
+
+    /// <summary><see cref="ProviderProfile.apiFormat"/> 取值（v1.17.0）。</summary>
+    public static class ApiFormats
+    {
+        public const string Auto = "auto";
+        public const string OpenAI = "openai";
+        public const string Anthropic = "anthropic";
+        public static readonly string[] All = { Auto, OpenAI, Anthropic };
+    }
+
+    /// <summary><see cref="ProviderProfile.dialect"/> 取值（v1.17.0）。</summary>
+    public static class OpenAIDialects
+    {
+        public const string Auto = "auto";
+        public const string Generic = "generic";
+        public const string OpenAI = "openai";
+        public const string DeepSeek = "deepseek";
+        public const string OpenRouter = "openrouter";
+        public const string LiteLLM = "litellm";
+        public const string Vllm = "vllm";
+        public static readonly string[] All = { Auto, Generic, OpenAI, DeepSeek, OpenRouter, LiteLLM, Vllm };
+    }
+
+    /// <summary><see cref="ProviderProfile.authScheme"/> 取值（v1.17.0）。</summary>
+    public static class AuthSchemes
+    {
+        public const string Auto = "auto";
+        public const string Bearer = "bearer";
+        public const string XApiKey = "x-api-key";
+        public static readonly string[] All = { Auto, Bearer, XApiKey };
     }
 }

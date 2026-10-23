@@ -13,24 +13,6 @@ namespace AgentCore.Editor.Core
     public partial class AgentLoop
     {
         /// <summary>
-        /// 移除之前注入的记忆消息，避免记忆消息在对话历史中累积。
-        /// 通过消息内容前缀 <see cref="MemoryMessagePrefix"/> 来识别记忆消息。
-        /// </summary>
-        private void RemoveOldMemoryMessages()
-        {
-            for (int i = _messages.Count - 1; i >= 0; i--)
-            {
-                if (_messages[i].Role == "system" &&
-                    _messages[i].Content != null &&
-                    _messages[i].Content.StartsWith(MemoryMessagePrefix))
-                {
-                    _messages.RemoveAt(i);
-                    AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Removed old memory injection message.");
-                }
-            }
-        }
-
-        /// <summary>
         /// 搜索与用户消息相关的记忆。
         /// 使用 <see cref="Mem0Client.SearchMemoryAsync"/> 进行语义搜索。
         /// <para>
@@ -85,6 +67,9 @@ namespace AgentCore.Editor.Core
             if (memories == null || memories.Count == 0)
                 return null;
 
+            // v1.17.0: 只注入历史中尚未出现过的记忆条目（记忆消息改为只追加不删除，避免重复堆积）
+            var alreadyInjected = CollectInjectedMemoryLines();
+
             var sb = new StringBuilder();
             sb.AppendLine(MemoryMessagePrefix);
 
@@ -97,6 +82,8 @@ namespace AgentCore.Editor.Core
                     continue;
 
                 var line = $"- {memory.Content.Trim()}";
+                if (alreadyInjected.Contains(line))
+                    continue;
 
                 // 检查是否超过最大字符限制
                 if (totalChars + line.Length + 2 > MemoryContextMaxChars) // +2 for newline
@@ -115,8 +102,12 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
-        /// 将格式化的记忆文本作为系统消息注入到 <see cref="_messages"/> 列表中。
-        /// 位置：在系统提示词（index 0）之后、第一条用户消息之前。
+        /// 将格式化的记忆文本作为系统消息<b>追加</b>到 <see cref="_messages"/> 末尾（当前用户消息之后）。
+        /// <para>
+        /// v1.17.0: 旧实现插入到系统提示词之后、并在每轮先删除旧记忆消息——这会改写历史前缀的第 2 条消息，
+        /// 使其后整段对话的 prompt 缓存每轮全部失效（Claude 显式缓存与 vLLM 自动前缀缓存皆然）。
+        /// 现改为只追加：历史前缀保持字节稳定，新召回的记忆以增量形式出现在本轮。
+        /// </para>
         /// </summary>
         /// <param name="memoryContext">格式化的记忆上下文文本</param>
         private void InjectMemoryContext(string memoryContext)
@@ -124,19 +115,23 @@ namespace AgentCore.Editor.Core
             if (string.IsNullOrEmpty(memoryContext))
                 return;
 
-            // 找到第一条非 system 消息的位置（即系统提示词之后）
-            int insertIndex = 1; // 默认在 system prompt 之后
-            for (int i = 0; i < _messages.Count; i++)
-            {
-                if (_messages[i].Role != "system")
-                {
-                    insertIndex = i;
-                    break;
-                }
-                insertIndex = i + 1;
-            }
+            _messages.Add(new ChatMessage { Role = "system", Content = memoryContext, Kind = MessageKind.OperatorNote });
+        }
 
-            _messages.Insert(insertIndex, ChatMessage.System(memoryContext));
+        /// <summary>收集历史中已注入过的记忆行（"- xxx" 形式）。</summary>
+        private HashSet<string> CollectInjectedMemoryLines()
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var m in _messages)
+            {
+                if (m.Role != "system" || m.Content == null || !m.Content.StartsWith(MemoryMessagePrefix)) continue;
+                foreach (var raw in m.Content.Split('\n'))
+                {
+                    var line = raw.TrimEnd('\r');
+                    if (line.StartsWith("- ")) set.Add(line);
+                }
+            }
+            return set;
         }
     }
 }

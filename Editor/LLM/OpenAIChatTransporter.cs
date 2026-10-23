@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -58,6 +59,46 @@ namespace AgentCore.Editor.LLM
             using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
             httpRequest.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
             return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+
+        /// <summary>
+        /// 通用 JSON POST（v1.17.0）：鉴权与附加请求头完全由 <paramref name="headers"/> 决定（不自动加 Bearer），
+        /// 供 Anthropic 原生协议（<c>x-api-key</c> + <c>anthropic-version</c>）与自定义鉴权方案复用。
+        /// </summary>
+        /// <param name="url">完整请求 url</param>
+        /// <param name="headers">请求头（可空）；<c>Authorization</c> 也通过这里传入</param>
+        /// <param name="jsonBody">已序列化好的 JSON body</param>
+        /// <param name="stream">true = ResponseHeadersRead（流式），调用方自行读流</param>
+        /// <param name="ct">取消令牌；调用方负责 Dispose 返回的 response</param>
+        public static async Task<HttpResponseMessage> SendJsonAsync(
+            string url, IReadOnlyDictionary<string, string> headers, string jsonBody, bool stream, CancellationToken ct)
+        {
+            var client = HttpClientFactory.GetClient();
+            using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url);
+            if (headers != null)
+            {
+                foreach (var kv in headers)
+                {
+                    if (string.IsNullOrEmpty(kv.Value)) continue;
+                    httpRequest.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
+                }
+            }
+            httpRequest.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+            return stream
+                ? await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct)
+                : await client.SendAsync(httpRequest, ct);
+        }
+
+        /// <summary>
+        /// 按鉴权方案构造鉴权头（v1.17.0）：<c>x-api-key</c> 方案用 <c>x-api-key</c> 头，其余用 Bearer。
+        /// </summary>
+        public static Dictionary<string, string> BuildAuthHeaders(string apiKey, bool useXApiKey)
+        {
+            var headers = new Dictionary<string, string>();
+            if (string.IsNullOrEmpty(apiKey)) return headers;
+            if (useXApiKey) headers["x-api-key"] = apiKey;
+            else headers["Authorization"] = "Bearer " + apiKey;
+            return headers;
         }
 
         /// <summary>

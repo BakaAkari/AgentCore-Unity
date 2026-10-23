@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+using UnityEngine.TestTools;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.LLM;
@@ -104,6 +106,7 @@ namespace AgentCore.Tests.Editor.Tools
         [Test]
         public async Task InvalidJson_ReturnsError()
         {
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex(@"\[AgentCore\] JSON parse error:"));
             var tc = MakeToolCall("test_tool", "not valid json {{{");
             var result = await _dispatcher.DispatchAsync(tc);
 

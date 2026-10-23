@@ -89,42 +89,38 @@ namespace AgentCore.Editor.Core
         {
             if (_skillScopeState == null) return;
 
-            // 1. 收集已在 _messages 中的 skill messages（按 name → index 索引）
+            // v1.17.0: 只追加、不删除。按消息顺序回放 "注入 / 卸载提示"，得到当前历史中生效的 skill 集合；
+            // 删除历史中的 skill 消息会改变已缓存前缀，导致其后全部 token 缓存失效（Claude 原生缓存与
+            // vLLM 前缀缓存都一样）。
             var existingByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < _messages.Count; i++)
             {
                 var msg = _messages[i];
                 if (msg.Role != "system") continue;
-                if (!SkillContentBuilder.IsSkillMessage(msg.Content)) continue;
-                var name = SkillContentBuilder.TryExtractName(msg.Content);
-                if (!string.IsNullOrEmpty(name))
-                    existingByName[name] = i;
+                if (SkillContentBuilder.IsSkillMessage(msg.Content))
+                {
+                    var name = SkillContentBuilder.TryExtractName(msg.Content);
+                    if (!string.IsNullOrEmpty(name)) existingByName[name] = i;
+                    continue;
+                }
+                var unloaded = SkillContentBuilder.TryExtractUnloadedName(msg.Content);
+                if (!string.IsNullOrEmpty(unloaded)) existingByName.Remove(unloaded);
             }
 
             var loadedNames = new HashSet<string>(_skillScopeState.LoadedSkills, StringComparer.OrdinalIgnoreCase);
 
-            // 2. 移除已被 unload 的 skill messages（倒序移除避免索引失效）
-            var indicesToRemove = existingByName
-                .Where(kv => !loadedNames.Contains(kv.Key))
-                .Select(kv => kv.Value)
-                .OrderByDescending(idx => idx)
-                .ToList();
-
-            foreach (var idx in indicesToRemove)
+            // 2. 已被 unload 的 skill：追加卸载提示（历史中的原消息保持不动）
+            var unloadedNames = existingByName.Keys.Where(n => !loadedNames.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToList();
+            foreach (var name in unloadedNames)
             {
-                _messages.RemoveAt(idx);
-            }
-
-            // 移除后重建索引（因为 index 被打乱）
-            existingByName.Clear();
-            for (int i = 0; i < _messages.Count; i++)
-            {
-                var msg = _messages[i];
-                if (msg.Role != "system") continue;
-                if (!SkillContentBuilder.IsSkillMessage(msg.Content)) continue;
-                var name = SkillContentBuilder.TryExtractName(msg.Content);
-                if (!string.IsNullOrEmpty(name))
-                    existingByName[name] = i;
+                _messages.Add(new ChatMessage
+                {
+                    Role = "system",
+                    Content = SkillContentBuilder.BuildUnloadNote(name),
+                    Kind = MessageKind.OperatorNote
+                });
+                existingByName.Remove(name);
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][Skills] Appended unload note for skill '{name}'.");
             }
 
             // 3. 为未在 _messages 的 skill 添加新消息

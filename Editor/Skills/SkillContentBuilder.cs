@@ -27,6 +27,27 @@ namespace AgentCore.Editor.Skills
         public const string Marker = "# [SKILL] ";
 
         /// <summary>
+        /// v1.17.0: skill 卸载提示前缀。卸载不再删除历史中的 skill 消息（删除会破坏 prompt 缓存前缀），
+        /// 而是追加一条带此前缀的提示，让模型忽略该 skill 之前的指令。
+        /// </summary>
+        public const string UnloadMarker = "# [SKILL-UNLOADED] ";
+
+        /// <summary>构建卸载提示消息文本。</summary>
+        public static string BuildUnloadNote(string skillName)
+            => UnloadMarker + (skillName ?? "unknown") + "\n" +
+               $"The skill '{skillName}' has been unloaded. Disregard its earlier instructions from this point on.";
+
+        /// <summary>从卸载提示中提取 skill 名；非卸载提示返回 null。</summary>
+        public static string TryExtractUnloadedName(string messageContent)
+        {
+            if (string.IsNullOrEmpty(messageContent) || !messageContent.StartsWith(UnloadMarker)) return null;
+            var end = messageContent.IndexOf('\n');
+            var firstLine = end >= 0 ? messageContent.Substring(0, end) : messageContent;
+            var name = firstLine.Substring(UnloadMarker.Length).Trim();
+            return name.Length > 0 ? name : null;
+        }
+
+        /// <summary>
         /// 构建一条完整的 Skill system message 文本。
         /// </summary>
         /// <param name="skillName">Skill 名称。</param>
