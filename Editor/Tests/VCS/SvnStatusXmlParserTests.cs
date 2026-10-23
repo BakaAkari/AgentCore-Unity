@@ -151,6 +151,98 @@ namespace AgentCore.Tests.Editor.VCS
         }
 
         #endregion
+
+        #region 锁 / move / copy / switch
+
+        private static string Lock(string token, string owner, string comment = null) =>
+            $"<lock><token>{token}</token><owner>{owner}</owner>{(comment == null ? "" : $"<comment>{comment}</comment>")}<created>2026-01-01T00:00:00Z</created></lock>";
+
+        private static string LockedEntry(string path, string item, string wcLock, string reposStatus) =>
+            $"<entry path=\"{path}\"><wc-status item=\"{item}\" props=\"none\" revision=\"3\">{wcLock}</wc-status>{reposStatus}</entry>";
+
+        [TestCase("t1", "t1", true, "K")]
+        [TestCase("t1", "t2", true, "T")]
+        [TestCase("t1", null, true, "B")]
+        [TestCase("t1", null, false, "K")]
+        [TestCase(null, "t2", true, "O")]
+        [TestCase(null, null, true, null)]
+        public void MapLockState_FollowsSvnColumnSix(string wcToken, string reposToken, bool hasRepos, string expected)
+        {
+            Assert.AreEqual(expected, SvnStatusXmlParser.MapLockState(wcToken, reposToken, hasRepos));
+        }
+
+        [Test]
+        public void Parse_LocalLockOnUnmodifiedFile_IsReportedInLockedFiles()
+        {
+            var xml = Wrap(LockedEntry("Assets/Main.unity", "normal", Lock("opaquelocktoken:1", "alice", "编辑场景"), null));
+
+            var result = SvnStatusXmlParser.Parse(xml);
+
+            Assert.IsEmpty(result.Files);
+            var locked = result.LockedFiles.Single();
+            Assert.AreEqual("K", locked.LockState);
+            Assert.AreEqual("alice", locked.LockOwner);
+            Assert.AreEqual("编辑场景", locked.LockComment);
+            Assert.AreEqual(VcsFileState.Unmodified, locked.State);
+        }
+
+        [Test]
+        public void Parse_RemoteLocks_DistinguishOtherStolenBroken()
+        {
+            var xml = Wrap(
+                LockedEntry("other.prefab", "normal", "", "<repos-status item=\"none\" props=\"none\">" + Lock("t9", "bob") + "</repos-status>")
+                + LockedEntry("stolen.prefab", "modified", Lock("t1", "me"), "<repos-status item=\"none\" props=\"none\">" + Lock("t2", "carol") + "</repos-status>")
+                + LockedEntry("broken.prefab", "normal", Lock("t3", "me"), "<repos-status item=\"none\" props=\"none\"/>")
+                + LockedEntry("mine.prefab", "modified", Lock("t4", "me"), "<repos-status item=\"none\" props=\"none\">" + Lock("t4", "me") + "</repos-status>"),
+                "<against revision=\"5\"/>");
+
+            var result = SvnStatusXmlParser.Parse(xml);
+            var byPath = result.LockedFiles.ToDictionary(f => f.FilePath);
+
+            Assert.AreEqual("O", byPath["other.prefab"].LockState);
+            Assert.AreEqual("bob", byPath["other.prefab"].LockOwner);
+            Assert.AreEqual("T", byPath["stolen.prefab"].LockState);
+            Assert.AreEqual("carol", byPath["stolen.prefab"].LockOwner);
+            Assert.AreEqual("B", byPath["broken.prefab"].LockState);
+            Assert.AreEqual("K", byPath["mine.prefab"].LockState);
+            // 内容修改的锁定文件同时出现在 Files 中
+            CollectionAssert.AreEquivalent(new[] { "stolen.prefab", "mine.prefab" }, result.Files.Select(f => f.FilePath));
+            Assert.IsEmpty(result.RemoteChangedFiles);
+        }
+
+        [Test]
+        public void Parse_MoveAndCopy_AreMapped()
+        {
+            var xml = Wrap(
+                Entry("new.cs", "item=\"added\" props=\"none\" copied=\"true\" moved-from=\"old.cs\"")
+                + Entry("old.cs", "item=\"deleted\" props=\"none\" moved-to=\"new.cs\"")
+                + Entry("copy.cs", "item=\"added\" props=\"none\" copied=\"true\""));
+
+            var result = SvnStatusXmlParser.Parse(xml);
+            var byPath = result.Files.ToDictionary(f => f.FilePath);
+
+            Assert.AreEqual(VcsFileState.Renamed, byPath["new.cs"].State);
+            Assert.AreEqual("old.cs", byPath["new.cs"].OriginalPath);
+            Assert.AreEqual(VcsFileState.Deleted, byPath["old.cs"].State);
+            Assert.AreEqual("new.cs", byPath["old.cs"].MovedToPath);
+            Assert.AreEqual(VcsFileState.Copied, byPath["copy.cs"].State);
+        }
+
+        [Test]
+        public void Parse_SwitchedAndWcLocked_AreReported()
+        {
+            var xml = Wrap(
+                Entry("Assets/Plugins", "item=\"normal\" props=\"none\" switched=\"true\"")
+                + Entry("Assets", "item=\"normal\" props=\"none\" wc-locked=\"true\""));
+
+            var result = SvnStatusXmlParser.Parse(xml);
+
+            Assert.IsEmpty(result.LockedFiles);
+            Assert.IsTrue(result.Warnings.Any(w => w.Contains("cleanup")));
+            Assert.IsTrue(result.Warnings.Any(w => w.Contains("Assets/Plugins") && w.Contains("switched")));
+        }
+
+        #endregion
     }
 }
 #endif
