@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -361,7 +362,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// 当前是否 Windows。用 Environment 判断而非 Application.platform：
         /// 后者是 Unity API，后台线程（探测 / 远端检查）里调用不安全。
         /// </summary>
-        public static readonly bool IsWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
+        public static readonly bool IsWindows = ProcessArgs.IsWindows;
 
         /// <summary>
         /// 把路径列表拆成多组，使每组 "command + prefixArgs + 该组路径" 转义后的命令行长度不超过
@@ -404,78 +405,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return chunks;
         }
 
-        public static string Join(IEnumerable<string> args)
-        {
-            if (args == null)
-                return string.Empty;
-            bool windows = IsWindows;
-            var sb = new StringBuilder();
-            foreach (var arg in args)
-            {
-                if (arg == null)
-                    continue;
-                if (sb.Length > 0)
-                    sb.Append(' ');
-                sb.Append(windows ? QuoteWindows(arg) : QuotePosix(arg));
-            }
-            return sb.ToString();
-        }
+        public static string Join(IEnumerable<string> args) => ProcessArgs.Join(args);
 
-        /// <summary>按 CommandLineToArgvW / MSVCRT 规则转义：反斜杠仅在引号前（或结尾引号前）需要加倍。</summary>
-        public static string QuoteWindows(string arg)
-        {
-            if (arg.Length > 0 && arg.IndexOfAny(new[] { ' ', '\t', '\n', '\v', '"' }) < 0)
-                return arg;
+        /// <summary>按 CommandLineToArgvW / MSVCRT 规则转义（实现位于 <see cref="ProcessArgs"/>，与 ripgrep 等共用）。</summary>
+        public static string QuoteWindows(string arg) => ProcessArgs.QuoteWindows(arg);
 
-            var sb = new StringBuilder(arg.Length + 2);
-            sb.Append('"');
-            for (int i = 0; i < arg.Length; i++)
-            {
-                int backslashes = 0;
-                while (i < arg.Length && arg[i] == '\\')
-                {
-                    backslashes++;
-                    i++;
-                }
-
-                if (i == arg.Length)
-                {
-                    sb.Append('\\', backslashes * 2);
-                    break;
-                }
-
-                if (arg[i] == '"')
-                {
-                    sb.Append('\\', backslashes * 2 + 1);
-                    sb.Append('"');
-                }
-                else
-                {
-                    sb.Append('\\', backslashes);
-                    sb.Append(arg[i]);
-                }
-            }
-            sb.Append('"');
-            return sb.ToString();
-        }
-
-        /// <summary>POSIX（Mono 在 macOS / Linux 上按 shell 规则拆分）：单引号包裹，内部单引号写作 '\''。</summary>
-        public static string QuotePosix(string arg)
-        {
-            if (arg.Length > 0 && IsPosixSafe(arg))
-                return arg;
-            return "'" + arg.Replace("'", "'\\''") + "'";
-        }
-
-        private static bool IsPosixSafe(string arg)
-        {
-            foreach (var c in arg)
-            {
-                if (!(char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.' || c == '/' || c == '=' || c == ':' || c == '@' || c == ',' || c == '+'))
-                    return false;
-            }
-            return true;
-        }
+        /// <summary>POSIX 单引号转义（实现位于 <see cref="ProcessArgs"/>）。</summary>
+        public static string QuotePosix(string arg) => ProcessArgs.QuotePosix(arg);
 
         /// <summary>
         /// 校验将作为 revision / 分支名 / 标签名传入的值：不能以 '-' 开头（否则会被当成选项，
