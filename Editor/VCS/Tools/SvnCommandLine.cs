@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Text;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -24,38 +24,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
     /// </summary>
     public static class SvnCommandLine
     {
-        private static Encoding _argumentEncoding;
-        private static Encoding _outputEncoding;
-
         /// <summary>svn 解析 argv / --targets 文件所用的编码（Windows: ACP；其他平台: UTF-8）。</summary>
-        public static Encoding ArgumentEncoding => _argumentEncoding ??= ResolveCodePage(useOem: false);
+        public static Encoding ArgumentEncoding => SvnExecutable.ArgumentEncoding;
 
         /// <summary>svn 文本输出所用的编码（Windows: 新建控制台的默认代码页即 OEM；其他平台: UTF-8）。</summary>
-        public static Encoding OutputEncoding => _outputEncoding ??= ResolveCodePage(useOem: true);
-
-        [DllImport("kernel32.dll")]
-        private static extern uint GetACP();
-
-        [DllImport("kernel32.dll")]
-        private static extern uint GetOEMCP();
-
-        private static Encoding ResolveCodePage(bool useOem)
-        {
-            if (!VcsArgs.IsWindows)
-                return new UTF8Encoding(false);
-            try
-            {
-                var codePage = (int)(useOem ? GetOEMCP() : GetACP());
-                if (codePage == 65001 || codePage <= 0)
-                    return new UTF8Encoding(false);
-                return Encoding.GetEncoding(codePage);
-            }
-            catch (Exception)
-            {
-                // 拿不到代码页或运行时缺少对应编码（I18N 程序集）：退回 UTF-8，至少 --xml 输出不受影响
-                return new UTF8Encoding(false);
-            }
-        }
+        public static Encoding OutputEncoding => SvnExecutable.OutputEncoding;
 
         /// <summary>命令是否为 svn（<c>svn</c>、<c>svn.exe</c>、<c>C:\...\svn.exe</c>）。</summary>
         public static bool IsSvnCommand(string command)
@@ -73,101 +46,22 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
-        // ===== 可执行文件定位 =====
-
-        private static readonly object ExecutableLock = new object();
-        private static string _resolvedExecutable;
+        // ===== 可执行文件定位（统一委托给 AgentCore.Editor.Utils.SvnExecutable） =====
 
         /// <summary>
-        /// 解析要启动的 svn 可执行文件：命令不是裸的 "svn" 时原样返回；
-        /// PATH 中找得到 svn 时返回 "svn"；否则依次尝试注册表 HKLM\SOFTWARE\TortoiseSVN 的 Directory、
-        /// Program Files 下的 TortoiseSVNin\svn.exe（TortoiseSVN 安装时可能没把命令行工具加入 PATH，
-        /// 或 Unity 启动时继承的 PATH 还是旧的）。结果按进程缓存；线程安全，不调用 Unity API。
+        /// 解析要启动的 svn 可执行文件：命令不是裸的 "svn" 时原样返回；否则交给 <see cref="SvnExecutable.Resolve"/>
+        /// （PATH → TortoiseSVN 注册表 Directory → Program Files）。
         /// </summary>
         public static string ResolveExecutable(string command)
         {
             if (!string.Equals(command?.Trim(), "svn", StringComparison.OrdinalIgnoreCase) || !VcsArgs.IsWindows)
                 return command;
-
-            lock (ExecutableLock)
-            {
-                if (_resolvedExecutable == null)
-                    _resolvedExecutable = FindSvnExecutable(
-                        Environment.GetEnvironmentVariable("PATH"),
-                        ReadTortoiseSvnDirectory(),
-                        new[]
-                        {
-                            Environment.GetEnvironmentVariable("ProgramW6432"),
-                            Environment.GetEnvironmentVariable("ProgramFiles"),
-                            Environment.GetEnvironmentVariable("ProgramFiles(x86)")
-                        },
-                        File.Exists) ?? command;
-                return _resolvedExecutable;
-            }
+            return SvnExecutable.Resolve();
         }
 
-        /// <summary>
-        /// 定位 svn.exe（纯函数，便于测试）：PATH 中存在时返回 "svn"（保持原有行为），
-        /// 否则返回 TortoiseSVN 目录 / Program Files 下第一个存在的 bin\svn.exe，都没有时返回 null。
-        /// </summary>
+        /// <inheritdoc cref="SvnExecutable.FindSvnExecutable"/>
         public static string FindSvnExecutable(string pathVariable, string tortoiseDirectory, IEnumerable<string> programFilesDirs, Func<string, bool> fileExists)
-        {
-            if (!string.IsNullOrEmpty(pathVariable))
-            {
-                foreach (var dir in pathVariable.Split(';'))
-                {
-                    var trimmed = dir.Trim().Trim('"');
-                    if (trimmed.Length == 0)
-                        continue;
-                    try
-                    {
-                        if (fileExists(Path.Combine(trimmed, "svn.exe")))
-                            return "svn";
-                    }
-                    catch (ArgumentException)
-                    {
-                        // PATH 中的非法条目
-                    }
-                }
-            }
-
-            var candidates = new List<string>();
-            if (!string.IsNullOrEmpty(tortoiseDirectory))
-                candidates.Add(Path.Combine(tortoiseDirectory, "bin", "svn.exe"));
-            if (programFilesDirs != null)
-            {
-                foreach (var dir in programFilesDirs)
-                {
-                    if (!string.IsNullOrEmpty(dir))
-                        candidates.Add(Path.Combine(dir, "TortoiseSVN", "bin", "svn.exe"));
-                }
-            }
-            foreach (var candidate in candidates)
-            {
-                try
-                {
-                    if (fileExists(candidate))
-                        return candidate;
-                }
-                catch (ArgumentException)
-                {
-                }
-            }
-            return null;
-        }
-
-        private static string ReadTortoiseSvnDirectory()
-        {
-            try
-            {
-                using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\TortoiseSVN"))
-                    return key?.GetValue("Directory") as string;
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
+            => SvnExecutable.FindSvnExecutable(pathVariable, tortoiseDirectory, programFilesDirs, fileExists);
 
         // ===== 参数 =====
 
@@ -301,78 +195,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ===== 输出解码 =====
 
-        /// <summary>
-        /// 逐行解码 svn 输出：合法 UTF-8 的行（含 --xml 输出、UTF-8 文件内容）按 UTF-8，
-        /// 其余行（svn 自己按控制台代码页输出的路径、提示）按 <paramref name="fallback"/>。
-        /// 按 '\n' 切分对 UTF-8 与 GBK 等 DBCS 都安全（多字节序列里不会出现 0x0A）。
-        /// </summary>
+        /// <inheritdoc cref="SvnExecutable.DecodeOutput"/>
         public static string DecodeOutput(byte[] bytes, int count, Encoding fallback = null)
-        {
-            if (bytes == null || count <= 0)
-                return string.Empty;
-            fallback ??= OutputEncoding;
-            var utf8 = new UTF8Encoding(false);
-            if (fallback is UTF8Encoding)
-                return StripBom(utf8.GetString(bytes, 0, count));
+            => SvnExecutable.DecodeOutput(bytes, count, fallback);
 
-            var sb = new StringBuilder(count);
-            var start = 0;
-            while (start < count)
-            {
-                var end = Array.IndexOf(bytes, (byte)'\n', start, count - start);
-                var lineEnd = end < 0 ? count : end + 1;
-                var length = lineEnd - start;
-                sb.Append(IsValidUtf8(bytes, start, length)
-                    ? utf8.GetString(bytes, start, length)
-                    : fallback.GetString(bytes, start, length));
-                start = lineEnd;
-            }
-            return StripBom(sb.ToString());
-        }
-
-        private static string StripBom(string value)
-        {
-            return value.Length > 0 && value[0] == '\uFEFF' ? value.Substring(1) : value;
-        }
-
-        /// <summary>严格校验 UTF-8（拒绝过长编码、代理区与超出 U+10FFFF 的序列）。</summary>
+        /// <inheritdoc cref="SvnExecutable.IsValidUtf8"/>
         public static bool IsValidUtf8(byte[] bytes, int start, int length)
-        {
-            var i = start;
-            var end = start + length;
-            while (i < end)
-            {
-                var b = bytes[i];
-                if (b < 0x80)
-                {
-                    i++;
-                    continue;
-                }
-
-                int extra;
-                int min;
-                if (b >= 0xC2 && b <= 0xDF) { extra = 1; min = 0x80; }
-                else if (b >= 0xE0 && b <= 0xEF) { extra = 2; min = 0x800; }
-                else if (b >= 0xF0 && b <= 0xF4) { extra = 3; min = 0x10000; }
-                else return false;
-
-                if (i + extra >= end)
-                    return false; // 序列被截断
-
-                var cp = b & (0x3F >> extra);
-                for (var k = 1; k <= extra; k++)
-                {
-                    var c = bytes[i + k];
-                    if ((c & 0xC0) != 0x80)
-                        return false;
-                    cp = (cp << 6) | (c & 0x3F);
-                }
-                if (cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
-                    return false;
-                i += extra + 1;
-            }
-            return true;
-        }
+            => SvnExecutable.IsValidUtf8(bytes, start, length);
 
         // ===== 错误提示 =====
 
