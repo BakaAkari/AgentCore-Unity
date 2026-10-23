@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.Compilation;
@@ -12,6 +13,11 @@ namespace AgentCore.Editor.Core
     /// 编译监控器 - 监控 Unity 编译过程，收集编译错误
     /// 当 Agent 的工具调用修改了脚本文件时，需要等待编译完成并检查是否有错误
     /// </summary>
+    /// <remarks>
+    /// 每次 Watch 分配一个递增的 generation，事件回调与超时回调都捕获自己的 generation，
+    /// 执行前与当前值比对：旧 Watch 遗留的超时 / 迟到的编译事件不会去结束新 Watch 的 Task。
+    /// 所有退出路径（编译完成 / 超时 / Dispose）都经过 <see cref="Cleanup"/> 退订事件并取消超时计时。
+    /// </remarks>
     public class CompilationWatcher : IDisposable
     {
         private TaskCompletionSource<ErrorReport> _compilationTcs;
@@ -19,6 +25,17 @@ namespace AgentCore.Editor.Core
         private readonly object _lock = new object();
         private bool _isWatching;
         private bool _disposed;
+
+        // 当前 Watch 的代号；每次 Watch / Dispose 自增，旧闭包比对不上即视为过期
+        private int _generation;
+
+        // 当前 Watch 订阅的委托（闭包捕获 generation），退订时必须用同一实例
+        private Action<object> _startedHandler;
+        private Action<object> _finishedHandler;
+        private Action<string, CompilerMessage[]> _assemblyFinishedHandler;
+
+        // 当前 Watch 的超时计时取消源
+        private CancellationTokenSource _timeoutCts;
 
         /// <summary>
         /// 编译超时时间（秒）。
@@ -43,22 +60,32 @@ namespace AgentCore.Editor.Core
                 return _compilationTcs?.Task ?? Task.FromResult(new ErrorReport { Context = "Already watching" });
             }
 
-            _compilationTcs = new TaskCompletionSource<ErrorReport>();
+            // 上一次 Watch 的残留（理论上 Cleanup 已处理）一律清掉，再开新代
+            Cleanup();
+
+            int generation = ++_generation;
+            var tcs = new TaskCompletionSource<ErrorReport>();
+            _compilationTcs = tcs;
 
             lock (_lock)
             {
                 _compilerMessages.Clear();
             }
 
-            CompilationPipeline.compilationStarted += OnCompilationStarted;
-            CompilationPipeline.compilationFinished += OnCompilationFinished;
-            CompilationPipeline.assemblyCompilationFinished += OnAssemblyCompilationFinished;
+            _startedHandler = _ => OnCompilationStarted(generation);
+            _finishedHandler = _ => OnCompilationFinished(generation, tcs);
+            _assemblyFinishedHandler = (_, messages) => OnAssemblyCompilationFinished(generation, messages);
+
+            CompilationPipeline.compilationStarted += _startedHandler;
+            CompilationPipeline.compilationFinished += _finishedHandler;
+            CompilationPipeline.assemblyCompilationFinished += _assemblyFinishedHandler;
             _isWatching = true;
 
             // 设置超时
-            StartTimeoutCheck();
+            _timeoutCts = new CancellationTokenSource();
+            StartTimeoutCheck(generation, tcs, CompilationTimeoutSeconds, _timeoutCts.Token);
 
-            return _compilationTcs.Task;
+            return tcs.Task;
         }
 
         /// <summary>
@@ -77,21 +104,28 @@ namespace AgentCore.Editor.Core
             return task;
         }
 
-        private void OnCompilationStarted(object context)
+        private bool IsCurrent(int generation) => _isWatching && generation == _generation;
+
+        private void OnCompilationStarted(int generation)
         {
+            if (!IsCurrent(generation)) return;
             AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Compilation started, watching for errors...");
         }
 
-        private void OnAssemblyCompilationFinished(string assemblyPath, CompilerMessage[] messages)
+        private void OnAssemblyCompilationFinished(int generation, CompilerMessage[] messages)
         {
+            if (!IsCurrent(generation) || messages == null) return;
             lock (_lock)
             {
                 _compilerMessages.AddRange(messages);
             }
         }
 
-        private void OnCompilationFinished(object context)
+        private void OnCompilationFinished(int generation, TaskCompletionSource<ErrorReport> tcs)
         {
+            // 过期 Watch 的迟到回调：不碰当前状态（它的委托本应已退订，这里是兜底）
+            if (!IsCurrent(generation)) return;
+
             AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Compilation finished, generating error report...");
 
             Cleanup();
@@ -135,33 +169,42 @@ namespace AgentCore.Editor.Core
                 }
             }
 
-            _compilationTcs?.TrySetResult(report);
+            tcs.TrySetResult(report);
         }
 
-        private async void StartTimeoutCheck()
+        private async void StartTimeoutCheck(int generation, TaskCompletionSource<ErrorReport> tcs,
+            float timeoutSeconds, CancellationToken ct)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(CompilationTimeoutSeconds));
+                await Task.Delay(TimeSpan.FromSeconds(timeoutSeconds), ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // 本次 Watch 已正常结束 / 被 Dispose，计时作废
+                return;
+            }
 
-                if (_isWatching)
+            try
+            {
+                // 计时期间可能已开始新的 Watch：代号不一致则不得结束新 Watch
+                if (ct.IsCancellationRequested || !IsCurrent(generation)) return;
+
+                AgentCoreLog.Warning($"[AgentCore] Compilation watch timed out after {timeoutSeconds}s");
+                Cleanup();
+
+                var report = new ErrorReport
                 {
-                    AgentCoreLog.Warning($"[AgentCore] Compilation watch timed out after {CompilationTimeoutSeconds}s");
-                    Cleanup();
+                    Context = "Compilation timeout"
+                };
+                report.AddError(new ErrorInfo
+                {
+                    Source = "compilation_watcher",
+                    Severity = ErrorSeverity.Warning,
+                    Message = $"Compilation did not complete within {timeoutSeconds} seconds. This may indicate no compilation was triggered, or compilation is taking unusually long."
+                });
 
-                    var report = new ErrorReport
-                    {
-                        Context = "Compilation timeout"
-                    };
-                    report.AddError(new ErrorInfo
-                    {
-                        Source = "compilation_watcher",
-                        Severity = ErrorSeverity.Warning,
-                        Message = $"Compilation did not complete within {CompilationTimeoutSeconds} seconds. This may indicate no compilation was triggered, or compilation is taking unusually long."
-                    });
-
-                    _compilationTcs?.TrySetResult(report);
-                }
+                tcs.TrySetResult(report);
             }
             catch (Exception ex)
             {
@@ -169,13 +212,25 @@ namespace AgentCore.Editor.Core
             }
         }
 
+        /// <summary>
+        /// 退订当前 Watch 的全部事件并取消超时计时。幂等，所有退出路径都调用。
+        /// </summary>
         private void Cleanup()
         {
-            if (!_isWatching) return;
+            if (_startedHandler != null) CompilationPipeline.compilationStarted -= _startedHandler;
+            if (_finishedHandler != null) CompilationPipeline.compilationFinished -= _finishedHandler;
+            if (_assemblyFinishedHandler != null) CompilationPipeline.assemblyCompilationFinished -= _assemblyFinishedHandler;
+            _startedHandler = null;
+            _finishedHandler = null;
+            _assemblyFinishedHandler = null;
 
-            CompilationPipeline.compilationStarted -= OnCompilationStarted;
-            CompilationPipeline.compilationFinished -= OnCompilationFinished;
-            CompilationPipeline.assemblyCompilationFinished -= OnAssemblyCompilationFinished;
+            if (_timeoutCts != null)
+            {
+                try { _timeoutCts.Cancel(); } catch (ObjectDisposedException) { }
+                _timeoutCts.Dispose();
+                _timeoutCts = null;
+            }
+
             _isWatching = false;
         }
 
@@ -185,6 +240,8 @@ namespace AgentCore.Editor.Core
             _disposed = true;
 
             Cleanup();
+            // 让任何仍在途的旧闭包都比对失败
+            _generation++;
 
             lock (_lock)
             {
