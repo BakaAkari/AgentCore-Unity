@@ -784,7 +784,11 @@ namespace AgentCore.Editor.Core
             // 否则 ThinkingDrawer 的计时器（250ms Every）永久悬空运行。
             // 已被新运行取代时 reasoning 运行时字段属于新运行，不能动。
             if (_activeRun == run)
+            {
                 CompleteReasoningIfNeeded(assistantTurn);
+                // 取消可能停在工具执行中途：补齐缺失的 tool_result，让之后存盘的会话本身就合法
+                SanitizeMessageHistory();
+            }
         }
 
         private void HandleRunFailed(ActiveRun run, ConversationTurn assistantTurn, Exception ex, string context)

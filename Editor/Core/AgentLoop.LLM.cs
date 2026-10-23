@@ -79,6 +79,11 @@ namespace AgentCore.Editor.Core
             var messagesSnapshot = ContextWindowManager.TrimToFit(
                 _messages, maxTokens, reserveTokens);
 
+            // 请求前修复副本中的 tool_call / tool_result 配对（取消、域重载、截断都会留下残缺配对，接口会直接 400）
+            messagesSnapshot = HistorySanitizer.Normalize(messagesSnapshot, out var historyReport);
+            if (historyReport.Changed)
+                AgentCoreLog.Warning($"[AgentCore] Request history repaired before sending ({historyReport}).");
+
             // 每次 LLM 调用重新识别可见规划 trace；reasoning 内容保留在同一个 assistant turn 中追加。
             _visiblePlanningTraceExtractor.Reset();
 
