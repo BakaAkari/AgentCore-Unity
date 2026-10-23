@@ -87,16 +87,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""revert_svn"",
                         ""add_files""
                     ],
-                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (each one is approved by the user in the editor): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files, lock_files, unlock_files (SVN). SVN notes: Unity .meta files are added/deleted/reverted/committed together with their assets automatically; get_status reports locks and svn:needs-lock files modified without a lock; operations that only partly succeed return status=partial with per-path results.""
+                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (each one is approved by the user in the editor): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files, lock_files, unlock_files (SVN). SVN notes: Unity .meta files are added/deleted/reverted/committed together with their assets automatically; get_status reports locks and svn:needs-lock files modified without a lock; operations that only partly succeed return status=partial with per-path results. Paths: inputs may be relative to the Unity project root (e.g. Assets/Foo.prefab), relative to the VCS root, or absolute; returned paths are relative to the Unity project root when the file is inside the project, otherwise relative to the VCS root (see detect_vcs root_path / project_root).""
                 },
                 ""file_path"": {
                     ""type"": ""string"",
-                    ""description"": ""File path for get_diff, get_blame, get_info, get_file_log, cleanup, ignore_file, ignore_folder, ignore_extension actions (relative to project root). Omit for repository-wide cleanup.""
+                    ""description"": ""File path for get_diff, get_blame, get_info, get_file_log, cleanup, ignore_file, ignore_folder, ignore_extension actions: relative to the Unity project root (e.g. Assets/Foo.prefab); a path relative to the VCS root or an absolute path is also accepted. Omit for repository-wide cleanup.""
                 },
                 ""file_paths"": {
                     ""type"": ""array"",
                     ""items"": { ""type"": ""string"" },
-                    ""description"": ""List of file paths for stage_files, unstage_files, revert_files, checkout_files, add_files, commit_files, resolve_files, remove_files, lock_files, unlock_files actions (relative to project root or absolute)""
+                    ""description"": ""List of file paths for stage_files, unstage_files, revert_files, checkout_files, add_files, commit_files, resolve_files, remove_files, lock_files, unlock_files actions: relative to the Unity project root (e.g. Assets/Foo.prefab); paths relative to the VCS root or absolute paths are also accepted. Returned paths use the same project-relative form.""
                 },
                 ""recursive"": {
                     ""type"": ""boolean"",
@@ -240,10 +240,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 var probeError = isAvailable ? null : VcsDetector.GetCommandProbeError(vcsType);
 
+                var projectRoot = GetProjectRoot();
+                var mapper = new VcsProjectPathMapper(rootPath, projectRoot);
                 var data = new
                 {
                     vcs_type = vcsType.ToString(),
                     root_path = rootPath,
+                    project_root = projectRoot,
+                    path_base = mapper.ProjectIsVcsRoot
+                        ? "Paths are relative to the Unity project root (which is also the VCS root)."
+                        : "Paths are relative to the Unity project root (e.g. Assets/...); inputs relative to root_path or absolute are also accepted. Files outside the Unity project are reported relative to root_path.",
                     command_available = isAvailable,
                     command_error = probeError,
                     priority_order = "SVN > Perforce > Git"
@@ -369,7 +375,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (maxCount > 100) maxCount = 100;
             if (maxCount < 1) maxCount = 1;
 
-            var result = await ExecutePathLogAsync(adapter, filePath, maxCount, ct);
+            var result = await ExecutePathLogAsync(adapter, ResolveInputPath(filePath), maxCount, ct);
             if (!result.Success)
                 return ToolResponse.Fail($"Failed to get file log: {result.ErrorMessage}");
 
@@ -397,7 +403,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
-            var diff = await adapter.GetDiffAsync(filePath, ct);
+            var diff = await adapter.GetDiffAsync(ResolveInputPath(filePath), ct);
 
             if (string.IsNullOrEmpty(diff))
             {
@@ -492,9 +498,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 local_change_count = result.LocalChangeCount,
                 ahead_count = result.AheadCount,
                 behind_count = result.BehindCount,
-                remote_changed_files = result.RemoteChangedFiles,
-                conflicted_files = result.ConflictedFiles,
+                remote_changed_files = _paths.ToOutput(result.RemoteChangedFiles),
+                conflicted_files = _paths.ToOutput(result.ConflictedFiles),
                 locked_files = result.LockedFiles.Select(DescribeFile).ToList(),
+                remote_revision = result.RemoteRevision,
                 summary = result.Summary
             };
 
@@ -511,7 +518,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (string.IsNullOrEmpty(filePath))
                 return ToolResponse.Fail("file_path is required for get_blame action.");
 
-            var result = await adapter.GetBlameAsync(filePath, ct);
+            var result = await adapter.GetBlameAsync(ResolveInputPath(filePath), ct);
 
             if (!result.Success)
                 return ToolResponse.Fail($"Failed to get blame: {result.ErrorMessage}");
@@ -975,7 +982,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             var result = await adapter.SyncAsync(ct);
             return ToOperationResponse(adapter, result, "Failed to sync/update", new Dictionary<string, object>
             {
-                { "conflicted_files", result.ConflictedFiles }
+                { "conflicted_files", _paths.ToOutput(result.ConflictedFiles) }
             });
         }
 
@@ -987,6 +994,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private const string AdapterUnavailableMessage =
             "No version control system detected or command not available. Run action 'detect_vcs' to re-check (e.g. after installing the VCS CLI).";
 
+        // 本次调用的路径换算（工程根 ↔ VCS 根），由 GetAdapter 设置；根目录不随调用变化，并发调用共享也无妨
+        private VcsProjectPathMapper _paths = new VcsProjectPathMapper(null, null);
+        private bool _resolveInputPaths;
+
         private IVcsAdapter GetAdapter()
         {
             var vcsType = VcsDetector.DetectVcs();
@@ -997,6 +1008,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (adapter == null || !adapter.IsAvailable())
                 return null;
 
+            _paths = new VcsProjectPathMapper(VcsDetector.GetVcsRootPath(), GetProjectRoot());
+            _resolveInputPaths = !(adapter is SvnAdapter);
             return adapter;
         }
 
@@ -1052,9 +1065,27 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             return filePaths
                 .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Select(path => path.Trim())
+                .Select(path => ResolveInputPath(path.Trim()))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        /// <summary>
+        /// 输入路径：工程相对 / VCS 根相对 / 绝对路径都接受。SVN 适配器自己解析（SvnAdapter.ResolvePath，
+        /// 保留用户写法用于结果展示）；Git / Perforce 在 VCS 根执行命令，工程相对路径在这里换算为绝对路径。
+        /// </summary>
+        private string ResolveInputPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !_resolveInputPaths)
+                return path;
+            return _paths.ResolveInput(path);
+        }
+
+        /// <summary>Unity 工程根。编辑器进程的当前目录就是工程根（与 SvnAdapter 一致，不依赖 Application.dataPath）。</summary>
+        private static string GetProjectRoot()
+        {
+            try { return Directory.GetCurrentDirectory(); }
+            catch { return null; }
         }
 
         private static IEnumerable<string> GetValidActions()
@@ -1062,22 +1093,22 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return _parametersSchema["properties"]?["action"]?["enum"]?.Select(token => token.ToString()) ?? Enumerable.Empty<string>();
         }
 
-        private static Dictionary<string, object> BuildOperationData(IVcsAdapter adapter, VcsOperationResult result, Dictionary<string, object> extra = null)
+        private Dictionary<string, object> BuildOperationData(IVcsAdapter adapter, VcsOperationResult result, Dictionary<string, object> extra = null)
         {
             var data = new Dictionary<string, object>
             {
                 { "vcs_type", adapter.VcsType.ToString() },
                 { "message", result.Message },
-                { "affected_files", result.AffectedFiles },
+                { "affected_files", _paths.ToOutput(result.AffectedFiles) },
                 { "affected_count", result.AffectedFiles?.Count ?? 0 },
                 { "raw_output", Truncate(result.RawOutput, 1000, out var rawOutputTruncated) },
                 { "raw_output_truncated", rawOutputTruncated }
             };
 
             if (result.FailedFiles != null && result.FailedFiles.Count > 0)
-                data["failed_files"] = result.FailedFiles;
+                data["failed_files"] = _paths.ToOutputKeys(result.FailedFiles);
             if (result.SkippedFiles != null && result.SkippedFiles.Count > 0)
-                data["skipped_files"] = result.SkippedFiles;
+                data["skipped_files"] = _paths.ToOutputKeys(result.SkippedFiles);
             if (result.Warnings != null && result.Warnings.Count > 0)
                 data["warnings"] = result.Warnings;
 
@@ -1094,14 +1125,14 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// 把操作结果转换为 ok / partial / failed 三态响应：
         /// 部分路径失败、更新后有冲突、更新中途出错但已更新部分内容时返回 partial（逐项列出），不再报告为完全成功。
         /// </summary>
-        private static ToolResponse ToOperationResponse(IVcsAdapter adapter, VcsOperationResult result, string failPrefix, Dictionary<string, object> extra = null)
+        private ToolResponse ToOperationResponse(IVcsAdapter adapter, VcsOperationResult result, string failPrefix, Dictionary<string, object> extra = null)
         {
             var hasFailures = result.FailedFiles != null && result.FailedFiles.Count > 0;
             if (!result.Success && !result.IsPartial)
             {
                 var error = string.IsNullOrEmpty(result.ErrorMessage) ? result.Message : result.ErrorMessage;
                 if (hasFailures && (result.FailedFiles.Count > 1 || string.IsNullOrEmpty(error)))
-                    error = string.Join("; ", result.FailedFiles.Take(10).Select(kv => $"{kv.Key}: {kv.Value}"));
+                    error = string.Join("; ", result.FailedFiles.Take(10).Select(kv => $"{_paths.ToOutput(kv.Key)}: {kv.Value}"));
                 return ToolResponse.Fail($"{failPrefix}: {error}");
             }
 
@@ -1111,20 +1142,20 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             var items = new List<ToolItemResult>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var conflicted in result.ConflictedFiles ?? new List<string>())
+            foreach (var conflicted in _paths.ToOutput(result.ConflictedFiles))
             {
                 if (seen.Add(conflicted))
                     items.Add(ToolItemResult.Failed(conflicted, "conflict: resolve the file, then call resolve_files"));
             }
             if (hasFailures)
             {
-                foreach (var pair in result.FailedFiles)
+                foreach (var pair in _paths.ToOutputKeys(result.FailedFiles))
                 {
                     if (seen.Add(pair.Key))
                         items.Add(ToolItemResult.Failed(pair.Key, pair.Value));
                 }
             }
-            foreach (var affected in result.AffectedFiles ?? new List<string>())
+            foreach (var affected in _paths.ToOutput(result.AffectedFiles))
             {
                 if (seen.Add(affected))
                     items.Add(ToolItemResult.Succeeded(affected));
@@ -1139,18 +1170,18 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return ToolResponse.Partial(result.Message, items, data);
         }
 
-        private static object DescribeFile(VcsFileStatus f)
+        private object DescribeFile(VcsFileStatus f)
         {
             var entry = new Dictionary<string, object>
             {
-                { "path", f.FilePath },
+                { "path", _paths.ToOutput(f.FilePath) },
                 { "state", f.State.ToString() },
                 { "description", f.StateDescription }
             };
             if (!string.IsNullOrEmpty(f.OriginalPath))
-                entry["original_path"] = f.OriginalPath;
+                entry["original_path"] = _paths.ToOutput(f.OriginalPath);
             if (!string.IsNullOrEmpty(f.MovedToPath))
-                entry["moved_to"] = f.MovedToPath;
+                entry["moved_to"] = _paths.ToOutput(f.MovedToPath);
             if (!string.IsNullOrEmpty(f.LockState))
             {
                 entry["lock"] = f.LockState;

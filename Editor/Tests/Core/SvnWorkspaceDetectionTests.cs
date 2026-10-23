@@ -207,6 +207,8 @@ namespace AgentCore.Tests.Editor.Core
             ProjectContextCollector.AppendSvnNotes(sb, vcs, "D:/work/Game/项目 A");
 
             StringAssert.Contains("Game/项目 A/", sb.ToString());
+            // 与 version_control 工具的路径约定一致：工具路径相对于 Unity 工程根
+            StringAssert.Contains("相对于 Unity 工程根", sb.ToString());
         }
 
         [Test]
