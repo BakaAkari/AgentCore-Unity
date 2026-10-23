@@ -36,6 +36,7 @@ namespace AgentCore.Editor.Config
                 new ModelAgentSettingsPage(),
                 new ContextMemorySettingsPage(),
                 new ToolsExtensionsSettingsPage(),
+                new PermissionsSettingsPage(),
                 new WorkspaceSettingsPage(),
             };
 
@@ -65,7 +66,7 @@ namespace AgentCore.Editor.Config
             return new AgentCoreSettingsProvider("Project/AgentCore", SettingsScope.Project)
             {
                 label = "AgentCore",
-                keywords = new[] { "agent", "ai", "llm", "chat", "agentcore", "mem0", "lightrag", "tools", "extensions" }
+                keywords = new[] { "agent", "ai", "llm", "chat", "agentcore", "mem0", "lightrag", "tools", "extensions", "permissions", "rules" }
             };
         }
 
