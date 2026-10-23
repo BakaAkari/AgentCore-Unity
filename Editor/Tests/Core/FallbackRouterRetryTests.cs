@@ -4,7 +4,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 using AgentCore.Editor.Config;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
@@ -70,6 +73,7 @@ namespace AgentCore.Tests.Editor.Core
         public async Task NonRetryableHttpError_IsNotRetried()
         {
             var client = new ScriptedClient((n, _) => throw Http(401));
+            LogAssert.Expect(LogType.Error, new Regex("Non-retryable error, giving up"));
 
             await AsyncAssert.ThrowsAsync<Exception>(async () => await Run(NewRouter(), client));
             Assert.AreEqual(1, client.Calls);

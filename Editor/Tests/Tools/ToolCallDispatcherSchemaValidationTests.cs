@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
+using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
@@ -43,6 +45,21 @@ namespace AgentCore.Tests.Editor.Tools
             }
         }
 
+        /// <summary>
+        /// 一律批准的确认提供器。本组测试只验证参数校验；未声明风险的 fake 工具会走确认流程，
+        /// 不传提供器时 dispatcher 按 fail-safe 拒绝，工具永远不会执行。
+        /// </summary>
+        private sealed class ApproveAllProvider : IToolConfirmationProvider
+        {
+            public Task<bool> RequestConfirmationAsync(ToolConfirmationRequest request, CancellationToken ct) => Task.FromResult(true);
+        }
+
+        /// <summary>空规则源，避免读取本机 UserSettings / ProjectSettings 中的权限规则。</summary>
+        private sealed class NoRules : IPermissionRuleSource
+        {
+            public IReadOnlyList<ScopedPermissionRule> GetActiveRules() => new List<ScopedPermissionRule>();
+        }
+
         private ToolCallDispatcher _dispatcher;
         private FakeTool _fakeTool;
 
@@ -65,7 +82,7 @@ namespace AgentCore.Tests.Editor.Tools
             ToolRegistry.Instance.Clear();
             _fakeTool = new FakeTool("test_tool", TestSchema);
             ToolRegistry.Instance.Register(_fakeTool);
-            _dispatcher = new ToolCallDispatcher(ToolRegistry.Instance);
+            _dispatcher = new ToolCallDispatcher(ToolRegistry.Instance, new ApproveAllProvider(), new NoRules());
         }
 
         [TearDown]

@@ -197,14 +197,15 @@ namespace AgentCore.Tests.Editor.Tools
         {
             var name = CreateCube();
             var before = GetVertices(name);
-            var target = before[0] + new Vector3(0f, 1f, 0f);
+            // 偏移量不能是边长的整数倍，否则会落在另一个角点上，把那里原有的顶点也算进来
+            var target = before[0] + new Vector3(0f, 0.37f, 0f);
             var coincidentBefore = before.Count(p => Vector3.Distance(p, before[0]) < 1e-5f);
 
             var result = Run(new JObject
             {
                 ["action"] = "move_vertices",
                 ["name"] = name,
-                ["vertices"] = new JArray(new JObject { ["index"] = 0, ["offset"] = new JObject { ["x"] = 0, ["y"] = 1, ["z"] = 0 } })
+                ["vertices"] = new JArray(new JObject { ["index"] = 0, ["offset"] = new JObject { ["x"] = 0, ["y"] = 0.37, ["z"] = 0 } })
             });
 
             Assert.IsTrue(result.IsFullSuccess, result.Error ?? result.Output);
