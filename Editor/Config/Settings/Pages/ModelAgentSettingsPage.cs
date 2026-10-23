@@ -289,7 +289,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             context.Ui.DrawApiKeyRow(
                 "API Key",
-                "LLM service API key (stored in EditorPrefs, not committed to git)",
+                "LLM service API key (stored in EditorPrefs, DPAPI-encrypted on Windows, not committed to git)",
                 context.State.StringValues[apiKeyDisplayKey],
                 "Set API Key",
                 $"Enter API Key for '{profile.displayName}':",

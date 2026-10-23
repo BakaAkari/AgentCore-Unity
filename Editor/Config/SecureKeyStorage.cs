@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using AgentCore.Editor.Utils;
 using UnityEditor;
 
 namespace AgentCore.Editor.Config
@@ -5,6 +8,11 @@ namespace AgentCore.Editor.Config
     /// <summary>
     /// API Key 安全存储。
     /// 使用 EditorPrefs 存储在操作系统级别，不进入项目文件或版本控制。
+    /// <para>
+    /// v1.18：Windows 上值经 DPAPI（CurrentUser）加密后再写入（见 <see cref="SecretProtector"/>）；
+    /// 旧版写入的明文在首次读取时透明迁移为密文，读取旧值始终可用。其他平台保持明文。
+    /// 读取不设任何确认 / 拦截。
+    /// </para>
     /// </summary>
     public static class SecureKeyStorage
     {
@@ -14,7 +22,7 @@ namespace AgentCore.Editor.Config
 
         // v1.13.0: Provider Profile 分键前缀。每个 profile 的 apiKey 存储为
         // "AgentCore_ProfileKey_<profileId>"。LLM apiKey 单一真源 = 各 profile 分键存储。
-        private const string PROFILE_KEY_PREFIX = "AgentCore_ProfileKey_";
+        internal const string PROFILE_KEY_PREFIX = "AgentCore_ProfileKey_";
 
         // --- mem0 API Key（Phase 3 使用）---
 
@@ -22,13 +30,13 @@ namespace AgentCore.Editor.Config
         /// 设置 mem0 API Key。
         /// </summary>
         public static void SetMem0ApiKey(string key)
-            => EditorPrefs.SetString(MEM0_API_KEY, key ?? "");
+            => WriteSecret(MEM0_API_KEY, key);
 
         /// <summary>
         /// 获取 mem0 API Key。
         /// </summary>
         public static string GetMem0ApiKey()
-            => EditorPrefs.GetString(MEM0_API_KEY, "");
+            => ReadSecret(MEM0_API_KEY);
 
         /// <summary>
         /// 检查是否已设置 mem0 API Key。
@@ -42,13 +50,13 @@ namespace AgentCore.Editor.Config
         /// 设置 LightRAG API Key。
         /// </summary>
         public static void SetLightRAGApiKey(string key)
-            => EditorPrefs.SetString(LIGHTRAG_API_KEY, key ?? "");
+            => WriteSecret(LIGHTRAG_API_KEY, key);
 
         /// <summary>
         /// 获取 LightRAG API Key。
         /// </summary>
         public static string GetLightRAGApiKey()
-            => EditorPrefs.GetString(LIGHTRAG_API_KEY, "");
+            => ReadSecret(LIGHTRAG_API_KEY);
 
         /// <summary>
         /// 检查是否已设置 LightRAG API Key。
@@ -64,13 +72,13 @@ namespace AgentCore.Editor.Config
         /// 设置视觉模型 API Key(固定单键,与主模型 profile 隔离)。
         /// </summary>
         public static void SetVisionApiKey(string key)
-            => EditorPrefs.SetString(VISION_API_KEY, key ?? "");
+            => WriteSecret(VISION_API_KEY, key);
 
         /// <summary>
         /// 获取视觉模型 API Key。
         /// </summary>
         public static string GetVisionApiKey()
-            => EditorPrefs.GetString(VISION_API_KEY, "");
+            => ReadSecret(VISION_API_KEY);
 
         /// <summary>
         /// 检查是否已设置视觉模型 API Key。
@@ -95,7 +103,7 @@ namespace AgentCore.Editor.Config
         {
             if (string.IsNullOrEmpty(profileId))
                 return;
-            EditorPrefs.SetString(PROFILE_KEY_PREFIX + profileId, key ?? "");
+            WriteSecret(PROFILE_KEY_PREFIX + profileId, key);
         }
 
         /// <summary>
@@ -105,7 +113,7 @@ namespace AgentCore.Editor.Config
         {
             if (string.IsNullOrEmpty(profileId))
                 return "";
-            return EditorPrefs.GetString(PROFILE_KEY_PREFIX + profileId, "");
+            return ReadSecret(PROFILE_KEY_PREFIX + profileId);
         }
 
         /// <summary>
@@ -132,6 +140,87 @@ namespace AgentCore.Editor.Config
         {
             EditorPrefs.DeleteKey(MEM0_API_KEY);
             EditorPrefs.DeleteKey(LIGHTRAG_API_KEY);
+        }
+
+        // --- 静态加密 + 旧明文迁移（v1.18）---
+
+        private static readonly object WarnLock = new();
+        private static readonly HashSet<string> WarnedKeys = new();
+
+        /// <summary>
+        /// 把 EditorPrefs 中存储的原始值还原为明文（纯函数，不读写 EditorPrefs）。
+        /// <para>
+        /// - 加密值：解密后返回；解密失败返回空字符串（原值保持不动，不删除）。<br/>
+        /// - 旧版明文：原样返回；若当前平台可加密，<paramref name="migrated"/> 给出应写回的密文。
+        /// </para>
+        /// </summary>
+        internal static string Reveal(string stored, out string migrated, out bool unreadable)
+        {
+            migrated = null;
+            unreadable = false;
+            if (string.IsNullOrEmpty(stored))
+                return "";
+
+            if (SecretProtector.IsProtected(stored))
+            {
+                if (SecretProtector.TryUnprotect(stored, out var plain))
+                    return plain;
+                unreadable = true;
+                return "";
+            }
+
+            if (SecretProtector.TryProtect(stored, out var protectedValue))
+                migrated = protectedValue;
+            return stored;
+        }
+
+        /// <summary>明文 → 存储值。可加密时返回密文，否则（非 Windows / 加密失败）返回明文。</summary>
+        internal static string Conceal(string plain)
+        {
+            if (string.IsNullOrEmpty(plain))
+                return "";
+            return SecretProtector.TryProtect(plain, out var protectedValue) ? protectedValue : plain;
+        }
+
+        private static string ReadSecret(string prefKey)
+        {
+            var stored = EditorPrefs.GetString(prefKey, "");
+            var plain = Reveal(stored, out var migrated, out var unreadable);
+
+            if (migrated != null)
+            {
+                // 旧版明文透明迁移：写回密文。写入失败（如非主线程调用）不影响本次读取，下次再迁移。
+                try
+                {
+                    EditorPrefs.SetString(prefKey, migrated);
+                }
+                catch (Exception)
+                {
+                    // 保留明文，下次读取再试
+                }
+            }
+            else if (unreadable)
+            {
+                lock (WarnLock)
+                {
+                    if (WarnedKeys.Add(prefKey))
+                    {
+                        AgentCoreLog.Warning($"[AgentCore] Stored secret '{prefKey}' could not be decrypted for the current Windows user. " +
+                            "The stored value is kept untouched; set the key again in Project Settings > AgentCore if needed.");
+                    }
+                }
+            }
+
+            return plain;
+        }
+
+        private static void WriteSecret(string prefKey, string plain)
+        {
+            EditorPrefs.SetString(prefKey, Conceal(plain));
+            lock (WarnLock)
+            {
+                WarnedKeys.Remove(prefKey);
+            }
         }
     }
 }
