@@ -6,6 +6,7 @@ using AgentCore.Editor.Components.VCS.Config;
 using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Utils;
+using AgentCore.Editor.Workspace.Resolution;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -42,6 +43,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private static int _isSyncingFlag;
 
         private static string _lastError;
+
+        /// <summary>连续失败次数（离线 / 认证失败 / 命令缺失），用于退避与"只记录一次警告"。受 _lock 保护。</summary>
+        private static int _consecutiveFailures;
         private static CancellationTokenSource _cts;
 
         /// <summary>
@@ -186,7 +190,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 var adapter = await CreateAdapterAsync().ConfigureAwait(false);
                 if (adapter == null)
+                {
+                    // 以前直接 return：UI 停在 "Checking remote..."，也不记录检查时间。
+                    // 现在记一次失败（退避）并通知 UI，错误原因（命令缺失等）由 LastError 给出。
+                    RecordFailure(_lastError, logWarning: !string.IsNullOrEmpty(_lastError));
                     return LastStatus;
+                }
 
                 _lastError = null;
 
@@ -214,11 +223,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
                 catch (Exception ex)
                 {
-                    _lastError = ex.Message;
-                    lock (_lock)
-                        _lastCheckedUtc = DateTime.UtcNow;
-                    AgentCoreLog.Warning($"[Version Control] Remote status check failed: {ex.Message}");
-                    NotifyStatusChanged(LastStatus);
+                    RecordFailure(ex.Message, logWarning: true);
                     return LastStatus;
                 }
             }
@@ -238,6 +243,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return;
 
             var now = DateTime.UtcNow;
+            int failures;
             lock (_lock)
             {
                 _lastCheckedUtc = now;
@@ -246,16 +252,68 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     // 失败时保留上一次成功的结果（含"远端有更新"的告警），只更新错误信息
                     _lastStatus = status;
                     _lastSuccessUtc = now;
+                    _consecutiveFailures = 0;
                 }
-                else if (_lastStatus == null || !_lastStatus.Success)
+                else
                 {
-                    _lastStatus = status;
+                    if (_lastStatus == null || !_lastStatus.Success)
+                        _lastStatus = status;
+                    _consecutiveFailures = Math.Min(_consecutiveFailures + 1, 16);
                 }
-                _nextCheckUtc = now + TimeSpan.FromMinutes(VcsSettings.RemoteStatusCheckIntervalMinutes);
+                failures = _consecutiveFailures;
+                _nextCheckUtc = now + GetCheckInterval(VcsSettings.RemoteStatusCheckIntervalMinutes, failures);
             }
 
-            _lastError = status.Success ? null : status.ErrorMessage;
+            _lastError = status.Success ? null : DescribeError(status.ErrorMessage);
+            // 离线 / 认证失败时 adapter 返回 Success=false（不抛异常）：只在连续失败的第一次记录警告
+            if (!status.Success && failures == 1)
+                AgentCoreLog.Warning($"[Version Control] Remote status check failed: {_lastError}");
             NotifyStatusChanged(status.Success ? status : LastStatus);
+        }
+
+        /// <summary>
+        /// 连续失败时的检查间隔：基础间隔 × 2^失败次数（最多 ×8），且不超过 max(基础间隔, 60 分钟)。
+        /// 离线 / 服务器不可达 / 认证失败时避免每个间隔都去连服务器、刷日志。手动 Check Remote 不受影响。
+        /// </summary>
+        public static TimeSpan GetCheckInterval(double baseIntervalMinutes, int consecutiveFailures)
+        {
+            var baseMinutes = Math.Max(baseIntervalMinutes, 0.1);
+            if (consecutiveFailures <= 0)
+                return TimeSpan.FromMinutes(baseMinutes);
+            var multiplier = 1 << Math.Min(consecutiveFailures, 3);
+            var capMinutes = Math.Max(baseMinutes, 60);
+            return TimeSpan.FromMinutes(Math.Min(baseMinutes * multiplier, capMinutes));
+        }
+
+        private static void RecordFailure(string error, bool logWarning)
+        {
+            int failures;
+            lock (_lock)
+            {
+                _lastCheckedUtc = DateTime.UtcNow;
+                _consecutiveFailures = Math.Min(_consecutiveFailures + 1, 16);
+                failures = _consecutiveFailures;
+                _nextCheckUtc = _lastCheckedUtc + GetCheckInterval(VcsSettings.RemoteStatusCheckIntervalMinutes, failures);
+            }
+
+            if (!string.IsNullOrEmpty(error))
+                _lastError = DescribeError(error);
+            if (logWarning && failures == 1)
+                AgentCoreLog.Warning($"[Version Control] Remote status check failed: {_lastError}");
+            NotifyStatusChanged(LastStatus);
+        }
+
+        /// <summary>SVN 错误附带处理建议（svn upgrade / cleanup / 认证 / 离线）。</summary>
+        private static string DescribeError(string error)
+        {
+            if (string.IsNullOrEmpty(error))
+                return error;
+            if (error.IndexOf("svn", StringComparison.OrdinalIgnoreCase) < 0 && SvnErrorHints.FirstErrorCode(error) == null)
+                return error;
+            var hint = SvnErrorHints.GetHint(error, VcsDetector.GetVcsRootPath());
+            if (hint == null || error.Contains(hint))
+                return error; // 无法识别或已附加过
+            return error.Trim() + "\n" + hint;
         }
 
         /// <summary>

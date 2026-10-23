@@ -205,7 +205,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// <summary>
         /// Launches an external process with shell resolution enabled.
         /// </summary>
-        /// <param name="fileName">Executable name or full path.</param>
+        /// <param name="fileName">Executable name or full path. <c>TortoiseProc.exe</c> is resolved via <see cref="ResolveTortoiseProcPath"/>.</param>
         /// <param name="arguments">Command line arguments (already quoted as needed).</param>
         /// <param name="workingDirectory">Working directory for the child process.</param>
         /// <param name="displayName">Human-readable label used in log/user messages.</param>
@@ -217,11 +217,32 @@ namespace AgentCore.Editor.Components.VCS.Tools
             string displayName,
             out string reason)
         {
+            var started = TryStartProcess(fileName, arguments, workingDirectory, displayName, out reason, out var process);
+            process?.Dispose();
+            return started;
+        }
+
+        /// <summary>
+        /// 同上，额外返回进程对象（调用方可订阅 Exited，在外部窗口关闭后刷新状态；用完需 Dispose）。
+        /// 启动失败时 <paramref name="process"/> 为 null。
+        /// </summary>
+        public static bool TryStartProcess(
+            string fileName,
+            string arguments,
+            string workingDirectory,
+            string displayName,
+            out string reason,
+            out System.Diagnostics.Process process)
+        {
+            process = null;
             if (string.IsNullOrWhiteSpace(workingDirectory))
             {
                 reason = "Working directory is empty.";
                 return false;
             }
+
+            if (IsTortoiseProc(fileName))
+                fileName = ResolveTortoiseProcPath();
 
             try
             {
@@ -233,7 +254,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     WorkingDirectory = workingDirectory
                 };
 
-                var process = System.Diagnostics.Process.Start(startInfo);
+                process = System.Diagnostics.Process.Start(startInfo);
                 if (process == null)
                 {
                     reason = $"Failed to start {displayName} (no process handle returned).";
@@ -247,8 +268,139 @@ namespace AgentCore.Editor.Components.VCS.Tools
             catch (Exception ex)
             {
                 reason = $"Failed to launch {displayName}: {ex.Message}";
+                if (IsTortoiseProc(fileName))
+                    reason += " (TortoiseSVN was not found in the registry, Program Files or PATH. Install TortoiseSVN, then retry.)";
                 AgentCoreLog.Warning($"[Version Control] {reason} Command: {fileName} {arguments}");
                 return false;
+            }
+        }
+
+        // ── TortoiseProc 定位 ──
+
+        private static readonly object _tortoiseLock = new object();
+        private static string _tortoiseProcPath;
+
+        /// <summary>
+        /// 定位 TortoiseProc.exe：注册表 HKLM\SOFTWARE\TortoiseSVN 的 ProcPath（安装器写入）→
+        /// Directory\bin → Program Files 默认位置 → PATH。都找不到时返回 "TortoiseProc.exe" 交给 Shell 解析。
+        /// <para>
+        /// TortoiseSVN 不注册 App Paths，ShellExecute 只能靠 PATH 找到它；而 Unity 继承的是 Unity Hub 启动时的 PATH，
+        /// Hub 运行期间安装 TortoiseSVN（或安装时没加入 PATH）都会导致 "系统找不到指定的文件"。
+        /// 找到的结果在本次域内缓存（注册表 / 文件存在性检查，几毫秒，不启动进程）。
+        /// </para>
+        /// </summary>
+        public static string ResolveTortoiseProcPath()
+        {
+            lock (_tortoiseLock)
+            {
+                if (_tortoiseProcPath != null)
+                    return _tortoiseProcPath;
+            }
+
+            var found = FindTortoiseProc(ReadTortoiseRegistry, Environment.GetEnvironmentVariable, File.Exists);
+            if (found == null)
+                return "TortoiseProc.exe"; // 不缓存失败结果：用户装好 TortoiseSVN 后无需重启 Unity
+
+            lock (_tortoiseLock)
+                _tortoiseProcPath = found;
+            return found;
+        }
+
+        /// <summary>
+        /// TortoiseProc 查找逻辑（依赖注入以便测试）：返回找到的完整路径，找不到返回 null。
+        /// </summary>
+        /// <param name="readRegistry">读取 HKLM\SOFTWARE\TortoiseSVN 下的值（名称 → 值，可返回 null）。</param>
+        /// <param name="getEnv">读取环境变量。</param>
+        /// <param name="fileExists">判断文件是否存在。</param>
+        public static string FindTortoiseProc(Func<string, string> readRegistry, Func<string, string> getEnv, Func<string, bool> fileExists)
+        {
+            var candidates = new List<string>();
+            try
+            {
+                var procPath = readRegistry?.Invoke("ProcPath");
+                if (!string.IsNullOrWhiteSpace(procPath))
+                    candidates.Add(Environment.ExpandEnvironmentVariables(procPath.Trim().Trim('"')));
+
+                var dir = readRegistry?.Invoke("Directory");
+                if (!string.IsNullOrWhiteSpace(dir))
+                    candidates.Add(Path.Combine(Environment.ExpandEnvironmentVariables(dir.Trim().Trim('"')), "bin", "TortoiseProc.exe"));
+            }
+            catch
+            {
+                // 注册表不可用时继续尝试默认位置
+            }
+
+            foreach (var envName in new[] { "ProgramW6432", "ProgramFiles", "ProgramFiles(x86)" })
+            {
+                var programFiles = getEnv?.Invoke(envName);
+                if (!string.IsNullOrWhiteSpace(programFiles))
+                    candidates.Add(Path.Combine(programFiles, "TortoiseSVN", "bin", "TortoiseProc.exe"));
+            }
+
+            var pathVar = getEnv?.Invoke("PATH");
+            if (!string.IsNullOrEmpty(pathVar))
+            {
+                foreach (var entry in pathVar.Split(';'))
+                {
+                    var trimmed = entry.Trim().Trim('"');
+                    if (trimmed.Length == 0)
+                        continue;
+                    try { candidates.Add(Path.Combine(trimmed, "TortoiseProc.exe")); }
+                    catch (ArgumentException) { /* PATH 里的非法条目 */ }
+                }
+            }
+
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    if (fileExists(candidate))
+                        return candidate;
+                }
+                catch
+                {
+                    // 忽略无法访问的候选
+                }
+            }
+            return null;
+        }
+
+        private static bool IsTortoiseProc(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+                return false;
+            try
+            {
+                var name = Path.GetFileName(fileName.Trim().Trim('"'));
+                return string.Equals(name, "TortoiseProc.exe", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, "TortoiseProc", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 通过反射读取 HKLM\SOFTWARE\TortoiseSVN（Microsoft.Win32.Registry 在部分 API 兼容级别下不能直接引用）。
+        /// 非 Windows / 失败时返回 null。
+        /// </summary>
+        private static string ReadTortoiseRegistry(string valueName)
+        {
+            if (!VcsArgs.IsWindows)
+                return null;
+            try
+            {
+                var registryType = Type.GetType("Microsoft.Win32.Registry, mscorlib")
+                                   ?? Type.GetType("Microsoft.Win32.Registry, Microsoft.Win32.Registry");
+                var getValue = registryType?.GetMethod("GetValue", new[] { typeof(string), typeof(string), typeof(object) });
+                if (getValue == null)
+                    return null;
+                return getValue.Invoke(null, new object[] { @"HKEY_LOCAL_MACHINE\SOFTWARE\TortoiseSVN", valueName, null }) as string;
+            }
+            catch
+            {
+                return null;
             }
         }
 

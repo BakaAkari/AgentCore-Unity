@@ -189,6 +189,11 @@ namespace AgentCore.Editor.Workspace
             {
                 if (info.IsCommandAvailable && info.IsWorkingCopy && !string.IsNullOrEmpty(info.Url))
                     SaveLastKnownSvnInfo(unityRoot, info);
+                else
+                    info = MergeWithKnownSvnInfo(info, _cached.Vcs);
+
+                if (!string.IsNullOrEmpty(info.ErrorMessage) && info.IsWorkingCopy)
+                    AgentCoreLog.Warning($"[AgentCore] WorkspaceContextService: svn info failed, using cached/filesystem workspace info. {info.ErrorMessage}");
 
                 _cached = Build(unityRoot, info);
             }
@@ -200,6 +205,35 @@ namespace AgentCore.Editor.Workspace
 
             try { ContextChanged?.Invoke(); }
             catch (Exception ex) { AgentCoreLog.Error($"[AgentCore] WorkspaceContextService.ContextChanged handler error: {ex}"); }
+        }
+
+        /// <summary>
+        /// svn info 失败（svn 缺失 / 超时 / E155036 需要升级 / 锁定等）时，结果里没有 URL。
+        /// 若根目录与当前已知信息（上次成功的 svn info）一致，沿用已知的 URL / 分支 / Revision，只附带本次的错误信息：
+        /// Fingerprint 依赖 URL，直接用失败结果重建会让 Session / Memory / 索引在会话中途切换到另一个隔离分区。
+        /// </summary>
+        internal static WorkspaceVcsInfo MergeWithKnownSvnInfo(WorkspaceVcsInfo probe, WorkspaceVcsInfo known)
+        {
+            if (probe == null || known == null)
+                return probe;
+            if (!string.IsNullOrEmpty(probe.Url) || string.IsNullOrEmpty(known.Url))
+                return probe;
+            if (string.IsNullOrEmpty(probe.RootPath)
+                || !string.Equals(UnityRootResolver.NormalizePath(probe.RootPath), UnityRootResolver.NormalizePath(known.RootPath), StringComparison.OrdinalIgnoreCase))
+                return probe;
+
+            return new WorkspaceVcsInfo
+            {
+                Type = WorkspaceVcsType.Svn,
+                RootPath = known.RootPath,
+                Url = known.Url,
+                RepositoryRoot = known.RepositoryRoot,
+                BranchId = known.BranchId,
+                Revision = known.Revision,
+                IsWorkingCopy = true,
+                IsCommandAvailable = probe.IsCommandAvailable,
+                ErrorMessage = probe.ErrorMessage
+            };
         }
 
         /// <summary>由 UnityRoot + SVN 信息组装 WorkspaceContext（纯文件系统，不启动子进程）。</summary>

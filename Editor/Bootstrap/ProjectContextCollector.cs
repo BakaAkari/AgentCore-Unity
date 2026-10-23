@@ -120,6 +120,9 @@ namespace AgentCore.Editor.Bootstrap
                         sb.AppendLine($"- **Revision**: {ctx.Vcs.Revision}");
                     if (!string.IsNullOrEmpty(ctx.Vcs.Url))
                         sb.AppendLine($"- **SVN URL**: `{ctx.Vcs.Url}`");
+
+                    if (ctx.Vcs.Type == WorkspaceVcsType.Svn)
+                        AppendSvnNotes(sb, ctx.Vcs, ctx.UnityRoot);
                 }
 
                 // Scope Roots 表格
@@ -147,6 +150,32 @@ namespace AgentCore.Editor.Bootstrap
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// SVN 补充说明：svn 不可用 / 工作副本需要 upgrade 等状态如实告诉模型（以前静默省略，模型会反复调用失败的 VCS 工具）；
+        /// Unity 工程位于工作副本子目录时，说明 svn 路径与 Assets 路径的换算关系。
+        /// </summary>
+        internal static void AppendSvnNotes(StringBuilder sb, WorkspaceVcsInfo vcs, string unityRoot)
+        {
+            // IsCommandAvailable=false 也可能只是"尚未探测"（ResolveFast），因此只依据 ErrorMessage 判断；
+            // svn 缺失 / 需要 upgrade / 需要 cleanup 时 ErrorMessage 已附带处理提示
+            if (!string.IsNullOrEmpty(vcs.ErrorMessage) && vcs.ErrorMessage != "No .svn directory found")
+            {
+                var message = vcs.ErrorMessage.Replace("\r", " ").Replace("\n", " ").Trim();
+                if (message.Length > 300)
+                    message = message.Substring(0, 300) + "…";
+                sb.AppendLine($"- **SVN 状态异常**: {message}");
+            }
+
+            var root = (vcs.RootPath ?? string.Empty).Replace('\\', '/').TrimEnd('/');
+            var unity = (unityRoot ?? string.Empty).Replace('\\', '/').TrimEnd('/');
+            if (root.Length > 0 && unity.Length > root.Length
+                && unity.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                var prefix = unity.Substring(root.Length + 1);
+                sb.AppendLine($"- **SVN 路径**: 版本控制工具返回的路径相对于工作副本根 `{root}`；去掉前缀 `{prefix}/` 才是 Unity 的 `Assets/...` 路径");
+            }
         }
 
         /// <summary>

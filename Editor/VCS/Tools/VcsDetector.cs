@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Workspace;
+using AgentCore.Editor.Workspace.Resolution;
 using UnityEditor;
 using UnityEngine;
 
@@ -324,9 +325,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
             // ── 本地检测（WorkspaceContext 不可用或 VcsType.Unknown 时） ────
             var projectPath = _projectRootPath;
 
-            // 优先级 1: SVN（.svn 目录检测）
-            if (IsSvnRepository(projectPath))
-                return (VcsType.Svn, projectPath);
+            // 优先级 1: SVN（向上查找最近的 .svn：SVN 1.7+ 只在工作副本根有 .svn，
+            // Unity 工程常位于大工作副本的深层子目录，只看工程目录本身会漏判为 Git / None）
+            var svnRoot = FindSvnWorkingCopyRoot(projectPath);
+            if (!string.IsNullOrEmpty(svnRoot))
+                return (VcsType.Svn, svnRoot);
 
             // 优先级 2: Perforce
             if (IsPerforceWorkspace(projectPath))
@@ -421,11 +424,15 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ── 文件系统检测 ──
 
-        private static bool IsSvnRepository(string path)
+        /// <summary>
+        /// 向上查找最近的含 .svn 的目录作为工作副本根（与 svn info 的 wcroot-abspath 一致，含 externals 场景）。
+        /// 纯文件系统，任意线程可用；未找到返回 null。
+        /// </summary>
+        public static string FindSvnWorkingCopyRoot(string path)
         {
-            // 检查 .svn 目录
-            var svnDir = Path.Combine(path, ".svn");
-            return Directory.Exists(svnDir);
+            var root = SvnWorkspaceInfoResolver.FindWorkingCopyRoot(path);
+            // 与 WorkspaceContext.WorkspaceRoot 保持同一格式（正斜杠），避免两条检测路径得出"不同"的根
+            return string.IsNullOrEmpty(root) ? null : root;
         }
 
         private static bool IsPerforceWorkspace(string path)

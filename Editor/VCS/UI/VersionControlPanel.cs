@@ -82,8 +82,17 @@ namespace AgentCore.Editor.Components.VCS.UI
         private bool _isBackgroundPolling;
         private bool _isPanelActive;
 
+        // svn log -r HEAD:1 每次都访问服务器：离线 / 认证失败时按次数指数退避，避免每 30 秒白跑一次
+        private int _commitPollFailures;
+        private const int MaxCommitPollBackoffSeconds = 600;
+
+        // Unity 工程根（Application.dataPath 的父目录，主线程构造时缓存）。
+        // SVN 状态路径相对于工作副本根，工程位于工作副本子目录时需要按它换算成 Assets/... 路径
+        private readonly string _unityRoot;
+
         public VersionControlPanel()
         {
+            _unityRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
             AddToClassList(UssClassName);
             VcsRemoteStatusMonitor.StatusChanged += UpdateSyncStatusBanner;
             EditorApplication.update += OnEditorUpdatePollCommits;
@@ -329,7 +338,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 var probeError = VcsDetector.GetCommandProbeError(_currentVcsType);
                 _vcsTypeLabel.text = $"{_currentVcsType} (command not available)";
-                ShowMessage($"{_currentVcsType} detected but command-line tool is not available. Please install {_currentVcsType} CLI, then click Refresh."
+                // TortoiseSVN 默认不安装命令行 svn.exe：明确告诉用户去安装器里勾选，而不是笼统的 "install CLI"
+                var installHint = _currentVcsType == VcsType.Svn
+                    ? "Install the svn command-line client (TortoiseSVN installer → Modify → enable \"command line client tools\"), make sure its bin folder is on PATH, restart Unity, then click Refresh."
+                    : $"Please install {_currentVcsType} CLI, then click Refresh.";
+                ShowMessage($"{_currentVcsType} detected at {rootPath} but the command-line tool is not available. {installHint}"
                             + (string.IsNullOrEmpty(probeError) ? string.Empty : $"\n{probeError}"), true);
                 _cleanupButton.SetEnabled(false);
                 return;
@@ -361,22 +374,8 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
             }
 
-            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
-            {
-                ShowMessage("Cleanup is blocked while Unity is compiling or importing assets. Please wait until Unity is idle.", true);
-                return;
-            }
-
-            var rootPath = VcsDetector.GetVcsRootPath();
-            var confirmed = EditorUtility.DisplayDialog(
-                "Cleanup Project Working Copy?",
-                $"This will open the external {_currentVcsType} cleanup tool for the whole project working copy.\n\nRoot:\n{rootPath}\n\nUse this when the working copy is locked, interrupted, or needs metadata cleanup.",
-                "Open Cleanup",
-                "Cancel");
-
-            if (!confirmed)
-                return;
-
+            // 不再弹二次确认、也不在编译 / 导入时拦截：这里只是打开外部工具（TortoiseSVN 的 Cleanup 对话框本身就带选项和确认），
+            // Unity 是否在编译与 svn cleanup 无关
             if (TryOpenExternalCleanupWindow())
                 return;
 
@@ -442,10 +441,14 @@ namespace AgentCore.Editor.Components.VCS.UI
                 if (VcsSettings.CheckRemoteStatusOnRefresh)
                     VcsRemoteStatusMonitor.RequestCheck();
 
-                await Task.WhenAll(branchTask, statusTask, logTask);
+                // 本地数据（svn info / svn status 只读工作副本）先到先显示；
+                // svn log -r HEAD:1 要访问服务器，离线时会拖到超时（最长 60 秒），不能让状态列表陪着等
+                await Task.WhenAll(branchTask, statusTask);
 
                 if (ct.IsCancellationRequested)
                     return;
+
+                var errors = new List<string>();
 
                 // 更新分支信息
                 var branchInfo = await branchTask;
@@ -456,6 +459,10 @@ namespace AgentCore.Editor.Components.VCS.UI
                     _revisionLabel.text = $"Revision: {branchInfo.CurrentRevision ?? "unknown"}";
                     _revisionLabel.tooltip = branchInfo.CurrentRevision ?? "unknown";
                 }
+                else if (!string.IsNullOrWhiteSpace(branchInfo.ErrorMessage))
+                {
+                    errors.Add(branchInfo.ErrorMessage);
+                }
 
                 // 更新状态列表
                 var statusResult = await statusTask;
@@ -463,14 +470,32 @@ namespace AgentCore.Editor.Components.VCS.UI
                 {
                     _currentFiles = statusResult.Files ?? new List<VcsFileStatus>();
                     UpdateStatusList(_currentFiles);
+                    if (statusResult.Truncated)
+                        _statusSummaryLabel.text += " (output truncated — list may be incomplete)";
                     // View Diff 走外部图形 diff 工具（目前仅 SVN/TortoiseSVN 支持），
                     // 非 SVN 时禁用按钮，避免点击后只弹"需要外部客户端"的空操作。
                     _viewDiffButton.SetEnabled(_currentFiles.Count > 0 && SupportsExternalFileTool("diff"));
                 }
+                else
+                {
+                    // 以前失败时什么都不显示，列表停留在旧内容 / "No changes"，用户以为工作副本是干净的
+                    _statusSummaryLabel.text = "Status unavailable (see message above)";
+                    errors.Add(statusResult.ErrorMessage);
+                }
 
-                // 更新提交历史
+                if (errors.Count > 0)
+                    ShowMessage(BuildCommandErrorMessage("Working copy status failed", errors), true);
+
+                // 本地部分已完成：先恢复按钮，不让远端 log 占着 Refresh / Cleanup
+                _refreshButton.SetEnabled(true);
+                _cleanupButton.SetEnabled(_adapter != null && _currentVcsType != VcsType.None);
+
+                // 更新提交历史（远端，可能较慢；失败时 adapter 返回空列表，此时保留已显示的旧列表）
                 var commits = await logTask;
-                UpdateCommitList(commits);
+                if (ct.IsCancellationRequested)
+                    return;
+                if ((commits?.Count ?? 0) > 0 || _loadedCommits.Count == 0)
+                    UpdateCommitList(commits);
 
                 UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
             }
@@ -745,10 +770,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             var revertablePaths = files.Where(CanRevert).Select(f => f.FilePath).ToList();
             // committablePaths：与单文件逻辑一致，排除 Untracked / Conflicted / Missing
             var committablePaths = files
-                .Where(f => f.State != VcsFileState.Ignored
-                         && f.State != VcsFileState.Untracked
-                         && f.State != VcsFileState.Conflicted
-                         && f.State != VcsFileState.Missing)
+                .Where(IsCommittable)
                 .Select(f => f.FilePath).ToList();
             var unityAssetPaths = selectedPaths.Where(IsUnityAssetPath).ToList();
 
@@ -916,23 +938,21 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by Working Copy Status list
-            
-            // 尝试使用外部工具 Revert
-            if (TryOpenExternalRevert(filePath))
+            // 资产与其 .meta 一起还原（只还原资产会留下与之不匹配的 .meta，反之亦然）
+            if (TryOpenExternalRevert(WithMetaCompanions(new[] { filePath }, CanRevert)))
                 return;
-            
+
             // 外部工具不可用时显示提示
             ShowExternalToolUnavailable("Revert");
         }
 
-        private async void OnStageSingleFileClicked(string filePath)
+        private void OnStageSingleFileClicked(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // 尝试使用外部工具添加文件，等待外部进程退出后自动刷新状态列表
-            if (await TryOpenExternalAddAsync(filePath))
+            // 新资产与其 .meta 一起加入版本控制；外部对话框关闭后自动刷新状态列表
+            if (TryOpenExternalAdd(WithMetaCompanions(new[] { filePath }, CanStage)))
                 return;
 
             // 外部工具不可用时显示提示
@@ -944,12 +964,10 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            // Selection handled by Working Copy Status list
-            
-            // 尝试使用外部工具提交单个文件
-            if (TryOpenExternalCommitFile(filePath))
+            // 资产与其 .meta 一起提交
+            if (TryOpenExternalCommitFiles(WithMetaCompanions(new[] { filePath }, IsCommittable)))
                 return;
-            
+
             // 外部工具不可用时显示提示
             ShowExternalToolUnavailable("Commit File");
         }
@@ -959,7 +977,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (filePaths == null || filePaths.Count == 0)
                 return;
 
-            if (TryOpenExternalCommitFiles(filePaths))
+            if (TryOpenExternalCommitFiles(WithMetaCompanions(filePaths, IsCommittable)))
                 return;
 
             ShowExternalToolUnavailable("Commit Selected Files");
@@ -1101,15 +1119,65 @@ namespace AgentCore.Editor.Components.VCS.UI
             return result.ErrorMessage;
         }
 
+        /// <summary>
+        /// 拼接命令失败信息；SVN 时附上可操作的提示（E155036 → svn upgrade、E155004 → cleanup、认证 / 离线等）。
+        /// </summary>
+        private string BuildCommandErrorMessage(string title, List<string> errors)
+        {
+            var distinct = errors
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Select(e => e.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var text = distinct.Count == 0 ? "Unknown error" : string.Join("\n", distinct);
+            if (_currentVcsType == VcsType.Svn)
+            {
+                var hint = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.GetHint(text, VcsDetector.GetVcsRootPath());
+                if (hint != null)
+                    text += "\n" + hint;
+            }
+            return $"{title}: {text}";
+        }
+
         private string GetAbsolutePath(string filePath)
         {
             var normalized = filePath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
             return Path.GetFullPath(Path.Combine(VcsDetector.GetVcsRootPath(), normalized));
         }
 
+        /// <summary>
+        /// 状态列表路径（相对工作副本根）→ Unity 资产路径（Assets/... / Packages/...）；不在 Unity 工程内返回 null。
+        /// Unity 工程位于工作副本子目录时，状态路径形如 "client/unity/Assets/Foo.prefab"，不能直接交给 AssetDatabase。
+        /// </summary>
+        private string ToUnityAssetPath(string filePath)
+        {
+            return VcsAssetPaths.ToUnityAssetPath(filePath, VcsDetector.GetVcsRootPath(), _unityRoot);
+        }
+
         private bool IsUnityAssetPath(string filePath)
         {
-            return !string.IsNullOrWhiteSpace(filePath) && filePath.Replace('\\', '/').StartsWith("Assets/", StringComparison.Ordinal);
+            return ToUnityAssetPath(filePath) != null;
+        }
+
+        /// <summary>
+        /// 为选中的状态路径补上 .meta 伴随文件（资产 ↔ .meta），只补状态列表里同样满足 <paramref name="filter"/> 的条目。
+        /// 只选中资产提交 / 还原时，其 .meta 的改动（GUID、导入设置）不会被漏掉，避免提交出 "资产与 meta 不一致" 的版本。
+        /// </summary>
+        private List<string> WithMetaCompanions(IEnumerable<string> filePaths, Func<VcsFileStatus, bool> filter)
+        {
+            var available = _currentFiles
+                .Where(f => f != null && (filter == null || filter(f)))
+                .Select(f => f.FilePath);
+            return VcsAssetPaths.WithMetaCompanions(filePaths, available);
+        }
+
+        private bool IsCommittable(VcsFileStatus file)
+        {
+            return file != null
+                && file.State != VcsFileState.Ignored
+                && file.State != VcsFileState.Untracked
+                && file.State != VcsFileState.Conflicted
+                && file.State != VcsFileState.Missing;
         }
 
         private void CopyRelativePath(string filePath)
@@ -1135,10 +1203,14 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private void PingInUnityProject(string filePath)
         {
-            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(filePath);
+            var assetPath = ToUnityAssetPath(filePath);
+            // .meta 本身不是资产：定位到它描述的资产
+            if (assetPath != null && assetPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                assetPath = assetPath.Substring(0, assetPath.Length - ".meta".Length);
+            var asset = assetPath == null ? null : AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath);
             if (asset == null)
             {
-                ShowMessage($"Unity asset not found: {filePath}", true);
+                ShowMessage($"Unity asset not found: {assetPath ?? filePath}", true);
                 return;
             }
 
@@ -1149,6 +1221,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         private void UpdateCommitList(List<VcsCommit> commits)
         {
             _loadedCommits = commits ?? new List<VcsCommit>();
+            if (_loadedCommits.Count > 0)
+                _commitPollFailures = 0;
             _visibleCommitCount = Mathf.Clamp(_visibleCommitCount, InitialCommitDisplayCount, Mathf.Max(InitialCommitDisplayCount, _loadedCommits.Count));
             _lastCommitPollUtc = DateTime.UtcNow;
             RenderCommitList();
@@ -1452,9 +1526,9 @@ namespace AgentCore.Editor.Components.VCS.UI
                         _lastExternalToolError = logMessageError;
                         return false;
                     }
-                    return TryStartTortoise("commit", new[] { rootPath }, rootPath, "TortoiseSVN commit window", logMessageArg);
+                    return TryStartTortoise("commit", new[] { rootPath }, rootPath, "TortoiseSVN commit window", logMessageArg, refreshOnExit: true);
                 case VcsType.Git:
-                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI commit window");
+                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI commit window", refreshOnExit: true);
                 case VcsType.Perforce:
                     return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "submit", rootPath }), rootPath, "P4V submit window");
                 default:
@@ -1468,9 +1542,9 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartTortoise("update", new[] { rootPath }, rootPath, "TortoiseSVN update window");
+                    return TryStartTortoise("update", new[] { rootPath }, rootPath, "TortoiseSVN update window", refreshOnExit: true, recheckRemoteOnExit: true);
                 case VcsType.Git:
-                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
+                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window", refreshOnExit: true);
                 case VcsType.Perforce:
                     return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "sync", rootPath }), rootPath, "P4V sync window");
                 default:
@@ -1484,7 +1558,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartTortoise("cleanup", new[] { rootPath }, rootPath, "TortoiseSVN cleanup options dialog");
+                    return TryStartTortoise("cleanup", new[] { rootPath }, rootPath, "TortoiseSVN cleanup options dialog", refreshOnExit: true);
                 case VcsType.Git:
                     return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
                 case VcsType.Perforce:
@@ -1494,38 +1568,76 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
-        private bool TryStartExternalProcess(string fileName, string arguments, string workingDirectory, string displayName)
+        /// <summary>
+        /// 启动外部工具（TortoiseProc 由 <see cref="VcsExternalToolLauncher"/> 按注册表 / Program Files / PATH 定位）。
+        /// <paramref name="refreshOnExit"/> 为 true 时，外部窗口关闭后自动刷新状态列表与 Project 窗口角标：
+        /// 以前 TortoiseSVN 提交 / 还原 / 更新完成后面板仍显示旧状态，需要用户手动 Refresh。
+        /// </summary>
+        private bool TryStartExternalProcess(string fileName, string arguments, string workingDirectory, string displayName,
+            bool refreshOnExit = false, bool recheckRemoteOnExit = false)
         {
-            try
+            if (!VcsExternalToolLauncher.TryStartProcess(fileName, arguments, workingDirectory, displayName, out var reason, out var process))
             {
-                if (string.IsNullOrWhiteSpace(workingDirectory))
-                    return false;
-
-                var startInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = fileName,
-                    Arguments = arguments,
-                    UseShellExecute = true,
-                    WorkingDirectory = workingDirectory
-                };
-                System.Diagnostics.Process.Start(startInfo);
-                ShowMessage($"Opened {displayName}.", false);
-                LogVcsOperation("Open External Tool", $"Opened {displayName}: {fileName} {arguments}");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _lastExternalToolError = ex.Message;
-                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open {displayName}. Command: {fileName} {arguments}. Error: {ex.Message}");
+                _lastExternalToolError = reason;
                 return false;
             }
+
+            ShowMessage($"Opened {displayName}.", false);
+            LogVcsOperation("Open External Tool", $"Opened {displayName}: {fileName} {arguments}");
+
+            if (refreshOnExit)
+                WatchExternalToolExit(process, recheckRemoteOnExit);
+            else
+                process.Dispose();
+            return true;
+        }
+
+        /// <summary>
+        /// 外部工具进程退出后（线程池回调）投递到主线程刷新。只订阅事件，从不等待进程。
+        /// </summary>
+        private void WatchExternalToolExit(System.Diagnostics.Process process, bool recheckRemote)
+        {
+            var fired = 0;
+            void OnExit()
+            {
+                if (Interlocked.Exchange(ref fired, 1) != 0)
+                    return;
+                try { process.Dispose(); } catch { /* 忽略 */ }
+                MainThread.Post(() => OnExternalToolClosed(recheckRemote));
+            }
+
+            try
+            {
+                process.EnableRaisingEvents = true;
+                process.Exited += (_, __) => OnExit();
+                // 订阅前进程已退出时 Exited 可能不再触发
+                if (process.HasExited)
+                    OnExit();
+            }
+            catch
+            {
+                // 拿不到进程状态（例如由已运行的实例接管）：不刷新，用户可手动 Refresh
+                try { process.Dispose(); } catch { /* 忽略 */ }
+            }
+        }
+
+        private void OnExternalToolClosed(bool recheckRemote)
+        {
+            VcsProjectWindowIntegration.RequestStatusRefresh();
+            if (recheckRemote)
+                VcsRemoteStatusMonitor.RequestCheck();
+
+            if (_isDisposed || _adapter == null)
+                return;
+            _ = RefreshAllData();
         }
 
         /// <summary>
         /// 启动 TortoiseProc。参数由 <see cref="VcsExternalToolLauncher"/> 构造：路径含双引号时给出明确原因，
         /// 多路径走 /pathfile。失败原因记录在 <see cref="_lastExternalToolError"/>，由 ShowExternalToolUnavailable 显示。
         /// </summary>
-        private bool TryStartTortoise(string command, IReadOnlyList<string> paths, string rootPath, string displayName, string extraArguments = null)
+        private bool TryStartTortoise(string command, IReadOnlyList<string> paths, string rootPath, string displayName, string extraArguments = null,
+            bool refreshOnExit = false, bool recheckRemoteOnExit = false)
         {
             if (!VcsExternalToolLauncher.TryBuildTortoiseArgs(command, paths, out var arguments, out var error))
             {
@@ -1537,7 +1649,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (!string.IsNullOrEmpty(extraArguments))
                 arguments += " " + extraArguments;
 
-            return TryStartExternalProcess("TortoiseProc.exe", arguments, rootPath, displayName);
+            return TryStartExternalProcess("TortoiseProc.exe", arguments, rootPath, displayName, refreshOnExit, recheckRemoteOnExit);
         }
 
         private void ShowExternalToolUnavailable(string operation)
@@ -1573,7 +1685,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             var rootPath = VcsDetector.GetVcsRootPath();
             var absolutePath = GetAbsolutePath(filePath);
-            
+
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
@@ -1586,133 +1698,37 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
-        private bool TryOpenExternalAdd(string filePath)
-        {
-            var rootPath = VcsDetector.GetVcsRootPath();
-            var absolutePath = GetAbsolutePath(filePath);
-            
-            switch (_currentVcsType)
-            {
-                case VcsType.Svn:
-                    return TryStartTortoise("add", new[] { absolutePath }, rootPath, "TortoiseSVN add dialog");
-                case VcsType.Git:
-                case VcsType.Perforce:
-                    return false;
-                default:
-                    return false;
-            }
-        }
-
         /// <summary>
-        /// 启动外部 Add 工具，等待外部进程退出后自动刷新文件状态列表。
+        /// 打开 TortoiseSVN Add 对话框（含 .meta 伴随文件），对话框关闭后自动刷新状态列表。
         /// 返回 true 表示外部工具已成功启动（无论用户在对话框中的操作结果）。
         /// </summary>
-        private async Task<bool> TryOpenExternalAddAsync(string filePath)
+        private bool TryOpenExternalAdd(List<string> filePaths)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
-            var absolutePath = GetAbsolutePath(filePath);
-
-            string fileName;
-            string arguments;
-
-            switch (_currentVcsType)
-            {
-                case VcsType.Svn:
-                    fileName = "TortoiseProc.exe";
-                    if (!VcsExternalToolLauncher.TryBuildTortoiseArgs("add", absolutePath, out arguments, out var argsError))
-                    {
-                        _lastExternalToolError = argsError;
-                        return false;
-                    }
-                    break;
-                default:
-                    return false;
-            }
-
-            if (string.IsNullOrWhiteSpace(rootPath))
+            var absolutePaths = ToAbsolutePaths(filePaths);
+            if (absolutePaths.Count == 0)
                 return false;
 
-            try
+            switch (_currentVcsType)
             {
-                var startInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = fileName,
-                    Arguments = arguments,
-                    UseShellExecute = true,
-                    WorkingDirectory = rootPath
-                };
-
-                var process = System.Diagnostics.Process.Start(startInfo);
-                ShowMessage("Opened TortoiseSVN add dialog.", false);
-                LogVcsOperation("Open External Tool", $"Opened TortoiseSVN add dialog: {fileName} {arguments}");
-
-                if (process != null)
-                {
-                    // 等待外部进程退出，然后自动刷新文件状态列表
-                    var tcs = new TaskCompletionSource<bool>();
-                    process.EnableRaisingEvents = true;
-                    process.Exited += (_, __) => tcs.TrySetResult(true);
-
-                    // 如果进程在订阅事件前已经退出，直接完成
-                    if (process.HasExited)
-                        tcs.TrySetResult(true);
-
-                    await tcs.Task;
-                    await RefreshAllData();
-                }
-
-                return true;
+                case VcsType.Svn:
+                    return TryStartTortoise("add", absolutePaths, rootPath, "TortoiseSVN add dialog", refreshOnExit: true);
+                default:
+                    return false;
             }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open TortoiseSVN add dialog. Error: {ex.Message}");
+        }
+
+        private bool TryOpenExternalRevert(List<string> filePaths)
+        {
+            var rootPath = VcsDetector.GetVcsRootPath();
+            var absolutePaths = ToAbsolutePaths(filePaths);
+            if (absolutePaths.Count == 0)
                 return false;
-            }
-        }
 
-        private bool TryOpenExternalRevert(string filePath)
-        {
-            var rootPath = VcsDetector.GetVcsRootPath();
-            var absolutePath = GetAbsolutePath(filePath);
-            
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartTortoise("revert", new[] { absolutePath }, rootPath, "TortoiseSVN revert dialog");
-                case VcsType.Git:
-                case VcsType.Perforce:
-                    return false;
-                default:
-                    return false;
-            }
-        }
-
-        private bool TryOpenExternalRemove(string filePath)
-        {
-            var rootPath = VcsDetector.GetVcsRootPath();
-            var absolutePath = GetAbsolutePath(filePath);
-            
-            switch (_currentVcsType)
-            {
-                case VcsType.Svn:
-                    return TryStartTortoise("remove", new[] { absolutePath }, rootPath, "TortoiseSVN remove dialog");
-                case VcsType.Git:
-                case VcsType.Perforce:
-                    return false;
-                default:
-                    return false;
-            }
-        }
-
-        private bool TryOpenExternalCommitFile(string filePath)
-        {
-            var rootPath = VcsDetector.GetVcsRootPath();
-            var absolutePath = GetAbsolutePath(filePath);
-            
-            switch (_currentVcsType)
-            {
-                case VcsType.Svn:
-                    return TryStartTortoise("commit", new[] { absolutePath }, rootPath, "TortoiseSVN commit window");
+                    return TryStartTortoise("revert", absolutePaths, rootPath, "TortoiseSVN revert dialog", refreshOnExit: true);
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1724,14 +1740,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private bool TryOpenExternalCommitFiles(List<string> filePaths)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
-            if (filePaths == null || filePaths.Count == 0)
-                return false;
-
-            var absolutePaths = filePaths
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Select(GetAbsolutePath)
-                .ToList();
-
+            var absolutePaths = ToAbsolutePaths(filePaths);
             if (absolutePaths.Count == 0)
                 return false;
 
@@ -1739,13 +1748,21 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 case VcsType.Svn:
                     // 多个文件通过 /pathfile 传递，不受命令行长度限制
-                    return TryStartTortoise("commit", absolutePaths, rootPath, "TortoiseSVN commit window");
+                    return TryStartTortoise("commit", absolutePaths, rootPath, "TortoiseSVN commit window", refreshOnExit: true);
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
                 default:
                     return false;
             }
+        }
+
+        private List<string> ToAbsolutePaths(List<string> filePaths)
+        {
+            return (filePaths ?? new List<string>())
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(GetAbsolutePath)
+                .ToList();
         }
 
         private bool SupportsExternalFileTool(string operation)
@@ -1792,7 +1809,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private async void OnStageMultipleFilesClicked(List<string> filePaths)
         {
-            await StageFilesAsync(filePaths, "Add or Track Selected");
+            await StageFilesAsync(WithMetaCompanions(filePaths, CanStage), "Add or Track Selected");
         }
 
         private async void OnRevertMultipleFilesClicked(List<string> filePaths)
@@ -1800,6 +1817,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (filePaths == null || filePaths.Count == 0)
                 return;
 
+            filePaths = WithMetaCompanions(filePaths, CanRevert);
             await RevertFilesAsync(
                 filePaths,
                 $"Revert {filePaths.Count} Selected File(s)?",
@@ -1999,18 +2017,20 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (status == null)
             {
                 _syncStatusLabel.text = VcsRemoteStatusMonitor.LastError is string checkError && !string.IsNullOrEmpty(checkError)
-                    ? $"Remote check failed: {checkError}"
+                    ? $"Remote check failed: {DescribeRemoteError(checkError)}"
                     : "Remote status has not been checked yet. Click Check Remote to fetch now.";
                 // 未检查过时不禁用 Update：用户想更新就直接执行
                 _updateRemoteButton?.SetEnabled(true);
                 return;
             }
 
+            // Update 按钮始终可用：远端检查失败（离线 / 认证）或结果过期都不应阻止用户自己打开更新窗口
+            _updateRemoteButton?.SetEnabled(true);
+
             if (!status.Success)
             {
                 _syncStatusBanner.AddToClassList("has-error");
-                _syncStatusLabel.text = $"Remote check failed: {status.ErrorMessage}";
-                _updateRemoteButton?.SetEnabled(false);
+                _syncStatusLabel.text = $"Remote check failed: {DescribeRemoteError(status.ErrorMessage)}";
                 return;
             }
 
@@ -2018,19 +2038,27 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 _syncStatusBanner.AddToClassList("has-remote-changes");
                 _syncStatusLabel.text = status.Summary;
-                _updateRemoteButton?.SetEnabled(true);
             }
             else
             {
                 _syncStatusBanner.AddToClassList("is-clean");
                 _syncStatusLabel.text = status.Summary ?? "Working copy is up to date.";
-                _updateRemoteButton?.SetEnabled(false);
             }
 
             // 最近一次检查失败但保留了上次成功结果：附上失败原因
             var lastError = VcsRemoteStatusMonitor.LastError;
             if (!string.IsNullOrEmpty(lastError))
-                _syncStatusLabel.text += $"\n(Latest check failed: {lastError})";
+                _syncStatusLabel.text += $"\n(Latest check failed: {DescribeRemoteError(lastError)})";
+        }
+
+        /// <summary>远端检查失败原因 + SVN 处理提示（认证 / 离线 / 需要升级等）。</summary>
+        private string DescribeRemoteError(string error)
+        {
+            if (_currentVcsType != VcsType.Svn || string.IsNullOrEmpty(error))
+                return error;
+            var hint = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.GetHint(error, VcsDetector.GetVcsRootPath());
+            // VcsRemoteStatusMonitor.LastError 可能已附带同一提示
+            return hint == null || error.Contains(hint) ? error : error.Trim() + "\n" + hint;
         }
 
         private void UpdateSyncStatusTimeLabel()
@@ -2125,11 +2153,20 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (_isBackgroundPolling || _isLoadingMoreCommits)
                 return;
 
-            var interval = TimeSpan.FromSeconds(VcsSettings.CommitListRefreshIntervalSeconds);
-            if (DateTime.UtcNow - _lastCommitPollUtc < interval)
+            if (DateTime.UtcNow - _lastCommitPollUtc < GetCommitPollInterval())
                 return;
 
             _ = PollCommitListSilentlyAsync();
+        }
+
+        /// <summary>
+        /// 轮询间隔：基础间隔 × 2^连续失败次数，上限 <see cref="MaxCommitPollBackoffSeconds"/>。
+        /// </summary>
+        private TimeSpan GetCommitPollInterval()
+        {
+            var baseSeconds = Math.Max(1, VcsSettings.CommitListRefreshIntervalSeconds);
+            var seconds = baseSeconds * Math.Pow(2, Math.Min(_commitPollFailures, 10));
+            return TimeSpan.FromSeconds(Math.Min(seconds, Math.Max(baseSeconds, MaxCommitPollBackoffSeconds)));
         }
 
         /// <summary>
@@ -2143,10 +2180,20 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             try
             {
+                var adapter = _adapter;
+                if (adapter == null)
+                    return;
                 var queryCount = GetCommitQueryCount();
-                var freshCommits = await _adapter.GetLogAsync(queryCount, CancellationToken.None);
+                var freshCommits = await adapter.GetLogAsync(queryCount, CancellationToken.None);
 
                 if (freshCommits == null || freshCommits.Count == 0)
+                {
+                    // adapter 失败时返回空列表（离线 / 认证失败 / 超时）：退避，下次间隔翻倍
+                    _commitPollFailures = Math.Min(_commitPollFailures + 1, 16);
+                    return;
+                }
+                _commitPollFailures = 0;
+                if (_isDisposed)
                     return;
 
                 // 对比最新 revision — 只有真正有新提交时才更新 UI
