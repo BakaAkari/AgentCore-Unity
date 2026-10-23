@@ -368,8 +368,13 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
-        /// 静态便捷方法 — 在后台触发自动记忆提取（fire-and-forget）。
+        /// 静态便捷方法 — 触发自动记忆提取（fire-and-forget）。
         /// 不会阻塞调用线程，所有异常都被静默处理。
+        /// <para>
+        /// 不再包一层 Task.Run：网络请求本身是异步 I/O，不占主线程；而 LLM 客户端在发请求前会同步读取
+        /// Profile / 密钥（ScriptableSingleton、EditorPrefs），这些只能在主线程访问。
+        /// 从主线程调用时，设置采集与请求准备都在主线程完成，只有 I/O 等待在后台。
+        /// </para>
         /// </summary>
         /// <param name="session">要提取记忆的会话数据</param>
         /// <param name="llmClient">LLM 客户端</param>
@@ -378,45 +383,20 @@ namespace AgentCore.Editor.Session
             if (session == null || llmClient == null) return;
 
             var strategy = new AutoMemoryStrategy();
+            _ = RunFireAndForgetAsync(strategy, session, llmClient);
+        }
 
-            // 主线程阶段：设置 / 密钥 / 会话快照在这里读取（Unity API 只能在主线程访问）。
-            // 非主线程调用时交给 ExtractAndStoreAsync 自行调度到主线程。
-            PreparedInput input = null;
-            bool prepared = false;
-            if (MainThread.IsMainThread)
+        private static async Task RunFireAndForgetAsync(AutoMemoryStrategy strategy, SessionData session, ILLMClient llmClient)
+        {
+            try
             {
-                try
-                {
-                    input = strategy.Prepare(session);
-                    prepared = true;
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"{LogPrefix}Failed to prepare auto-memory: {ex.Message}");
-                    return;
-                }
-                if (input == null) return;
+                // ExtractAndStoreAsync 内部：主线程同步 Prepare（快照会话），非主线程调用时经 MainThread 调度
+                await strategy.ExtractAndStoreAsync(session, llmClient);
             }
-
-            // Fire-and-forget: 网络请求在后台执行，不阻塞调用方
-            _ = Task.Run(async () =>
+            catch (Exception ex)
             {
-                try
-                {
-                    if (prepared)
-                        await strategy.RunPreparedAsync(input, llmClient, CancellationToken.None);
-                    else
-                        await strategy.ExtractAndStoreAsync(session, llmClient);
-                }
-                catch (OperationCanceledException)
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Extraction cancelled.");
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"[AgentCore] AutoMemory background task failed: {ex.Message}");
-                }
-            });
+                AgentCoreLog.Warning($"[AgentCore] AutoMemory background task failed: {ex.Message}");
+            }
         }
     }
 }
