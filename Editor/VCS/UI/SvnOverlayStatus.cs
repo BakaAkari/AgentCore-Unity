@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Xml;
+using AgentCore.Editor.Components.VCS.Tools;
 
 namespace AgentCore.Editor.Components.VCS.UI
 {
@@ -20,12 +19,14 @@ namespace AgentCore.Editor.Components.VCS.UI
         Missing = 1 << 5,
         /// <summary>带 svn:needs-lock 属性（未加锁时工作副本中为只读）。</summary>
         NeedsLock = 1 << 6,
-        /// <summary>本工作副本持有锁。</summary>
+        /// <summary>本工作副本持有锁（K）。</summary>
         LockedByMe = 1 << 7,
-        /// <summary>仓库中被其他人（或其他工作副本）锁定，来自最近一次远端检查（svn status -u）。</summary>
+        /// <summary>仓库中被其他人（或其他工作副本）锁定（O），来自最近一次远端检查（svn status -u）。</summary>
         LockedByOther = 1 << 8,
         /// <summary>文件夹内有改动（由子项向上传播）。</summary>
         ChildChanged = 1 << 9,
+        /// <summary>本工作副本的锁已被他人抢走（T）或已失效（B），来自最近一次远端检查。</summary>
+        LockLost = 1 << 10,
 
         LocalChangeMask = Modified | Added | Deleted | Conflicted | Unversioned | Missing
     }
@@ -37,9 +38,14 @@ namespace AgentCore.Editor.Components.VCS.UI
     public sealed class SvnOverlaySnapshot
     {
         public readonly Dictionary<string, SvnOverlayFlags> Flags = new Dictionary<string, SvnOverlayFlags>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>锁持有者（他人锁定 / 抢走锁的人 / 本人锁定时的用户名）。</summary>
         public readonly Dictionary<string, string> LockOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>解析过程中 XML 不完整（输出被截断等）；已解析的部分仍然有效。</summary>
+        /// <summary>锁注释（svn lock -m）。</summary>
+        public readonly Dictionary<string, string> LockComments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>解析过程中输出不完整（被截断等）；已解析的部分仍然有效。</summary>
         public bool IsIncomplete;
 
         public bool IsEmpty => Flags.Count == 0;
@@ -58,81 +64,148 @@ namespace AgentCore.Editor.Components.VCS.UI
             Flags.TryGetValue(assetPath, out var existing);
             Flags[assetPath] = existing | flags;
         }
+
+        /// <summary>记录（或清除）锁持有者与注释。</summary>
+        public void SetLockInfo(string assetPath, string owner, string comment)
+        {
+            if (string.IsNullOrEmpty(assetPath))
+                return;
+            if (string.IsNullOrEmpty(owner))
+                LockOwners.Remove(assetPath);
+            else
+                LockOwners[assetPath] = owner;
+            if (string.IsNullOrEmpty(comment))
+                LockComments.Remove(assetPath);
+            else
+                LockComments[assetPath] = comment;
+        }
     }
 
     /// <summary>
-    /// 解析 <c>svn status --xml</c>、<c>svn propget svn:needs-lock -R --xml</c> 与 <c>svn status -u --xml</c> 的输出，
-    /// 生成 Project 窗口角标。纯逻辑，不调用 Unity API，可在线程池执行。
+    /// 由 SvnAdapter 的结构化结果（<see cref="VcsFileStatus"/>：State / LockState / LockOwner / LockComment）
+    /// 与整树 needs-lock propget 生成 Project 窗口角标。不再自行解析 status XML（解析统一在 <see cref="SvnStatusXmlParser"/>）。
+    /// 纯逻辑，不调用 Unity API，可在线程池执行。
     /// <para>
-    /// 路径换算：svn 输出的路径相对于命令的工作目录（<paramref name="baseDirectory"/>，可为工作副本根或 Unity 工程根），
-    /// 也可能是绝对路径（propget 对绝对目标）；统一经 <see cref="VcsAssetPaths.ToUnityRelativePath"/> 换算，
-    /// Unity 工程之外的条目丢弃。
+    /// 路径换算：适配器返回的路径相对于其工作目录（<c>baseDirectory</c>，即工作副本根），propget 也可能给出绝对路径；
+    /// 统一经 <see cref="VcsAssetPaths.ToUnityRelativePath"/> 换算，Unity 工程之外的条目丢弃，.meta 并入资产本身。
     /// </para>
     /// </summary>
     public static class SvnOverlayStatusParser
     {
         private const string MetaExtension = ".meta";
 
-        /// <summary>解析本地 <c>svn status --xml</c>：改动状态与本工作副本持有的锁。</summary>
-        public static void ApplyStatusXml(string xml, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
+        /// <summary>
+        /// 本地状态（svn status，不带 -u）：改动状态来自 <see cref="VcsStatusResult.Files"/>，
+        /// 本工作副本持有的锁（K）来自 <see cref="VcsStatusResult.LockedFiles"/>。
+        /// </summary>
+        public static void ApplyLocalStatus(VcsStatusResult status, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
         {
-            ForEachEntry(xml, snapshot, entry =>
-            {
-                var assetPath = ToAssetKey(entry.Path, baseDirectory, unityRoot);
-                if (assetPath == null)
-                    return;
+            if (status == null || snapshot == null)
+                return;
+            if (status.Truncated)
+                snapshot.IsIncomplete = true;
+            ApplyLocalStatus(status.Files, status.LockedFiles, baseDirectory, unityRoot, snapshot);
+        }
 
-                var flags = MapItem(entry.WcItem, entry.WcProps, entry.TreeConflicted);
-                if (!string.IsNullOrEmpty(entry.WcLockToken))
-                    flags |= SvnOverlayFlags.LockedByMe;
-                snapshot.Add(assetPath, flags);
-            });
+        /// <inheritdoc cref="ApplyLocalStatus(VcsStatusResult, string, string, SvnOverlaySnapshot)"/>
+        public static void ApplyLocalStatus(IEnumerable<VcsFileStatus> files, IEnumerable<VcsFileStatus> lockedFiles,
+            string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
+        {
+            if (snapshot == null)
+                return;
+
+            if (files != null)
+            {
+                foreach (var file in files)
+                {
+                    if (file == null)
+                        continue;
+                    var key = ToAssetKey(file.FilePath, baseDirectory, unityRoot);
+                    if (key != null)
+                        snapshot.Add(key, MapState(file.State));
+                }
+            }
+
+            if (lockedFiles != null)
+            {
+                foreach (var file in lockedFiles)
+                {
+                    // 不带 -u 时只可能是 K；T / B 的判定需要远端信息，见 ApplyRemoteLocks
+                    if (file == null || file.LockState != "K")
+                        continue;
+                    var key = ToAssetKey(file.FilePath, baseDirectory, unityRoot);
+                    if (key == null)
+                        continue;
+                    snapshot.Add(key, SvnOverlayFlags.LockedByMe);
+                    snapshot.SetLockInfo(key, file.LockOwner, file.LockComment);
+                }
+            }
         }
 
         /// <summary>
-        /// 解析远端检查的 <c>svn status -u --xml</c>：仓库锁的 token 与本地锁不同（或本地无锁）即为他人锁定。
-        /// 只取锁信息，改动状态以本地 status 为准。
+        /// 远端检查（svn status -u）的锁：O → 他人锁定（附持有者 / 注释）；T / B → 本人的锁被抢 / 已失效。
+        /// 本地状态比远端快照新：本地已持有锁（K）时忽略过期的 O；本地已没有锁时忽略过期的 T / B。
+        /// 需在 ApplyLocalStatus 之后调用。
         /// </summary>
-        public static void ApplyRemoteLocksXml(string xml, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
+        public static void ApplyRemoteLocks(IEnumerable<VcsFileStatus> lockedFiles, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
         {
-            ForEachEntry(xml, snapshot, entry =>
-            {
-                if (string.IsNullOrEmpty(entry.ReposLockToken) && string.IsNullOrEmpty(entry.ReposLockOwner))
-                    return;
-                if (!string.IsNullOrEmpty(entry.WcLockToken) && entry.WcLockToken == entry.ReposLockToken)
-                    return; // 自己的锁
-
-                var assetPath = ToAssetKey(entry.Path, baseDirectory, unityRoot);
-                if (assetPath == null)
-                    return;
-                snapshot.Add(assetPath, SvnOverlayFlags.LockedByOther);
-                if (!string.IsNullOrEmpty(entry.ReposLockOwner))
-                    snapshot.LockOwners[assetPath] = entry.ReposLockOwner;
-            });
-        }
-
-        /// <summary>解析 <c>svn propget svn:needs-lock -R --xml</c>：每个 target 即带该属性的文件。</summary>
-        public static void ApplyNeedsLockXml(string xml, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
-        {
-            if (string.IsNullOrWhiteSpace(xml))
+            if (lockedFiles == null || snapshot == null)
                 return;
-            try
+
+            foreach (var file in lockedFiles)
             {
-                using (var reader = XmlReader.Create(new StringReader(xml), CreateSettings()))
+                if (file == null || string.IsNullOrEmpty(file.LockState))
+                    continue;
+                var key = ToAssetKey(file.FilePath, baseDirectory, unityRoot);
+                if (key == null)
+                    continue;
+
+                var current = snapshot.Get(key);
+                var lockedByMeNow = (current & SvnOverlayFlags.LockedByMe) != 0;
+                switch (file.LockState)
                 {
-                    while (reader.Read())
-                    {
-                        if (reader.NodeType != XmlNodeType.Element || reader.Name != "target")
+                    case "O":
+                        if (lockedByMeNow)
                             continue;
-                        var assetPath = ToAssetKey(reader.GetAttribute("path"), baseDirectory, unityRoot);
-                        if (assetPath != null)
-                            snapshot.Add(assetPath, SvnOverlayFlags.NeedsLock);
-                    }
+                        snapshot.Add(key, SvnOverlayFlags.LockedByOther);
+                        snapshot.SetLockInfo(key, file.LockOwner, file.LockComment);
+                        break;
+                    case "T":
+                    case "B":
+                        if (!lockedByMeNow)
+                            continue;
+                        snapshot.Flags[key] = (current & ~SvnOverlayFlags.LockedByMe) | SvnOverlayFlags.LockLost;
+                        // T：仓库里现在是别人的锁，记录新持有者；B：锁已不存在
+                        if (file.LockState == "T")
+                            snapshot.SetLockInfo(key, file.LockOwner, file.LockComment);
+                        else
+                            snapshot.SetLockInfo(key, null, null);
+                        break;
                 }
             }
-            catch (XmlException)
-            {
+        }
+
+        /// <summary>整树 <c>svn propget svn:needs-lock -R --xml</c> 的输出：每个 target 即带该属性的文件。</summary>
+        public static void ApplyNeedsLockXml(string xml, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
+        {
+            if (snapshot == null)
+                return;
+            var targets = SvnStatusXmlParser.ParsePropgetTargets(xml, out var incomplete);
+            if (incomplete)
                 snapshot.IsIncomplete = true;
+            ApplyNeedsLock(targets, baseDirectory, unityRoot, snapshot);
+        }
+
+        /// <summary>带 svn:needs-lock 的路径列表。</summary>
+        public static void ApplyNeedsLock(IEnumerable<string> paths, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
+        {
+            if (paths == null || snapshot == null)
+                return;
+            foreach (var path in paths)
+            {
+                var key = ToAssetKey(path, baseDirectory, unityRoot);
+                if (key != null)
+                    snapshot.Add(key, SvnOverlayFlags.NeedsLock);
             }
         }
 
@@ -170,167 +243,27 @@ namespace AgentCore.Editor.Components.VCS.UI
             return VcsAssetPaths.IsAssetDatabasePath(relative) ? relative : null;
         }
 
-        private static SvnOverlayFlags MapItem(string item, string props, bool treeConflicted)
+        /// <summary>适配器的文件状态 → 角标位。</summary>
+        public static SvnOverlayFlags MapState(VcsFileState state)
         {
-            var flags = SvnOverlayFlags.None;
-            if (treeConflicted)
-                flags |= SvnOverlayFlags.Conflicted;
-
-            switch (item)
+            switch (state)
             {
-                case "modified":
-                case "replaced":
-                case "merged":
-                case "obstructed":
-                case "incomplete":
-                    flags |= SvnOverlayFlags.Modified;
-                    break;
-                case "added":
-                    flags |= SvnOverlayFlags.Added;
-                    break;
-                case "deleted":
-                    flags |= SvnOverlayFlags.Deleted;
-                    break;
-                case "conflicted":
-                    flags |= SvnOverlayFlags.Conflicted;
-                    break;
-                case "unversioned":
-                    flags |= SvnOverlayFlags.Unversioned;
-                    break;
-                case "missing":
-                    flags |= SvnOverlayFlags.Missing;
-                    break;
-            }
-
-            if (props == "modified")
-                flags |= SvnOverlayFlags.Modified;
-            else if (props == "conflicted")
-                flags |= SvnOverlayFlags.Conflicted;
-            return flags;
-        }
-
-        private sealed class Entry
-        {
-            public string Path;
-            public string WcItem;
-            public string WcProps;
-            public bool TreeConflicted;
-            public string WcLockToken;
-            public string ReposLockToken;
-            public string ReposLockOwner;
-        }
-
-        private static XmlReaderSettings CreateSettings()
-        {
-            return new XmlReaderSettings
-            {
-                DtdProcessing = DtdProcessing.Prohibit,
-                XmlResolver = null,
-                IgnoreComments = true,
-                IgnoreWhitespace = true
-            };
-        }
-
-        /// <summary>
-        /// 流式遍历 status XML 的 entry；XML 被截断时保留已读到的条目并标记 <see cref="SvnOverlaySnapshot.IsIncomplete"/>。
-        /// </summary>
-        private static void ForEachEntry(string xml, SvnOverlaySnapshot snapshot, Action<Entry> onEntry)
-        {
-            if (string.IsNullOrWhiteSpace(xml))
-                return;
-
-            try
-            {
-                using (var reader = XmlReader.Create(new StringReader(xml), CreateSettings()))
-                {
-                    Entry current = null;
-                    string section = null; // "wc-status" / "repos-status"
-                    var inLock = false;
-                    string textTarget = null;
-
-                    while (reader.Read())
-                    {
-                        switch (reader.NodeType)
-                        {
-                            case XmlNodeType.Element:
-                                var empty = reader.IsEmptyElement;
-                                switch (reader.Name)
-                                {
-                                    case "entry":
-                                        current = new Entry { Path = reader.GetAttribute("path") };
-                                        if (empty)
-                                        {
-                                            onEntry(current);
-                                            current = null;
-                                        }
-                                        break;
-                                    case "wc-status":
-                                        if (current != null)
-                                        {
-                                            current.WcItem = reader.GetAttribute("item");
-                                            current.WcProps = reader.GetAttribute("props");
-                                            current.TreeConflicted = reader.GetAttribute("tree-conflicted") == "true";
-                                            section = empty ? null : "wc-status";
-                                        }
-                                        break;
-                                    case "repos-status":
-                                        if (current != null)
-                                            section = empty ? null : "repos-status";
-                                        break;
-                                    case "lock":
-                                        inLock = current != null && section != null && !empty;
-                                        break;
-                                    case "token":
-                                    case "owner":
-                                        textTarget = inLock && !empty ? reader.Name : null;
-                                        break;
-                                }
-                                break;
-
-                            case XmlNodeType.Text:
-                            case XmlNodeType.CDATA:
-                                if (current != null && textTarget != null)
-                                {
-                                    var value = reader.Value;
-                                    if (section == "wc-status" && textTarget == "token")
-                                        current.WcLockToken = value;
-                                    else if (section == "repos-status" && textTarget == "token")
-                                        current.ReposLockToken = value;
-                                    else if (section == "repos-status" && textTarget == "owner")
-                                        current.ReposLockOwner = value;
-                                }
-                                break;
-
-                            case XmlNodeType.EndElement:
-                                switch (reader.Name)
-                                {
-                                    case "entry":
-                                        if (current != null)
-                                            onEntry(current);
-                                        current = null;
-                                        section = null;
-                                        inLock = false;
-                                        break;
-                                    case "wc-status":
-                                    case "repos-status":
-                                        section = null;
-                                        break;
-                                    case "lock":
-                                        inLock = false;
-                                        break;
-                                    case "token":
-                                    case "owner":
-                                        textTarget = null;
-                                        break;
-                                }
-                                break;
-                        }
-                    }
-                }
-            }
-            catch (XmlException)
-            {
-                snapshot.IsIncomplete = true;
+                case VcsFileState.Modified:
+                    return SvnOverlayFlags.Modified;
+                case VcsFileState.Added:
+                case VcsFileState.Renamed:
+                case VcsFileState.Copied:
+                    return SvnOverlayFlags.Added;
+                case VcsFileState.Deleted:
+                    return SvnOverlayFlags.Deleted;
+                case VcsFileState.Conflicted:
+                    return SvnOverlayFlags.Conflicted;
+                case VcsFileState.Untracked:
+                    return SvnOverlayFlags.Unversioned;
+                case VcsFileState.Missing:
+                    return SvnOverlayFlags.Missing;
+                default:
+                    return SvnOverlayFlags.None;
             }
         }
     }

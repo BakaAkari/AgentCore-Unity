@@ -381,28 +381,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
-        /// <summary>
-        /// 通过反射读取 HKLM\SOFTWARE\TortoiseSVN（Microsoft.Win32.Registry 在部分 API 兼容级别下不能直接引用）。
-        /// 非 Windows / 失败时返回 null。
-        /// </summary>
-        private static string ReadTortoiseRegistry(string valueName)
-        {
-            if (!VcsArgs.IsWindows)
-                return null;
-            try
-            {
-                var registryType = Type.GetType("Microsoft.Win32.Registry, mscorlib")
-                                   ?? Type.GetType("Microsoft.Win32.Registry, Microsoft.Win32.Registry");
-                var getValue = registryType?.GetMethod("GetValue", new[] { typeof(string), typeof(string), typeof(object) });
-                if (getValue == null)
-                    return null;
-                return getValue.Invoke(null, new object[] { @"HKEY_LOCAL_MACHINE\SOFTWARE\TortoiseSVN", valueName, null }) as string;
-            }
-            catch
-            {
-                return null;
-            }
-        }
+        /// <summary>读取 HKLM\SOFTWARE\TortoiseSVN（与 svn.exe 定位共用 <see cref="SvnExecutable.ReadTortoiseSvnRegistry"/>）。</summary>
+        private static string ReadTortoiseRegistry(string valueName) => SvnExecutable.ReadTortoiseSvnRegistry(valueName);
 
         /// <summary>
         /// Builds a standard "external tool unavailable" message for the given VCS type and operation.

@@ -42,6 +42,15 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// </summary>
         public bool WholeWorkingCopy { get; set; }
 
+        /// <summary>
+        /// 为 true（默认）时，status 会对"已修改但未持有锁"的文件额外运行一次 propget svn:needs-lock，
+        /// 填充 <see cref="VcsFileStatus.NeedsLock"/> 并给出提醒。Project 窗口角标自己做整树 propget，关掉以免重复。
+        /// </summary>
+        public bool AnnotateNeedsLock { get; set; } = true;
+
+        /// <summary>适配器的工作目录（工作副本根）：status / sync status 返回的相对路径以此为基准。</summary>
+        public string WorkingDirectory => _workingDirectory;
+
         /// <summary>Unity 项目目录相对工作副本根的 svn 参数；项目即工作副本根（或不在其下）时为 null。</summary>
         private readonly string _projectScopeArg;
 
@@ -125,7 +134,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 if (result.Truncated)
                     AgentCoreLog.Warning($"[Version Control] SVN status output incomplete ({result.Files.Count} entries parsed): {parsed.Error ?? "output truncated"}");
 
-                await AnnotateNeedsLockAsync(result, ct);
+                if (AnnotateNeedsLock)
+                    await AnnotateNeedsLockAsync(result, ct);
             }
             catch (OperationCanceledException)
             {
@@ -195,27 +205,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 "They are usually binary (scenes/prefabs) and cannot be merged; lock them (lock_files) or coordinate before committing.");
         }
 
-        /// <summary>解析 <c>svn propget --xml</c> 输出中带属性值的 target 路径。</summary>
+        /// <summary>
+        /// 解析 <c>svn propget --xml</c> 输出中带属性值的 target 路径（流式，XML 被截断时保留已读到的部分）。
+        /// 与 Project 窗口角标共用 <see cref="SvnStatusXmlParser.ParsePropgetTargets(string, out bool)"/>。
+        /// </summary>
         public static List<string> ParsePropgetTargets(string xml)
         {
-            var paths = new List<string>();
-            if (string.IsNullOrWhiteSpace(xml))
-                return paths;
-            try
-            {
-                var doc = XDocument.Parse(xml);
-                foreach (var target in doc.Descendants("target"))
-                {
-                    var path = target.Attribute("path")?.Value;
-                    if (!string.IsNullOrEmpty(path) && target.Elements("property").Any())
-                        paths.Add(path);
-                }
-            }
-            catch (Exception)
-            {
-                // XML 不完整：needs-lock 只是提示信息，忽略
-            }
-            return paths;
+            return SvnStatusXmlParser.ParsePropgetTargets(xml, out _);
         }
 
         public async Task<VcsBranchInfo> GetBranchInfoAsync(CancellationToken ct = default)
@@ -464,6 +460,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 result.Success = true;
                 result.RawOutput = remoteStatus.Output;
+                result.PathBase = _workingDirectory;
                 result.HasLocalChanges = localStatus.Success && localStatus.Files.Count > 0;
                 result.LocalChangeCount = localStatus.Success ? localStatus.Files.Count : 0;
                 var remoteParsed = SvnStatusXmlParser.Parse(remoteStatus.Output);
@@ -472,6 +469,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.HasRemoteChanges = result.RemoteChangeCount > 0;
                 // -u 才能看到他人的锁（O）与本地失效的锁（T / B）
                 result.LockedFiles = remoteParsed.LockedFiles;
+                result.RemoteRevision = remoteParsed.AgainstRevision;
                 result.HasConflicts = localStatus.Success && localStatus.Files.Any(f => f.State == VcsFileState.Conflicted);
                 result.ConflictedFiles = localStatus.Success
                     ? localStatus.Files.Where(f => f.State == VcsFileState.Conflicted).Select(f => f.FilePath).ToList()

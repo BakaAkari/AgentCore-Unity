@@ -163,6 +163,18 @@ namespace AgentCore.Tests.Editor.VCS
         }
 
         [Test]
+        public void AppendErrorHint_SharesTableWithSvnErrorHints_AndIsIdempotent()
+        {
+            var error = "svn: E155004: Run 'svn cleanup' to remove locks";
+            var appended = SvnCommandLine.AppendErrorHint(error);
+
+            // 同一张表：命令层追加的提示与 SvnErrorHints 一致；面板 / 远端检查再 Describe 不会重复追加
+            StringAssert.EndsWith(AgentCore.Editor.Workspace.Resolution.SvnErrorHints.GetHint(error), appended);
+            Assert.AreEqual(appended, SvnCommandLine.AppendErrorHint(appended));
+            Assert.AreEqual(appended, AgentCore.Editor.Workspace.Resolution.SvnErrorHints.Describe(appended, "D:/w"));
+        }
+
+        [Test]
         public void AppendErrorHint_UnknownError_Unchanged()
         {
             Assert.AreEqual("svn: E999999: something", SvnCommandLine.AppendErrorHint("svn: E999999: something"));

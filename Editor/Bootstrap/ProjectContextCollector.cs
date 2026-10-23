@@ -174,7 +174,7 @@ namespace AgentCore.Editor.Bootstrap
                 && unity.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
             {
                 var prefix = unity.Substring(root.Length + 1);
-                sb.AppendLine($"- **SVN 路径**: 版本控制工具返回的路径相对于工作副本根 `{root}`；去掉前缀 `{prefix}/` 才是 Unity 的 `Assets/...` 路径");
+                sb.AppendLine($"- **SVN 路径**: Unity 工程位于工作副本 `{root}` 的子目录 `{prefix}/`。version_control 工具的输入与返回路径都相对于 Unity 工程根（`Assets/...`，工程外的文件相对于工作副本根）；直接运行 svn 命令时输出路径相对于工作副本根，去掉前缀 `{prefix}/` 才是 `Assets/...` 路径");
             }
         }
 

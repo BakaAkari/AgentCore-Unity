@@ -365,6 +365,56 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
+        /// <summary>
+        /// 解析 <c>svn propget PROP --xml</c>（含 <c>-R</c>）：返回带该属性的 target 路径（原样，可能是相对或绝对路径）。
+        /// 流式读取，XML 被截断时保留已读到的 target 并置 <paramref name="incomplete"/>。
+        /// SvnAdapter（needs-lock 提醒）与 Project 窗口角标共用这一份解析。
+        /// </summary>
+        public static List<string> ParsePropgetTargets(string xml, out bool incomplete)
+        {
+            incomplete = false;
+            var paths = new List<string>();
+            if (string.IsNullOrWhiteSpace(xml))
+                return paths;
+
+            var settings = new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+                IgnoreComments = true,
+                IgnoreWhitespace = true
+            };
+            try
+            {
+                using (var reader = XmlReader.Create(new StringReader(xml), settings))
+                {
+                    string currentTarget = null;
+                    while (reader.Read())
+                    {
+                        if (reader.NodeType == XmlNodeType.Element)
+                        {
+                            if (reader.Name == "target")
+                                currentTarget = reader.IsEmptyElement ? null : reader.GetAttribute("path");
+                            else if (reader.Name == "property" && !string.IsNullOrEmpty(currentTarget))
+                            {
+                                paths.Add(currentTarget);
+                                currentTarget = null; // 同一 target 只记一次
+                            }
+                        }
+                        else if (reader.NodeType == XmlNodeType.EndElement && reader.Name == "target")
+                        {
+                            currentTarget = null;
+                        }
+                    }
+                }
+            }
+            catch (XmlException)
+            {
+                incomplete = true;
+            }
+            return paths;
+        }
+
         /// <summary>锁状态的可读描述。</summary>
         public static string DescribeLock(string lockState, string owner)
         {

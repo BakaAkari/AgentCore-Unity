@@ -77,14 +77,35 @@ namespace AgentCore.Editor.Components.VCS.UI
         private VcsType _currentVcsType = VcsType.None;
         private CancellationTokenSource _cts;
 
-        // 后台静默轮询 commit 列表
+        // 后台静默轮询 commit 列表（仅 Git / P4）。SVN 不轮询：svn log -r HEAD:1 每次都访问服务器，
+        // 改为按需刷新——面板打开、手动刷新、外部提交 / 更新窗口关闭后、远端检查报告 HEAD 版本号变化时
         private DateTime _lastCommitPollUtc = DateTime.MinValue;
         private bool _isBackgroundPolling;
         private bool _isPanelActive;
 
-        // svn log -r HEAD:1 每次都访问服务器：离线 / 认证失败时按次数指数退避，避免每 30 秒白跑一次
+        // 提交历史拉取失败（离线 / 认证失败 / 超时）时按次数指数退避：
+        // 自动刷新（面板打开、HEAD 变化、Git/P4 轮询）在退避期内跳过；手动刷新不受限
         private int _commitPollFailures;
+        private DateTime _lastCommitLogFailureUtc = DateTime.MinValue;
         private const int MaxCommitPollBackoffSeconds = 600;
+        private const int CommitLogFailureBaseBackoffSeconds = 30;
+
+        // 最近一次拉取提交历史的错误（显示在提交历史摘要行），成功后清除
+        private string _commitLogError;
+
+        // 最近一次远端检查报告的仓库 HEAD 版本号（svn status -u），变化时刷新提交历史
+        private string _lastSeenRemoteRevision;
+
+        /// <summary>RefreshAllData 中提交历史的刷新方式。</summary>
+        private enum LogRefresh
+        {
+            /// <summary>自动触发（面板打开 / 初始化）：失败退避期内跳过。</summary>
+            Auto,
+            /// <summary>用户手动刷新或外部提交 / 更新完成：总是拉取，失败时弹出消息。</summary>
+            Force,
+            /// <summary>本地操作（暂存 / 还原 / 删除）之后：提交历史不会变，不访问服务器。</summary>
+            Skip
+        }
 
         // Unity 工程根（Application.dataPath 的父目录，主线程构造时缓存）。
         // SVN 状态路径相对于工作副本根，工程位于工作副本子目录时需要按它换算成 Assets/... 路径
@@ -95,6 +116,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             _unityRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
             AddToClassList(UssClassName);
             VcsRemoteStatusMonitor.StatusChanged += UpdateSyncStatusBanner;
+            VcsRemoteStatusMonitor.StatusChanged += OnRemoteStatusChangedForLog;
+            _lastSeenRemoteRevision = VcsRemoteStatusMonitor.LastStatus?.RemoteRevision;
             EditorApplication.update += OnEditorUpdatePollCommits;
             RegisterCallback<DetachFromPanelEvent>(_ => Dispose());
             _isPanelActive = true;
@@ -352,7 +375,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _vcsTypeLabel.text = $"Type: {_currentVcsType}";
             _cleanupButton.SetEnabled(true);
 
-            _ = RefreshAllData();
+            _ = RefreshAllData(LogRefresh.Auto);
         }
 
         private async void OnRefreshClicked()
@@ -363,7 +386,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 return;
             }
 
-            await RefreshAllData();
+            await RefreshAllData(LogRefresh.Force);
         }
 
         private void OnCleanupProjectClicked()
@@ -399,8 +422,10 @@ namespace AgentCore.Editor.Components.VCS.UI
             try
             {
                 var queryCount = GetCommitQueryCount();
-                var commits = await _adapter.GetLogAsync(queryCount, _cts?.Token ?? CancellationToken.None);
-                UpdateCommitList(commits);
+                var (commits, error) = await FetchLogAsync(_adapter, queryCount, _cts?.Token ?? CancellationToken.None);
+                if (_isDisposed)
+                    return;
+                ApplyLogResult(commits, error, showMessageOnError: true);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -414,7 +439,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
-        private async Task RefreshAllData()
+        private async Task RefreshAllData(LogRefresh logRefresh = LogRefresh.Skip)
         {
             if (_adapter == null)
                 return;
@@ -434,7 +459,12 @@ namespace AgentCore.Editor.Components.VCS.UI
                 // 并行获取所有数据
                 var branchTask = _adapter.GetBranchInfoAsync(ct);
                 var statusTask = _adapter.GetStatusAsync(ct);
-                var logTask = _adapter.GetLogAsync(GetCommitQueryCount(), ct);
+                // 提交历史：本地操作后跳过；自动刷新在失败退避期内跳过（离线时不必每次打开面板都等 svn log 超时）
+                var fetchLog = logRefresh == LogRefresh.Force
+                               || (logRefresh == LogRefresh.Auto && !IsCommitLogInBackoff());
+                var logTask = fetchLog
+                    ? FetchLogAsync(_adapter, GetCommitQueryCount(), ct)
+                    : null;
 
                 // 远端检查（fetch）不在刷新路径上：由 VcsRemoteStatusMonitor 定时 / 手动在后台执行，
                 // 这里只显示上次结果；开关开启时也只是排队一次后台检查，不等待。
@@ -490,12 +520,14 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _refreshButton.SetEnabled(true);
                 _cleanupButton.SetEnabled(_adapter != null && _currentVcsType != VcsType.None);
 
-                // 更新提交历史（远端，可能较慢；失败时 adapter 返回空列表，此时保留已显示的旧列表）
-                var commits = await logTask;
-                if (ct.IsCancellationRequested)
-                    return;
-                if ((commits?.Count ?? 0) > 0 || _loadedCommits.Count == 0)
-                    UpdateCommitList(commits);
+                // 更新提交历史（远端，可能较慢；失败时保留已显示的旧列表，并在摘要行显示错误）
+                if (logTask != null)
+                {
+                    var (commits, logError) = await logTask;
+                    if (ct.IsCancellationRequested || _isDisposed)
+                        return;
+                    ApplyLogResult(commits, logError, showMessageOnError: logRefresh == LogRefresh.Force && errors.Count == 0);
+                }
 
                 UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
             }
@@ -1055,70 +1087,6 @@ namespace AgentCore.Editor.Components.VCS.UI
         }
 
 
-        private async Task RunFileCommandAsync(string operation, string command, IReadOnlyList<string> argumentList, string filePath, bool refreshAfterSuccess = false)
-        {
-            try
-            {
-                // 每个参数作为独立 argv 传入；arguments 仅用于日志展示
-                var arguments = VcsArgs.Join(argumentList);
-                LogVcsOperation(operation, $"Running {command} {arguments}");
-                var result = await VcsCommandExecutor.ExecuteAsync(command, argumentList, VcsDetector.GetVcsRootPath(), ct: CancellationToken.None);
-                var output = string.Join("\n", new[] { result.Output, result.Error }.Where(text => !string.IsNullOrWhiteSpace(text))).Trim();
-
-                if (result.Success)
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\n{output}");
-                    ShowMessage($"{operation} for '{filePath}' logged to Console.", false);
-                    if (refreshAfterSuccess)
-                        await RefreshAllData();
-                }
-                else
-                {
-                    AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][{operation}] {filePath}\nCommand: {command} {arguments}\nError: {result.ErrorMessage}\n{output}");
-                    ShowMessage($"{operation} failed: {result.ErrorMessage}", true);
-                }
-            }
-            catch (Exception ex)
-            {
-                ShowMessage($"{operation} failed: {ex.Message}", true);
-            }
-        }
-
-        private async Task<CommandResult> ExecuteSvnWithCleanupRetryAsync(string operation, IReadOnlyList<string> arguments, string rootPath)
-        {
-            var result = await VcsCommandExecutor.ExecuteAsync("svn", arguments, rootPath, ct: CancellationToken.None);
-            if (!IsSvnWorkingCopyLocked(result))
-                return result;
-
-            LogVcsOperation(operation, "SVN working copy is locked. Running svn cleanup and retrying once.");
-            var cleanupResult = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "cleanup", "--non-interactive" }, rootPath, ct: CancellationToken.None);
-            if (!cleanupResult.Success)
-            {
-                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][{operation}] SVN cleanup failed.\nCommand: svn cleanup\nError: {cleanupResult.ErrorMessage}\n{cleanupResult.Output}\n{cleanupResult.Error}");
-                return cleanupResult;
-            }
-
-            return await VcsCommandExecutor.ExecuteAsync("svn", arguments, rootPath, ct: CancellationToken.None);
-        }
-
-        private bool IsSvnWorkingCopyLocked(CommandResult result)
-        {
-            if (result == null)
-                return false;
-
-            var combined = $"{result.ErrorMessage}\n{result.Output}\n{result.Error}";
-            return combined.IndexOf("E155004", StringComparison.OrdinalIgnoreCase) >= 0
-                || combined.IndexOf("working copy", StringComparison.OrdinalIgnoreCase) >= 0 && combined.IndexOf("locked", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private string BuildSvnFailureMessage(CommandResult result)
-        {
-            if (IsSvnWorkingCopyLocked(result))
-                return $"{result.ErrorMessage} Please run svn cleanup on the working copy root and retry.";
-
-            return result.ErrorMessage;
-        }
-
         /// <summary>
         /// 拼接命令失败信息；SVN 时附上可操作的提示（E155036 → svn upgrade、E155004 → cleanup、认证 / 离线等）。
         /// </summary>
@@ -1131,11 +1099,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 .ToList();
             var text = distinct.Count == 0 ? "Unknown error" : string.Join("\n", distinct);
             if (_currentVcsType == VcsType.Svn)
-            {
-                var hint = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.GetHint(text, VcsDetector.GetVcsRootPath());
-                if (hint != null)
-                    text += "\n" + hint;
-            }
+                text = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.Describe(text, VcsDetector.GetVcsRootPath());
             return $"{title}: {text}";
         }
 
@@ -1218,6 +1182,60 @@ namespace AgentCore.Editor.Components.VCS.UI
             Selection.activeObject = asset;
         }
 
+        /// <summary>
+        /// 拉取提交历史并带回错误：SVN 用 <see cref="SvnAdapter.GetLogWithErrorAsync"/>
+        /// （<see cref="IVcsAdapter.GetLogAsync"/> 失败时只返回空列表，认证失败 / 离线会被误报成"没有提交"）。
+        /// </summary>
+        private static async Task<(List<VcsCommit> commits, string error)> FetchLogAsync(IVcsAdapter adapter, int count, CancellationToken ct)
+        {
+            if (adapter is SvnAdapter svn)
+                return await svn.GetLogWithErrorAsync(count, ct);
+            return (await adapter.GetLogAsync(count, ct), null);
+        }
+
+        /// <summary>
+        /// 应用一次提交历史拉取结果。失败：计入退避、保留旧列表、在摘要行显示错误（手动刷新时同时弹出消息）。
+        /// Git / P4 适配器不返回错误，空列表按失败退避但不显示错误。
+        /// </summary>
+        private void ApplyLogResult(List<VcsCommit> commits, string error, bool showMessageOnError)
+        {
+            if (!string.IsNullOrEmpty(error))
+            {
+                RecordCommitLogFailure();
+                _commitLogError = error;
+                if (showMessageOnError)
+                    ShowMessage(BuildCommandErrorMessage("Commit history failed", new List<string> { error }), true);
+                RenderCommitList();
+                return;
+            }
+
+            _commitLogError = null;
+            if ((commits?.Count ?? 0) == 0 && !(_adapter is SvnAdapter))
+            {
+                // 非 SVN 适配器失败时只返回空列表：退避，但不清空已显示的列表
+                RecordCommitLogFailure();
+                if (_loadedCommits.Count > 0)
+                    return;
+            }
+
+            UpdateCommitList(commits);
+        }
+
+        private void RecordCommitLogFailure()
+        {
+            _commitPollFailures = Math.Min(_commitPollFailures + 1, 16);
+            _lastCommitLogFailureUtc = DateTime.UtcNow;
+        }
+
+        /// <summary>自动刷新的失败退避：基础 30 秒 × 2^(连续失败次数 - 1)，上限 <see cref="MaxCommitPollBackoffSeconds"/>。</summary>
+        private bool IsCommitLogInBackoff()
+        {
+            if (_commitPollFailures <= 0)
+                return false;
+            var seconds = CommitLogFailureBaseBackoffSeconds * Math.Pow(2, Math.Min(_commitPollFailures - 1, 10));
+            return DateTime.UtcNow - _lastCommitLogFailureUtc < TimeSpan.FromSeconds(Math.Min(seconds, MaxCommitPollBackoffSeconds));
+        }
+
         private void UpdateCommitList(List<VcsCommit> commits)
         {
             _loadedCommits = commits ?? new List<VcsCommit>();
@@ -1232,10 +1250,15 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             _commitList.Clear();
 
+            var errorSuffix = string.IsNullOrEmpty(_commitLogError)
+                ? string.Empty
+                : $"\nCould not refresh commit history: {AgentCore.Editor.Workspace.Resolution.SvnErrorHints.Describe(_commitLogError, VcsDetector.GetVcsRootPath())}";
+            _commitHistorySummaryLabel.tooltip = _commitLogError ?? string.Empty;
+
             if (_loadedCommits == null || _loadedCommits.Count == 0)
             {
-                _commitHistorySummaryLabel.text = "No commit history available";
-                var noCommits = new Label("No commit history available");
+                _commitHistorySummaryLabel.text = (string.IsNullOrEmpty(_commitLogError) ? "No commit history available" : "Commit history unavailable") + errorSuffix;
+                var noCommits = new Label(string.IsNullOrEmpty(_commitLogError) ? "No commit history available" : "Commit history unavailable");
                 noCommits.style.color = new Color(0.6f, 0.6f, 0.6f);
                 noCommits.style.paddingTop = 5;
                 _commitList.Add(noCommits);
@@ -1247,6 +1270,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _commitHistorySummaryLabel.text = hiddenLoadedCount > 0
                 ? $"Showing latest {visibleCount} of {_loadedCommits.Count} loaded commits. {hiddenLoadedCount} older loaded commits are collapsed."
                 : $"Showing {_loadedCommits.Count} loaded commits.";
+            _commitHistorySummaryLabel.text += errorSuffix;
 
             foreach (var commit in _loadedCommits.Take(visibleCount))
             {
@@ -1322,9 +1346,19 @@ namespace AgentCore.Editor.Components.VCS.UI
             try
             {
                 var queryCount = Mathf.Min(MaxCommitQueryCount, Mathf.Max(GetCommitQueryCount() + CommitLoadBatchSize, _loadedCommits.Count + CommitLoadBatchSize));
-                var commits = await _adapter.GetLogAsync(queryCount, CancellationToken.None);
-                _loadedCommits = commits ?? _loadedCommits;
-                _visibleCommitCount = Mathf.Min(_visibleCommitCount + CommitLoadBatchSize, _loadedCommits.Count);
+                var (commits, error) = await FetchLogAsync(_adapter, queryCount, CancellationToken.None);
+                if (!string.IsNullOrEmpty(error))
+                {
+                    _commitLogError = error;
+                    ShowMessage(BuildCommandErrorMessage("Failed to load older commits", new List<string> { error }), true);
+                }
+                else
+                {
+                    _commitLogError = null;
+                    if ((commits?.Count ?? 0) > 0)
+                        _loadedCommits = commits;
+                    _visibleCommitCount = Mathf.Min(_visibleCommitCount + CommitLoadBatchSize, _loadedCommits.Count);
+                }
             }
             catch (Exception ex)
             {
@@ -1526,9 +1560,9 @@ namespace AgentCore.Editor.Components.VCS.UI
                         _lastExternalToolError = logMessageError;
                         return false;
                     }
-                    return TryStartTortoise("commit", new[] { rootPath }, rootPath, "TortoiseSVN commit window", logMessageArg, refreshOnExit: true);
+                    return TryStartTortoise("commit", new[] { rootPath }, rootPath, "TortoiseSVN commit window", logMessageArg, refreshOnExit: true, refreshLogOnExit: true);
                 case VcsType.Git:
-                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI commit window", refreshOnExit: true);
+                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI commit window", refreshOnExit: true, refreshLogOnExit: true);
                 case VcsType.Perforce:
                     return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "submit", rootPath }), rootPath, "P4V submit window");
                 default:
@@ -1542,9 +1576,9 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartTortoise("update", new[] { rootPath }, rootPath, "TortoiseSVN update window", refreshOnExit: true, recheckRemoteOnExit: true);
+                    return TryStartTortoise("update", new[] { rootPath }, rootPath, "TortoiseSVN update window", refreshOnExit: true, recheckRemoteOnExit: true, refreshLogOnExit: true);
                 case VcsType.Git:
-                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window", refreshOnExit: true);
+                    return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window", refreshOnExit: true, refreshLogOnExit: true);
                 case VcsType.Perforce:
                     return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "sync", rootPath }), rootPath, "P4V sync window");
                 default:
@@ -1574,7 +1608,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// 以前 TortoiseSVN 提交 / 还原 / 更新完成后面板仍显示旧状态，需要用户手动 Refresh。
         /// </summary>
         private bool TryStartExternalProcess(string fileName, string arguments, string workingDirectory, string displayName,
-            bool refreshOnExit = false, bool recheckRemoteOnExit = false)
+            bool refreshOnExit = false, bool recheckRemoteOnExit = false, bool refreshLogOnExit = false)
         {
             if (!VcsExternalToolLauncher.TryStartProcess(fileName, arguments, workingDirectory, displayName, out var reason, out var process))
             {
@@ -1586,7 +1620,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             LogVcsOperation("Open External Tool", $"Opened {displayName}: {fileName} {arguments}");
 
             if (refreshOnExit)
-                WatchExternalToolExit(process, recheckRemoteOnExit);
+                WatchExternalToolExit(process, recheckRemoteOnExit, refreshLogOnExit);
             else
                 process.Dispose();
             return true;
@@ -1595,7 +1629,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// <summary>
         /// 外部工具进程退出后（线程池回调）投递到主线程刷新。只订阅事件，从不等待进程。
         /// </summary>
-        private void WatchExternalToolExit(System.Diagnostics.Process process, bool recheckRemote)
+        private void WatchExternalToolExit(System.Diagnostics.Process process, bool recheckRemote, bool logChanged)
         {
             var fired = 0;
             void OnExit()
@@ -1603,7 +1637,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 if (Interlocked.Exchange(ref fired, 1) != 0)
                     return;
                 try { process.Dispose(); } catch { /* 忽略 */ }
-                MainThread.Post(() => OnExternalToolClosed(recheckRemote));
+                MainThread.Post(() => OnExternalToolClosed(recheckRemote, logChanged));
             }
 
             try
@@ -1621,7 +1655,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
-        private void OnExternalToolClosed(bool recheckRemote)
+        private void OnExternalToolClosed(bool recheckRemote, bool logChanged)
         {
             VcsProjectWindowIntegration.RequestStatusRefresh();
             if (recheckRemote)
@@ -1629,7 +1663,8 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             if (_isDisposed || _adapter == null)
                 return;
-            _ = RefreshAllData();
+            // 提交 / 更新会改变提交历史或 BASE：强制刷新 log；还原 / 清理 / 添加只影响本地
+            _ = RefreshAllData(logChanged ? LogRefresh.Force : LogRefresh.Skip);
         }
 
         /// <summary>
@@ -1637,7 +1672,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// 多路径走 /pathfile。失败原因记录在 <see cref="_lastExternalToolError"/>，由 ShowExternalToolUnavailable 显示。
         /// </summary>
         private bool TryStartTortoise(string command, IReadOnlyList<string> paths, string rootPath, string displayName, string extraArguments = null,
-            bool refreshOnExit = false, bool recheckRemoteOnExit = false)
+            bool refreshOnExit = false, bool recheckRemoteOnExit = false, bool refreshLogOnExit = false)
         {
             if (!VcsExternalToolLauncher.TryBuildTortoiseArgs(command, paths, out var arguments, out var error))
             {
@@ -1649,7 +1684,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (!string.IsNullOrEmpty(extraArguments))
                 arguments += " " + extraArguments;
 
-            return TryStartExternalProcess("TortoiseProc.exe", arguments, rootPath, displayName, refreshOnExit, recheckRemoteOnExit);
+            return TryStartExternalProcess("TortoiseProc.exe", arguments, rootPath, displayName, refreshOnExit, recheckRemoteOnExit, refreshLogOnExit);
         }
 
         private void ShowExternalToolUnavailable(string operation)
@@ -1748,7 +1783,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 case VcsType.Svn:
                     // 多个文件通过 /pathfile 传递，不受命令行长度限制
-                    return TryStartTortoise("commit", absolutePaths, rootPath, "TortoiseSVN commit window", refreshOnExit: true);
+                    return TryStartTortoise("commit", absolutePaths, rootPath, "TortoiseSVN commit window", refreshOnExit: true, refreshLogOnExit: true);
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1830,21 +1865,64 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (_adapter == null)
                 return;
 
-            var filesToRevert = _currentFiles?.Select(f => f.FilePath).ToList();
-            if (filesToRevert == null || filesToRevert.Count == 0)
+            // 未版本控制 / 忽略的文件 svn revert 不会处理（也不会删除）：不传给适配器，在结果消息里报告为已跳过
+            var (filesToRevert, skippedUnversioned) = PartitionRevertAll(_currentFiles);
+            if (filesToRevert.Count == 0)
             {
-                ShowMessage("No files to revert.", false);
+                ShowMessage(skippedUnversioned.Count > 0
+                    ? "No versioned changes to revert. " + DescribeSkippedUnversioned(skippedUnversioned)
+                    : "No files to revert.", false);
                 return;
             }
+
+            var dialogMessage = "This will discard ALL local changes in the working copy.\n\nThis action cannot be undone.";
+            if (skippedUnversioned.Count > 0)
+                dialogMessage += $"\n\n{skippedUnversioned.Count} unversioned file(s) will be left untouched.";
 
             await RevertFilesAsync(
                 filesToRevert,
                 "Revert All Changes?",
-                "This will discard ALL local changes in the working copy.\n\nThis action cannot be undone.",
-                "Revert All");
+                dialogMessage,
+                "Revert All",
+                skippedUnversioned);
         }
 
-        private async Task RevertFilesAsync(List<string> filesToRevert, string title, string message, string okButton)
+        /// <summary>
+        /// Revert All 的文件划分：未版本控制（Untracked）与忽略（Ignored）的文件不参与还原，单独列为跳过；
+        /// 其余（含 Renamed / Copied、Missing、Conflicted）都交给 svn revert。纯函数，供测试。
+        /// </summary>
+        public static (List<string> revertable, List<string> skippedUnversioned) PartitionRevertAll(IEnumerable<VcsFileStatus> files)
+        {
+            var revertable = new List<string>();
+            var skipped = new List<string>();
+            if (files == null)
+                return (revertable, skipped);
+
+            foreach (var file in files)
+            {
+                if (file == null || string.IsNullOrEmpty(file.FilePath))
+                    continue;
+                if (file.State == VcsFileState.Untracked || file.State == VcsFileState.Ignored)
+                    skipped.Add(file.FilePath);
+                else
+                    revertable.Add(file.FilePath);
+            }
+            return (revertable, skipped);
+        }
+
+        /// <summary>结果消息中的"已跳过未版本控制文件"说明，最多列出前 5 个路径。</summary>
+        public static string DescribeSkippedUnversioned(IReadOnlyList<string> skipped)
+        {
+            if (skipped == null || skipped.Count == 0)
+                return string.Empty;
+            const int maxListed = 5;
+            var listed = string.Join(", ", skipped.Take(maxListed));
+            var more = skipped.Count > maxListed ? $" and {skipped.Count - maxListed} more" : string.Empty;
+            return $"Skipped {skipped.Count} unversioned file(s) (revert does not touch or delete them): {listed}{more}.";
+        }
+
+        private async Task RevertFilesAsync(List<string> filesToRevert, string title, string message, string okButton,
+            IReadOnlyList<string> skippedUnversioned = null)
         {
             if (_adapter == null)
                 return;
@@ -1864,14 +1942,30 @@ namespace AgentCore.Editor.Components.VCS.UI
                 LogVcsOperation("Revert", $"Reverting {filesToRevert.Count} file(s).");
                 var result = await _adapter.RevertFilesAsync(filesToRevert, CancellationToken.None);
                 LogVcsResult("Revert", result);
+                // 适配器自身跳过的（例如状态刷新后才变成未版本控制的文件）也并入跳过说明
+                var skipped = new List<string>(skippedUnversioned ?? Array.Empty<string>());
+                if (result.SkippedFiles != null)
+                {
+                    foreach (var path in result.SkippedFiles.Keys)
+                    {
+                        if (!skipped.Contains(path, StringComparer.OrdinalIgnoreCase))
+                            skipped.Add(path);
+                    }
+                }
+                var skippedNote = skipped.Count > 0 ? "\n" + DescribeSkippedUnversioned(skipped) : string.Empty;
+
                 if (result.Success)
                 {
-                    ShowMessage($"Reverted {filesToRevert.Count} file(s) successfully.", false);
+                    var revertedCount = Math.Max(0, filesToRevert.Count - (result.SkippedFiles?.Count ?? 0) - (result.FailedFiles?.Count ?? 0));
+                    var failedNote = (result.FailedFiles?.Count ?? 0) > 0
+                        ? $"\nFailed: {string.Join(", ", result.FailedFiles.Select(kv => $"{kv.Key} ({kv.Value})"))}"
+                        : string.Empty;
+                    ShowMessage($"Reverted {revertedCount} file(s) successfully.{skippedNote}{failedNote}", failedNote.Length > 0);
                     await RefreshAllData();
                 }
                 else
                 {
-                    ShowMessage($"Revert failed: {GetOperationFailureMessage(result)}", true);
+                    ShowMessage($"Revert failed: {GetOperationFailureMessage(result)}{skippedNote}", true);
                 }
             }
             catch (Exception ex)
@@ -2056,9 +2150,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             if (_currentVcsType != VcsType.Svn || string.IsNullOrEmpty(error))
                 return error;
-            var hint = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.GetHint(error, VcsDetector.GetVcsRootPath());
-            // VcsRemoteStatusMonitor.LastError 可能已附带同一提示
-            return hint == null || error.Contains(hint) ? error : error.Trim() + "\n" + hint;
+            // Describe 幂等：LastError / 命令层已附带提示时不重复
+            return AgentCore.Editor.Workspace.Resolution.SvnErrorHints.Describe(error, VcsDetector.GetVcsRootPath());
         }
 
         private void UpdateSyncStatusTimeLabel()
@@ -2111,7 +2204,7 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             if (_adapter != null && _currentVcsType != VcsType.None)
             {
-                _ = RefreshAllData();
+                _ = RefreshAllData(LogRefresh.Auto);
             }
         }
 
@@ -2133,6 +2226,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _isPanelActive = false;
             EditorApplication.update -= OnEditorUpdatePollCommits;
             VcsRemoteStatusMonitor.StatusChanged -= UpdateSyncStatusBanner;
+            VcsRemoteStatusMonitor.StatusChanged -= OnRemoteStatusChangedForLog;
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;
@@ -2150,10 +2244,37 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (_adapter == null || _currentVcsType == VcsType.None)
                 return;
 
+            // SVN 不定时轮询 svn log（每次都访问服务器）：由远端检查报告的 HEAD 变化触发，见 OnRemoteStatusChangedForLog
+            if (_currentVcsType == VcsType.Svn)
+                return;
+
             if (_isBackgroundPolling || _isLoadingMoreCommits)
                 return;
 
             if (DateTime.UtcNow - _lastCommitPollUtc < GetCommitPollInterval())
+                return;
+
+            _ = PollCommitListSilentlyAsync();
+        }
+
+        /// <summary>
+        /// 远端检查（<see cref="VcsRemoteStatusMonitor"/>，主线程回调）报告了新的 HEAD 版本号时静默刷新提交历史。
+        /// 离线退避期内跳过；面板不活动时只记下版本号，下次打开时按 Auto 刷新。
+        /// </summary>
+        private void OnRemoteStatusChangedForLog(VcsSyncStatus status)
+        {
+            if (_isDisposed || status == null || !status.Success || string.IsNullOrEmpty(status.RemoteRevision))
+                return;
+            if (string.Equals(status.RemoteRevision, _lastSeenRemoteRevision, StringComparison.Ordinal))
+                return;
+            _lastSeenRemoteRevision = status.RemoteRevision;
+
+            if (!_isPanelActive || _currentVcsType != VcsType.Svn || _adapter == null)
+                return;
+            if (_isBackgroundPolling || _isLoadingMoreCommits || IsCommitLogInBackoff())
+                return;
+            // 已显示的最新提交就是这个版本：无需再访问服务器
+            if (_loadedCommits.Count > 0 && string.Equals(_loadedCommits[0].Revision, status.RemoteRevision, StringComparison.Ordinal))
                 return;
 
             _ = PollCommitListSilentlyAsync();
@@ -2184,17 +2305,27 @@ namespace AgentCore.Editor.Components.VCS.UI
                 if (adapter == null)
                     return;
                 var queryCount = GetCommitQueryCount();
-                var freshCommits = await adapter.GetLogAsync(queryCount, CancellationToken.None);
+                var (freshCommits, error) = await FetchLogAsync(adapter, queryCount, CancellationToken.None);
+                if (_isDisposed)
+                    return;
 
-                if (freshCommits == null || freshCommits.Count == 0)
+                if (!string.IsNullOrEmpty(error) || freshCommits == null || freshCommits.Count == 0)
                 {
-                    // adapter 失败时返回空列表（离线 / 认证失败 / 超时）：退避，下次间隔翻倍
-                    _commitPollFailures = Math.Min(_commitPollFailures + 1, 16);
+                    // 失败（离线 / 认证失败 / 超时）：退避，下次间隔翻倍；静默刷新不弹消息，只在摘要行显示错误
+                    RecordCommitLogFailure();
+                    if (!string.IsNullOrEmpty(error))
+                    {
+                        _commitLogError = error;
+                        RenderCommitList();
+                    }
                     return;
                 }
                 _commitPollFailures = 0;
-                if (_isDisposed)
-                    return;
+                if (_commitLogError != null)
+                {
+                    _commitLogError = null;
+                    RenderCommitList();
+                }
 
                 // 对比最新 revision — 只有真正有新提交时才更新 UI
                 var currentLatestRevision = _loadedCommits.Count > 0 ? _loadedCommits[0].Revision : null;

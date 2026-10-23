@@ -1,7 +1,5 @@
 using System;
-using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using AgentCore.Editor.Utils;
@@ -53,7 +51,7 @@ namespace AgentCore.Editor.Workspace.Resolution
             try
             {
                 // 路径末尾加 '@'：路径本身含 '@' 时，svn 会把最后一个 '@' 之后当作 peg revision
-                var run = RunSvn(path, "info", "--xml", "--non-interactive", path + "@");
+                var run = SvnExecutable.Run(path, CommandTimeoutMs, "info", "--xml", "--non-interactive", path + "@");
                 if (!run.Started)
                 {
                     info.IsCommandAvailable = false;
@@ -196,87 +194,6 @@ namespace AgentCore.Editor.Workspace.Resolution
                 return null;
             }
             catch { return null; }
-        }
-
-        private struct SvnRun
-        {
-            public bool Started;
-            public bool TimedOut;
-            public int ExitCode;
-            public string Output;
-            public string Error;
-        }
-
-        /// <summary>
-        /// 运行 svn 并同步等待（仅后台线程）。stdin 立即关闭（--non-interactive 之外的兜底），
-        /// stdout / stderr 异步读取避免管道写满，超时结束整棵进程树。
-        /// </summary>
-        private static SvnRun RunSvn(string workingDirectory, params string[] args)
-        {
-            var run = new SvnRun();
-            var psi = new ProcessStartInfo
-            {
-                FileName = "svn",
-                Arguments = ProcessArgs.Join(args),
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                // --xml 输出固定 UTF-8；stderr 在 Windows 上是 ANSI 代码页，这里只用来识别错误码
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
-            if (!string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory))
-                psi.WorkingDirectory = workingDirectory;
-
-            Process p;
-            try
-            {
-                p = Process.Start(psi);
-            }
-            catch (Exception ex)
-            {
-                run.Error = ex.Message;
-                return run;
-            }
-
-            if (p == null)
-            {
-                run.Error = "Process.Start returned null for svn";
-                return run;
-            }
-
-            using (p)
-            {
-                run.Started = true;
-                ChildProcessJob.TryAssign(p);
-                try { p.StandardInput.Close(); } catch { /* 进程已退出 */ }
-
-                var outputTask = p.StandardOutput.ReadToEndAsync();
-                var errorTask = p.StandardError.ReadToEndAsync();
-                if (!p.WaitForExit(CommandTimeoutMs))
-                {
-                    ChildProcessJob.KillTree(p);
-                    run.TimedOut = true;
-                    run.ExitCode = -1;
-                    return run;
-                }
-
-                // 进程已退出，读取很快完成；仍给上限，防止孙进程占着管道不放
-                if (!outputTask.Wait(CommandTimeoutMs) || !errorTask.Wait(CommandTimeoutMs))
-                {
-                    ChildProcessJob.KillTree(p);
-                    run.TimedOut = true;
-                    run.ExitCode = -1;
-                    return run;
-                }
-
-                run.ExitCode = p.ExitCode;
-                run.Output = outputTask.Result;
-                run.Error = errorTask.Result;
-                return run;
-            }
         }
     }
 }

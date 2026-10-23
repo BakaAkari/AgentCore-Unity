@@ -14,12 +14,12 @@ namespace AgentCore.Editor.Components.VCS.UI
 {
     /// <summary>
     /// Unity Project 窗口 VCS 集成：右键菜单（多选、自动带上 .meta）与 SVN 状态角标
-    /// （改动 / 新增 / 冲突 / 未版本化 / needs-lock / 本人锁定 / 他人锁定）。
+    /// （改动 / 新增 / 冲突 / 未版本化 / needs-lock / 本人锁定 / 他人锁定 / 锁被抢或失效）。
     /// <para>
     /// 角标绘制回调只做字典查找，不做 IO、不启动进程。状态在线程池刷新：
     /// 防抖（<see cref="DebounceSeconds"/>）+ 单飞 + 最小间隔，触发源为工程变更、编辑器重新获得焦点
     /// （从 TortoiseSVN / 资源管理器切回来）、外部工具关闭与远端检查完成。
-    /// svn 命令从 Unity 工程根执行，只扫描工程本身，不扫描整个（可能很大的）工作副本。
+    /// 本地状态经 SvnAdapter 只扫描工程目录，不扫描整个（可能很大的）工作副本；远端锁快照来自 VcsRemoteStatusMonitor（域重载后从 SessionState 恢复）。
     /// </para>
     /// </summary>
     [InitializeOnLoad]
@@ -42,8 +42,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private static double _refreshDueTime = -1;
         private static double _lastRefreshFinishedTime = -1000;
         private static bool _refreshRunning;
-        private static string _remoteStatusXml;
-        private static string _remoteStatusBase;
+        private static VcsSyncStatus _remoteLockStatus;
         private static string _lastReportedError;
 
         static VcsProjectWindowIntegration()
@@ -59,7 +58,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             VcsDetector.DetectionChanged += RequestStatusRefresh;
             VcsRemoteStatusMonitor.StatusChanged += OnRemoteStatusChanged;
 
-            // 域重载后远端快照（不含 RawOutput）无法恢复锁信息，等待下一次远端检查
+            // 远端锁快照随 VcsRemoteStatusMonitor 存在 SessionState 里，域重载后直接可用（他人锁定角标不会消失）
+            _remoteLockStatus = VcsRemoteStatusMonitor.LastStatus;
             EditorApplication.delayCall += RequestStatusRefresh;
         }
 
@@ -82,17 +82,19 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private static void OnRemoteStatusChanged(VcsSyncStatus status)
         {
-            if (status == null || !status.Success || string.IsNullOrEmpty(status.RawOutput))
+            // 失败的检查不覆盖上一次成功的锁快照（monitor 也保留了上次成功结果）
+            if (status == null || !status.Success)
                 return;
             if (VcsDetector.DetectVcs() != VcsType.Svn)
                 return;
-            if (ReferenceEquals(status.RawOutput, _remoteStatusXml))
+            if (ReferenceEquals(status, _remoteLockStatus))
                 return;
 
-            // svn status -u 在工作副本根执行，路径相对于工作副本根
-            _remoteStatusXml = status.RawOutput;
-            _remoteStatusBase = VcsDetector.GetVcsRootPath();
-            RequestStatusRefresh();
+            var hadLocks = _remoteLockStatus?.LockedFiles?.Count > 0;
+            _remoteLockStatus = status;
+            // 锁快照有变化（或之前有锁）才需要重新生成角标；远端无锁且之前也无锁时省一次 svn status
+            if (hadLocks || status.LockedFiles?.Count > 0)
+                RequestStatusRefresh();
         }
 
         private static void OnEditorUpdate()
@@ -121,10 +123,10 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             _refreshRunning = true;
             var unityRoot = _unityRoot;
-            var remoteXml = _remoteStatusXml;
-            var remoteBase = _remoteStatusBase;
+            var remote = _remoteLockStatus;
+            var vcsRoot = VcsDetector.GetVcsRootPath();
 
-            Task.Run(() => BuildSnapshotAsync(unityRoot, remoteXml, remoteBase)).ContinueWith(task =>
+            Task.Run(() => BuildSnapshotAsync(unityRoot, vcsRoot, remote)).ContinueWith(task =>
             {
                 MainThread.Post(() =>
                 {
@@ -154,31 +156,37 @@ namespace AgentCore.Editor.Components.VCS.UI
             }, TaskScheduler.Default);
         }
 
-        private static async Task<(SvnOverlaySnapshot snapshot, string error)> BuildSnapshotAsync(string unityRoot, string remoteXml, string remoteBase)
+        /// <summary>
+        /// 本地状态走 SvnAdapter（与面板 / 工具同一套 status 解析、svn.exe 定位与解码），只扫描 Unity 工程目录；
+        /// needs-lock 用一次整树 propget（适配器只对已修改文件检查，角标需要全部）；
+        /// 他人锁定 / 锁失效来自远端检查的结构化锁列表（<see cref="VcsSyncStatus.LockedFiles"/>）。
+        /// </summary>
+        private static async Task<(SvnOverlaySnapshot snapshot, string error)> BuildSnapshotAsync(string unityRoot, string vcsRoot, VcsSyncStatus remote)
         {
             if (!await VcsDetector.EnsureCommandAvailableAsync(VcsType.Svn).ConfigureAwait(false))
                 return (null, null); // 命令缺失由面板 / 检测器提示，这里不重复报错
 
-            var statusTask = VcsCommandExecutor.ExecuteAsync(
-                "svn", new List<string> { "status", "--xml", "--non-interactive", "." }, unityRoot, SvnTimeoutSeconds);
+            var baseDirectory = string.IsNullOrEmpty(vcsRoot) ? unityRoot : vcsRoot;
+            var adapter = new SvnAdapter(baseDirectory) { AnnotateNeedsLock = false };
+            var statusTask = adapter.GetStatusAsync();
             var needsLockTask = VcsCommandExecutor.ExecuteAsync(
                 "svn", new List<string> { "propget", "svn:needs-lock", "-R", "--xml", "--non-interactive", "." }, unityRoot, SvnTimeoutSeconds);
             await Task.WhenAll(statusTask, needsLockTask).ConfigureAwait(false);
 
             var status = statusTask.Result;
             if (!status.Success)
-                return (null, string.IsNullOrEmpty(status.ErrorMessage) ? status.Error : status.ErrorMessage);
+                return (null, status.ErrorMessage);
 
             var snapshot = new SvnOverlaySnapshot();
-            SvnOverlayStatusParser.ApplyStatusXml(status.Output, unityRoot, unityRoot, snapshot);
+            SvnOverlayStatusParser.ApplyLocalStatus(status, adapter.WorkingDirectory, unityRoot, snapshot);
 
-            // propget 失败（极少见）只影响 needs-lock 角标
+            // propget 失败（极少见）只影响 needs-lock 角标；没有任何 needs-lock 文件时 svn 也可能非零退出，但 XML 仍可解析
             var needsLock = needsLockTask.Result;
-            if (needsLock.Success)
+            if (!string.IsNullOrEmpty(needsLock.Output))
                 SvnOverlayStatusParser.ApplyNeedsLockXml(needsLock.Output, unityRoot, unityRoot, snapshot);
 
-            if (!string.IsNullOrEmpty(remoteXml) && !string.IsNullOrEmpty(remoteBase))
-                SvnOverlayStatusParser.ApplyRemoteLocksXml(remoteXml, remoteBase, unityRoot, snapshot);
+            if (remote != null && remote.Success && remote.LockedFiles != null && remote.LockedFiles.Count > 0)
+                SvnOverlayStatusParser.ApplyRemoteLocks(remote.LockedFiles, remote.PathBase ?? baseDirectory, unityRoot, snapshot);
 
             SvnOverlayStatusParser.PropagateToFolders(snapshot);
             return (snapshot, null);
@@ -266,19 +274,28 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private static bool TryGetLockBadge(SvnOverlayFlags flags, SvnOverlaySnapshot snapshot, string assetPath, out Color color, out string tooltip)
         {
+            snapshot.LockOwners.TryGetValue(assetPath, out var owner);
+            snapshot.LockComments.TryGetValue(assetPath, out var comment);
             if ((flags & SvnOverlayFlags.LockedByOther) != 0)
             {
-                snapshot.LockOwners.TryGetValue(assetPath, out var owner);
                 color = ErrorColor;
-                tooltip = string.IsNullOrEmpty(owner)
-                    ? "SVN: locked by someone else (as of the last remote check)"
-                    : $"SVN: locked by {owner} (as of the last remote check)";
+                tooltip = BuildLockTooltip(string.IsNullOrEmpty(owner) ? "SVN: locked by someone else" : $"SVN: locked by {owner}",
+                    comment, "as of the last remote check");
+                return true;
+            }
+            if ((flags & SvnOverlayFlags.LockLost) != 0)
+            {
+                color = ErrorColor;
+                tooltip = BuildLockTooltip(string.IsNullOrEmpty(owner)
+                        ? "SVN: your lock is no longer valid (broken) — commit will fail until you lock again"
+                        : $"SVN: your lock was stolen by {owner} — commit will fail until you lock again",
+                    comment, "as of the last remote check");
                 return true;
             }
             if ((flags & SvnOverlayFlags.LockedByMe) != 0)
             {
                 color = MyLockColor;
-                tooltip = "SVN: locked by you in this working copy";
+                tooltip = BuildLockTooltip("SVN: locked by you in this working copy", comment, null);
                 return true;
             }
             if ((flags & SvnOverlayFlags.NeedsLock) != 0)
@@ -290,6 +307,17 @@ namespace AgentCore.Editor.Components.VCS.UI
             color = default;
             tooltip = null;
             return false;
+        }
+
+        /// <summary>锁角标提示：标题 + 锁注释 + 时效说明。</summary>
+        public static string BuildLockTooltip(string title, string comment, string note)
+        {
+            var text = title;
+            if (!string.IsNullOrWhiteSpace(comment))
+                text += $"\n\"{comment.Trim()}\"";
+            if (!string.IsNullOrEmpty(note))
+                text += $"\n({note})";
+            return text;
         }
 
         private static void DrawLetterBadge(Rect rect, string letter, Color color, string tooltip)
