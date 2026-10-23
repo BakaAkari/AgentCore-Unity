@@ -33,7 +33,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     ///   clear_index        — 清除当前 Workspace 的索引
     /// </summary>
     [AgentTool("search_code",
-        Description = "Codebase indexing and C# symbol search via local SQLite index (not committed to VCS). " +
+        Description = "Codebase indexing and C# symbol search: a local index of Roslyn-extracted C# symbols stored as JSONL " +
+                      "under {workspaceRoot}/.agentcore/index (not committed to VCS), plus ripgrep literal source-text search when rg is installed. " +
                       "Actions: status (index state), diagnose (full diagnostic: background service + per-root state + advice), " +
                       "list_root_states (per-root Ready/Indexing/Stale/NotIndexed/Failed with counts), " +
                       "mark_stale (force re-index of a root/scope on next background pass), " +
@@ -159,7 +160,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         /// <inheritdoc/>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "search_code",
-            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、全文搜索（FTS5）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储（SQLite），不提交 VCS。",
+            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量/按 Scope 索引 C# 符号（Roslyn 提取）、按名称/类型/命名空间/Scope 搜索符号、符号名全文搜索（安装 ripgrep 时附带 *.cs 源码字面量命中）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据以 JSONL 本地存储于 {workspaceRoot}/.agentcore/index，不提交 VCS。",
             category: "Indexing",
             parametersSchema: _parametersSchema,
             requiresMainThread: false
@@ -1310,7 +1311,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             else if (symbolId > 0)
             {
                 // 通过 file symbols 查找（需要先找到文件）
-                // 降级：通过 FTS 搜索 symbol_id 对应的符号
+                // 降级：通过符号文本搜索查找 symbol_id 对应的符号
                 var searcher = new SymbolSearcher(store);
                 var allByFile = await store.SearchSymbolsByTextAsync(stored.Id, "", 1, ct);
                 // 直接通过 GetSymbolsByFileAsync 无法按 ID 查，改用 search_text 降级
@@ -1410,7 +1411,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         }
 
         /// <summary>
-        /// get_backend_info — 获取当前索引后端信息（SQLite / Jsonl，数据库路径等）。
+        /// get_backend_info — 获取当前索引后端信息（后端类型、索引目录；仅 SQLite 后端报告数据库文件路径）。
         /// </summary>
         private static async Task<ToolResponse> HandleGetBackendInfoAsync(CancellationToken ct)
         {
@@ -1421,14 +1422,22 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
 
+            // 默认后端是 JSONL（目录内的操作日志 + 快照），只有 SQLite 后端才有单一数据库文件
+            string indexDir = null;
             string dbPath = null;
             if (!string.IsNullOrEmpty(workspace?.WorkspaceRoot))
-                dbPath = IndexStoreFactory.GetDbPath(workspace.WorkspaceRoot);
+            {
+                indexDir = IndexStoreFactory.GetIndexDir(workspace.WorkspaceRoot);
+                if (string.Equals(store.BackendType, "sqlite", StringComparison.OrdinalIgnoreCase))
+                    dbPath = IndexStoreFactory.GetDbPath(workspace.WorkspaceRoot);
+            }
 
             return ToolResponse.OkWithData(new
             {
                 backend_type = store.BackendType,
                 workspace_root = workspace?.WorkspaceRoot,
+                index_dir = indexDir,
+                index_dir_exists = indexDir != null && System.IO.Directory.Exists(indexDir),
                 db_path = dbPath,
                 db_exists = dbPath != null && System.IO.File.Exists(dbPath),
                 workspace_indexed = stored != null,
@@ -1439,7 +1448,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         // ── 私有辅助方法 ─────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 创建 IIndexStore 实例（优先 SQLite，降级 Jsonl）。
+        /// 创建 IIndexStore 实例（默认 JSONL；仅定义 AGENTCORE_SQLITE 时优先尝试 SQLite，失败降级 JSONL）。
         /// 如果 WorkspaceRoot 无法解析则返回 null。
         /// </summary>
         private static IIndexStore CreateStore()
