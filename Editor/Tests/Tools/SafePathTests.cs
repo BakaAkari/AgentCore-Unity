@@ -70,10 +70,11 @@ namespace AgentCore.Tests.Editor.Tools
         [TestCase("Assets/keys/id_rsa")]
         [TestCase("Assets/cert.pem")]
         [TestCase(".git/config")]
-        public void TryResolveUnder_ForbiddenFiles_Fail(string input)
+        public void TryResolveUnder_SecretFiles_ResolveButAreFlagged(string input)
         {
-            Assert.IsFalse(SafePath.TryResolveUnder(Root, input, out _, out var error));
-            StringAssert.Contains("forbidden", error);
+            // 机密文件不再硬拒绝：可以解析，由 IsForbidden 标记后走确认
+            Assert.IsTrue(SafePath.TryResolveUnder(Root, input, out var full, out _));
+            Assert.IsTrue(SafePath.IsForbidden(full));
         }
 
         #endregion

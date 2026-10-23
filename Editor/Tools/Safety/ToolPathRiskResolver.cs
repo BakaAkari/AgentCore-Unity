@@ -108,23 +108,15 @@ namespace AgentCore.Editor.Tools.Safety
                 if (string.IsNullOrEmpty(absolutePath))
                     continue;
 
-                WorkspaceOperationRisk risk;
-                if (SafePath.IsForbidden(absolutePath))
-                {
-                    // 机密文件（.env / 私钥 / .git/config）：任何写操作都拒绝
-                    risk = WorkspaceOperationRisk.Blocked;
-                }
-                else
-                {
-                    var rootInfo = WorkspacePathService.TryGetRootInfo(absolutePath);
-                    // 不属于任何 WorkspaceRoot（项目外）不能再当作 Safe 跳过；
-                    // 仍不直接 Blocked，因为 "target"/"source" 也可能是 "/Root/Child" 这类 GameObject 路径
-                    risk = rootInfo == null
-                        ? WorkspaceOperationRisk.HighRisk
-                        : WorkspacePathPolicy.GetRisk(rootInfo.Role);
-                }
+                var rootInfo = WorkspacePathService.TryGetRootInfo(absolutePath);
+                // 不属于任何 WorkspaceRoot（项目外）不能再当作 Safe 跳过；
+                // 仍不直接 Blocked，因为 "target"/"source" 也可能是 "/Root/Child" 这类 GameObject 路径
+                var risk = rootInfo == null
+                    ? WorkspaceOperationRisk.HighRisk
+                    : WorkspacePathPolicy.GetRisk(rootInfo.Role);
 
-                if (IsProtectedTarget(pathValue, absolutePath))
+                // 机密文件（.env / 私钥 / .git/config）与受保护路径一样走确认，不硬拒绝
+                if (SafePath.IsForbidden(absolutePath) || IsProtectedTarget(pathValue, absolutePath))
                     touchesProtectedPath = true;
 
                 if (targets == null)

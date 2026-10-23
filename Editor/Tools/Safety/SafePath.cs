@@ -54,18 +54,8 @@ namespace AgentCore.Editor.Tools.Safety
                 return false;
             }
 
-            if (ContainsReparsePoint(rootFull, full))
-            {
-                error = $"Path '{input}' goes through a symbolic link or junction, which is not allowed.";
-                return false;
-            }
-
-            if (IsForbidden(full))
-            {
-                error = $"Access to '{input}' is forbidden (secret or credential file).";
-                return false;
-            }
-
+            // 只约束"落在根内"（工具原有语义）；机密文件、经过链接的路径不再硬拒绝，
+            // 写入时由 ToolPathRiskResolver 标为受保护路径，按用户选择的审查级别确认
             fullPath = full;
             return true;
         }
@@ -120,12 +110,6 @@ namespace AgentCore.Editor.Tools.Safety
                 throw new ArgumentException(
                     $"Path '{input}' resolves to '{relative}', which is not under Assets/{(allowPackages ? " or Packages/" : "")}.");
 
-            if (ContainsReparsePoint(root, resolved))
-                throw new ArgumentException($"Path '{input}' goes through a symbolic link or junction, which is not allowed.");
-
-            if (IsForbidden(relative))
-                throw new ArgumentException($"Access to '{input}' is forbidden (secret or credential file).");
-
             return relative;
         }
 
@@ -174,7 +158,7 @@ namespace AgentCore.Editor.Tools.Safety
         }
 
         /// <summary>
-        /// 禁止段：读写都拒绝的机密文件。
+        /// 机密文件：写入时按受保护路径走确认（不硬拒绝）；LightRAG 上传时排除。
         /// <c>.env*</c>（<c>.env.example</c> 除外）、<c>id_rsa*</c> / <c>id_ed25519*</c> / <c>id_ecdsa*</c>、
         /// <c>*.pem</c> / <c>*.pfx</c> / <c>*.p12</c>、<c>.git/config</c>、<c>.git-credentials</c>。
         /// </summary>
@@ -212,7 +196,7 @@ namespace AgentCore.Editor.Tools.Safety
         }
 
         /// <summary>
-        /// 受保护路径（写入总要确认，YOLO 也不例外）。输入为项目相对路径或绝对路径。
+        /// 受保护路径（写入总要确认，是否放行由审查级别决定，YOLO 直通）。输入为项目相对路径或绝对路径。
         /// <c>ProjectSettings/</c>、<c>UserSettings/</c>、<c>Packages/manifest.json</c>、<c>.git/</c>、
         /// <c>*.asmdef</c>、<c>Assets/**/Editor/**</c>、AgentCore 自身的包目录。
         /// </summary>
