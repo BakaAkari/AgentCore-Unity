@@ -16,11 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 用量观测：统一 `LlmUsage`（未缓存输入 / 缓存读 / 缓存写 / 输出 / 推理），兼容 OpenAI、DeepSeek、LiteLLM、Anthropic 的 usage 字段；每次调用记一行 Info 日志；`UsageLedger` 会话累计与估算费用；上下文面板显示缓存命中率与费用，新建会话清零
 - 模型注册表 `ModelRegistry`：上下文窗口、最大输出、价格、thinking 形态等模型知识的单一真源；可用 `ProjectSettings/AgentCoreModelRegistry.json` 覆盖或新增条目
 - OpenAI 兼容方言适配：DeepSeek 工具调用轮次回传 `reasoning_content`；OpenAI 自动 `prompt_cache_key`；OpenRouter / LiteLLM 下的 Claude 模型自动加 `cache_control`
+- 输入区 + 按钮改为"添加到消息"菜单：上传图片 / 截取 Game 视图 / 截取 Scene 视图（复用 VisionCaptureService），也支持把图片拖到输入区；附图后不再立即发送，输入框上方显示预览条（缩略图 + 尺寸 + 移除，悬停浮出大图），随下一条消息一起发送
+- Chat 面板输入区新增模型切换下拉：显示当前模型，可直接切换当前 profile 的可用模型（后台拉取 /models 并缓存，与设置页共用）、刷新列表、切换 profile；Agent 运行中禁止切换。自绘深色弹出面板（搜索筛选、↑↓/Enter 键盘选择、当前项高亮、vendor 前缀淡化）
 - 视觉模型支持 Anthropic 端点（按 host 自动识别，使用 base64 image 块）
 - 按需工具改为延迟声明：工具列表在会话内保持不变，`request_tools` 激活的工具以追加的 `ToolChange` 消息启用。支持的 Claude 模型（Opus 5 / 5.5 / 4.8、Fable 5 / 5.1、Mythos 5 / 5.1、Sonnet 5.5）走 `defer_loading` + `tool_addition`（beta `mid-conversation-tool-changes-2026-07-01`），激活工具不再使整个缓存失效；其他模型/协议只发送已启用的工具
 - 单元测试 `Tests/LLM/MultiProviderTests.cs`（含“追加式历史下请求前缀稳定”不变量测试）
 
 ### Changed
+- 移除 Chat 窗口工具栏右上角的 profile 快切下拉（`ProviderProfileSelector`），由输入区模型下拉取代；输入区右侧重排：左列上排 + / 思考强度胶囊、下排模型胶囊，发送按钮占两行高度，思考强度由 Unity 原生下拉改为与模型胶囊同款外观（"思考"前缀）与同款弹出面板（每档附说明、当前档 ✓、键盘可选）；发送按钮随左列拉伸、输入框最小高度与按钮组一致，上下沿对齐
 - API Format remains visible with manual override. Unknown gateways verify generation with a small synthetic request before sending conversation content, remember the successful protocol/authentication, and invalidate results when connection settings or credentials change.
 - Connection and cache status are shown without exposing authentication/cache tuning controls. Missing cache metrics display as unknown rather than 0%; mixed sessions with missing metrics do not claim a complete hit rate.
 - 缓存前缀稳定化（对所有供应商的自动前缀缓存同样有效）：
