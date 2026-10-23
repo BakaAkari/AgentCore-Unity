@@ -53,6 +53,12 @@ namespace AgentCore.Editor.Tools.Safety
         /// <summary>确认后允许提供给 UI 的短期信任范围。</summary>
         public IReadOnlyList<ToolConfirmationTrustScope> AllowedTrustScopes { get; }
 
+        /// <summary>
+        /// 触发本次确认的 <c>ask</c> 权限规则（P2）；为 null 表示确认由风险策略本身触发。
+        /// <para>非 null 时 Trust Low/Med 会话信任不会自动放行（只有显式点击或 YOLO）。</para>
+        /// </summary>
+        public PermissionRuleMatch TriggeredByRule { get; }
+
         public ToolConfirmationRequest(
             string toolName,
             string action,
@@ -62,7 +68,8 @@ namespace AgentCore.Editor.Tools.Safety
             IReadOnlyList<string> reasons,
             IReadOnlyDictionary<string, string> parameterSummary,
             IReadOnlyList<string> targets,
-            IReadOnlyList<ToolConfirmationTrustScope> allowedTrustScopes = null)
+            IReadOnlyList<ToolConfirmationTrustScope> allowedTrustScopes = null,
+            PermissionRuleMatch triggeredByRule = null)
         {
             ToolName = toolName ?? throw new ArgumentNullException(nameof(toolName));
             Action = action ?? string.Empty;
@@ -79,6 +86,29 @@ namespace AgentCore.Editor.Tools.Safety
                 ToolConfirmationTrustScope.SessionLowMediumRisk,
                 ToolConfirmationTrustScope.SessionAll
             };
+            TriggeredByRule = triggeredByRule != null && triggeredByRule.HasMatch ? triggeredByRule : null;
+        }
+
+        /// <summary>
+        /// 返回标记了 <c>ask</c> 规则的副本，并把 <paramref name="extraReason"/> 追加到原因列表首位。
+        /// </summary>
+        public ToolConfirmationRequest WithPermissionRule(PermissionRuleMatch match, string extraReason)
+        {
+            var reasons = new List<string>(Reasons.Count + 1);
+            if (!string.IsNullOrEmpty(extraReason))
+                reasons.Add(extraReason);
+            reasons.AddRange(Reasons);
+            return new ToolConfirmationRequest(
+                ToolName,
+                Action,
+                Risk,
+                Title,
+                Description,
+                reasons,
+                ParameterSummary,
+                Targets,
+                AllowedTrustScopes,
+                match);
         }
     }
 }

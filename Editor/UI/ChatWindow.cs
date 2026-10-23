@@ -543,7 +543,8 @@ namespace AgentCore.Editor.UI
                 var llmClient = new RoutingLLMClient();
 
                 // 创建 AgentLoop
-                var confirmationProvider = new DelegatingToolConfirmationProvider(RequestEmbeddedToolConfirmationAsync);
+                // P2: YOLO 状态由本窗口的会话信任持有，dispatcher 经 IToolSessionTrustState 查询（YOLO 下 deny 规则不生效）
+                var confirmationProvider = new DelegatingToolConfirmationProvider(RequestEmbeddedToolConfirmationAsync, IsSessionYoloActive);
                 _agentLoop = new AgentLoop(llmClient, confirmationProvider);
                 _agentLoop.OnAgentEvent += HandleAgentEvent;
                 _agentLoop.OnUserQueryRaised += HandleUserQueryRaised;

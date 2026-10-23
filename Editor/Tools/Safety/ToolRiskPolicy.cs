@@ -336,6 +336,101 @@ namespace AgentCore.Editor.Tools.Safety
         }
 
         /// <summary>
+        /// 把用户配置的权限规则叠加到风险策略决策上（P2）。
+        /// <list type="bullet">
+        ///   <item><description>未命中规则 → 原样返回（与无规则时完全一致）。</description></item>
+        ///   <item><description>原决策已是 Block（缺元数据 / Blocked 工作区根）→ 原样返回，规则不放宽也不改写。</description></item>
+        ///   <item><description><c>deny</c>：YOLO 下完全忽略（原样返回，随后由确认提供者直通）；否则 Block，原因里写明规则。</description></item>
+        ///   <item><description><c>ask</c>：一律 RequireConfirmation，并在请求上标记规则（Trust Low/Med 不会自动放行）。</description></item>
+        ///   <item><description><c>allow</c>：一律 Allow（含底线操作——用户显式选择）。</description></item>
+        /// </list>
+        /// </summary>
+        /// <param name="decision">风险策略给出的原决策。</param>
+        /// <param name="match">规则评估结果（可为 null）。</param>
+        /// <param name="yoloActive">当前会话是否处于 YOLO。</param>
+        /// <param name="metadata">工具元数据（ask 需要新建确认请求时使用，可为 null）。</param>
+        /// <param name="toolName">工具名。</param>
+        /// <param name="action">action。</param>
+        /// <param name="parameterSummary">参数摘要。</param>
+        /// <param name="targets">目标列表。</param>
+        public static ToolPolicyDecision ApplyPermissionRule(
+            ToolPolicyDecision decision,
+            PermissionRuleMatch match,
+            bool yoloActive,
+            ToolMetadata metadata,
+            string toolName,
+            string action,
+            IReadOnlyDictionary<string, string> parameterSummary = null,
+            IReadOnlyList<string> targets = null)
+        {
+            if (match == null || !match.HasMatch || decision.IsBlocked)
+                return decision;
+
+            var reasons = new List<string>(decision.Reasons ?? Array.Empty<string>());
+            switch (match.Effect)
+            {
+                case PermissionRuleEffect.Deny:
+                {
+                    // YOLO = 零审查、零拦截：deny 规则在 YOLO 下不生效
+                    if (yoloActive)
+                        return decision;
+                    return ToolPolicyDecision.Block(decision.Risk, new[] { $"Denied by permission {match.Describe()}" });
+                }
+
+                case PermissionRuleEffect.Ask:
+                {
+                    var ruleReason = $"Confirmation required by permission {match.Describe()}";
+                    if (decision.RequiresConfirmation && decision.ConfirmationRequest != null)
+                    {
+                        reasons.Insert(0, ruleReason);
+                        return ToolPolicyDecision.RequireConfirmation(
+                            decision.Risk,
+                            decision.ConfirmationRequest.WithPermissionRule(match, ruleReason),
+                            reasons);
+                    }
+
+                    var askReasons = new List<string> { ruleReason };
+                    ToolConfirmationRequest request;
+                    if (metadata != null)
+                    {
+                        request = BuildConfirmationRequest(
+                            toolName,
+                            action,
+                            decision.Risk,
+                            metadata,
+                            askReasons,
+                            parameterSummary,
+                            targets,
+                            allowSessionTrust: true);
+                    }
+                    else
+                    {
+                        request = new ToolConfirmationRequest(
+                            toolName ?? string.Empty,
+                            action,
+                            decision.Risk,
+                            string.IsNullOrEmpty(action) ? toolName : $"{toolName}: {action}",
+                            $"Confirm execution of tool '{toolName}'.",
+                            askReasons,
+                            parameterSummary,
+                            targets);
+                    }
+
+                    return ToolPolicyDecision.RequireConfirmation(
+                        decision.Risk,
+                        request.WithPermissionRule(match, null),
+                        askReasons);
+                }
+
+                default:
+                {
+                    reasons.Insert(0, $"Allowed by permission {match.Describe()}");
+                    return ToolPolicyDecision.Allow(decision.Risk, reasons);
+                }
+            }
+        }
+
+        /// <summary>
         /// 判断 action 名是否包含破坏性 token（v1.4.5 起）。
         /// <para>
         /// 匹配算法：把 action 按 <c>_</c> 拆成 token 列表，任一 token 命中
