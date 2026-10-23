@@ -31,6 +31,25 @@ namespace AgentCore.Editor.LLM
             _anthropic = anthropic ?? throw new ArgumentNullException(nameof(anthropic));
         }
 
+        /// <summary>
+        /// 网关探测：探测失败（超时 / 连接失败 / 无法识别格式）只算"探测失败"——记录警告后按用户配置的
+        /// 格式与鉴权直接发送真实请求，由真实请求的结果决定成败；不把探测失败变成本次运行的中止或取消。
+        /// 用户取消、配置缺失（未选模型 / endpoint 非法）照常上抛。
+        /// </summary>
+        private static async Task<ProviderProfile> ResolveForRequestAsync(ProviderProfile profile, CancellationToken ct)
+        {
+            try
+            {
+                return await GatewayDiscovery.ResolveAsync(profile, ActiveModelConfig.ApiKey, ct);
+            }
+            catch (GatewayProbeException ex) when (!ct.IsCancellationRequested)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Warning(
+                    $"[AgentCore] Gateway probe failed, sending the request with the configured profile settings: {ex.Message}");
+                return profile;
+            }
+        }
+
         /// <summary>当前应使用的底层客户端。</summary>
         public ILLMClient Current => ActiveModelConfig.ApiFormat == ApiFormats.Anthropic ? _anthropic : _openAI;
 
@@ -41,7 +60,7 @@ namespace AgentCore.Editor.LLM
             var profile = ActiveModelConfig.ActiveProfile;
             try
             {
-                var resolved = _discover ? await GatewayDiscovery.ResolveAsync(profile, ActiveModelConfig.ApiKey, ct) : profile;
+                var resolved = _discover ? await ResolveForRequestAsync(profile, ct) : profile;
                 using (ActiveModelConfig.UseProfile(resolved))
                     return await Current.ChatCompletionAsync(messages, tools, ct, contentMaxTokens, reasoningLevelOverride);
             }
@@ -59,7 +78,7 @@ namespace AgentCore.Editor.LLM
             var profile = ActiveModelConfig.ActiveProfile;
             try
             {
-                var resolved = _discover ? await GatewayDiscovery.ResolveAsync(profile, ActiveModelConfig.ApiKey, ct) : profile;
+                var resolved = _discover ? await ResolveForRequestAsync(profile, ct) : profile;
                 using (ActiveModelConfig.UseProfile(resolved))
                     return await Current.ChatCompletionStreamAsync(messages, onChunk, tools, ct, contentMaxTokens, reasoningLevelOverride);
             }
