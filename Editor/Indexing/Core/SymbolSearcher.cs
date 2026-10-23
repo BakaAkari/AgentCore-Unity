@@ -74,6 +74,50 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
+        /// 按查询条件搜索符号，附带 totalMatches / truncated / truncatedReason。
+        /// 后端未实现 <see cref="IPagedSymbolSearch"/> 时多取一条判断是否截断（总数为下界）。
+        /// </summary>
+        /// <returns>一页结果；workspace 尚未索引时返回空页。</returns>
+        public async Task<SymbolSearchPage> SearchPageAsync(
+            SearchQuery query,
+            CancellationToken ct = default)
+        {
+            if (query == null) throw new ArgumentNullException(nameof(query));
+
+            query.Limit = Math.Min(Math.Max(1, query.Limit), MaxResultLimit);
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
+                return new SymbolSearchPage();
+
+            if (_store is IPagedSymbolSearch paged)
+                return await paged.SearchSymbolsPageAsync(stored.Id, query, ct);
+
+            var limit = query.Limit;
+            query.Limit = limit + 1;
+            IReadOnlyList<SymbolInfo> raw;
+            try
+            {
+                raw = await _store.SearchSymbolsAsync(stored.Id, query, ct);
+            }
+            finally
+            {
+                query.Limit = limit;
+            }
+
+            var truncated = raw.Count > limit;
+            return new SymbolSearchPage
+            {
+                Matches = truncated ? raw.Take(limit).ToList() : raw,
+                TotalMatches = raw.Count,
+                TotalIsLowerBound = truncated,
+                Truncated = truncated,
+                TruncatedReason = truncated ? SearchTruncation.MaxResults : null,
+            };
+        }
+
+        /// <summary>
         /// 按文件路径获取该文件的所有符号。
         /// </summary>
         /// <param name="filePath">文件绝对路径（或相对于 WorkspaceRoot 的路径）。</param>
