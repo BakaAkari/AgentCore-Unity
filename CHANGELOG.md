@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-10-22
+
+多供应商 LLM 兼容与 prompt 缓存优化。设计文档：`plans/multi-llm-provider-design.md`。
+
+### Added
+- 原生 Anthropic Messages API 客户端（`LLM/Anthropic/`）：显式 `cache_control` 缓存断点（system/tools + 消息尾部，≤4 个，可选 1h TTL）、thinking 块带签名回放、按模型代际自动选择 thinking 形态（adaptive / budget_tokens / 始终开启）与 effort、SSE 流式、thinking 签名失效时自动降级重试一次
+- Provider Profile 新字段：`apiFormat`（auto/openai/anthropic，auto 按 host 识别 api.anthropic.com）、`dialect`（OpenAI 兼容方言）、`cacheTtl`（5m/1h）、`authScheme`（Bearer / x-api-key）、`fallbackProfileIds`（重试耗尽后按顺序切换的备用 profile）；Settings 页对应下拉与 Claude 走纯 OpenAI 兼容端点时的“无缓存”警告
+- Utility Profile：对话压缩、自动记忆等辅助调用可指定更便宜的 profile
+- 用量观测：统一 `LlmUsage`（未缓存输入 / 缓存读 / 缓存写 / 输出 / 推理），兼容 OpenAI、DeepSeek、LiteLLM、Anthropic 的 usage 字段；每次调用记一行 Info 日志；`UsageLedger` 会话累计与估算费用；上下文面板显示缓存命中率与费用，新建会话清零
+- 模型注册表 `ModelRegistry`：上下文窗口、最大输出、价格、thinking 形态等模型知识的单一真源；可用 `ProjectSettings/AgentCoreModelRegistry.json` 覆盖或新增条目
+- OpenAI 兼容方言适配：DeepSeek 工具调用轮次回传 `reasoning_content`；OpenAI 自动 `prompt_cache_key`；OpenRouter / LiteLLM 下的 Claude 模型自动加 `cache_control`
+- 视觉模型支持 Anthropic 端点（按 host 自动识别，使用 base64 image 块）
+- 按需工具改为延迟声明：工具列表在会话内保持不变，`request_tools` 激活的工具以追加的 `ToolChange` 消息启用。支持的 Claude 模型（Opus 5 / 5.5 / 4.8、Fable 5 / 5.1、Mythos 5 / 5.1、Sonnet 5.5）走 `defer_loading` + `tool_addition`（beta `mid-conversation-tool-changes-2026-07-01`），激活工具不再使整个缓存失效；其他模型/协议只发送已启用的工具
+- 单元测试 `Tests/LLM/MultiProviderTests.cs`（含“追加式历史下请求前缀稳定”不变量测试）
+
+### Changed
+- API Format remains visible with manual override. Unknown gateways verify generation with a small synthetic request before sending conversation content, remember the successful protocol/authentication, and invalidate results when connection settings or credentials change.
+- Connection and cache status are shown without exposing authentication/cache tuning controls. Missing cache metrics display as unknown rather than 0%; mixed sessions with missing metrics do not claim a complete hit rate.
+- 缓存前缀稳定化（对所有供应商的自动前缀缓存同样有效）：
+  - 记忆召回改为追加到当前轮末尾、只注入新条目，不再每轮删除并插入到系统提示之后
+  - skill 卸载改为追加卸载提示，不再从历史中删除 skill 消息
+  - 工具定义在会话内保持稳定顺序（已见工具保持位置，新工具追加）
+  - Self-Challenge REVISE 沿用本轮工具定义，修订答案追加在审阅反馈之后，不再替换原草稿
+  - 上下文截断采用水位线：超限时截到可用预算的 70%，之后沿用同一截断点直到再次超限；保留完整的前导 system 段；尽量从 user 消息处截断
+- 上下文窗口大小优先取模型注册表；temperature 仅对支持的模型发送；`max_tokens` 不超过模型最大输出
+- `GetEffectiveMaxTokens` 改为读取当前 profile 的覆盖值
+- Fallback：Anthropic `overloaded` / `api_error` / `rate_limit` 以及 HTTP 500 / 529 视为可重试
+
+### Fixed
+- Unity Editor integration (2026-10-23): native model discovery now respects protocol/version/auth headers; duplicated profiles retain protocol, cache TTL and fallback settings.
+- Anthropic streams now fail on truncation and propagate cancellation rather than returning incomplete assistant/tool messages.
+- Streaming planning markers no longer leak initial newlines across token boundaries; malformed-input tests explicitly expect error logs under the Unity Test Runner.
+- Verified in Unity 2022.3.50f1: 197 EditMode tests pass; live Claude tool round-trip and prompt cache reads succeed. See `plans/unity-integration-validation.md` for remaining external blockers.
+- `request_tools` 激活的工具此前要到下一条用户消息才出现在工具列表中（与其返回的 "available in subsequent calls" 不符），现在同一轮工具循环的下一次调用即可用
+- 流式响应最后的 usage chunk（`choices` 为空）被提前返回丢弃，导致从未读到 usage；内容与 `finish_reason` 在同一 chunk 时漏发 Finished
+
 ## [1.16.0] - 2026-08-19
 
 ### Added
