@@ -175,6 +175,27 @@ namespace AgentCore.Tests.Editor.Core
             Assert.AreEqual("plain", SvnErrorHints.Describe("plain"));
         }
 
+        [TestCase("svn: E230001: Server SSL certificate verification failed", SvnErrorHints.Kind.CertificateUntrusted)]
+        [TestCase("svn: warning: W160035: Path '/a' is already locked by user 'bob' in filesystem", SvnErrorHints.Kind.LockedByOther)]
+        [TestCase("svn: E155011: File 'a' is out of date", SvnErrorHints.Kind.OutOfDate)]
+        [TestCase("svn: E155032: Pristine text not found", SvnErrorHints.Kind.NeedsCleanup)]
+        [TestCase("svn: E170013: Unable to connect\nsvn: E215004: Authentication failed", SvnErrorHints.Kind.AuthRequired)]
+        public void SvnErrorHints_MergedTable_CoversCommandLineCodes(string text, SvnErrorHints.Kind expected)
+        {
+            Assert.AreEqual(expected, SvnErrorHints.Classify(text));
+        }
+
+        [Test]
+        public void SvnErrorHints_Describe_IsIdempotent()
+        {
+            var error = "svn: E155004: Run 'svn cleanup' to remove locks";
+            var once = SvnErrorHints.Describe(error, "D:/w");
+            Assert.AreEqual(once, SvnErrorHints.Describe(once, "D:/w"));
+            StringAssert.Contains("\n" + SvnErrorHints.HintPrefix, once);
+            Assert.IsTrue(SvnErrorHints.HasHint(once));
+            Assert.IsFalse(SvnErrorHints.HasHint(error));
+        }
+
         // ── 上下文摘要 ──
 
         [Test]

@@ -310,10 +310,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return error;
             if (error.IndexOf("svn", StringComparison.OrdinalIgnoreCase) < 0 && SvnErrorHints.FirstErrorCode(error) == null)
                 return error;
-            var hint = SvnErrorHints.GetHint(error, VcsDetector.GetVcsRootPath());
-            if (hint == null || error.Contains(hint))
-                return error; // 无法识别或已附加过
-            return error.Trim() + "\n" + hint;
+            return SvnErrorHints.Describe(error, VcsDetector.GetVcsRootPath()); // 幂等：已附加过时不重复
         }
 
         /// <summary>

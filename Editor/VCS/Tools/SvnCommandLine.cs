@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using AgentCore.Editor.Utils;
+using AgentCore.Editor.Workspace.Resolution;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -207,52 +208,18 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         /// <summary>
         /// 为常见 svn 错误码附加一行可操作的提示（工作副本被锁、需要认证、证书不受信任等）。
-        /// 不改变原始错误文本；没有匹配的错误码时原样返回。
+        /// 提示表统一在 <see cref="SvnErrorHints"/>；不改变原始错误文本，没有匹配时原样返回，已有提示时不重复追加。
         /// </summary>
         public static string AppendErrorHint(string error)
         {
-            if (string.IsNullOrEmpty(error))
+            if (string.IsNullOrEmpty(error) || SvnErrorHints.HasHint(error))
                 return error;
-
-            var hint = GetErrorHint(error);
-            return hint == null ? error : error.TrimEnd() + "\nHint: " + hint;
+            var hint = SvnErrorHints.GetHint(error);
+            return hint == null ? error : error.TrimEnd() + "\n" + SvnErrorHints.HintPrefix + hint;
         }
 
-        public static string GetErrorHint(string error)
-        {
-            if (string.IsNullOrEmpty(error))
-                return null;
-
-            if (Has(error, "E155004") || Has(error, "E155037") || Has(error, "E155032"))
-                return "The working copy is locked by an interrupted or concurrent svn operation. Close other svn clients (TortoiseSVN dialogs) and run version_control action 'cleanup', then retry.";
-            if (Has(error, "E155036"))
-                return "The working copy format is older than this svn client. Run 'svn upgrade' (or TortoiseSVN > Upgrade working copy) once.";
-            if (Has(error, "E155007"))
-                return "The path is not inside an SVN working copy.";
-            if (Has(error, "E215004") || Has(error, "E170001") || (Has(error, "E170013") && Has(error, "uthenticat")))
-                return "SVN authentication failed. AgentCore runs svn with --non-interactive and cannot prompt for a password; authenticate once with TortoiseSVN (or run 'svn info <url>' in a terminal and save the credentials), then retry.";
-            if (Has(error, "E230001"))
-                return "The server's SSL certificate is not trusted. Accept it permanently once with TortoiseSVN or a terminal 'svn info <url>'; AgentCore does not bypass certificate checks.";
-            if (Has(error, "E170013") || Has(error, "E731001") || Has(error, "E670002") || Has(error, "E175002"))
-                return "Could not reach the SVN server. Check the network / VPN and the repository URL.";
-            if (Has(error, "E155011") || Has(error, "E160028") || Has(error, "E160024"))
-                return "Some items are out of date. Run version_control action 'update' first, resolve any conflicts, then commit again.";
-            if (Has(error, "E155015"))
-                return "There are unresolved conflicts. Resolve them (resolve_files) before committing.";
-            if (Has(error, "W160035") || Has(error, "E160035") || Has(error, "E195022"))
-                return "The file is locked by another user or working copy. Ask the lock owner to release it.";
-            if (Has(error, "E195013"))
-                return "The file is not locked in this working copy.";
-            if (Has(error, "E155038"))
-                return "Reverting a directory with changed children needs a recursive revert (pass recursive=true).";
-            if (Has(error, "E720005") || Has(error, "E720032") || Has(error, "E720033"))
-                return "A file is in use by another program (Unity, an IDE, antivirus). Close it or retry after Unity finishes importing.";
-            if (Has(error, "E200009") && Has(error, "not known to exist in the repository"))
-                return "A parent directory is scheduled for addition but not part of the commit; include it (commit_files adds such parents automatically).";
-            return null;
-        }
-
-        private static bool Has(string text, string token) => text.IndexOf(token, StringComparison.Ordinal) >= 0;
+        /// <inheritdoc cref="SvnErrorHints.GetHint"/>
+        public static string GetErrorHint(string error) => SvnErrorHints.GetHint(error);
     }
 
     /// <summary>

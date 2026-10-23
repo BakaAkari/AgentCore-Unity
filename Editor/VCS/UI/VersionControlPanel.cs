@@ -1067,11 +1067,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 .ToList();
             var text = distinct.Count == 0 ? "Unknown error" : string.Join("\n", distinct);
             if (_currentVcsType == VcsType.Svn)
-            {
-                var hint = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.GetHint(text, VcsDetector.GetVcsRootPath());
-                if (hint != null)
-                    text += "\n" + hint;
-            }
+                text = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.Describe(text, VcsDetector.GetVcsRootPath());
             return $"{title}: {text}";
         }
 
@@ -1992,9 +1988,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             if (_currentVcsType != VcsType.Svn || string.IsNullOrEmpty(error))
                 return error;
-            var hint = AgentCore.Editor.Workspace.Resolution.SvnErrorHints.GetHint(error, VcsDetector.GetVcsRootPath());
-            // VcsRemoteStatusMonitor.LastError 可能已附带同一提示
-            return hint == null || error.Contains(hint) ? error : error.Trim() + "\n" + hint;
+            // Describe 幂等：LastError / 命令层已附带提示时不重复
+            return AgentCore.Editor.Workspace.Resolution.SvnErrorHints.Describe(error, VcsDetector.GetVcsRootPath());
         }
 
         private void UpdateSyncStatusTimeLabel()
