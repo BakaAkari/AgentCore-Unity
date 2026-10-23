@@ -69,6 +69,7 @@
   "chat.model.noneTooltip": "No provider profile configured. Click to manage profiles.",
   "chat.model.unset": "(no model)",
   "chat.model.tooltip": "Model: {0}\nProfile: {1}\nClick to switch model or profile",
+  "chat.model.personalTooltip": "Your personal choice (team default: {0})",
   "chat.model.busy": "Can't switch while the agent is running",
   "chat.model.loading": "Loading model list…",
   "chat.model.empty": "No models returned by the endpoint",

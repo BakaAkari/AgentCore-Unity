@@ -296,6 +296,76 @@ namespace AgentCore.Tests.Editor.Config
             Assert.AreEqual("http://example.test/v1", p.endpoint, "团队配置字段不受影响");
         }
 
+        [Test]
+        public void ModelOverride_NoOverride_FallsBackToSharedModelName()
+        {
+            var p = Profile("p1");
+            p.modelName = "team-model";
+            Assert.AreEqual("team-model", ProviderProfilesStorage.ResolveModelName(p, new ProviderProfilesUserState()));
+            Assert.AreEqual("team-model", ProviderProfilesStorage.ResolveModelName(p, null));
+            Assert.IsNull(ProviderProfilesStorage.ResolveModelName(null, new ProviderProfilesUserState()));
+        }
+
+        [Test]
+        public void ModelOverride_Set_ResolvesPersonalChoice_AndLeavesSharedModelUntouched()
+        {
+            var p = Profile("p1");
+            p.modelName = "team-model";
+            var state = new ProviderProfilesUserState();
+
+            Assert.IsTrue(ProviderProfilesStorage.SetModelOverride(state, p, "my-model"));
+            Assert.AreEqual("my-model", ProviderProfilesStorage.ResolveModelName(p, state));
+            Assert.AreEqual("team-model", p.modelName, "个人选择不得改写共享 modelName");
+            Assert.IsFalse(ProviderProfilesStorage.SetModelOverride(state, p, "my-model"), "重复选择不算变化");
+        }
+
+        [Test]
+        public void ModelOverride_SelectingTeamDefaultOrEmpty_ClearsOverride()
+        {
+            var p = Profile("p1");
+            p.modelName = "team-model";
+            var state = new ProviderProfilesUserState();
+
+            ProviderProfilesStorage.SetModelOverride(state, p, "my-model");
+            Assert.IsTrue(ProviderProfilesStorage.SetModelOverride(state, p, "team-model"));
+            Assert.AreEqual(0, state.modelOverrides.Count);
+            Assert.AreEqual("team-model", ProviderProfilesStorage.ResolveModelName(p, state));
+
+            ProviderProfilesStorage.SetModelOverride(state, p, "my-model");
+            Assert.IsTrue(ProviderProfilesStorage.SetModelOverride(state, p, "  "));
+            Assert.AreEqual(0, state.modelOverrides.Count);
+            Assert.IsFalse(ProviderProfilesStorage.SetModelOverride(state, p, null), "无覆盖时清除不算变化");
+        }
+
+        [Test]
+        public void ModelOverride_JsonRoundTrip_AndOmittedWhenEmpty()
+        {
+            var p = Profile("p1");
+            p.modelName = "team-model";
+            var state = new ProviderProfilesUserState();
+            StringAssert.DoesNotContain("modelOverrides", state.ToJson(), "无个人选择时不写字段，旧状态文件不因此改动");
+
+            ProviderProfilesStorage.SetModelOverride(state, p, "my-model");
+            var json = state.ToJson();
+            StringAssert.Contains("modelOverrides", json);
+
+            var back = ProviderProfilesUserState.FromJson(json);
+            Assert.AreEqual("my-model", ProviderProfilesStorage.ResolveModelName(p, back));
+            Assert.AreEqual(json, back.ToJson());
+        }
+
+        [Test]
+        public void ModelOverride_FromJson_DropsBlankValues_AndLegacyFileHasNone()
+        {
+            var state = ProviderProfilesUserState.FromJson("{\"modelOverrides\":{\"p1\":\"  \",\"p2\":\"m\"}}");
+            Assert.AreEqual(1, state.modelOverrides.Count);
+            Assert.AreEqual("m", state.modelOverrides["p2"]);
+
+            var legacy = ProviderProfilesUserState.FromJson("{\"schemaVersion\":1,\"activeProfileId\":\"p1\"}");
+            Assert.IsNotNull(legacy.modelOverrides);
+            Assert.AreEqual(0, legacy.modelOverrides.Count);
+        }
+
         private static ProviderProfile Profile(string id)
         {
             var p = ProviderProfile.Create(id);

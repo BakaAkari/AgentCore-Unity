@@ -12,12 +12,14 @@ namespace AgentCore.Editor.UI.Components
     /// v1.17.0: chat 面板输入区的模型切换下拉。胶囊按钮显示当前 active profile 的模型名，点击弹出
     /// <see cref="ModelSelectorPopup"/>（UI Toolkit 自绘，深色主题，带搜索/分区/当前项高亮）：
     /// <list type="bullet">
-    /// <item>当前 profile 的可用模型（<see cref="ProviderModelCatalog"/>，首次挂载时后台拉取）——选中即改写该 profile 的 modelName；</item>
+    /// <item>当前 profile 的可用模型（<see cref="ProviderModelCatalog"/>，首次挂载时后台拉取）——选中即记录为本用户对该 profile 的
+    /// 个人模型选择（<see cref="AgentCoreProviderProfiles.SetUserModel"/>，存 UserSettings，不改团队共享的 ProjectSettings 文件）；</item>
     /// <item>刷新模型列表；</item>
     /// <item>切换到其他 profile；打开设置页管理 profile。</item>
     /// </list>
     /// <para>
-    /// 模型/profile 是全局状态（与设置页同一份 <see cref="AgentCoreProviderProfiles"/>），靠
+    /// 显示的模型为本用户生效的模型（<see cref="AgentCoreProviderProfiles.GetEffectiveModelName"/>：个人选择优先，
+    /// 否则为共享 modelName）。模型/profile 状态与设置页同一份 <see cref="AgentCoreProviderProfiles"/>，靠
     /// <see cref="AgentCoreProviderProfiles.OnProfilesChanged"/> 与 <see cref="ProviderModelCatalog.OnCatalogChanged"/> 同步显示。
     /// Agent 运行中禁止切换（工具循环中途换模型会使 thinking 回放与缓存失效），由 <see cref="IsBusy"/> 判定。
     /// </para>
@@ -95,8 +97,10 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>刷新胶囊文字、状态点与 tooltip。</summary>
         public void Refresh()
         {
-            var active = AgentCoreProviderProfiles.instance.GetActive();
-            _dot.EnableInClassList("is-ready", active != null && !string.IsNullOrWhiteSpace(active.modelName));
+            var store = AgentCoreProviderProfiles.instance;
+            var active = store.GetActive();
+            var effectiveModel = store.GetEffectiveModelName(active);
+            _dot.EnableInClassList("is-ready", active != null && !string.IsNullOrWhiteSpace(effectiveModel));
             _dot.EnableInClassList("is-loading", active != null && ProviderModelCatalog.IsFetching(active.id));
 
             if (active == null)
@@ -106,11 +110,18 @@ namespace AgentCore.Editor.UI.Components
                 return;
             }
 
-            var model = string.IsNullOrWhiteSpace(active.modelName) ? Loc.Tr("chat.model.unset", "(no model)") : active.modelName;
+            var model = string.IsNullOrWhiteSpace(effectiveModel) ? Loc.Tr("chat.model.unset", "(no model)") : effectiveModel;
             _label.text = ShortName(model);
             tooltip = string.Format(
                 Loc.Tr("chat.model.tooltip", "Model: {0}\nProfile: {1}\nClick to switch model or profile"),
                 model, ProfileName(active));
+            // 个人选择与团队默认不同时注明，避免误以为改了团队配置
+            if (!string.IsNullOrWhiteSpace(effectiveModel) && !string.Equals(effectiveModel, active.modelName, StringComparison.Ordinal))
+            {
+                tooltip += "\n" + string.Format(
+                    Loc.Tr("chat.model.personalTooltip", "Your personal choice (team default: {0})"),
+                    string.IsNullOrWhiteSpace(active.modelName) ? Loc.Tr("chat.model.unset", "(no model)") : active.modelName);
+            }
         }
 
         private void ShowPopup()
@@ -169,11 +180,17 @@ namespace AgentCore.Editor.UI.Components
 
         private static ProviderProfile Active => AgentCoreProviderProfiles.instance.GetActive();
 
+        private static string EffectiveModel(ProviderProfile p) => AgentCoreProviderProfiles.instance.GetEffectiveModelName(p);
+
         private static List<string> ModelsOf(ProviderProfile active)
         {
             var models = ProviderModelCatalog.Get(active.id);
+            // 团队默认与个人选择都保证出现在列表里（目录未拉取 / 端点未返回时也能切回）
             if (!string.IsNullOrWhiteSpace(active.modelName) && !models.Contains(active.modelName))
                 models.Insert(0, active.modelName);
+            var effective = EffectiveModel(active);
+            if (!string.IsNullOrWhiteSpace(effective) && !models.Contains(effective))
+                models.Insert(0, effective);
             return models;
         }
 
@@ -320,14 +337,15 @@ namespace AgentCore.Editor.UI.Components
                 label.AddToClassList("agentcore-model-popup__row-text");
                 row.Add(label);
 
-                if (!string.IsNullOrWhiteSpace(p.modelName))
+                var profileModel = EffectiveModel(p);
+                if (!string.IsNullOrWhiteSpace(profileModel))
                 {
-                    var model = new Label(ModelSelector.ShortName(p.modelName));
+                    var model = new Label(ModelSelector.ShortName(profileModel));
                     model.AddToClassList("agentcore-model-popup__row-meta");
                     row.Add(model);
                 }
 
-                row.tooltip = string.IsNullOrWhiteSpace(p.endpoint) ? p.modelName : p.modelName + "\n" + p.endpoint;
+                row.tooltip = string.IsNullOrWhiteSpace(p.endpoint) ? profileModel : profileModel + "\n" + p.endpoint;
                 var id = p.id;
                 AddNavigable(container, row, current || _busy ? null : () =>
                 {
@@ -380,13 +398,14 @@ namespace AgentCore.Editor.UI.Components
                 _searchPlaceholder.style.display = filter.Length == 0 ? DisplayStyle.Flex : DisplayStyle.None;
 
             var models = ModelsOf(active);
+            var effectiveModel = EffectiveModel(active);
             var newRows = new List<VisualElement>();
             var newActions = new List<Action>();
             VisualElement selectedRow = null;
             foreach (var m in models)
             {
                 if (!Matches(m, filter)) continue;
-                bool current = m == active.modelName;
+                bool current = m == effectiveModel;
                 var row = Row(current);
 
                 var check = new Label(current ? "✓" : string.Empty);
@@ -492,12 +511,16 @@ namespace AgentCore.Editor.UI.Components
             _navActions.Add(act);
         }
 
+        /// <summary>
+        /// 选中模型：记录为本用户的个人选择（UserSettings），不改共享的 ProjectSettings 文件——
+        /// 换模型是个人偏好，不应给团队制造 VCS 改动。选回团队默认时清除个人覆盖。
+        /// </summary>
         private static void SelectModel(string profileId, string model)
         {
             var store = AgentCoreProviderProfiles.instance;
             var p = store.FindById(profileId);
-            if (p == null || p.modelName == model) return;
-            store.UpdateProfile(profileId, x => x.modelName = model);
+            if (p == null || store.GetEffectiveModelName(p) == model) return;
+            store.SetUserModel(profileId, model);
         }
 
         // ── 小工具 ───────────────────────────────────────────────────────
