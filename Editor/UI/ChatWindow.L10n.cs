@@ -87,6 +87,9 @@ namespace AgentCore.Editor.UI
 
             // v1.14.10: 思考强度下拉的选项文案（Auto/Off/Low/Med/High）随语言刷新。
             _reasoningLevelSelector?.RefreshDisplayNames();
+
+            // v1.17.0: + 按钮 tooltip / 附件预览文案
+            RefreshAttachmentUI();
         }
 
         /// <summary>

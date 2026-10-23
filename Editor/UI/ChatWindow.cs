@@ -435,6 +435,9 @@ namespace AgentCore.Editor.UI
                 {
                     chatArea.Add(_fileChangeSummaryPanel);
                 }
+
+                // v1.17.0: 待发送图片预览条（紧贴输入区上方）+ 输入区图片拖拽
+                InitializeAttachments(chatArea, inputArea);
             }
 
             // 7. 创建并初始化 AgentLoop（#10：Bootstrap 上下文异步加载，窗口首次打开不再阻塞主线程）。
@@ -449,6 +452,8 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private void OnDestroy()
         {
+            ReleasePendingAttachTexture();
+
             // Phase 3: 窗口关闭时强制保存当前会话
             if (_agentLoop != null)
             {
