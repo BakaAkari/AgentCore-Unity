@@ -27,6 +27,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private static DateTime? _lastSuccessAt;
         private static bool _sessionPaused;
 
+        // A damaged store (IIndexHealth.RequiresRebuild) triggers at most one automatic full rebuild per session.
+        private static bool _rebuildAttempted;
+
         // v1.4.0 — burst backoff (set by IndexingDirtyTracker when a large batch arrives)
         private static double _burstBackoffUntil;
         private static string _burstReason;
@@ -128,6 +131,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private static void OnEditorUpdate()
         {
             if (_running || !IndexingDirtyTracker.HasDirtyPaths)
+            {
+                return;
+            }
+
+            // Events are still arriving (debounce window): wait for them to settle.
+            if (IndexingDirtyTracker.IsSettling)
             {
                 return;
             }
@@ -245,7 +254,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     {
                         // All dirty paths belonged to OnDemand roots — drop them from the queue
                         // so we don't spin. LLM/user can trigger index_scope manually.
-                        IndexingDirtyTracker.MarkProcessed(snapshot.ChangedPaths, snapshot.DeletedPaths);
+                        IndexingDirtyTracker.MarkProcessed(snapshot);
                         _running = false;
                         _consecutiveFailures = 0;
                         _lastError = null;
@@ -261,49 +270,86 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                     var maxFileSizeBytes = Math.Max(1, settings.MaxFileSizeKB) * 1024L;
                     var indexer = new CodebaseIndexer(store, maxFileSizeBytes);
-                    var result = await indexer.RunTargetedIncrementalAsync(
-                        filteredChanged,
-                        filteredDeleted,
-                        Math.Max(1, settings.YieldEveryNFiles),
-                        progress => PublishRunning(
-                            snapshot.Count,
-                            Math.Max(0, progress.ProcessedFiles),
-                            Math.Max(filteredChanged.Count + filteredDeleted.Count, progress.TotalFiles),
-                            progress.CurrentFile),
-                        ct);
 
-                    if (!result.IsSuccess)
+                    // The store found too many corrupt lines on load: rebuild once per session
+                    // instead of incrementally patching an index that is known to be incomplete.
+                    if (!_rebuildAttempted && store is IIndexHealth health && health.RequiresRebuild)
                     {
-                        if (string.Equals(result.ErrorMessage, "NO_FULL_INDEX", StringComparison.Ordinal))
+                        _rebuildAttempted = true;
+                        AgentCoreLog.Warning($"[AgentCore] {health.HealthMessage ?? "Index store is damaged."} Running a full rebuild.");
+                        var rebuild = await indexer.RunFullIndexAsync(
+                            progress => PublishRunning(
+                                snapshot.Count,
+                                Math.Max(0, progress.ProcessedFiles),
+                                Math.Max(1, progress.TotalFiles),
+                                progress.CurrentFile),
+                            ct);
+                        ct.ThrowIfCancellationRequested();
+                        if (!rebuild.IsSuccess)
                         {
-                            _lastError = "Full index is required before background incremental indexing can run.";
-                            _nextRunAt = EditorApplication.timeSinceStartup + 30;
-                            PublishPending(IndexingDirtyTracker.Count);
-                            return;
+                            throw new InvalidOperationException(rebuild.ErrorMessage ?? "Full index rebuild failed.");
                         }
 
-                        // Persist failure on affected roots so LLM/user can see which roots broke
                         foreach (var rootId in affectedRoots)
                         {
-                            try { await stateStore.MarkFailedAsync(rootId, result.ErrorMessage, ct); }
-                            catch { /* best-effort */ }
+                            try { await stateStore.RefreshAndMarkReadyAsync(rootId, ct); }
+                            catch (Exception ex)
+                            {
+                                AgentCoreLog.Warning($"[AgentCore] Failed to refresh state for root {rootId}: {ex.Message}");
+                            }
                         }
 
-                        throw new InvalidOperationException(result.ErrorMessage ?? "Background incremental indexing failed.");
+                        // The full rebuild already covered every dirty path in this snapshot.
                     }
-
-                    // v1.4.0 — refresh per-root counts and mark Ready
-                    foreach (var rootId in affectedRoots)
+                    else
                     {
-                        try { await stateStore.RefreshAndMarkReadyAsync(rootId, ct); }
-                        catch (Exception ex)
+                        var result = await indexer.RunTargetedIncrementalAsync(
+                            filteredChanged,
+                            filteredDeleted,
+                            Math.Max(1, settings.YieldEveryNFiles),
+                            progress => PublishRunning(
+                                snapshot.Count,
+                                Math.Max(0, progress.ProcessedFiles),
+                                Math.Max(filteredChanged.Count + filteredDeleted.Count, progress.TotalFiles),
+                                progress.CurrentFile),
+                            ct);
+
+                        // Cancelled (domain reload / pause): not a failure, the paths stay dirty.
+                        ct.ThrowIfCancellationRequested();
+
+                        if (!result.IsSuccess)
                         {
-                            AgentCoreLog.Warning($"[AgentCore] Failed to refresh state for root {rootId}: {ex.Message}");
+                            if (string.Equals(result.ErrorMessage, "NO_FULL_INDEX", StringComparison.Ordinal))
+                            {
+                                _lastError = "Full index is required before background incremental indexing can run.";
+                                _nextRunAt = EditorApplication.timeSinceStartup + 30;
+                                PublishPending(IndexingDirtyTracker.Count);
+                                return;
+                            }
+
+                            // Persist failure on affected roots so LLM/user can see which roots broke
+                            foreach (var rootId in affectedRoots)
+                            {
+                                try { await stateStore.MarkFailedAsync(rootId, result.ErrorMessage, ct); }
+                                catch { /* best-effort */ }
+                            }
+
+                            throw new InvalidOperationException(result.ErrorMessage ?? "Background incremental indexing failed.");
+                        }
+
+                        // v1.4.0 — refresh per-root counts and mark Ready
+                        foreach (var rootId in affectedRoots)
+                        {
+                            try { await stateStore.RefreshAndMarkReadyAsync(rootId, ct); }
+                            catch (Exception ex)
+                            {
+                                AgentCoreLog.Warning($"[AgentCore] Failed to refresh state for root {rootId}: {ex.Message}");
+                            }
                         }
                     }
                 }
 
-                IndexingDirtyTracker.MarkProcessed(snapshot.ChangedPaths, snapshot.DeletedPaths);
+                IndexingDirtyTracker.MarkProcessed(snapshot);
                 _consecutiveFailures = 0;
                 _lastError = null;
                 _lastSuccessAt = DateTime.UtcNow;

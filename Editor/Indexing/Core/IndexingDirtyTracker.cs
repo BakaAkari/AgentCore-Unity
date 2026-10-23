@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using AgentCore.Editor.Components.Indexing.Config;
 using AgentCore.Editor.Utils;
+using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,23 +13,40 @@ namespace AgentCore.Editor.Components.Indexing.Core
 {
     /// <summary>
     /// Tracks changed and deleted source paths for background incremental indexing.
+    /// <para>
+    /// Paths live in a <see cref="VersionedDirtySet"/>: every event bumps the path's version, and
+    /// <see cref="MarkProcessed(IndexingDirtySnapshot)"/> only removes a path whose version still
+    /// matches the snapshot, so edits that land while a batch is being indexed are kept for the
+    /// next pass. Events are debounced (~500 ms) before persisting / notifying listeners.
+    /// </para>
     /// </summary>
     [InitializeOnLoad]
     public static class IndexingDirtyTracker
     {
         private const string PersistRelativePath = "Library/agentcore-indexing-dirty.json";
+
+        /// <summary>Quiet period after the last event before the dirty set is saved and listeners notified.</summary>
+        public const int DebounceMilliseconds = 500;
+
         private static readonly object _gate = new object();
-        private static readonly HashSet<string> _changedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly HashSet<string> _deletedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object _saveGate = new object();
+        private static readonly VersionedDirtySet _set = new VersionedDirtySet();
+        private static readonly Stopwatch _sinceLastEvent = new Stopwatch();
+        private static bool _flushPending;
+        private static int _pendingAddedCount;
         private static bool _loaded;
+        private static string _projectRoot;
 
         static IndexingDirtyTracker()
         {
             Load();
+            EditorApplication.update += FlushIfQuiet;
+            AssemblyReloadEvents.beforeAssemblyReload += FlushNow;
+            EditorApplication.quitting += FlushNow;
         }
 
         /// <summary>
-        /// Raised when the dirty path set changes.
+        /// Raised when the dirty path set changes (after the debounce window).
         /// </summary>
         public static event Action DirtyChanged;
 
@@ -39,10 +58,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             get
             {
                 EnsureLoaded();
-                lock (_gate)
-                {
-                    return _changedPaths.Count + _deletedPaths.Count;
-                }
+                return _set.Count;
             }
         }
 
@@ -50,6 +66,21 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// Gets whether there are paths waiting to be indexed.
         /// </summary>
         public static bool HasDirtyPaths => Count > 0;
+
+        /// <summary>
+        /// Gets whether events arrived within the debounce window and have not been flushed yet.
+        /// Background indexing waits until the burst of events settles.
+        /// </summary>
+        public static bool IsSettling
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _flushPending;
+                }
+            }
+        }
 
         /// <summary>
         /// Adds changed paths to the pending dirty set.
@@ -68,42 +99,78 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// Gets a snapshot of pending dirty paths without removing them.
+        /// Gets a snapshot of pending dirty paths without removing them. Oldest events come first.
+        /// Each path is classified as changed or deleted by whether it exists on disk right now;
+        /// the captured versions are used by <see cref="MarkProcessed(IndexingDirtySnapshot)"/>.
         /// </summary>
         public static IndexingDirtySnapshot Snapshot(int maxChangedPaths = int.MaxValue)
         {
             EnsureLoaded();
-            lock (_gate)
+            var limit = Math.Max(0, maxChangedPaths);
+            var snapshot = new IndexingDirtySnapshot
             {
-                return new IndexingDirtySnapshot
+                Versions = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            };
+
+            foreach (var entry in _set.Snapshot())
+            {
+                if (File.Exists(entry.Key))
                 {
-                    ChangedPaths = _changedPaths.Take(Math.Max(0, maxChangedPaths)).ToList(),
-                    DeletedPaths = _deletedPaths.ToList()
-                };
+                    if (snapshot.ChangedPaths.Count >= limit)
+                    {
+                        continue;
+                    }
+
+                    snapshot.ChangedPaths.Add(entry.Key);
+                }
+                else
+                {
+                    snapshot.DeletedPaths.Add(entry.Key);
+                }
+
+                snapshot.Versions[entry.Key] = entry.Value;
+            }
+
+            return snapshot;
+        }
+
+        /// <summary>
+        /// Removes the paths of a processed snapshot, but only those whose version has not changed
+        /// since the snapshot was taken (compare-and-remove). Paths edited mid-index stay dirty.
+        /// </summary>
+        public static void MarkProcessed(IndexingDirtySnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                return;
+            }
+
+            EnsureLoaded();
+            if (snapshot.Versions == null)
+            {
+                MarkProcessed(snapshot.ChangedPaths, snapshot.DeletedPaths);
+                return;
+            }
+
+            var removed = _set.RemoveProcessed(snapshot.Versions);
+            if (removed > 0)
+            {
+                Save();
+                NotifyChanged();
             }
         }
 
         /// <summary>
-        /// Removes successfully processed paths from the pending dirty set.
+        /// Removes paths from the pending dirty set unconditionally (no version check).
+        /// Prefer <see cref="MarkProcessed(IndexingDirtySnapshot)"/>, which does not lose concurrent edits.
         /// </summary>
         public static void MarkProcessed(IEnumerable<string> changedPaths, IEnumerable<string> deletedPaths)
         {
             EnsureLoaded();
-            var changed = NormalizePaths(changedPaths);
-            var deleted = NormalizePaths(deletedPaths);
             var changedAny = false;
-
-            lock (_gate)
+            foreach (var path in NormalizePaths(changedPaths).Concat(NormalizePaths(deletedPaths)))
             {
-                foreach (var path in changed)
-                {
-                    changedAny |= _changedPaths.Remove(path);
-                }
-
-                foreach (var path in deleted)
-                {
-                    changedAny |= _deletedPaths.Remove(path);
-                }
+                changedAny |= _set.RemoveUnconditionally(path);
             }
 
             if (changedAny)
@@ -119,13 +186,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public static void Clear()
         {
             EnsureLoaded();
-            var changed = false;
-            lock (_gate)
-            {
-                changed = _changedPaths.Count > 0 || _deletedPaths.Count > 0;
-                _changedPaths.Clear();
-                _deletedPaths.Clear();
-            }
+            var changed = _set.Count > 0;
+            _set.Clear();
 
             if (changed)
             {
@@ -136,18 +198,22 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         /// <summary>
         /// Forces the current dirty set to be written to disk.
+        /// The persisted format (ChangedPaths / DeletedPaths) is unchanged; versions are per-session.
         /// </summary>
         public static void Save()
         {
             EnsureLoaded();
-            IndexingDirtySnapshot snapshot;
-            lock (_gate)
+            var snapshot = new IndexingDirtySnapshot();
+            foreach (var path in _set.Paths())
             {
-                snapshot = new IndexingDirtySnapshot
+                if (File.Exists(path))
                 {
-                    ChangedPaths = _changedPaths.ToList(),
-                    DeletedPaths = _deletedPaths.ToList()
-                };
+                    snapshot.ChangedPaths.Add(path);
+                }
+                else
+                {
+                    snapshot.DeletedPaths.Add(path);
+                }
             }
 
             try
@@ -159,7 +225,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     Directory.CreateDirectory(directory);
                 }
 
-                AtomicFile.WriteAllText(path, JsonHelper.Serialize(snapshot, pretty: true));
+                // Save can be reached from the main thread and from tool threads; serialize the file write.
+                lock (_saveGate)
+                {
+                    AtomicFile.WriteAllText(path, JsonHelper.Serialize(snapshot, pretty: true));
+                }
             }
             catch (Exception ex)
             {
@@ -172,12 +242,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// </summary>
         public static void Load()
         {
-            lock (_gate)
-            {
-                _changedPaths.Clear();
-                _deletedPaths.Clear();
-                _loaded = true;
-            }
+            _set.Clear();
+            _loaded = true;
 
             try
             {
@@ -194,29 +260,15 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     return;
                 }
 
-                lock (_gate)
+                foreach (var dirtyPath in NormalizePaths(snapshot.ChangedPaths).Concat(NormalizePaths(snapshot.DeletedPaths)))
                 {
-                    foreach (var changedPath in NormalizePaths(snapshot.ChangedPaths))
-                    {
-                        _changedPaths.Add(changedPath);
-                        _deletedPaths.Remove(changedPath);
-                    }
-
-                    foreach (var deletedPath in NormalizePaths(snapshot.DeletedPaths))
-                    {
-                        _deletedPaths.Add(deletedPath);
-                        _changedPaths.Remove(deletedPath);
-                    }
+                    _set.Mark(dirtyPath);
                 }
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Warning($"[AgentCore] IndexingDirtyTracker.Load failed, dirty set reset: {ex.Message}");
-                lock (_gate)
-                {
-                    _changedPaths.Clear();
-                    _deletedPaths.Clear();
-                }
+                _set.Clear();
             }
         }
 
@@ -224,58 +276,79 @@ namespace AgentCore.Editor.Components.Indexing.Core
         {
             EnsureLoaded();
             var normalizedPaths = NormalizePaths(paths);
-            var changed = false;
-            var addedInThisBatch = 0;
+            var marked = 0;
+            var added = 0;
 
-            lock (_gate)
+            foreach (var path in normalizedPaths)
             {
-                foreach (var path in normalizedPaths)
+                // A "changed" event for a file that no longer exists is noise unless the path is
+                // already tracked (then the new version makes the next pass treat it as deleted).
+                if (!deleted && !File.Exists(path) && !_set.Contains(path))
                 {
-                    if (deleted)
-                    {
-                        if (_deletedPaths.Add(path))
-                        {
-                            changed = true;
-                            addedInThisBatch++;
-                        }
+                    continue;
+                }
 
-                        if (_changedPaths.Remove(path))
-                        {
-                            changed = true;
-                        }
-                    }
-                    else
-                    {
-                        if (File.Exists(path))
-                        {
-                            if (_changedPaths.Add(path))
-                            {
-                                changed = true;
-                                addedInThisBatch++;
-                            }
-                        }
-
-                        if (_deletedPaths.Remove(path))
-                        {
-                            changed = true;
-                        }
-                    }
+                _set.Mark(path, out var isNew);
+                marked++;
+                if (isNew)
+                {
+                    added++;
                 }
             }
 
-            if (changed)
+            if (marked == 0)
             {
-                Save();
-                NotifyChanged();
+                return;
+            }
 
-                // v1.4.0 — Burst detection: notify BackgroundIndexService to pause when a single
-                // batch marks a large number of files dirty (branch switch, formatting sweep, etc.).
-                TryNotifyBurst(addedInThisBatch);
+            // Debounce: persist / notify / burst-detect once the events settle.
+            lock (_gate)
+            {
+                _flushPending = true;
+                _pendingAddedCount += added;
+                _sinceLastEvent.Restart();
             }
         }
 
+        private static void FlushIfQuiet()
+        {
+            lock (_gate)
+            {
+                if (!_flushPending || _sinceLastEvent.ElapsedMilliseconds < DebounceMilliseconds)
+                {
+                    return;
+                }
+            }
+
+            FlushNow();
+        }
+
+        private static void FlushNow()
+        {
+            int addedCount;
+            lock (_gate)
+            {
+                if (!_flushPending)
+                {
+                    return;
+                }
+
+                _flushPending = false;
+                addedCount = _pendingAddedCount;
+                _pendingAddedCount = 0;
+                _sinceLastEvent.Reset();
+            }
+
+            Save();
+            NotifyChanged();
+
+            // v1.4.0 — Burst detection: notify BackgroundIndexService to pause when the coalesced
+            // events mark a large number of files dirty (branch switch, formatting sweep, etc.).
+            TryNotifyBurst(addedCount);
+        }
+
         /// <summary>
-        /// v1.4.0 — When a single Add() call adds more than the configured threshold, tell
+        /// v1.4.0 — When one debounced batch adds more than the configured threshold, tell
         /// <see cref="BackgroundIndexService"/> to enter burst backoff so the Editor can settle.
         /// Silent no-op when settings are unavailable or threshold is 0.
         /// </summary>
@@ -366,7 +439,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         private static string GetProjectRoot()
         {
-            return Path.GetFullPath(Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
+            // Cached on first use (the [InitializeOnLoad] constructor runs on the main thread), so
+            // AddChanged from tool threads does not touch Application.dataPath off the main thread.
+            return _projectRoot ??= Path.GetFullPath(Path.Combine(Application.dataPath, "..")).Replace('\\', '/').TrimEnd('/');
         }
 
         private static void NotifyChanged()
@@ -390,6 +465,14 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// Absolute paths for deleted files.
         /// </summary>
         public List<string> DeletedPaths = new List<string>();
+
+        /// <summary>
+        /// Version of every path in this snapshot at the time it was taken (not persisted).
+        /// Used for compare-and-remove in <see cref="IndexingDirtyTracker.MarkProcessed(IndexingDirtySnapshot)"/>.
+        /// </summary>
+        [JsonIgnore]
+        [NonSerialized]
+        public Dictionary<string, long> Versions;
 
         /// <summary>
         /// Total pending path count.
