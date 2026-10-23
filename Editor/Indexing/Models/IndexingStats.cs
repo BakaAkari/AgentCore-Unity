@@ -44,6 +44,15 @@ namespace AgentCore.Editor.Components.Indexing.Models
         /// <summary>最后一次增量索引时间（null 表示从未执行）。</summary>
         public DateTime? LastIncrementalIndexAt { get; set; }
 
+        /// <summary>最后一次 Scope 重建时间（null 表示从未执行）。</summary>
+        public DateTime? LastScopeIndexAt { get; set; }
+
+        /// <summary>最后一次任意类型索引运行时间（全量 / 增量 / Scope）。</summary>
+        public DateTime? LastIndexAt { get; set; }
+
+        /// <summary>最后一次索引运行类型（full / incremental / scope），未知时为 null。</summary>
+        public string LastIndexKind { get; set; }
+
         /// <summary>最后一次全量索引耗时（秒）。</summary>
         public double LastFullIndexDurationSeconds { get; set; }
 

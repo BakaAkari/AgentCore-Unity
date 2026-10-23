@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
+using AgentCore.Editor.Utils;
 using Newtonsoft.Json.Linq;
 
 namespace AgentCore.Editor.Tools.FileSystem
@@ -37,7 +38,7 @@ namespace AgentCore.Editor.Tools.FileSystem
         MayModifyScripts = true,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles,
-        ReadOnlyActions = new[] { "read_file", "file_info", "list_directory", "search_content", "ascii" })]
+        ReadOnlyActions = new[] { "read_file", "file_info", "list_directory", "search_content" })]
     public class ManageFileTool : IAgentTool
     {
         /// <summary>
@@ -59,16 +60,6 @@ namespace AgentCore.Editor.Tools.FileSystem
         /// Maximum number of context lines shown around each search match.
         /// </summary>
         private const int DefaultContextLines = 2;
-
-        /// <summary>
-        /// Maximum regex pattern length accepted by search_content.
-        /// </summary>
-        private const int MaxRegexPatternLength = 512;
-
-        /// <summary>
-        /// Per-match regex timeout. A pathological pattern fails with an error instead of hanging the editor.
-        /// </summary>
-        private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(200);
 
         /// <summary>
         /// Overall wall-clock budget for one search_content call. When exceeded, the partial
@@ -119,6 +110,18 @@ namespace AgentCore.Editor.Tools.FileSystem
             ".mp4", ".avi", ".mov", ".mkv",
             ".cubemap", ".exr", ".hdr"
         };
+
+        /// <summary>
+        /// ripgrep path: maximum directories walked (in parallel with rg) to report nested excluded dirs
+        /// such as Assets/Foo/obj in excluded_dirs. Past the cap the list is marked incomplete.
+        /// </summary>
+        internal const int ExcludedDirScanMaxDirs = 4000;
+
+        /// <summary>
+        /// ripgrep path: wall-clock budget for the excluded-dir walk. It starts before rg, so it only adds
+        /// latency when rg finishes sooner than this.
+        /// </summary>
+        internal static readonly TimeSpan ExcludedDirScanBudget = TimeSpan.FromMilliseconds(150);
 
         /// <summary>
         /// Lines longer than this are clipped in ripgrep results (minified / generated files).
@@ -272,7 +275,7 @@ namespace AgentCore.Editor.Tools.FileSystem
             catch (RegexMatchTimeoutException ex)
             {
                 // Never report a timed-out regex as "0 matches".
-                response = ToolResponse.Fail(DescribeRegexTimeout(ex.Pattern));
+                response = ToolResponse.Fail(SafeRegex.DescribeTimeout(ex.Pattern, "manage_file search_content"));
             }
             catch (OperationCanceledException)
             {
@@ -348,44 +351,6 @@ namespace AgentCore.Editor.Tools.FileSystem
         #region Search Helpers
 
         /// <summary>
-        /// Build a regex with a length cap, culture-invariant matching and a per-match timeout.
-        /// Throws <see cref="ArgumentException"/> with an explanation for unusable patterns.
-        /// </summary>
-        private static Regex CreateSafeRegex(string pattern, bool caseSensitive)
-        {
-            if (pattern == null)
-                throw new ArgumentException("Regex pattern is required.");
-
-            if (pattern.Length > MaxRegexPatternLength)
-                throw new ArgumentException(
-                    $"Regex pattern is {pattern.Length} chars; the limit is {MaxRegexPatternLength}. " +
-                    "Split it into several searches or use a shorter, more specific pattern.");
-
-            var options = RegexOptions.CultureInvariant;
-            if (!caseSensitive)
-                options |= RegexOptions.IgnoreCase;
-
-            try
-            {
-                return new Regex(pattern, options, RegexMatchTimeout);
-            }
-            catch (ArgumentException ex)
-            {
-                throw new ArgumentException($"Invalid regex pattern: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Error text for a regex that exceeded the per-match timeout.
-        /// </summary>
-        private static string DescribeRegexTimeout(string pattern)
-        {
-            return $"regex_timeout: pattern '{pattern}' took longer than {RegexMatchTimeout.TotalMilliseconds:0} ms on a single line " +
-                   "(likely catastrophic backtracking, e.g. nested quantifiers like (a+)+). No results were returned because they would be incomplete. " +
-                   "Rewrite the pattern (anchor it, avoid nested quantifiers) or search a narrower path.";
-        }
-
-        /// <summary>
         /// Whether a sub-directory is a generated / cache directory that scans skip by default.
         /// </summary>
         private static bool IsExcludedDirectory(string parentFullPath, string dirName)
@@ -454,6 +419,61 @@ namespace AgentCore.Editor.Tools.FileSystem
                 for (int i = toVisit.Count - 1; i >= 0; i--)
                     pending.Push(toVisit[i]);
             }
+        }
+
+        /// <summary>
+        /// Bounded walk under <paramref name="startDirs"/> that records excluded directories (obj/ at any depth,
+        /// Library/ Temp/ Logs/ under the project root) into <paramref name="excludedHits"/> without descending
+        /// into them. Hidden directories (unless <paramref name="includeHidden"/>) and .git are skipped.
+        /// Used by the ripgrep path, which prunes obj/ via a glob and therefore never reports it.
+        /// </summary>
+        /// <returns>true when the walk finished; false when it stopped at <paramref name="maxDirs"/> or <paramref name="budget"/>.</returns>
+        internal static bool CollectExcludedDirsBounded(
+            IEnumerable<string> startDirs, bool includeHidden, ISet<string> excludedHits,
+            int maxDirs, TimeSpan budget, CancellationToken ct)
+        {
+            var clock = Stopwatch.StartNew();
+            var pending = new Stack<string>();
+            foreach (var dir in startDirs)
+                pending.Push(dir);
+
+            int visited = 0;
+            while (pending.Count > 0)
+            {
+                if (ct.IsCancellationRequested || visited >= maxDirs || clock.Elapsed > budget)
+                    return false;
+
+                var current = pending.Pop();
+                visited++;
+
+                string[] children;
+                try
+                {
+                    children = Directory.GetDirectories(current);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                foreach (var child in children)
+                {
+                    var name = Path.GetFileName(child);
+                    if (IsExcludedDirectory(current, name))
+                    {
+                        excludedHits.Add(ToRelativePath(child));
+                        continue;
+                    }
+
+                    if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase)
+                        || (!includeHidden && name.StartsWith(".")))
+                        continue;
+
+                    pending.Push(child);
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -775,6 +795,15 @@ namespace AgentCore.Editor.Tools.FileSystem
         }
 
         /// <summary>
+        /// Result of the bounded excluded-dir walk on the ripgrep path.
+        /// </summary>
+        private sealed class NestedExcludedDirs
+        {
+            public readonly SortedSet<string> Dirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            public bool Complete;
+        }
+
+        /// <summary>
         /// search_content via ripgrep. Returns null — with <paramref name="fallbackNote"/> explaining why when it
         /// matters — when the .NET scanner should answer instead; an rg-specific problem is never an error.
         /// <para>
@@ -878,12 +907,31 @@ namespace AgentCore.Editor.Tools.FileSystem
             else
             {
                 options.Paths.Add(relativeRoot);
-                foreach (var dirName in ExcludedDirsAnywhere)
+            }
+
+            // rg prunes obj/ through a glob and never reports it, so list excluded dirs at any depth (as the
+            // .NET scanner does) with a bounded walk that runs alongside rg instead of before it.
+            Task<NestedExcludedDirs> excludedWalk = null;
+            if (req.Recursive)
+            {
+                var walkRoots = isProjectRoot
+                    ? options.Paths.Select(p => Path.Combine(ProjectRoot, p)).Where(Directory.Exists).ToList()
+                    : new List<string> { req.FullPath };
+                var includeHidden = req.IncludeHidden;
+                excludedWalk = Task.Run(() =>
                 {
-                    var nested = Path.Combine(req.FullPath, dirName);
-                    if (Directory.Exists(nested))
-                        excludedDirs.Add(ToRelativePath(nested));
-                }
+                    var found = new NestedExcludedDirs();
+                    try
+                    {
+                        found.Complete = CollectExcludedDirsBounded(
+                            walkRoots, includeHidden, found.Dirs, ExcludedDirScanMaxDirs, ExcludedDirScanBudget, ct);
+                    }
+                    catch (Exception)
+                    {
+                        found.Complete = false; // best-effort listing; never fails the search
+                    }
+                    return found;
+                });
             }
 
             RgSearchResult rg;
@@ -914,6 +962,21 @@ namespace AgentCore.Editor.Tools.FileSystem
                     return null;
             }
 
+            bool excludedListComplete = true;
+            if (excludedWalk != null)
+            {
+                // The walk is bounded by its own budget; this wait only covers the part rg did not overlap.
+                if (excludedWalk.Wait(ExcludedDirScanBudget + TimeSpan.FromMilliseconds(100)))
+                {
+                    excludedDirs.UnionWith(excludedWalk.Result.Dirs);
+                    excludedListComplete = excludedWalk.Result.Complete;
+                }
+                else
+                {
+                    excludedListComplete = false;
+                }
+            }
+
             var matches = new JArray();
             foreach (var m in rg.Matches)
             {
@@ -941,6 +1004,7 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ["truncated"] = rg.Truncated,
                 ["truncatedReason"] = rg.TruncatedReason,
                 ["excluded_dirs"] = new JArray(excludedDirs),
+                ["excluded_dirs_complete"] = excludedListComplete,
                 ["engine"] = "ripgrep"
             };
 
@@ -952,6 +1016,8 @@ namespace AgentCore.Editor.Tools.FileSystem
                 msg += $"; scan stopped after {SearchTimeBudget.TotalSeconds:0}s budget, narrow path/file_pattern for complete results";
             if (excludedDirs.Count > 0)
                 msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to search it)";
+            if (!excludedListComplete)
+                msg += $"; excluded_dirs may be incomplete (listing stopped after {ExcludedDirScanMaxDirs} dirs / {ExcludedDirScanBudget.TotalMilliseconds:0} ms; obj/ is still skipped at every depth)";
 
             return ToolResponse.OkWithData(data, msg);
         }
@@ -959,7 +1025,7 @@ namespace AgentCore.Editor.Tools.FileSystem
         /// <summary>
         /// search_content via the built-in .NET scanner.
         /// <para>
-        /// Safety: the pattern is capped at 512 chars and each match has a 200 ms timeout; a timeout
+        /// Safety: <see cref="SafeRegex"/> caps the pattern length and gives each match a timeout; a timeout
         /// is returned as an error, never as "0 matches". The scan honours cancellation per file and
         /// stops at a time / file / byte budget, returning what it found with truncatedReason set.
         /// </para>
@@ -974,11 +1040,11 @@ namespace AgentCore.Editor.Tools.FileSystem
             var caseSensitive = req.CaseSensitive;
             var includeHidden = req.IncludeHidden;
 
-            // Validate regex (length cap + match timeout; invalid patterns explain why)
+            // Validate regex (shared SafeRegex: length cap + match timeout; invalid patterns explain why)
             Regex regex;
             try
             {
-                regex = CreateSafeRegex(searchPattern, caseSensitive);
+                regex = SafeRegex.Create(searchPattern, ignoreCase: !caseSensitive);
             }
             catch (ArgumentException ex)
             {

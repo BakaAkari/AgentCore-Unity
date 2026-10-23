@@ -33,7 +33,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     ///   clear_index        — 清除当前 Workspace 的索引
     /// </summary>
     [AgentTool("search_code",
-        Description = "Codebase indexing and C# symbol search via local SQLite index (not committed to VCS). " +
+        Description = "Codebase indexing and C# symbol search: a local index of Roslyn-extracted C# symbols stored as JSONL " +
+                      "under {workspaceRoot}/.agentcore/index (not committed to VCS), plus ripgrep literal source-text search when rg is installed. " +
                       "Actions: status (index state), diagnose (full diagnostic: background service + per-root state + advice), " +
                       "list_root_states (per-root Ready/Indexing/Stale/NotIndexed/Failed with counts), " +
                       "mark_stale (force re-index of a root/scope on next background pass), " +
@@ -159,7 +160,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         /// <inheritdoc/>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "search_code",
-            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量索引 C# 符号、按名称/类型/命名空间/Scope 搜索符号、全文搜索（FTS5）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据本地存储（SQLite），不提交 VCS。",
+            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量/按 Scope 索引 C# 符号（Roslyn 提取）、按名称/类型/命名空间/Scope 搜索符号、符号名全文搜索（安装 ripgrep 时附带 *.cs 源码字面量命中）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据以 JSONL 本地存储于 {workspaceRoot}/.agentcore/index，不提交 VCS。",
             category: "Indexing",
             parametersSchema: _parametersSchema,
             requiresMainThread: false
@@ -308,6 +309,17 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 AgentCoreLog.Warning($"[AgentCore] search_code::status per-root fetch failed: {ex.Message}");
             }
 
+            object indexTimestamps = null;
+            try
+            {
+                indexTimestamps = await BuildIndexTimestampsAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                // 时间戳同为尽力而为
+                AgentCoreLog.Warning($"[AgentCore] search_code::status index timestamps fetch failed: {ex.Message}");
+            }
+
             return ToolResponse.OkWithData(new
             {
                 state = snapshot.State.ToString(),
@@ -321,6 +333,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 next_run_at = snapshot.NextRunAt?.ToString("O"),
                 reason_paused = snapshot.ReasonPaused,
                 session_paused = BackgroundIndexService.SessionPaused,
+                index_timestamps = indexTimestamps,
                 per_root_state = perRoot,
             }, $"后台索引状态：{snapshot.State}");
         }
@@ -701,7 +714,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 extracted_symbols = progress.ExtractedSymbols,
                 error_files = progress.ErrorFiles,
                 elapsed_seconds = Math.Round(progress.ElapsedSeconds, 2),
-            }, $"Scope 索引完成：{targetRoots.Count} 个 Root，{progress.ProcessedFiles} 个文件，{progress.ExtractedSymbols} 个符号（其他 Root 的索引未改动）");
+            }, $"Scope 索引完成：{targetRoots.Count} 个 Root，{progress.ProcessedFiles} 个文件，{progress.ExtractedSymbols} 个符号（其他 Root 的索引未改动；已更新 last_scope_index_at / last_index_at，last_full_index_at 保持为最后一次全量重建时间）");
         }
 
         /// <summary>
@@ -901,8 +914,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                     message = "尚未建立索引，请执行 index_full 或 index_incremental。",
                 }, "尚未建立索引");
 
-            var lastFull = await indexer.GetLastFullIndexTimeAsync(ct);
-            var lastIncremental = await indexer.GetLastIncrementalIndexTimeAsync(ct);
+            var timestamps = await indexer.GetIndexTimestampsAsync(ct) ?? new IndexTimestamps();
 
             return ToolResponse.OkWithData(new
             {
@@ -911,8 +923,13 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 total_symbols = stats.TotalSymbols,
                 total_roots = stats.TotalRoots,
                 error_files = stats.ErrorFiles,
-                last_full_index_at = lastFull?.ToString("O"),
-                last_incremental_at = lastIncremental?.ToString("O"),
+                last_full_index_at = timestamps.LastFullIndexAt?.ToString("O"),
+                last_incremental_at = timestamps.LastIncrementalAt?.ToString("O"),
+                last_scope_index_at = timestamps.LastScopeIndexAt?.ToString("O"),
+                last_scope_index_roots = timestamps.LastScopeIndexRoots,
+                last_index_at = timestamps.LastIndexAt?.ToString("O"),
+                last_index_kind = timestamps.LastIndexKind,
+                index_timestamps_note = IndexRunMetadata.Describe(timestamps),
                 scope_breakdown = stats.FilesByScope != null
                     ? stats.FilesByScope.Select(kvp => new
                     {
@@ -1310,7 +1327,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             else if (symbolId > 0)
             {
                 // 通过 file symbols 查找（需要先找到文件）
-                // 降级：通过 FTS 搜索 symbol_id 对应的符号
+                // 降级：通过符号文本搜索查找 symbol_id 对应的符号
                 var searcher = new SymbolSearcher(store);
                 var allByFile = await store.SearchSymbolsByTextAsync(stored.Id, "", 1, ct);
                 // 直接通过 GetSymbolsByFileAsync 无法按 ID 查，改用 search_text 降级
@@ -1410,7 +1427,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         }
 
         /// <summary>
-        /// get_backend_info — 获取当前索引后端信息（SQLite / Jsonl，数据库路径等）。
+        /// get_backend_info — 获取当前索引后端信息（后端类型、索引目录；仅 SQLite 后端报告数据库文件路径）。
         /// </summary>
         private static async Task<ToolResponse> HandleGetBackendInfoAsync(CancellationToken ct)
         {
@@ -1421,14 +1438,22 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
 
+            // 默认后端是 JSONL（目录内的操作日志 + 快照），只有 SQLite 后端才有单一数据库文件
+            string indexDir = null;
             string dbPath = null;
             if (!string.IsNullOrEmpty(workspace?.WorkspaceRoot))
-                dbPath = IndexStoreFactory.GetDbPath(workspace.WorkspaceRoot);
+            {
+                indexDir = IndexStoreFactory.GetIndexDir(workspace.WorkspaceRoot);
+                if (string.Equals(store.BackendType, "sqlite", StringComparison.OrdinalIgnoreCase))
+                    dbPath = IndexStoreFactory.GetDbPath(workspace.WorkspaceRoot);
+            }
 
             return ToolResponse.OkWithData(new
             {
                 backend_type = store.BackendType,
                 workspace_root = workspace?.WorkspaceRoot,
+                index_dir = indexDir,
+                index_dir_exists = indexDir != null && System.IO.Directory.Exists(indexDir),
                 db_path = dbPath,
                 db_exists = dbPath != null && System.IO.File.Exists(dbPath),
                 workspace_indexed = stored != null,
@@ -1439,7 +1464,34 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         // ── 私有辅助方法 ─────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 创建 IIndexStore 实例（优先 SQLite，降级 Jsonl）。
+        /// status 附带的索引时间戳（全量 / 增量 / Scope / 最近一次）。尚未建立索引时返回 null。
+        /// </summary>
+        private static async Task<object> BuildIndexTimestampsAsync(CancellationToken ct)
+        {
+            using var store = CreateStore();
+            if (store == null)
+                return null;
+
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
+                return null;
+
+            var t = await IndexRunMetadata.ReadAsync(store, stored.Id, ct);
+            return new
+            {
+                last_index_at = t.LastIndexAt?.ToString("O"),
+                last_index_kind = t.LastIndexKind,
+                last_full_index_at = t.LastFullIndexAt?.ToString("O"),
+                last_incremental_at = t.LastIncrementalAt?.ToString("O"),
+                last_scope_index_at = t.LastScopeIndexAt?.ToString("O"),
+                last_scope_index_roots = t.LastScopeIndexRoots,
+                note = IndexRunMetadata.Describe(t),
+            };
+        }
+
+        /// <summary>
+        /// 创建 IIndexStore 实例（默认 JSONL；仅定义 AGENTCORE_SQLITE 时优先尝试 SQLite，失败降级 JSONL）。
         /// 如果 WorkspaceRoot 无法解析则返回 null。
         /// </summary>
         private static IIndexStore CreateStore()
