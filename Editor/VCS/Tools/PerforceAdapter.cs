@@ -299,6 +299,61 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// <summary>
         /// 获取 Perforce 变更列表详情 (p4 describe)
         /// </summary>
+        /// <summary>
+        /// 解析当前 Perforce client 名：优先 <c>p4 -ztag info</c> 的 clientName（会考虑 P4CONFIG / p4 set），
+        /// 失败时回退到 P4CLIENT 环境变量。未配置 client 时 p4 返回 "*unknown*"，视为失败。
+        /// </summary>
+        internal async Task<string> GetClientNameAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var info = await VcsCommandExecutor.ExecuteAsync(
+                    "p4", new List<string> { "-ztag", "info" }, _workingDirectory, timeoutSeconds: 30, ct: ct);
+                if (info.Success)
+                {
+                    var name = ParseZtagField(info.Output, "clientName");
+                    if (IsValidClientName(name))
+                        return name;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[Version Control] p4 -ztag info failed: {ex.Message}");
+            }
+
+            var env = Environment.GetEnvironmentVariable("P4CLIENT");
+            return IsValidClientName(env) ? env.Trim() : null;
+        }
+
+        private static bool IsValidClientName(string name)
+        {
+            return !string.IsNullOrWhiteSpace(name)
+                   && !string.Equals(name.Trim(), "*unknown*", StringComparison.OrdinalIgnoreCase)
+                   && !name.TrimStart().StartsWith("-", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 从 <c>p4 -ztag</c> 输出中读取 "... field value" 行。
+        /// </summary>
+        internal static string ParseZtagField(string output, string field)
+        {
+            if (string.IsNullOrEmpty(output))
+                return null;
+
+            var prefix = "... " + field + " ";
+            foreach (var rawLine in output.Split('\n'))
+            {
+                var line = rawLine.TrimEnd('\r');
+                if (line.StartsWith(prefix, StringComparison.Ordinal))
+                    return line.Substring(prefix.Length).Trim();
+            }
+            return null;
+        }
+
         public async Task<VcsPerforceChangelist> GetChangelistAsync(string changeNumber = null, CancellationToken ct = default)
         {
             var result = new VcsPerforceChangelist();
@@ -307,9 +362,18 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 if (string.IsNullOrEmpty(changeNumber))
                 {
-                    // 获取默认 pending changelist
+                    // 获取当前 client 最新的 pending changelist。
+                    // 进程不经过 shell，"$P4CLIENT" 不会被展开（旧实现把字面量当 client 名），这里先解析真实 client 名。
+                    var clientName = await GetClientNameAsync(ct);
+                    if (string.IsNullOrEmpty(clientName))
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = "Could not determine the Perforce client (workspace) name from 'p4 -ztag info' or P4CLIENT. Specify a change_number.";
+                        return result;
+                    }
+
                     var pendingResult = await VcsCommandExecutor.ExecuteAsync(
-                        "p4", new List<string> { "changes", "-s", "pending", "-c", "$P4CLIENT", "-m", "1" }, _workingDirectory, ct: ct);
+                        "p4", new List<string> { "changes", "-s", "pending", "-c", clientName, "-m", "1" }, _workingDirectory, ct: ct);
 
                     if (pendingResult.Success && !string.IsNullOrEmpty(pendingResult.Output))
                     {
