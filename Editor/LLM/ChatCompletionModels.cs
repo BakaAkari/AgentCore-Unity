@@ -178,6 +178,13 @@ namespace AgentCore.Editor.LLM
         /// </summary>
         [JsonProperty("index", NullValueHandling = NullValueHandling.Ignore)]
         public int? Index { get; set; }
+
+        /// <summary>
+        /// 非空表示该调用不可执行（参数被 max_tokens 截断或不是合法 JSON），内容即回传给模型的错误。
+        /// 仅运行时标记，不序列化；见 <see cref="ToolCallIntegrity"/>。
+        /// </summary>
+        [JsonIgnore]
+        public string InvalidReason { get; set; }
     }
 
     /// <summary>

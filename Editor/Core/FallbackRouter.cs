@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Net.Http;
 using System.Collections.Generic;
 using System.Threading;
@@ -63,6 +64,20 @@ namespace AgentCore.Editor.Core
             Exception lastException = null;
             int actualAttempts = 0;
 
+            // 已有输出推给 UI（文本 / reasoning / 工具调用增量）后不再重试或切换 fallback：
+            // 重放会在同一轮里重复输出，且半截工具调用可能已被 UI 展示。直接报错，由用户决定是否重发。
+            bool emitted = false;
+            Action<StreamChunk> trackedOnChunk = chunk =>
+            {
+                if (chunk.Type == StreamChunkType.ContentToken ||
+                    chunk.Type == StreamChunkType.ReasoningToken ||
+                    chunk.Type == StreamChunkType.ToolCallDelta)
+                {
+                    emitted = true;
+                }
+                onChunk?.Invoke(chunk);
+            };
+
             for (int attempt = 0; attempt <= MaxRetries; attempt++)
             {
                 actualAttempts++;
@@ -75,7 +90,7 @@ namespace AgentCore.Editor.Core
                         await Task.Delay(RetryDelayMs * attempt, ct); // 递增延迟
                     }
 
-                    var result = await client.ChatCompletionStreamAsync(messages, onChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride);
+                    var result = await client.ChatCompletionStreamAsync(messages, trackedOnChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride);
 
                     // v1.6.5+: 流式路径不做空内容重试
                     // 原因：reasoning chunks 已通过 onChunk 发送到 UI，重试会导致重复输出
@@ -83,21 +98,20 @@ namespace AgentCore.Editor.Core
                     LastError = null;
                     return result;
                 }
-                catch (TaskCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     // 用户取消，不重试
                     throw;
                 }
-                catch (OperationCanceledException)
+                catch (Exception rawEx)
                 {
-                    // 用户取消，不重试
-                    throw;
-                }
-                catch (Exception ex)
-                {
+                    var ex = NormalizeTimeout(rawEx);
                     lastException = ex;
                     LastError = ex.Message;
                     AgentCoreLog.Warning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
+
+                    if (emitted)
+                        throw PartialOutputFailure(ex);
 
                     // 判断是否值得重试
                     if (!IsRetryableError(ex))
@@ -110,10 +124,12 @@ namespace AgentCore.Editor.Core
 
             // v1.17.0: 主 profile 失败后依次尝试 fallback 链
             var (fbOk, fbResult, fbError) = await TryFallbackChainAsync(
-                () => client.ChatCompletionStreamAsync(messages, onChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride),
-                onStatusUpdate);
+                () => client.ChatCompletionStreamAsync(messages, trackedOnChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride),
+                onStatusUpdate, ct, () => emitted);
             if (fbOk) return fbResult;
             lastException = fbError ?? lastException;
+            if (emitted)
+                throw PartialOutputFailure(lastException);
 
             // 所有重试都失败了（或遇到不可重试错误）
             throw new Exception(
@@ -165,16 +181,13 @@ namespace AgentCore.Editor.Core
 
                     return response;
                 }
-                catch (TaskCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     throw;
                 }
-                catch (OperationCanceledException)
+                catch (Exception rawEx)
                 {
-                    throw;
-                }
-                catch (Exception ex)
-                {
+                    var ex = NormalizeTimeout(rawEx);
                     lastException = ex;
                     LastError = ex.Message;
                     AgentCoreLog.Warning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
@@ -194,7 +207,7 @@ namespace AgentCore.Editor.Core
                 if (msg == null || string.IsNullOrEmpty(msg.Content))
                     throw new InvalidOperationException("LLM returned empty content.");
                 return response;
-            }, onStatusUpdate);
+            }, onStatusUpdate, ct, null);
             if (fbOk) return fbResult;
             lastException = fbError ?? lastException;
 
@@ -210,8 +223,12 @@ namespace AgentCore.Editor.Core
         /// 不修改全局 active profile。取消异常直接上抛。
         /// </summary>
         private async Task<(bool ok, T result, Exception error)> TryFallbackChainAsync<T>(
-            Func<Task<T>> call, Action<string> onStatusUpdate)
+            Func<Task<T>> call, Action<string> onStatusUpdate, CancellationToken ct, Func<bool> hasEmittedOutput)
         {
+            // 主 profile 已经输出过内容（例如流中途断开）时不切换模型，避免同一轮重复输出
+            if (hasEmittedOutput != null && hasEmittedOutput())
+                return (false, default, null);
+
             List<ProviderProfile> chain;
             try { chain = AgentCoreProviderProfiles.instance.GetFallbackChain(ActiveModelConfig.ActiveProfile); }
             catch { return (false, default, null); }
@@ -231,18 +248,41 @@ namespace AgentCore.Editor.Core
                         return (true, result, null);
                     }
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception rawEx)
                 {
+                    var ex = NormalizeTimeout(rawEx);
                     last = ex;
                     LastError = ex.Message;
                     AgentCoreLog.Warning($"[AgentCore] Fallback profile '{name}' failed: {ex.Message}");
+                    if (hasEmittedOutput != null && hasEmittedOutput())
+                        break;
                 }
             }
             return (false, default, last);
+        }
+
+        /// <summary>
+        /// 调用方令牌未取消时出现的 <see cref="OperationCanceledException"/>（含 <see cref="TaskCanceledException"/>）
+        /// 来自 HttpClient.Timeout 等内部超时，不是用户取消：转成 <see cref="TimeoutException"/> 走重试，
+        /// 而不是让整个运行按"用户取消"收尾。
+        /// </summary>
+        private static Exception NormalizeTimeout(Exception ex)
+        {
+            return ex is OperationCanceledException
+                ? new TimeoutException($"LLM request timed out: {ex.Message}", ex)
+                : ex;
+        }
+
+        private static Exception PartialOutputFailure(Exception ex)
+        {
+            AgentCoreLog.Warning("[AgentCore] LLM stream failed after partial output; not retrying to avoid duplicated output.");
+            return new Exception(
+                $"LLM stream was interrupted after partial output (not retried to avoid duplicated output). Last error: {ex?.Message}",
+                ex);
         }
 
         /// <summary>
@@ -255,9 +295,21 @@ namespace AgentCore.Editor.Core
             // 1. 异常类型判断（优先，更可靠）
             switch (ex)
             {
-                // TaskCanceledException 由 HttpClient 超时引发 -> 可重试
+                // TaskCanceledException 由 HttpClient 超时引发 -> 可重试（用户取消在调用方已提前拦截）
                 case TaskCanceledException _:
                     return true;
+
+                // 流在 [DONE] / finish_reason / message_stop 之前断开 -> 不完整回复，可重试
+                case EndOfStreamException _:
+                    return true;
+
+                // 流中途的服务端错误事件：按错误类型判断
+                case LlmStreamErrorException streamEx:
+                    return streamEx.Retryable;
+
+                // 内容过滤：重试结果相同
+                case LlmContentFilterException _:
+                    return false;
 
                 // v1.13+ SSE 流空闲超时看门狗 (StreamingResponseParser.ReadLineWithIdleTimeoutAsync)
                 // 抛出的 TimeoutException -> 判定为死连接，可重试 (显式类型判断，不依赖消息字符串

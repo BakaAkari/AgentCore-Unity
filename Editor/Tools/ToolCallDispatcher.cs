@@ -222,8 +222,23 @@ namespace AgentCore.Editor.Tools
                     );
                 }
 
-                // 2. 解析参数
+                // 2. 截断 / 非法参数的调用不执行（见 ToolCallIntegrity）
+                if (!string.IsNullOrEmpty(toolCall.InvalidReason))
+                {
+                    stopwatch.Stop();
+                    AgentCoreLog.Warning($"{LogPrefix}Skipped '{toolName}': {toolCall.InvalidReason}");
+                    return new ToolCallResult(
+                        toolCall,
+                        ToolResult.Fail(toolCall.InvalidReason, stopwatch.Elapsed.TotalMilliseconds),
+                        toolName,
+                        stopwatch.Elapsed.TotalMilliseconds
+                    );
+                }
+
+                // 3. 解析参数（_raw_arguments 包装 = 原参数不是合法 JSON，视同解析失败）
                 var parameters = ParseArguments(toolCall.Function?.Arguments);
+                if (ToolCallIntegrity.IsRawArgumentsWrapper(parameters))
+                    parameters = null;
 
                 if (parameters == null)
                 {
@@ -238,7 +253,7 @@ namespace AgentCore.Editor.Tools
                     );
                 }
 
-                // 3. Schema 参数预校验
+                // 4. Schema 参数预校验
                 var schema = tool.Metadata.ParametersSchema;
                 if (!ToolParameterValidator.Validate(parameters, schema, out var validationError))
                 {

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config;
@@ -80,6 +79,7 @@ namespace AgentCore.Editor.LLM
                 var message = result.GetMessage();
                 if (message != null)
                 {
+                    ToolCallIntegrity.MarkInvalid(message.ToolCalls, result.Choices?[0]?.FinishReason);
                     message.Usage = usage;
                     var reasoning = ReasoningFieldExtractor.ExtractFromObject(raw?["choices"]?[0]?["message"] as JObject);
                     if (!string.IsNullOrEmpty(reasoning)) message.ReasoningContent = reasoning;
@@ -244,7 +244,8 @@ namespace AgentCore.Editor.LLM
                             break;
 
                         case StreamChunkType.Done:
-                            finishReason = chunk.FinishReason;
+                            if (!string.IsNullOrEmpty(chunk.FinishReason))
+                                finishReason = chunk.FinishReason;
                             onChunk?.Invoke(chunk);
                             break;
 
@@ -254,6 +255,9 @@ namespace AgentCore.Editor.LLM
                             break;
                     }
                 }, ct);
+
+                if (string.Equals(finishReason, "content_filter", StringComparison.OrdinalIgnoreCase))
+                    throw new LlmContentFilterException("LLM response was blocked by the provider's content filter (finish_reason=content_filter).");
 
                 // 构建完整的 tool_calls 列表
                 foreach (var builder in toolCallBuilders.Values)
@@ -267,6 +271,11 @@ namespace AgentCore.Editor.LLM
                         toolCalls.Add(built);
                     }
                 }
+
+                // 截断（length）或参数非法的调用标记为不可执行，由 ToolCallDispatcher 回传错误
+                ToolCallIntegrity.MarkInvalid(toolCalls, finishReason);
+                if (finishReason == "length")
+                    AgentCoreLog.Warning($"[AgentCore] LLM output hit max_tokens (finish_reason=length); {toolCalls.Count} tool call(s) will not be executed.");
 
                 // 返回拼接好的完整 assistant 消息
                 var content = contentBuilder.ToString();
@@ -497,25 +506,9 @@ namespace AgentCore.Editor.LLM
                 // 策略 1 失败，继续尝试
             }
 
-            // 策略 2：尝试用 Newtonsoft.Json 的宽松模式读取
-            // 如果上面的修复不够，尝试提取可解析的部分并重建
-            try
-            {
-                // 尝试找到 JSON 对象的边界并逐字段修复
-                var rebuilt = RebuildJsonArguments(arguments);
-                if (rebuilt != null)
-                {
-                    JToken.Parse(rebuilt);
-                    AgentCore.Editor.Utils.AgentCoreLog.Debug("[AgentCore] Tool arguments repaired successfully (rebuild).");
-                    return rebuilt;
-                }
-            }
-            catch
-            {
-                // 策略 2 也失败
-            }
-
-            // 策略 3：最后手段 — 将整个 arguments 作为纯文本包装。
+            // 不再尝试"按正则提取键值对重建"：截断 / 损坏的参数被拼回合法 JSON 后会变成语义不同的调用。
+            // 修不好就包装为 _raw_arguments，仅用于保持历史可发送；ToolCallIntegrity 会把它标记为不可执行。
+            // 策略 2：最后手段 — 将整个 arguments 作为纯文本包装。
             // v1.14.13 note(Bug A 已实测证伪): 曾怀疑此处二次转义，经 sourceai vLLM(8000)
             // 实测带 id 的 _raw_arguments 形态被正常解析(200 OK)，该层转义为合法 JSON 所需，非 bug。请勿改。
             AgentCoreLog.Warning($"[AgentCore] Unable to fully repair tool arguments, wrapping as raw text. Original (first 200 chars): {arguments.Substring(0, Math.Min(200, arguments.Length))}");
@@ -612,62 +605,6 @@ namespace AgentCore.Editor.LLM
             }
 
             return sb.ToString();
-        }
-
-        /// <summary>
-        /// 尝试重建 JSON arguments：提取键值对并用 Newtonsoft.Json 安全重新序列化。
-        /// </summary>
-        private static string RebuildJsonArguments(string arguments)
-        {
-            // 尝试用正则提取顶层键值对
-            // 匹配模式: "key": "value" 或 "key": value
-            var result = new JObject();
-            
-            // 找到第一个 { 和最后一个 }
-            int start = arguments.IndexOf('{');
-            int end = arguments.LastIndexOf('}');
-            if (start < 0 || end <= start) return null;
-
-            string inner = arguments.Substring(start + 1, end - start - 1);
-            
-            // 尝试逐个提取 "key": 后面的值
-            var keyPattern = new Regex(@"""(\w+)""\s*:\s*");
-            var matches = keyPattern.Matches(inner);
-            
-            for (int i = 0; i < matches.Count; i++)
-            {
-                var match = matches[i];
-                string key = match.Groups[1].Value;
-                int valueStart = match.Index + match.Length;
-                
-                // 确定值的结束位置（下一个键的开始，或字符串末尾）
-                int valueEnd = (i + 1 < matches.Count) ? matches[i + 1].Index : inner.Length;
-                string rawValue = inner.Substring(valueStart, valueEnd - valueStart).TrimEnd(',', ' ', '\n', '\r');
-                
-                // 尝试解析值
-                try
-                {
-                    var token = JToken.Parse(rawValue);
-                    result[key] = token;
-                }
-                catch
-                {
-                    // 值无法解析，用安全序列化包装为字符串
-                    if (rawValue.StartsWith("\"") && rawValue.EndsWith("\""))
-                    {
-                        // 去掉外层引号，作为原始字符串内容
-                        string rawContent = rawValue.Substring(1, rawValue.Length - 2);
-                        result[key] = rawContent;
-                    }
-                    else
-                    {
-                        result[key] = rawValue;
-                    }
-                }
-            }
-
-            if (result.Count == 0) return null;
-            return result.ToString(Newtonsoft.Json.Formatting.None);
         }
 
         /// <summary>

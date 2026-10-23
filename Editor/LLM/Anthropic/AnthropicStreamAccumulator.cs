@@ -287,6 +287,9 @@ namespace AgentCore.Editor.LLM.Anthropic
                 }
             }
 
+            // max_tokens 截断的 tool_use 参数不完整，标记为不可执行
+            ToolCallIntegrity.MarkInvalid(toolCalls, AnthropicMessageMapper.MapStopReason(StopReason));
+
             var message = ChatMessage.Assistant(text.Length > 0 ? text.ToString() : null, toolCalls.Count > 0 ? toolCalls : null);
             if (reasoning.Count > 0) message.ReasoningBlocks = reasoning;
             var reasoningText = ReasoningText;
