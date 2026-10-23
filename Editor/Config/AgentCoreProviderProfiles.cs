@@ -77,6 +77,12 @@ namespace AgentCore.Editor.Config
         /// <summary>每用户状态（运行时字段 + 个人 active 选择），首次访问时加载并与共享数据合并。</summary>
         [NonSerialized] private ProviderProfilesUserState _userState;
 
+        /// <summary>
+        /// 保护 <see cref="ProviderProfilesUserState.modelOverrides"/>：LLM 客户端可能在后台线程经
+        /// <see cref="ActiveModelConfig.ModelName"/> 读取，写入只在主线程。
+        /// </summary>
+        private static readonly object ModelOverrideLock = new object();
+
         /// <summary>增删改及切换 active 时触发，供 UI 订阅刷新。</summary>
         public static event Action OnProfilesChanged;
 
@@ -128,6 +134,41 @@ namespace AgentCore.Editor.Config
         /// </summary>
         public ProviderProfile GetActive()
             => FindById(ActiveProfileId);
+
+        /// <summary>
+        /// profile 对本用户生效的模型名：chat 面板里的个人选择（存于 UserSettings）优先，
+        /// 否则为共享文件中的 <see cref="ProviderProfile.modelName"/>（团队默认）。
+        /// 可在后台线程调用（只读）。
+        /// </summary>
+        public string GetEffectiveModelName(ProviderProfile profile)
+        {
+            if (profile == null)
+                return null;
+            EnsureUserState();
+            lock (ModelOverrideLock)
+                return ProviderProfilesStorage.ResolveModelName(profile, _userState);
+        }
+
+        /// <summary>
+        /// 记录本用户为 profile 选择的模型（chat 面板模型下拉）。这是个人选择：只写
+        /// <c>UserSettings/AgentCore/ProviderProfilesState.json</c>，不改共享文件；
+        /// 选择与团队默认相同时清除个人覆盖。设置页修改共享 modelName 请用 <see cref="UpdateProfile"/>。
+        /// </summary>
+        public void SetUserModel(string profileId, string model)
+        {
+            var target = FindById(profileId);
+            if (target == null)
+                return;
+
+            bool changed;
+            lock (ModelOverrideLock)
+                changed = ProviderProfilesStorage.SetModelOverride(_userState, target, model);
+            if (!changed)
+                return;
+
+            target.lastUsedAtUnixMs = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            SaveAndNotify();
+        }
 
         /// <summary>辅助任务 profile id（空 = 跟随 active）。</summary>
         public string UtilityProfileId => utilityProfileId;
@@ -273,6 +314,8 @@ namespace AgentCore.Editor.Config
 
             EnsureUserState();
             _userState.profiles.Remove(id);
+            lock (ModelOverrideLock)
+                _userState.modelOverrides?.Remove(id);
             if (_userState.activeProfileId == id)
                 _userState.activeProfileId = null;
 
@@ -325,7 +368,16 @@ namespace AgentCore.Editor.Config
                 return;
 
             var previousConnection = AgentCore.Editor.LLM.GatewayDiscovery.Identity(target);
+            var previousModel = target.modelName;
             mutate(target);
+            if (!string.Equals(previousModel, target.modelName, StringComparison.Ordinal))
+            {
+                // 共享 modelName 被显式修改（设置页 / 自动填充首个模型）：清除本用户对该 profile 的个人模型选择，
+                // 让这次修改对自己立即生效，而不是被旧的个人选择遮住。
+                EnsureUserState();
+                lock (ModelOverrideLock)
+                    _userState.modelOverrides?.Remove(id);
+            }
             if (previousConnection != AgentCore.Editor.LLM.GatewayDiscovery.Identity(target))
             {
                 target.verifiedConnection = null;

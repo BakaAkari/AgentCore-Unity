@@ -122,7 +122,9 @@ namespace AgentCore.Editor.Core
                 chunk => OnStreamChunkReceived(chunk, assistantTurn, ct),
                 tools: effectiveTools,
                 ct: ct,
-                onStatusUpdate: status => EmitEvent(AgentEvent.ErrorEvent($"[Retry] {status}")),
+                // 重试 / 切换备用 profile 是信息性进度，不按错误事件发出（否则 UI 会留下红色错误卡片，
+                // 即使重试随后成功）。全部失败时由异常路径的 ErrorEvent 单独报告。
+                onStatusUpdate: status => EmitEvent(AgentEvent.LlmRetryNotice(status)),
                 // v1.14.10: 会话级思考强度快捷覆盖（chat 面板下拉选择），随 ConversationTurn
                 // 而非 AgentLoop 全局状态存在——每条独立会话可以有不同的覆盖值。
                 reasoningLevelOverride: ReasoningEffortOverride

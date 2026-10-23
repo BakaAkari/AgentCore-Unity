@@ -31,16 +31,19 @@ namespace AgentCore.Editor.UI
             switch (evt.Type)
             {
                 case AgentEventType.StateChanged:
+                    _llmRetryNoticeActive = false; // 状态切换会改写状态行，重试提示随之撤下
                     UpdateUIState(evt.State);
                     break;
 
                 case AgentEventType.StreamToken:
+                    ClearLlmRetryNoticeIfAny();
                     AppendStreamToken(evt.Content, evt.MessageId);
                     _agentStatusLine?.Tick();
                     ThrottledScrollToBottom();
                     break;
 
                 case AgentEventType.ReasoningToken:
+                    ClearLlmRetryNoticeIfAny();
                     AppendReasoningToken(evt.Content, evt.MessageId, evt.ReasoningSource);
                     _agentStatusLine?.Tick();
                     ThrottledScrollToBottom();
@@ -62,8 +65,14 @@ namespace AgentCore.Editor.UI
                     break;
 
                 case AgentEventType.Error:
+                    _llmRetryNoticeActive = false;
                     DismissPendingIndicator();
                     ShowError(evt.Content, evt.Detail);
+                    break;
+
+                // LLM 自动重试进度：信息性状态，不是错误，不生成错误卡片
+                case AgentEventType.LlmRetryNotice:
+                    HandleLlmRetryNotice(evt);
                     break;
 
                 // Phase 2: 工具调用事件

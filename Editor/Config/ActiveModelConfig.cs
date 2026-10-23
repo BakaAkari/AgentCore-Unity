@@ -118,9 +118,21 @@ namespace AgentCore.Editor.Config
         public static string Endpoint
             => ActiveProfile?.endpoint ?? throw new InvalidOperationException(NoProfileMessage);
 
-        /// <summary>当前 model name。无 active profile 时抛 <see cref="InvalidOperationException"/>。</summary>
+        /// <summary>
+        /// 当前 model name。无 active profile 时抛 <see cref="InvalidOperationException"/>。
+        /// 本用户在 chat 面板选择的模型（UserSettings）优先，否则为 profile 的共享 modelName，
+        /// 见 <see cref="AgentCoreProviderProfiles.GetEffectiveModelName"/>。作用域 profile（fallback / utility /
+        /// 已验证的副本）按 id 解析，同样适用个人选择。
+        /// </summary>
         public static string ModelName
-            => ActiveProfile?.modelName ?? throw new InvalidOperationException(NoProfileMessage);
+        {
+            get
+            {
+                var p = ActiveProfile ?? throw new InvalidOperationException(NoProfileMessage);
+                return AgentCoreProviderProfiles.instance.GetEffectiveModelName(p)
+                       ?? throw new InvalidOperationException(NoProfileMessage);
+            }
+        }
 
         /// <summary>
         /// 当前 API key。有 active profile 时按 profileId 从 <see cref="SecureKeyStorage"/> 取

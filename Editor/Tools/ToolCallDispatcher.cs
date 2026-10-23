@@ -330,7 +330,7 @@ namespace AgentCore.Editor.Tools
                         touchesProtected);
 
                     // P2 权限规则：deny > ask > allow；YOLO 下 deny 不生效。无规则时原样返回。
-                    var ruleMatch = EvaluatePermissionRules(toolName, action, parameters);
+                    var ruleMatch = EvaluatePermissionRules(toolName, action, parameters, out var rulePaths);
                     decision = ToolRiskPolicy.ApplyPermissionRule(
                         decision,
                         ruleMatch,
@@ -340,6 +340,10 @@ namespace AgentCore.Editor.Tools
                         action,
                         paramSummary,
                         pathTargets);
+
+                    // 记下规则匹配用的路径：UI 新增 allow 规则后据此重新评估排队中的确认（与这里同一匹配器、同一输入）
+                    if (decision.ConfirmationRequest != null)
+                        decision.ConfirmationRequest.RulePaths = rulePaths;
                 }
 
                 switch (decision.Outcome)
@@ -884,7 +888,7 @@ namespace AgentCore.Editor.Tools
                     subProtected);
 
                 // P2 权限规则逐子操作生效（batch_execute 外壳本身不参与匹配）
-                var subRuleMatch = EvaluatePermissionRules(subToolName, subAction, subArgs);
+                var subRuleMatch = EvaluatePermissionRules(subToolName, subAction, subArgs, out _);
                 if (subRuleMatch.HasMatch)
                 {
                     if (yoloActive == null)
@@ -957,36 +961,17 @@ namespace AgentCore.Editor.Tools
         /// 按当前规则来源评估一次调用（工具名 + action + 参数中的路径）。
         /// 无规则或读取失败返回 <see cref="PermissionRuleMatch.None"/>——绝不因规则配置问题拦截。
         /// </summary>
-        private PermissionRuleMatch EvaluatePermissionRules(string toolName, string action, JObject parameters)
+        private PermissionRuleMatch EvaluatePermissionRules(string toolName, string action, JObject parameters, out List<string> rulePaths)
         {
+            rulePaths = null;
             try
             {
+                var paths = CollectRulePaths(parameters);
+                rulePaths = paths;
+
                 var rules = (_ruleSource ?? PermissionRulesStore.Default).GetActiveRules();
                 if (rules == null || rules.Count == 0)
                     return PermissionRuleMatch.None;
-
-                var raw = ToolPathRiskResolver.ExtractPathCandidates(parameters);
-                List<string> paths = null;
-                if (raw.Count > 0)
-                {
-                    string projectRoot = null;
-                    try
-                    {
-                        projectRoot = SafePath.ProjectRoot;
-                    }
-                    catch
-                    {
-                        // 拿不到项目根（非主线程等）：只做斜杠 / 段规范化后匹配
-                    }
-
-                    paths = new List<string>(raw.Count);
-                    foreach (var p in raw)
-                    {
-                        var normalized = PermissionRuleMatcher.NormalizePath(p, projectRoot);
-                        if (normalized != null)
-                            paths.Add(normalized);
-                    }
-                }
 
                 return PermissionRuleMatcher.Evaluate(rules, toolName, action, paths);
             }
@@ -995,6 +980,37 @@ namespace AgentCore.Editor.Tools
                 AgentCoreLog.Warning($"{LogPrefix}Permission rule evaluation failed for '{toolName}': {ex.Message}. Rules ignored for this call.");
                 return PermissionRuleMatch.None;
             }
+        }
+
+        /// <summary>
+        /// 提取参数中的路径并规范化为项目相对路径，供权限规则 glob 匹配。无路径返回 null。
+        /// </summary>
+        private static List<string> CollectRulePaths(JObject parameters)
+        {
+            var raw = ToolPathRiskResolver.ExtractPathCandidates(parameters);
+            List<string> paths = null;
+            if (raw.Count > 0)
+            {
+                string projectRoot = null;
+                try
+                {
+                    projectRoot = SafePath.ProjectRoot;
+                }
+                catch
+                {
+                    // 拿不到项目根（非主线程等）：只做斜杠 / 段规范化后匹配
+                }
+
+                paths = new List<string>(raw.Count);
+                foreach (var p in raw)
+                {
+                    var normalized = PermissionRuleMatcher.NormalizePath(p, projectRoot);
+                    if (normalized != null)
+                        paths.Add(normalized);
+                }
+            }
+
+            return paths;
         }
 
         /// <summary>

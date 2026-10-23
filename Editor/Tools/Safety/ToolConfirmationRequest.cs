@@ -59,6 +59,15 @@ namespace AgentCore.Editor.Tools.Safety
         /// </summary>
         public PermissionRuleMatch TriggeredByRule { get; }
 
+        /// <summary>
+        /// Dispatcher 做权限规则匹配时使用的规范化项目相对路径（可为 null = 调用无路径参数）。
+        /// <para>
+        /// 供 UI 在新增规则（"始终允许"）后用与 Dispatcher 相同的输入重新评估排队中的确认
+        /// （<see cref="ToolConfirmationTrust.IsAllowedByPermissionRules"/>）；不参与展示。
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<string> RulePaths { get; internal set; }
+
         public ToolConfirmationRequest(
             string toolName,
             string action,
@@ -108,7 +117,10 @@ namespace AgentCore.Editor.Tools.Safety
                 ParameterSummary,
                 Targets,
                 AllowedTrustScopes,
-                match);
+                match)
+            {
+                RulePaths = RulePaths
+            };
         }
     }
 }

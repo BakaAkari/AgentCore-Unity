@@ -86,6 +86,16 @@ namespace AgentCore.Editor.Config
         /// <summary>按 profile id 保存的运行时状态。有条目即表示该 profile 以本文件为准（即便全为默认值）。</summary>
         public SortedDictionary<string, ProviderProfileRuntimeState> profiles = new(StringComparer.Ordinal);
 
+        /// <summary>
+        /// 本用户在 chat 面板模型下拉里选择的模型（profile id → 模型名）；无条目 = 跟随共享文件中该 profile 的
+        /// <see cref="ProviderProfile.modelName"/>（团队默认）。与 <see cref="activeProfileId"/> 一样是个人选择，
+        /// 切换模型只改这里，不改共享文件。旧版本把选择直接写进共享 modelName，读取时自然作为默认值保留。
+        /// </summary>
+        public SortedDictionary<string, string> modelOverrides = new(StringComparer.Ordinal);
+
+        /// <summary>无个人模型选择时不写出该字段，避免旧状态文件仅因多出空字段而改动。</summary>
+        public bool ShouldSerializemodelOverrides() => modelOverrides != null && modelOverrides.Count > 0;
+
         public string ToJson()
             => JsonConvert.SerializeObject(this, Formatting.Indented).Replace("\r\n", "\n") + "\n";
 
@@ -99,6 +109,16 @@ namespace AgentCore.Editor.Config
             state.profiles = state.profiles == null
                 ? new SortedDictionary<string, ProviderProfileRuntimeState>(StringComparer.Ordinal)
                 : new SortedDictionary<string, ProviderProfileRuntimeState>(state.profiles, StringComparer.Ordinal);
+            var overrides = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            if (state.modelOverrides != null)
+            {
+                foreach (var pair in state.modelOverrides)
+                {
+                    if (!string.IsNullOrEmpty(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                        overrides[pair.Key] = pair.Value;
+                }
+            }
+            state.modelOverrides = overrides;
             return state;
         }
     }
@@ -249,6 +269,41 @@ namespace AgentCore.Editor.Config
                 }
             }
             return imported;
+        }
+
+        /// <summary>
+        /// 解析 profile 对本用户生效的模型名：个人选择优先，否则为共享文件中的 <see cref="ProviderProfile.modelName"/>。
+        /// </summary>
+        public static string ResolveModelName(ProviderProfile profile, ProviderProfilesUserState state)
+        {
+            if (profile == null)
+                return null;
+            if (state?.modelOverrides != null && !string.IsNullOrEmpty(profile.id)
+                && state.modelOverrides.TryGetValue(profile.id, out var personal)
+                && !string.IsNullOrWhiteSpace(personal))
+                return personal;
+            return profile.modelName;
+        }
+
+        /// <summary>
+        /// 记录本用户对 profile 的模型选择。选择与团队默认相同（或为空）时清除个人覆盖，继续跟随团队默认。
+        /// </summary>
+        /// <returns>true 表示用户状态有变化。</returns>
+        public static bool SetModelOverride(ProviderProfilesUserState state, ProviderProfile profile, string model)
+        {
+            if (state == null || profile == null || string.IsNullOrEmpty(profile.id))
+                return false;
+            state.modelOverrides ??= new SortedDictionary<string, string>(StringComparer.Ordinal);
+
+            model = model?.Trim();
+            if (string.IsNullOrEmpty(model) || string.Equals(model, profile.modelName, StringComparison.Ordinal))
+                return state.modelOverrides.Remove(profile.id);
+
+            if (state.modelOverrides.TryGetValue(profile.id, out var existing)
+                && string.Equals(existing, model, StringComparison.Ordinal))
+                return false;
+            state.modelOverrides[profile.id] = model;
+            return true;
         }
 
         /// <summary>把当前 profile 上的运行时字段写入用户状态（每个 profile 都保留条目）。</summary>

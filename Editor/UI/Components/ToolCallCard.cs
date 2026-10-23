@@ -20,19 +20,26 @@ namespace AgentCore.Editor.UI.Components
         Completed,
 
         /// <summary>执行失败</summary>
-        Failed
+        Failed,
+
+        /// <summary>
+        /// 部分完成：部分目标成功、部分失败（对应 <c>ToolResult.IsPartial</c>）。
+        /// 已成功的修改保留，但不是完全成功——用警告色区分，不按成功绿显示。
+        /// </summary>
+        Partial
     }
 
     /// <summary>
     /// 工具调用卡片组件。
     /// <para>
     /// 轻量级 VisualElement，在聊天窗口中显示单个工具调用的状态。
-    /// 支持 Pending/Running/Completed/Failed 四种状态，可展开/折叠查看详情。
+    /// 支持 Pending/Running/Completed/Failed/Partial 五种状态，可展开/折叠查看详情。
     /// </para>
     /// <para>
     /// 折叠策略：
     /// - 已完成（成功）的工具调用：默认折叠，只显示工具名 + 状态 + 耗时
     /// - 失败的工具调用：默认展开，显示错误信息
+    /// - 部分完成的工具调用：默认展开，显示成功项/失败项明细
     /// - 正在执行的工具调用：展开显示
     /// - 等待中的工具调用：折叠显示
     /// - 用户可以点击切换折叠/展开状态
@@ -59,6 +66,7 @@ namespace AgentCore.Editor.UI.Components
         private static readonly Color BorderBlue = UI.AgentCoreColors.Accent;                // #4a86c8（统一）
         private static readonly Color BorderGreen = UI.AgentCoreColors.Success;              // #5cb85c（统一）
         private static readonly Color BorderRed = UI.AgentCoreColors.Danger;                 // #d9534f（统一）
+        private static readonly Color BorderWarning = UI.AgentCoreColors.Warning;            // #f0ad4e（部分完成）
         private static readonly Color TextPrimary = UI.AgentCoreColors.TextPrimary;          // #D4D4D4
         private static readonly Color TextSecondary = UI.AgentCoreColors.TextSecondary;      // #888888
         private static readonly Color DetailsBg = UI.AgentCoreColors.DetailBackground;       // #272727
@@ -72,6 +80,7 @@ namespace AgentCore.Editor.UI.Components
         private const string IconRunning = "[>]";
         private const string IconCompleted = "[v]";
         private const string IconFailed = "[x]";
+        private const string IconPartial = "[!]";
 
         // 折叠/展开箭头指示器（纯 ASCII，避免 Unity 字体缺字）
         private const string ArrowCollapsed = ">";
@@ -299,6 +308,51 @@ namespace AgentCore.Editor.UI.Components
         #region 公开方法
 
         /// <summary>
+        /// 由工具结果推导卡片的终态（纯函数，供实时事件与会话恢复共用）。
+        /// <para>
+        /// 部分成功优先看显式标志；旧会话没有持久化该标志时，回退识别结果文本的
+        /// <see cref="AgentCore.Editor.Tools.ToolResult.PartialPrefix"/> 前缀。
+        /// </para>
+        /// </summary>
+        /// <param name="success">工具是否执行成功（部分成功时也为 true）</param>
+        /// <param name="isPartial">是否显式标记为部分成功</param>
+        /// <param name="result">结果文本（可为 null）</param>
+        public static ToolCallStatus ResolveFinalStatus(bool success, bool isPartial, string result)
+        {
+            if (!success)
+                return ToolCallStatus.Failed;
+            if (isPartial)
+                return ToolCallStatus.Partial;
+            if (!string.IsNullOrEmpty(result)
+                && result.StartsWith(AgentCore.Editor.Tools.ToolResult.PartialPrefix, System.StringComparison.Ordinal))
+                return ToolCallStatus.Partial;
+            return ToolCallStatus.Completed;
+        }
+
+        /// <summary>
+        /// 终态对应的状态文本（"完成 (12ms)" / "部分完成 (12ms)" / "失败"）。
+        /// </summary>
+        /// <param name="status">终态</param>
+        /// <param name="executionTimeMs">耗时（毫秒），&lt;= 0 时不显示</param>
+        public static string FormatFinalStatusText(ToolCallStatus status, double executionTimeMs)
+        {
+            var time = executionTimeMs > 0 ? $"{executionTimeMs:F0}ms" : null;
+            switch (status)
+            {
+                case ToolCallStatus.Failed:
+                    return AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.failed", "失败");
+                case ToolCallStatus.Partial:
+                    return time != null
+                        ? AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.partialWithTime", "部分完成 ({0})", time)
+                        : AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.partial", "部分完成");
+                default:
+                    return time != null
+                        ? AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.completedWithTime", "完成 ({0})", time)
+                        : AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.completed", "完成");
+            }
+        }
+
+        /// <summary>
         /// 设置工具调用状态。
         /// </summary>
         /// <param name="status">新状态</param>
@@ -333,8 +387,8 @@ namespace AgentCore.Editor.UI.Components
 
             SetDetailsInternal(details);
 
-            // 失败状态自动展开详情（仅在用户未手动切换时）
-            if (Status == ToolCallStatus.Failed && !_isExpanded && !_userToggled)
+            // 失败 / 部分完成状态自动展开详情（仅在用户未手动切换时）
+            if ((Status == ToolCallStatus.Failed || Status == ToolCallStatus.Partial) && !_isExpanded && !_userToggled)
             {
                 SetExpanded(true);
             }
@@ -413,6 +467,7 @@ namespace AgentCore.Editor.UI.Components
         /// - Running: 展开（让用户看到执行中的状态）
         /// - Completed: 折叠（减少空间占用）
         /// - Failed: 展开（显示错误信息）
+        /// - Partial: 展开（显示成功项/失败项明细）
         /// - Pending: 折叠
         /// </summary>
         private void ApplyAutoExpandCollapse()
@@ -434,7 +489,8 @@ namespace AgentCore.Editor.UI.Components
                     break;
 
                 case ToolCallStatus.Failed:
-                    // 失败时自动展开，显示错误信息
+                case ToolCallStatus.Partial:
+                    // 失败 / 部分完成时自动展开，显示错误信息或失败项明细
                     if (!string.IsNullOrEmpty(_detailsRaw))
                     {
                         SetExpanded(true);
@@ -489,6 +545,16 @@ namespace AgentCore.Editor.UI.Components
                     if (string.IsNullOrEmpty(_statusLabel.text))
                     {
                         _statusLabel.text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.failed", "失败");
+                    }
+                    break;
+
+                case ToolCallStatus.Partial:
+                    _statusIcon.text = IconPartial;
+                    _statusIcon.style.color = BorderWarning;
+                    style.borderLeftColor = BorderWarning;
+                    if (string.IsNullOrEmpty(_statusLabel.text))
+                    {
+                        _statusLabel.text = AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.partial", "部分完成");
                     }
                     break;
             }
