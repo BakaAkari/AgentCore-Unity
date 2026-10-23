@@ -310,11 +310,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                             case WorkspaceVcsType.Perforce:
                                 return (VcsType.Perforce, !string.IsNullOrEmpty(wsCtx.WorkspaceRoot) ? wsCtx.WorkspaceRoot : _projectRootPath);
 
-                            case WorkspaceVcsType.None:
-                                // WorkspaceContext 明确说明无 VCS，跳过后续检测
-                                return (VcsType.None, _projectRootPath);
-
-                            // WorkspaceVcsType.Unknown → 继续本地检测
+                            // WorkspaceVcsType.None 只表示"未找到 SVN 工作副本"（WorkspaceRootResolver 只识别 SVN），
+                            // 不能据此判定无 VCS；与 Unknown 一样继续本地检测，否则 Git/P4 项目会被误判为无 VCS
                         }
                     }
                 }
