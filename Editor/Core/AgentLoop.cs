@@ -165,6 +165,24 @@ namespace AgentCore.Editor.Core
         /// <summary>是否已完成初始化</summary>
         private bool _isInitialized;
 
+        /// <summary>
+        /// 进行中的初始化 Task（重入保护）：初始化未完成时再次调用 <see cref="InitializeAsync"/>
+        /// 直接返回同一个 Task，不会并行跑两遍 CompleteInitialize（重复追加 system 消息 / 重复订阅事件）。
+        /// </summary>
+        private Task _initTask;
+
+        /// <summary>
+        /// 是否已 Dispose。初始化的每个 await 之后都检查：窗口关闭 / 重建期间仍在途的初始化
+        /// 不得再订阅全局事件或覆盖新 AgentLoop 注入的静态状态。
+        /// </summary>
+        private bool _disposed;
+
+        /// <summary>
+        /// 最近一次把作用域状态注入到 RequestToolsTool / LoadSkillTool 静态字段的实例。
+        /// Dispose 时只有自己仍是持有者才清空，避免旧实例清掉新实例的注入。
+        /// </summary>
+        private static AgentLoop s_scopeStateOwner;
+
         /// <summary>Console 错误捕获器 - 在工具执行期间捕获 Unity Console 错误</summary>
         private ConsoleErrorCapture _consoleCapture;
 
@@ -264,7 +282,29 @@ namespace AgentCore.Editor.Core
         /// await 续体回到主线程后再执行 <see cref="CompleteInitialize"/>，其中的 Unity API / 事件注册均在主线程完成。
         /// </summary>
         /// <param name="ct">取消令牌</param>
-        public async Task InitializeAsync(CancellationToken ct = default)
+        public Task InitializeAsync(CancellationToken ct = default)
+        {
+            if (_disposed)
+            {
+                AgentCoreLog.Warning("[AgentCore] InitializeAsync called on a disposed AgentLoop, ignored.");
+                return Task.CompletedTask;
+            }
+
+            // 重入保护：初始化仍在进行中时，复用同一个 Task
+            if (_initTask != null && !_initTask.IsCompleted)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] InitializeAsync already in progress, awaiting the existing initialization.");
+                return _initTask;
+            }
+
+            _initTask = InitializeCoreAsync(ct);
+            return _initTask;
+        }
+
+        /// <summary>
+        /// <see cref="InitializeAsync"/> 的实际实现。每个 await 之后检查 <see cref="_disposed"/>。
+        /// </summary>
+        private async Task InitializeCoreAsync(CancellationToken ct)
         {
             // [DIAG-BUG1] 整个 InitializeAsync 总耗时 + 各阶段分段耗时，用于定位"打开 Chat 窗口后
             // 长时间初始化很慢"的卡点在哪一步。同时用于 SlowOperationDiagnostics 自动落盘（见下方）。
@@ -313,6 +353,12 @@ namespace AgentCore.Editor.Core
                 }, TaskScheduler.Default);
             }
 
+            if (_disposed)
+            {
+                DiagStep("InitializeAsync: AgentLoop disposed during auto-config, abort");
+                return;
+            }
+
             // BUG1 预防：LoadBootstrapSystemPromptAsync 内部含磁盘扫描（脚本统计/命名空间分布/
             // 用户文件读取），此前唯一没有超时保护的一段——若磁盘异常慢（网络盘/云同步盘/AV拦截），
             // 会导致初始化无限期挂起，用户看到的"初始化中…"永远不结束、发送按钮永远不可用。
@@ -337,6 +383,13 @@ namespace AgentCore.Editor.Core
                 }
             }
             DiagStep("InitializeAsync: LoadBootstrapSystemPromptAsync done");
+
+            if (_disposed)
+            {
+                // 窗口关闭 / AgentLoop 被替换：不再注册全局事件、不再注入静态状态
+                DiagStep("InitializeAsync: AgentLoop disposed during bootstrap loading, abort");
+                return;
+            }
 
             CompleteInitialize(systemPrompt);
             DiagStep("InitializeAsync: CompleteInitialize done, TOTAL");
@@ -440,6 +493,9 @@ namespace AgentCore.Editor.Core
             _messages.Add(ChatMessage.System(systemPrompt));
 
             // Phase 2 Step 11: 初始化错误收集与自我纠错基础设施
+            // ResetConversation 后会再次进入这里：先释放上一轮的实例（解除 logMessageReceived / 编译事件订阅）
+            _consoleCapture?.Dispose();
+            _compilationWatcher?.Dispose();
             _consoleCapture = new ConsoleErrorCapture();
             _compilationWatcher = new CompilationWatcher();
             _fallbackRouter = new FallbackRouter(AgentCoreSettings.instance);
@@ -488,6 +544,7 @@ namespace AgentCore.Editor.Core
             // G.3 ActiveToolScope: 初始化工具作用域状态并注入到 RequestToolsTool
             _toolScopeState = new ToolScopeState();
             AgentCore.Editor.Tools.Native.Meta.RequestToolsTool.SetScopeState(_toolScopeState);
+            s_scopeStateOwner = this;
 
             // ADR-18 Skill System: 初始化 Skill 作用域状态并注入到 LoadSkillTool
             InitializeSkillContext();
@@ -515,6 +572,8 @@ namespace AgentCore.Editor.Core
             }
 
             // Domain Reload Resilience: 注册 beforeAssemblyReload 事件
+            // 先 -= 再 +=：ResetConversation 后重新初始化不会重复订阅（否则一次重载会保存两遍）
+            AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
         }
 
@@ -1161,6 +1220,10 @@ namespace AgentCore.Editor.Core
         /// </summary>
         public void Dispose()
         {
+            if (_disposed) return;
+            // 先置标志：仍在途的 InitializeAsync 在下一个 await 之后看到它即放弃，不再订阅事件
+            _disposed = true;
+
             // Domain Reload Resilience: 取消注册 beforeAssemblyReload 事件
             AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
 
@@ -1186,6 +1249,13 @@ namespace AgentCore.Editor.Core
 
             // ADR-18: 释放 Skill Context（解除事件订阅 + 清空 tool 引用）
             DisposeSkillContext();
+
+            // G.3: 只有自己仍是静态作用域状态的持有者时才清空，不影响已接手的新实例
+            if (ReferenceEquals(s_scopeStateOwner, this))
+            {
+                AgentCore.Editor.Tools.Native.Meta.RequestToolsTool.SetScopeState(null);
+                s_scopeStateOwner = null;
+            }
 
             // 取消并注销当前运行
             if (_activeRun != null)

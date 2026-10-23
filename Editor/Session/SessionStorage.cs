@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Utils;
 
@@ -17,7 +19,14 @@ namespace AgentCore.Editor.Session
     /// 存储路径：Library/AgentCore/sessions/（相对于 Unity 项目根目录）。
     /// 该目录位于 Library/ 下，不进版本控制。
     /// </para>
+    /// <para>
+    /// 线程模型：会话目录在 <c>[InitializeOnLoad]</c> 时于主线程缓存，之后任意线程都可安全取路径。
+    /// <see cref="SaveInBackground"/> 把 JSON 序列化 + 原子落盘移到后台；所有写入（同步/后台）共用一把写锁并按
+    /// 递增序号比较，旧序号的写入不会覆盖新序号。读取前先等待同一会话尚未落盘的后台写入，避免读到旧内容。
+    /// 域重载 / 退出前会等待在途写入完成。
+    /// </para>
     /// </summary>
+    [InitializeOnLoad]
     public static class SessionStorage
     {
         #region 常量
@@ -34,15 +43,48 @@ namespace AgentCore.Editor.Session
             DateTimeZoneHandling = DateTimeZoneHandling.Utc
         };
 
+        /// <summary>主线程缓存的会话目录（Application.dataPath 只能在主线程访问）。</summary>
+        private static string _sessionDirectory;
+
+        /// <summary>所有会话文件写入共用的锁（同步 Save 与后台写入串行化）。</summary>
+        private static readonly object WriteLock = new object();
+
+        /// <summary>全局递增的保存序号；每次 Save / SaveInBackground 在调用线程上领取。</summary>
+        private static long _saveSequence;
+
+        /// <summary>每个会话已落盘的最大序号（受 <see cref="WriteLock"/> 保护）。</summary>
+        private static readonly Dictionary<string, long> WrittenSequence = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>每个会话最近一次后台写入的 Task。</summary>
+        private static readonly ConcurrentDictionary<string, Task> PendingWrites = new ConcurrentDictionary<string, Task>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>域重载 / 退出前等待在途写入的最长时间。</summary>
+        private const int FlushTimeoutMs = 5000;
+
+        static SessionStorage()
+        {
+            // [InitializeOnLoad] 保证在主线程执行：此时缓存目录，之后后台线程也能取到
+            _sessionDirectory = BuildSessionDirectory();
+            AssemblyReloadEvents.beforeAssemblyReload -= FlushPendingWrites;
+            AssemblyReloadEvents.beforeAssemblyReload += FlushPendingWrites;
+            EditorApplication.quitting -= FlushPendingWrites;
+            EditorApplication.quitting += FlushPendingWrites;
+        }
+
         #endregion
 
         #region 公开方法
 
         /// <summary>
-        /// 获取会话存储目录的绝对路径。
+        /// 获取会话存储目录的绝对路径。任意线程可调用（路径已在主线程缓存）。
         /// </summary>
         /// <returns>会话存储目录路径</returns>
         public static string GetSessionDirectory()
+        {
+            return _sessionDirectory ??= BuildSessionDirectory();
+        }
+
+        private static string BuildSessionDirectory()
         {
             // Application.dataPath = "{ProjectRoot}/Assets"
             // 我们需要 "{ProjectRoot}/Library/AgentCore/sessions/"
@@ -70,19 +112,117 @@ namespace AgentCore.Editor.Session
 
             try
             {
+                WriteCore(session, Interlocked.Increment(ref _saveSequence));
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Failed to save session {session.Id}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 在后台线程序列化并落盘会话（用于每轮结束的自动保存等高频路径，避免大 JSON 序列化 + 落盘卡主线程）。
+        /// <para>
+        /// 调用方须传入不再被修改的快照（如 <see cref="SessionData.FromAgentLoop"/> 新建的对象）。
+        /// 后台序列化若因共享子对象被并发修改而失败，会回到主线程用同一序号重试一次。
+        /// 序号在调用时领取：之后的同步 <see cref="Save"/> 一定覆盖它，它也不会覆盖之后的写入。
+        /// </para>
+        /// </summary>
+        public static void SaveInBackground(SessionData session)
+        {
+            if (session == null || string.IsNullOrEmpty(session.Id))
+            {
+                Save(session); // 走同步路径输出同样的错误日志
+                return;
+            }
+
+            long seq = Interlocked.Increment(ref _saveSequence);
+            var id = session.Id;
+            // 确保目录缓存已在主线程完成
+            GetSessionDirectory();
+
+            var task = Task.Run(() =>
+            {
+                try
+                {
+                    WriteCore(session, seq);
+                }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"{LogPrefix}Background save of {id} failed ({ex.Message}), retrying on main thread.");
+                    MainThread.Post(() =>
+                    {
+                        try
+                        {
+                            WriteCore(session, seq);
+                        }
+                        catch (Exception retryEx)
+                        {
+                            AgentCoreLog.Error($"{LogPrefix}Failed to save session {id}: {retryEx.Message}");
+                        }
+                    });
+                }
+            });
+            PendingWrites[id] = task;
+            // 只移除仍是自己的条目（之后的新写入已替换时保留新条目）
+            task.ContinueWith(t => ((ICollection<KeyValuePair<string, Task>>)PendingWrites).Remove(new KeyValuePair<string, Task>(id, t)),
+                TaskScheduler.Default);
+        }
+
+        /// <summary>
+        /// 序列化并原子写入；序号不新于已落盘版本时直接跳过（保证"后保存者胜出"）。
+        /// </summary>
+        private static void WriteCore(SessionData session, long seq)
+        {
+            lock (WriteLock)
+            {
+                if (WrittenSequence.TryGetValue(session.Id, out var written) && written >= seq)
+                    return;
+
                 var directory = GetSessionDirectory();
                 EnsureDirectoryExists(directory);
 
                 var filePath = Path.Combine(directory, $"{session.Id}.json");
                 var json = JsonConvert.SerializeObject(session, JsonSettings);
                 AtomicFile.WriteAllText(filePath, json, backupPath: filePath + BackupSuffix);
+                WrittenSequence[session.Id] = seq;
+            }
 
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session saved: {session.Id} ({session.Title})");
-            }
-            catch (Exception ex)
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session saved: {session.Id} ({session.Title})");
+        }
+
+        /// <summary>同步等待指定会话的在途后台写入（读文件前调用，避免读到旧内容）。</summary>
+        private static void WaitPendingWrite(string sessionId)
+        {
+            if (string.IsNullOrEmpty(sessionId)) return;
+            if (PendingWrites.TryGetValue(sessionId, out var task) && !task.IsCompleted)
             {
-                AgentCoreLog.Error($"{LogPrefix}Failed to save session {session.Id}: {ex.Message}");
+                try { task.Wait(FlushTimeoutMs); } catch (Exception) { /* 写入错误已在任务内记录 */ }
             }
+        }
+
+        /// <summary>异步等待指定会话的在途后台写入。</summary>
+        private static async Task WaitPendingWriteAsync(string sessionId)
+        {
+            if (string.IsNullOrEmpty(sessionId)) return;
+            if (PendingWrites.TryGetValue(sessionId, out var task) && !task.IsCompleted)
+            {
+                try { await task; } catch (Exception) { /* 写入错误已在任务内记录 */ }
+            }
+        }
+
+        /// <summary>同步等待全部在途后台写入（列表 / 检索 / 域重载 / 退出前）。</summary>
+        private static void WaitAllPendingWrites()
+        {
+            var tasks = PendingWrites.Values.Where(t => !t.IsCompleted).ToArray();
+            if (tasks.Length == 0) return;
+            try { Task.WaitAll(tasks, FlushTimeoutMs); } catch (Exception) { /* 写入错误已在任务内记录 */ }
+        }
+
+        /// <summary>域重载 / 编辑器退出前：等待在途后台写入落盘，避免最后一次自动保存丢失。</summary>
+        private static void FlushPendingWrites()
+        {
+            WaitAllPendingWrites();
         }
 
         /// <summary>上一份完好会话的备份后缀（由 AtomicFile 在替换时保留）。不匹配 *.json，不会出现在会话列表里。</summary>
@@ -147,6 +287,7 @@ namespace AgentCore.Editor.Session
 
             try
             {
+                WaitPendingWrite(sessionId);
                 var filePath = Path.Combine(GetSessionDirectory(), $"{sessionId}.json");
 
                 if (!File.Exists(filePath))
@@ -202,6 +343,7 @@ namespace AgentCore.Editor.Session
 
             try
             {
+                await WaitPendingWriteAsync(sessionId);
                 var filePath = Path.Combine(GetSessionDirectory(), $"{sessionId}.json");
 
                 if (!File.Exists(filePath))
@@ -250,6 +392,7 @@ namespace AgentCore.Editor.Session
 
             try
             {
+                WaitAllPendingWrites();
                 var directory = GetSessionDirectory();
 
                 if (!Directory.Exists(directory))
@@ -303,6 +446,11 @@ namespace AgentCore.Editor.Session
         {
             try
             {
+                foreach (var pending in PendingWrites.Values.ToArray())
+                {
+                    try { await pending; } catch (Exception) { /* 写入错误已在任务内记录 */ }
+                }
+
                 var directory = GetSessionDirectory();
 
                 if (!Directory.Exists(directory))
@@ -411,6 +559,7 @@ namespace AgentCore.Editor.Session
 
             try
             {
+                WaitPendingWrite(sessionId);
                 var filePath = Path.Combine(GetSessionDirectory(), $"{sessionId}.json");
 
                 if (File.Exists(filePath))
@@ -469,6 +618,7 @@ namespace AgentCore.Editor.Session
 
             try
             {
+                WaitAllPendingWrites();
                 var directory = GetSessionDirectory();
                 if (!Directory.Exists(directory))
                 {

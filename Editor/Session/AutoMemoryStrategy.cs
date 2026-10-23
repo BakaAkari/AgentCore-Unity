@@ -64,8 +64,21 @@ namespace AgentCore.Editor.Session
             "对话内容：\n";
 
         /// <summary>
+        /// 在主线程预先采集好的提取输入：设置、密钥、会话快照都在主线程读取，
+        /// 后台线程只做 LLM 请求与 mem0 HTTP 调用，不再触碰 Unity API / ScriptableSingleton。
+        /// </summary>
+        private sealed class PreparedInput
+        {
+            public string ConversationSummary;
+            public Mem0Client Mem0Client;
+            public string SessionId;
+            public string SessionTitle;
+        }
+
+        /// <summary>
         /// 从会话中提取关键信息并存入 mem0。
         /// 此方法是异步的，不会阻塞 UI。失败时静默处理。
+        /// 设置读取与会话快照在主线程完成（非主线程调用时自动调度到主线程）。
         /// </summary>
         /// <param name="session">要提取记忆的会话数据</param>
         /// <param name="llmClient">LLM 客户端（用于生成摘要）</param>
@@ -77,60 +90,10 @@ namespace AgentCore.Editor.Session
         {
             try
             {
-                // 1. 检查是否满足触发条件
-                if (!ShouldTrigger(session))
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Skipped — trigger conditions not met.");
-                    return;
-                }
-
-                // 2. 构建对话摘要
-                var conversationSummary = BuildConversationSummary(session);
-                if (string.IsNullOrWhiteSpace(conversationSummary))
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Skipped — conversation summary is empty.");
-                    return;
-                }
-
-                // 3. 调用 LLM 提取记忆
-                var memories = await ExtractMemoriesFromLLMAsync(llmClient, conversationSummary, ct);
-                if (memories == null || memories.Count == 0)
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}No memories extracted from conversation.");
-                    return;
-                }
-
-                // 4. 存入 mem0
-                var mem0Client = Mem0Client.FromSettings();
-                int storedCount = 0;
-
-                foreach (var memory in memories)
-                {
-                    if (string.IsNullOrWhiteSpace(memory)) continue;
-
-                    ct.ThrowIfCancellationRequested();
-
-                    var result = await mem0Client.AddMemoryAsync(
-                        memory,
-                        metadata: new Dictionary<string, string>
-                        {
-                            ["source"] = "auto_memory",
-                            ["session_id"] = session.Id ?? "",
-                            ["session_title"] = session.Title ?? ""
-                        },
-                        ct: ct);
-
-                    if (result.Success)
-                    {
-                        storedCount++;
-                    }
-                    else
-                    {
-                        AgentCoreLog.Warning($"{LogPrefix}Failed to store memory: {result.Message}");
-                    }
-                }
-
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Stored {storedCount}/{memories.Count} memories for session '{session.Title}'.");
+                var input = MainThread.IsMainThread
+                    ? Prepare(session)
+                    : await MainThread.RunAsync(() => Prepare(session));
+                await RunPreparedAsync(input, llmClient, ct);
             }
             catch (OperationCanceledException)
             {
@@ -141,6 +104,84 @@ namespace AgentCore.Editor.Session
                 // 静默处理 — 自动记忆失败不应影响正常功能
                 AgentCoreLog.Warning($"{LogPrefix}Failed to extract and store memories: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 主线程阶段：检查触发条件、构建对话摘要、按设置创建 mem0 客户端。
+        /// 返回 null 表示本次跳过（已记录原因）。
+        /// </summary>
+        private PreparedInput Prepare(SessionData session)
+        {
+            // 1. 检查是否满足触发条件
+            if (!ShouldTrigger(session))
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Skipped — trigger conditions not met.");
+                return null;
+            }
+
+            // 2. 构建对话摘要（在主线程遍历 Turns，避免与 UI 线程的追加并发）
+            var conversationSummary = BuildConversationSummary(session);
+            if (string.IsNullOrWhiteSpace(conversationSummary))
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Skipped — conversation summary is empty.");
+                return null;
+            }
+
+            return new PreparedInput
+            {
+                ConversationSummary = conversationSummary,
+                // FromSettings 读取 AgentCoreSettings 与 SecureKeyStorage(EditorPrefs)，必须在主线程
+                Mem0Client = Mem0Client.FromSettings(),
+                SessionId = session.Id ?? "",
+                SessionTitle = session.Title ?? ""
+            };
+        }
+
+        /// <summary>
+        /// 后台阶段：调用 LLM 提取记忆并逐条存入 mem0。只使用 <paramref name="input"/> 中的快照数据。
+        /// </summary>
+        private async Task RunPreparedAsync(PreparedInput input, ILLMClient llmClient, CancellationToken ct)
+        {
+            if (input == null) return;
+
+            // 3. 调用 LLM 提取记忆
+            var memories = await ExtractMemoriesFromLLMAsync(llmClient, input.ConversationSummary, ct);
+            if (memories == null || memories.Count == 0)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}No memories extracted from conversation.");
+                return;
+            }
+
+            // 4. 存入 mem0
+            int storedCount = 0;
+
+            foreach (var memory in memories)
+            {
+                if (string.IsNullOrWhiteSpace(memory)) continue;
+
+                ct.ThrowIfCancellationRequested();
+
+                var result = await input.Mem0Client.AddMemoryAsync(
+                    memory,
+                    metadata: new Dictionary<string, string>
+                    {
+                        ["source"] = "auto_memory",
+                        ["session_id"] = input.SessionId,
+                        ["session_title"] = input.SessionTitle
+                    },
+                    ct: ct);
+
+                if (result.Success)
+                {
+                    storedCount++;
+                }
+                else
+                {
+                    AgentCoreLog.Warning($"{LogPrefix}Failed to store memory: {result.Message}");
+                }
+            }
+
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Stored {storedCount}/{memories.Count} memories for session '{input.SessionTitle}'.");
         }
 
         /// <summary>
@@ -327,8 +368,13 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
-        /// 静态便捷方法 — 在后台触发自动记忆提取（fire-and-forget）。
+        /// 静态便捷方法 — 触发自动记忆提取（fire-and-forget）。
         /// 不会阻塞调用线程，所有异常都被静默处理。
+        /// <para>
+        /// 不再包一层 Task.Run：网络请求本身是异步 I/O，不占主线程；而 LLM 客户端在发请求前会同步读取
+        /// Profile / 密钥（ScriptableSingleton、EditorPrefs），这些只能在主线程访问。
+        /// 从主线程调用时，设置采集与请求准备都在主线程完成，只有 I/O 等待在后台。
+        /// </para>
         /// </summary>
         /// <param name="session">要提取记忆的会话数据</param>
         /// <param name="llmClient">LLM 客户端</param>
@@ -337,18 +383,20 @@ namespace AgentCore.Editor.Session
             if (session == null || llmClient == null) return;
 
             var strategy = new AutoMemoryStrategy();
-            // Fire-and-forget: 在后台执行，不阻塞调用方
-            _ = Task.Run(async () =>
+            _ = RunFireAndForgetAsync(strategy, session, llmClient);
+        }
+
+        private static async Task RunFireAndForgetAsync(AutoMemoryStrategy strategy, SessionData session, ILLMClient llmClient)
+        {
+            try
             {
-                try
-                {
-                    await strategy.ExtractAndStoreAsync(session, llmClient);
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"[AgentCore] AutoMemory background task failed: {ex.Message}");
-                }
-            });
+                // ExtractAndStoreAsync 内部：主线程同步 Prepare（快照会话），非主线程调用时经 MainThread 调度
+                await strategy.ExtractAndStoreAsync(session, llmClient);
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] AutoMemory background task failed: {ex.Message}");
+            }
         }
     }
 }

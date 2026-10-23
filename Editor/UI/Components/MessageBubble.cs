@@ -73,6 +73,15 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>气泡内显示的图像（用户上传图 / 截图），无图时为 null。</summary>
         private UnityEngine.UIElements.Image _bubbleImage;
 
+        /// <summary>
+        /// <see cref="_bubbleImage"/> 使用的纹理（HideAndDontSave，由本气泡创建并负责销毁）。
+        /// 替换图片 / 离开面板（DetachFromPanelEvent）时 DestroyImmediate；重新挂回面板时按 data URL 重新解码。
+        /// </summary>
+        private UnityEngine.Texture2D _bubbleTexture;
+
+        /// <summary>当前图像的 data URL（用于离开面板后重新挂回时恢复显示）。</summary>
+        private string _bubbleImageDataUrl;
+
         /// <summary>气泡根元素</summary>
         private VisualElement _bubbleRoot;
 
@@ -162,6 +171,13 @@ namespace AgentCore.Editor.UI.Components
             _contentLabel = this.Q<Label>("content-label");
             _bubbleContent = this.Q<VisualElement>("bubble-content");
             TryAttachImage(imageDataUrl);
+            // 纹理生命周期跟随面板：离开面板（清空消息 / 窗口关闭 / 池化回收）即销毁，重新挂回时恢复
+            RegisterCallback<DetachFromPanelEvent>(_ => ReleaseBubbleImage(keepDataUrl: true));
+            RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                if (_bubbleTexture == null && !string.IsNullOrEmpty(_bubbleImageDataUrl))
+                    TryAttachImage(_bubbleImageDataUrl);
+            });
             _copyButton = this.Q<Button>("copy-button");
             _forkButton = this.Q<Button>("fork-button");
 
@@ -622,12 +638,20 @@ namespace AgentCore.Editor.UI.Components
                 var bytes = System.Convert.FromBase64String(b64);
                 if (bytes == null || bytes.Length == 0) return;
 
-                var tex = new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, false);
+                var tex = new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, false)
+                {
+                    hideFlags = UnityEngine.HideFlags.HideAndDontSave
+                };
                 if (!UnityEngine.ImageConversion.LoadImage(tex, bytes))
                 {
                     UnityEngine.Object.DestroyImmediate(tex);
                     return;
                 }
+
+                // 同一气泡只持有一张纹理：先销毁旧的
+                ReleaseBubbleImage(keepDataUrl: false);
+                _bubbleTexture = tex;
+                _bubbleImageDataUrl = imageDataUrl;
 
                 var img = new UnityEngine.UIElements.Image
                 {
@@ -658,13 +682,32 @@ namespace AgentCore.Editor.UI.Components
         public void AttachImage(string imageDataUrl)
         {
             if (string.IsNullOrEmpty(imageDataUrl)) return;
-            // 已有图则先移除旧 Image 元素，避免同一气泡多次注入叠加
-            if (_bubbleImage != null && _bubbleImage.parent != null && _bubbleContent != null)
+            // 已有图则先移除旧 Image 元素并销毁旧纹理，避免同一气泡多次注入叠加 / 纹理泄漏
+            ReleaseBubbleImage(keepDataUrl: false);
+            TryAttachImage(imageDataUrl);
+        }
+
+        /// <summary>
+        /// 移除图像元素并 DestroyImmediate 本气泡创建的纹理。
+        /// <paramref name="keepDataUrl"/> 为 true 时保留 data URL，重新挂回面板时可恢复显示。
+        /// </summary>
+        private void ReleaseBubbleImage(bool keepDataUrl)
+        {
+            if (_bubbleImage != null)
             {
+                _bubbleImage.image = null;
                 _bubbleImage.RemoveFromHierarchy();
                 _bubbleImage = null;
             }
-            TryAttachImage(imageDataUrl);
+
+            if (_bubbleTexture != null)
+            {
+                UnityEngine.Object.DestroyImmediate(_bubbleTexture);
+                _bubbleTexture = null;
+            }
+
+            if (!keepDataUrl)
+                _bubbleImageDataUrl = null;
         }
 
         private void SetupCopyButton()
