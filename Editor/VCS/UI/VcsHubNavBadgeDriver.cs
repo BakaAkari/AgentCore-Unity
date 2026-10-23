@@ -26,7 +26,10 @@ namespace AgentCore.Editor.Components.VCS.UI
             // 域重载后重新绑定并推送一次当前状态（HubNavBadgeBus 会保留快照，
             // 供之后打开的 ChatWindow 主动拉取）。
             VcsRemoteStatusMonitor.StatusChanged += OnRemoteStatusChanged;
-            PublishCurrent(VcsRemoteStatusMonitor.LastStatus);
+            // 重新检测（设置页 Re-detect / 面板刷新）后同步更新标签
+            VcsDetector.DetectionChanged += () => PublishCurrent(VcsRemoteStatusMonitor.LastStatus);
+            // 推迟到首帧之后再检测，避免在 InitializeOnLoad 阶段做文件系统 / WorkspaceContext 解析拖慢域重载
+            EditorApplication.delayCall += () => PublishCurrent(VcsRemoteStatusMonitor.LastStatus);
         }
 
         private static void OnRemoteStatusChanged(VcsSyncStatus status)

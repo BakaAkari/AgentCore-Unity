@@ -203,34 +203,51 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ===== Phase 1: 只读查询处理器 =====
 
-        private Task<ToolResponse> HandleDetectVcs(CancellationToken ct)
+        private async Task<ToolResponse> HandleDetectVcs(CancellationToken ct)
         {
             try
             {
+                // detect_vcs 是显式检测：未检测到 VCS 或命令曾探测失败时重新检测（例如刚安装了 git），
+                // 否则复用会话缓存。命令探测在后台线程执行，不阻塞主线程。
                 var vcsType = VcsDetector.DetectVcs();
+                bool isAvailable;
+                if (vcsType == VcsType.None
+                    || VcsDetector.GetCommandAvailability(vcsType) == VcsCommandAvailability.Unavailable)
+                {
+                    isAvailable = await VcsDetector.Refresh();
+                    vcsType = VcsDetector.DetectVcs();
+                }
+                else
+                {
+                    isAvailable = await VcsDetector.EnsureCommandAvailableAsync(vcsType);
+                }
+
                 var rootPath = VcsDetector.GetVcsRootPath();
 
                 if (vcsType == VcsType.None)
                 {
-                    return Task.FromResult(ToolResponse.Fail("No version control system detected in the current project."));
+                    return ToolResponse.Fail("No version control system detected in the current project.");
                 }
 
-                var adapter = CreateAdapter(vcsType);
-                var isAvailable = adapter?.IsAvailable() ?? false;
+                var probeError = isAvailable ? null : VcsDetector.GetCommandProbeError(vcsType);
 
                 var data = new
                 {
                     vcs_type = vcsType.ToString(),
                     root_path = rootPath,
                     command_available = isAvailable,
+                    command_error = probeError,
                     priority_order = "SVN > Perforce > Git"
                 };
 
-                return Task.FromResult(ToolResponse.OkWithData(data, $"Detected {vcsType} at {rootPath}. Command available: {isAvailable}"));
+                var message = $"Detected {vcsType} at {rootPath}. Command available: {isAvailable}";
+                if (!string.IsNullOrEmpty(probeError))
+                    message += $" ({probeError})";
+                return ToolResponse.OkWithData(data, message);
             }
             catch (Exception ex)
             {
-                return Task.FromResult(ToolResponse.Fail($"Failed to detect VCS: {ex.Message}"));
+                return ToolResponse.Fail($"Failed to detect VCS: {ex.Message}");
             }
         }
 
@@ -238,7 +255,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.GetStatusAsync(ct);
 
@@ -265,7 +282,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.GetBranchInfoAsync(ct);
 
@@ -288,7 +305,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var maxCount = ToolHelpers.GetOptionalInt(parameters, "max_count", VcsSettings.MaxCommitEntries);
             if (maxCount > 100) maxCount = 100;
@@ -317,7 +334,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             if (string.IsNullOrEmpty(filePath))
@@ -352,7 +369,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             var diff = await adapter.GetDiffAsync(filePath, ct);
@@ -393,7 +410,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.GetRemoteInfoAsync(ct);
 
@@ -414,7 +431,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var tags = await adapter.GetTagsAsync(ct);
 
@@ -432,7 +449,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.GetSyncStatusAsync(ct);
             if (!result.Success)
@@ -460,7 +477,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             if (string.IsNullOrEmpty(filePath))
@@ -503,7 +520,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var revision = ToolHelpers.GetOptionalString(parameters, "revision");
             if (string.IsNullOrEmpty(revision))
@@ -562,7 +579,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not PerforceAdapter p4Adapter)
                 return ToolResponse.Fail("get_client_info is only available for Perforce. Current VCS: " + adapter.VcsType);
@@ -591,7 +608,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not PerforceAdapter p4Adapter)
                 return ToolResponse.Fail("get_changelist is only available for Perforce. Current VCS: " + adapter.VcsType);
@@ -621,7 +638,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not SvnAdapter svnAdapter)
                 return ToolResponse.Fail("get_info is only available for SVN. Current VCS: " + adapter.VcsType);
@@ -665,7 +682,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                 return ToolResponse.Fail("Cleanup is blocked while Unity is compiling or importing assets. Please wait until Unity is idle.");
@@ -683,7 +700,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
 
@@ -707,7 +724,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
 
@@ -731,7 +748,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var message = ToolHelpers.GetOptionalString(parameters, "message");
             if (string.IsNullOrEmpty(message))
@@ -750,7 +767,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var message = ToolHelpers.GetOptionalString(parameters, "message");
             if (string.IsNullOrEmpty(message))
@@ -772,7 +789,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("create_branch is only available for Git. Current VCS: " + adapter.VcsType);
@@ -800,7 +817,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("switch_branch is only available for Git. Current VCS: " + adapter.VcsType);
@@ -828,7 +845,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("stash is only available for Git. Current VCS: " + adapter.VcsType);
@@ -852,7 +869,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("stash_pop is only available for Git. Current VCS: " + adapter.VcsType);
@@ -875,7 +892,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
             if (filePaths == null || filePaths.Count == 0)
@@ -901,7 +918,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
             if (filePaths == null || filePaths.Count == 0)
@@ -919,7 +936,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             var explicitPattern = ToolHelpers.GetOptionalString(parameters, "ignore_pattern");
@@ -938,7 +955,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
             if (filePaths == null || filePaths.Count == 0)
@@ -956,7 +973,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.SyncAsync(ct);
 
@@ -972,6 +989,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         // ===== 辅助方法 =====
+
+        /// <summary>
+        /// GetAdapter 返回 null 时的统一错误信息。命令可用性是会话级缓存，提示 LLM 可用 detect_vcs 重新检测。
+        /// </summary>
+        private const string AdapterUnavailableMessage =
+            "No version control system detected or command not available. Run action 'detect_vcs' to re-check (e.g. after installing the VCS CLI).";
 
         private IVcsAdapter GetAdapter()
         {

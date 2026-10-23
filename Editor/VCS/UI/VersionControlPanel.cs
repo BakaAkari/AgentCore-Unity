@@ -47,6 +47,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Button _loadOlderCommitsButton;
         private Button _collapseCommitsButton;
         private Button _refreshButton;
+        private int _detectVersion;
+        private bool _isDisposed;
         private Button _cleanupButton;
         private Button _refreshCommitsButton;
         private Button _viewDiffButton;
@@ -265,33 +267,67 @@ namespace AgentCore.Editor.Components.VCS.UI
             return section;
         }
 
-        private void DetectAndInitialize()
+        /// <summary>
+        /// 检测 VCS 并初始化适配器。类型检测走会话缓存（SessionState），命令可用性探测在后台线程执行，
+        /// 主线程只 await，不等待子进程。
+        /// </summary>
+        /// <param name="forceRedetect">显式刷新：清空检测缓存后重新检测（用于未就绪状态下点击 Refresh）。</param>
+        private async void DetectAndInitialize(bool forceRedetect = false)
         {
-            _currentVcsType = VcsDetector.DetectVcs();
+            var version = ++_detectVersion;
+            _adapter = null;
+
+            bool available;
+            if (forceRedetect)
+            {
+                _vcsTypeLabel.text = "Detecting...";
+                available = await VcsDetector.Refresh();
+                _currentVcsType = VcsDetector.DetectVcs();
+            }
+            else
+            {
+                _currentVcsType = VcsDetector.DetectVcs();
+                if (_currentVcsType == VcsType.None)
+                {
+                    available = false;
+                }
+                else
+                {
+                    _vcsTypeLabel.text = $"Type: {_currentVcsType} (checking command...)";
+                    available = await VcsDetector.EnsureCommandAvailableAsync(_currentVcsType);
+                }
+            }
+
+            // 窗口在等待期间关闭或又发起了新的检测
+            if (version != _detectVersion || _isDisposed)
+                return;
+
+            // Refresh 始终保持可用：未检测到 VCS / 命令不可用时点击即重新检测
+            _refreshButton.SetEnabled(true);
 
             if (_currentVcsType == VcsType.None)
             {
                 _vcsTypeLabel.text = "No VCS detected";
-                ShowMessage("No version control system detected in this project.", true);
-                _refreshButton.SetEnabled(false);
+                ShowMessage("No version control system detected in this project. Click Refresh to detect again.", true);
                 _cleanupButton.SetEnabled(false);
                 return;
             }
 
             var rootPath = VcsDetector.GetVcsRootPath();
-            _adapter = CreateAdapter(_currentVcsType, rootPath);
+            var adapter = CreateAdapter(_currentVcsType, rootPath);
 
-            if (_adapter == null || !_adapter.IsAvailable())
+            if (adapter == null || !available)
             {
+                var probeError = VcsDetector.GetCommandProbeError(_currentVcsType);
                 _vcsTypeLabel.text = $"{_currentVcsType} (command not available)";
-                ShowMessage($"{_currentVcsType} detected but command-line tool is not available. Please install {_currentVcsType} CLI.", true);
-                _refreshButton.SetEnabled(false);
+                ShowMessage($"{_currentVcsType} detected but command-line tool is not available. Please install {_currentVcsType} CLI, then click Refresh."
+                            + (string.IsNullOrEmpty(probeError) ? string.Empty : $"\n{probeError}"), true);
                 _cleanupButton.SetEnabled(false);
                 return;
             }
 
+            _adapter = adapter;
             _vcsTypeLabel.text = $"Type: {_currentVcsType}";
-            _refreshButton.SetEnabled(true);
             _cleanupButton.SetEnabled(true);
 
             _ = RefreshAllData();
@@ -301,7 +337,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             if (_adapter == null || _currentVcsType == VcsType.None)
             {
-                DetectAndInitialize();
+                DetectAndInitialize(forceRedetect: true);
                 return;
             }
 
@@ -2006,6 +2042,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         public void Dispose()
         {
+            _isDisposed = true;
             _isPanelActive = false;
             EditorApplication.update -= OnEditorUpdatePollCommits;
             VcsRemoteStatusMonitor.StatusChanged -= UpdateSyncStatusBanner;
