@@ -75,13 +75,60 @@ namespace AgentCore.Editor.Session
 
                 var filePath = Path.Combine(directory, $"{session.Id}.json");
                 var json = JsonConvert.SerializeObject(session, JsonSettings);
-                AtomicFile.WriteAllText(filePath, json);
+                AtomicFile.WriteAllText(filePath, json, backupPath: filePath + BackupSuffix);
 
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session saved: {session.Id} ({session.Title})");
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"{LogPrefix}Failed to save session {session.Id}: {ex.Message}");
+            }
+        }
+
+        /// <summary>上一份完好会话的备份后缀（由 AtomicFile 在替换时保留）。不匹配 *.json，不会出现在会话列表里。</summary>
+        private const string BackupSuffix = ".bak";
+
+        /// <summary>
+        /// 会话文件损坏时：把坏文件改名保留为 <c>*.corrupted-时间戳</c>，再从 <c>.bak</c> 恢复。
+        /// 绝不静默丢弃——无备份时坏文件仍在磁盘上，日志给出位置。
+        /// </summary>
+        private static SessionData RecoverFromBackup(string sessionId, string filePath, string reason)
+        {
+            var corruptedPath = $"{filePath}.corrupted-{DateTime.Now:yyyyMMdd-HHmmss}";
+            try
+            {
+                File.Move(filePath, corruptedPath);
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"{LogPrefix}Could not move corrupted session file aside: {ex.Message}");
+                corruptedPath = filePath;
+            }
+
+            var backupPath = filePath + BackupSuffix;
+            if (!File.Exists(backupPath))
+            {
+                AgentCoreLog.Error($"{LogPrefix}Session {sessionId} is corrupted ({reason}) and has no backup. The damaged file was kept at {corruptedPath}.");
+                return null;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(backupPath);
+                var session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
+                if (session == null)
+                    throw new InvalidDataException("backup is empty");
+
+                AtomicFile.WriteAllText(filePath, json);
+                AgentCoreLog.Warning($"{LogPrefix}Session {sessionId} was corrupted ({reason}); restored the previous save from backup. " +
+                                     $"Changes after that save are lost. The damaged file was kept at {corruptedPath}.");
+                return session;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Error($"{LogPrefix}Session {sessionId} is corrupted ({reason}) and its backup could not be loaded ({ex.Message}). " +
+                                   $"The damaged file was kept at {corruptedPath}.");
+                return null;
             }
         }
 
@@ -108,14 +155,19 @@ namespace AgentCore.Editor.Session
                     return null;
                 }
 
-                var json = File.ReadAllText(filePath);
-                var session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
+                SessionData session;
+                try
+                {
+                    var json = File.ReadAllText(filePath);
+                    session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
+                }
+                catch (JsonException ex)
+                {
+                    return RecoverFromBackup(sessionId, filePath, ex.Message);
+                }
 
                 if (session == null)
-                {
-                    AgentCoreLog.Error($"{LogPrefix}Failed to deserialize session: {sessionId}");
-                    return null;
-                }
+                    return RecoverFromBackup(sessionId, filePath, "file is empty");
 
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded: {sessionId} ({session.Title}, {session.MessageCount} messages)");
                 return session;
@@ -160,14 +212,19 @@ namespace AgentCore.Editor.Session
 
                 // 读取（异步 I/O）+ 反序列化（Task.Run 后台线程）都不占用主线程
                 var json = await File.ReadAllTextAsync(filePath, ct);
-                var session = await Task.Run(
-                    () => JsonConvert.DeserializeObject<SessionData>(json, JsonSettings), ct);
+                SessionData session;
+                try
+                {
+                    session = await Task.Run(
+                        () => JsonConvert.DeserializeObject<SessionData>(json, JsonSettings), ct);
+                }
+                catch (JsonException ex)
+                {
+                    return RecoverFromBackup(sessionId, filePath, ex.Message);
+                }
 
                 if (session == null)
-                {
-                    AgentCoreLog.Error($"{LogPrefix}Failed to deserialize session: {sessionId}");
-                    return null;
-                }
+                    return RecoverFromBackup(sessionId, filePath, "file is empty");
 
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded (async): {sessionId} ({session.Title}, {session.MessageCount} messages)");
                 return session;
@@ -359,6 +416,8 @@ namespace AgentCore.Editor.Session
                 if (File.Exists(filePath))
                 {
                     File.Delete(filePath);
+                    if (File.Exists(filePath + BackupSuffix))
+                        File.Delete(filePath + BackupSuffix);
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session deleted: {sessionId}");
                 }
                 else

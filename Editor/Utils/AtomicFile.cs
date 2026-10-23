@@ -18,13 +18,14 @@ namespace AgentCore.Editor.Utils
 
         /// <summary>
         /// 原子写入文本。<paramref name="encoding"/> 为 null 时与 <c>File.WriteAllText(path, text)</c> 一致（UTF-8 无 BOM）。
+        /// <paramref name="backupPath"/> 非空时，被替换的旧内容保留到该路径（上一份完好的版本，用于损坏恢复）。
         /// </summary>
-        public static void WriteAllText(string path, string contents, Encoding encoding = null)
+        public static void WriteAllText(string path, string contents, Encoding encoding = null, string backupPath = null)
         {
-            WriteAllBytes(path, Encode(contents ?? string.Empty, encoding ?? Utf8NoBom));
+            WriteAllBytes(path, Encode(contents ?? string.Empty, encoding ?? Utf8NoBom), backupPath);
         }
 
-        public static void WriteAllBytes(string path, byte[] bytes)
+        public static void WriteAllBytes(string path, byte[] bytes, string backupPath = null)
         {
             var fullPath = Path.GetFullPath(path);
             var directory = Path.GetDirectoryName(fullPath);
@@ -42,7 +43,7 @@ namespace AgentCore.Editor.Utils
                     stream.Flush(true);
                 }
 
-                Commit(tempPath, fullPath);
+                Commit(tempPath, fullPath, backupPath == null ? null : Path.GetFullPath(backupPath));
             }
             finally
             {
@@ -58,7 +59,7 @@ namespace AgentCore.Editor.Utils
             }
         }
 
-        private static void Commit(string tempPath, string fullPath)
+        private static void Commit(string tempPath, string fullPath, string backupPath)
         {
             if (!File.Exists(fullPath))
             {
@@ -68,12 +69,14 @@ namespace AgentCore.Editor.Utils
 
             try
             {
-                File.Replace(tempPath, fullPath, null, ignoreMetadataErrors: true);
+                File.Replace(tempPath, fullPath, backupPath, ignoreMetadataErrors: true);
             }
             catch (Exception ex) when (ex is IOException || ex is PlatformNotSupportedException || ex is UnauthorizedAccessException)
             {
                 // 目标被其他进程（杀毒、索引器、Unity 文件监视）短暂占用，或文件系统不支持 Replace：
                 // 退回覆盖复制。此时不再是原子替换，但临时文件已完整落盘，不会写出半截内容。
+                if (backupPath != null)
+                    File.Copy(fullPath, backupPath, overwrite: true);
                 File.Copy(tempPath, fullPath, overwrite: true);
             }
         }

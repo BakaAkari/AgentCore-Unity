@@ -49,6 +49,21 @@ namespace AgentCore.Tests.Editor.Utils
         }
 
         [Test]
+        public void WriteAllText_WithBackupPath_KeepsPreviousVersion()
+        {
+            var path = Path.Combine(_dir, "a.json");
+            var backup = path + ".bak";
+            AtomicFile.WriteAllText(path, "v1", backupPath: backup);
+            Assert.IsFalse(File.Exists(backup), "first write has nothing to back up");
+
+            AtomicFile.WriteAllText(path, "v2", backupPath: backup);
+            AtomicFile.WriteAllText(path, "v3", backupPath: backup);
+
+            Assert.AreEqual("v3", File.ReadAllText(path));
+            Assert.AreEqual("v2", File.ReadAllText(backup));
+        }
+
+        [Test]
         public void WriteAllText_DefaultEncoding_HasNoBom_ExplicitUtf8_HasBom()
         {
             var plain = Path.Combine(_dir, "plain.txt");
