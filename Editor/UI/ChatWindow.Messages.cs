@@ -4,6 +4,7 @@ using System.Linq;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
+using AgentCore.Editor.Tools.Safety;
 using AgentCore.Editor.UI.Components;
 using AgentCore.Editor.Utils;
 using UnityEditor;
@@ -34,6 +35,8 @@ namespace AgentCore.Editor.UI
             // 不需要像 assistant 消息那样等待事件回调后再查证。
             bubble.OnForkClicked = OnForkButtonClicked;
             bubble.SetForkAvailable(true);
+            bubble.OnRewindClicked = OnRewindButtonClicked;
+            bubble.SetRewindAvailable(true);
             _messageBubbles[messageId] = bubble;
             _messageListManager?.AddItem(bubble);
             ScrollToBottom(force: true); // 新消息添加，强制滚动到底部
@@ -387,6 +390,138 @@ namespace AgentCore.Editor.UI
             bubble.OnForkClicked = OnForkButtonClicked;
             bool available = turn.MessageEndIndex >= 0 || isLastTurn;
             bubble.SetForkAvailable(available);
+
+            if (turn.Role == "user")
+            {
+                bubble.OnRewindClicked = OnRewindButtonClicked;
+                bubble.SetRewindAvailable(true);
+            }
+        }
+
+        /// <summary>回退按钮：弹出菜单选择恢复文件 / 恢复对话 / 两者。</summary>
+        private void OnRewindButtonClicked(string turnId, VisualElement anchor)
+        {
+            if (string.IsNullOrEmpty(turnId) || _agentLoop == null)
+                return;
+
+            if (_agentLoop.CurrentState != AgentState.Idle)
+            {
+                UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.busy", "Agent 运行中，停止后再回退"), true);
+                return;
+            }
+
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.both", "恢复文件和对话到这条消息之前")), false,
+                () => RewindToBeforeTurn(turnId, files: true, conversation: true));
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.files", "仅恢复文件")), false,
+                () => RewindToBeforeTurn(turnId, files: true, conversation: false));
+            menu.AddItem(new GUIContent(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.conversation", "仅恢复对话")), false,
+                () => RewindToBeforeTurn(turnId, files: false, conversation: true));
+            if (anchor != null)
+                menu.DropDown(anchor.worldBound);
+            else
+                menu.ShowAsContext();
+        }
+
+        /// <summary>
+        /// 回退到某条用户消息之前。文件：恢复该轮及之后 Agent 改过的文件、移除新建文件、撤销编辑器内改动；
+        /// 对话：删除该消息及之后的历史，并把消息原文放回输入框。由用户主动发起，执行前列出影响范围请用户确认。
+        /// </summary>
+        private void RewindToBeforeTurn(string turnId, bool files, bool conversation)
+        {
+            var sessionId = SessionManager.Instance.CurrentSessionId;
+            if (_agentLoop == null || string.IsNullOrEmpty(sessionId) || _agentLoop.CurrentState != AgentState.Idle)
+                return;
+
+            var title = AgentCore.Editor.L10n.Loc.Tr("chat.rewind.title", "回退到这条消息之前");
+            var status = new List<string>();
+
+            if (files)
+            {
+                var plan = CheckpointStore.PlanRewind(sessionId, turnId);
+                if (plan.IsEmpty)
+                {
+                    if (!conversation)
+                    {
+                        UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.nothing", "这条消息之后没有记录到文件改动"), false);
+                        return;
+                    }
+                    status.Add(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.noFiles", "无文件改动"));
+                }
+                else
+                {
+                    var restore = plan.Items.Count(i => i.First.Kind == CheckpointStore.EntryKind.Modified);
+                    var remove = plan.Items.Count(i => i.First.Kind == CheckpointStore.EntryKind.Created);
+                    var lines = new List<string>
+                    {
+                        $"恢复原内容：{restore} 个文件",
+                        $"移除 Agent 新建的文件：{remove} 个（移到回收站）"
+                    };
+                    if (plan.Moves.Count > 0)
+                        lines.Add($"移回被移动的资产：{plan.Moves.Count} 个");
+                    if (plan.FirstUndoGroup >= 0)
+                        lines.Add("撤销编辑器内的改动（Undo 历史回到这条消息之前，之后你手动做的未保存场景改动也会撤销）");
+                    if (plan.Unrecoverable.Count > 0)
+                        lines.Add($"无法恢复（没有备份）：{plan.Unrecoverable.Count} 个，见 Console 日志");
+                    var changed = plan.ChangedSinceAgentCount;
+                    if (changed > 0)
+                        lines.Add($"\n其中 {changed} 个文件在 Agent 修改之后又被改过：\n  " +
+                                  string.Join("\n  ", plan.Items.Where(i => i.ChangedSinceAgent).Take(10).Select(i => i.Path)));
+
+                    var message = string.Join("\n", lines);
+                    bool overwriteChanged;
+                    if (changed > 0)
+                    {
+                        var choice = EditorUtility.DisplayDialogComplex(title, message, "全部恢复", "取消", "跳过这些文件");
+                        if (choice == 1)
+                            return;
+                        overwriteChanged = choice == 0;
+                    }
+                    else
+                    {
+                        if (!EditorUtility.DisplayDialog(title, message, "回退", "取消"))
+                            return;
+                        overwriteChanged = true;
+                    }
+
+                    var report = CheckpointStore.ApplyRewind(plan, overwriteChanged, revertEditorUndo: true);
+                    foreach (var line in report.Unrecoverable.Concat(report.Failed).Concat(report.Skipped))
+                        AgentCoreLog.Warning($"[AgentCore] Rewind: {line}");
+                    status.Add(report.ToString());
+                }
+            }
+
+            if (conversation)
+            {
+                if (_agentLoop.TruncateBeforeTurn(turnId, out var userText))
+                {
+                    try
+                    {
+                        SessionManager.Instance.ForceSave(
+                            new List<ChatMessage>(_agentLoop.Messages),
+                            new List<ConversationTurn>(_agentLoop.ConversationTurns));
+                    }
+                    catch (Exception ex)
+                    {
+                        AgentCoreLog.Error($"[AgentCore] Error saving session after rewind: {ex.Message}");
+                    }
+
+                    RebuildMessageBubbles();
+                    UpdateContextUsagePanel();
+                    if (_inputField != null && !string.IsNullOrEmpty(userText))
+                    {
+                        _inputField.value = userText;
+                        _inputField.Focus();
+                    }
+                    status.Add(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.conversationDone", "对话已回退"));
+                }
+                else
+                {
+                    status.Add(AgentCore.Editor.L10n.Loc.Tr("chat.rewind.conversationFailed", "对话回退失败（找不到可靠的截断点）"));
+                }
+            }
+
+            UpdateStatusLabel($"{title}: {string.Join("; ", status)}", false);
         }
 
         /// <summary>

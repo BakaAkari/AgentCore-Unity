@@ -17,6 +17,12 @@ namespace AgentCore.Editor.Utils
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
 
         /// <summary>
+        /// 写入前回调（参数为目标的绝对路径），供检查点在文件被替换前备份原内容。
+        /// 回调抛出的异常被吞掉，不影响写入。
+        /// </summary>
+        public static event Action<string> BeforeWrite;
+
+        /// <summary>
         /// 原子写入文本。<paramref name="encoding"/> 为 null 时与 <c>File.WriteAllText(path, text)</c> 一致（UTF-8 无 BOM）。
         /// <paramref name="backupPath"/> 非空时，被替换的旧内容保留到该路径（上一份完好的版本，用于损坏恢复）。
         /// </summary>
@@ -28,6 +34,15 @@ namespace AgentCore.Editor.Utils
         public static void WriteAllBytes(string path, byte[] bytes, string backupPath = null)
         {
             var fullPath = Path.GetFullPath(path);
+            try
+            {
+                BeforeWrite?.Invoke(fullPath);
+            }
+            catch
+            {
+                // 备份失败不阻止写入
+            }
+
             var directory = Path.GetDirectoryName(fullPath);
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);

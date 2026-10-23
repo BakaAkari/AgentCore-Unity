@@ -295,15 +295,18 @@ namespace AgentCore.Editor.Tools
                 // 4. 治理层策略评估 (G.1)
                 var action = preflightAction;
                 ToolPolicyDecision decision;
+                List<string> writeTargets;
                 if (toolName == BatchExecuteReadOnlyToolName)
                 {
                     // batch_execute 是纯调度器：每个子操作各自过完整策略，不再整体降级成一次 High 确认
                     decision = EvaluateBatchExecute(tool.Metadata, parameters);
+                    writeTargets = CollectBatchWriteTargets(parameters);
                 }
                 else
                 {
                     var paramSummary = BuildParameterSummary(parameters);
                     var pathRisk = ToolPathRiskResolver.Resolve(parameters, tool.Metadata, out var pathTargets, out var touchesProtected);
+                    writeTargets = pathTargets;
                     decision = ToolRiskPolicy.Evaluate(
                         tool.Metadata,
                         pathRisk,
@@ -360,14 +363,18 @@ namespace AgentCore.Editor.Tools
                 // 5. 执行工具
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Executing tool '{toolName}' (mainThread={tool.Metadata.RequiresMainThread})");
 
+                // 检查点：按参数里的写入目标先备份原内容，并为本次调用开一个命名 Undo 组，供"回退到这条消息之前"使用
                 ToolResult result;
-                if (tool.Metadata.RequiresMainThread)
+                using (CheckpointStore.BeginToolCall(toolName, writeTargets))
                 {
-                    result = await ExecuteOnMainThreadAsync(tool, parameters, ct);
-                }
-                else
-                {
-                    result = await tool.ExecuteAsync(parameters, ct);
+                    if (tool.Metadata.RequiresMainThread)
+                    {
+                        result = await ExecuteOnMainThreadAsync(tool, parameters, ct);
+                    }
+                    else
+                    {
+                        result = await tool.ExecuteAsync(parameters, ct);
+                    }
                 }
 
                 stopwatch.Stop();
@@ -744,6 +751,28 @@ namespace AgentCore.Editor.Tools
         /// </list>
         /// 参考 Claude Code："A rule must match each subcommand independently"。
         /// </summary>
+        /// <summary>batch_execute 各子操作参数中的写入目标（只用于检查点预备份）。</summary>
+        private List<string> CollectBatchWriteTargets(JObject parameters)
+        {
+            var targets = new List<string>();
+            if (!(parameters?["operations"] is JArray operations))
+                return targets;
+
+            foreach (var token in operations)
+            {
+                if (!(token is JObject op))
+                    continue;
+                var subToolName = op["tool"]?.Type == JTokenType.String ? op["tool"].Value<string>() : null;
+                var subTool = string.IsNullOrEmpty(subToolName) ? null : _registry.GetTool(subToolName);
+                if (subTool?.Metadata == null)
+                    continue;
+                ToolPathRiskResolver.Resolve(op["args"] as JObject, subTool.Metadata, out var subTargets);
+                if (subTargets != null)
+                    targets.AddRange(subTargets);
+            }
+            return targets;
+        }
+
         private ToolPolicyDecision EvaluateBatchExecute(ToolMetadata batchMetadata, JObject parameters)
         {
             var operations = parameters?["operations"] as JArray;

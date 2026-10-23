@@ -656,6 +656,9 @@ namespace AgentCore.Editor.Core
             }
             _conversationTurns.Add(userTurn);
 
+            // 检查点：本轮工具写入的原内容记到这条用户消息名下，供"回退到这条消息之前"
+            CheckpointStore.BeginTurn(SessionManager.Instance.CurrentSessionId, userTurn.Id);
+
             // 标记会话内容已变更，确保保存时更新 UpdatedAt
             SessionManager.Instance.MarkDirty();
 
@@ -1000,6 +1003,58 @@ namespace AgentCore.Editor.Core
 
             var session = SessionManager.Instance.LoadSession(sessionId);
             return ApplyLoadedSession(session, sessionId);
+        }
+
+        /// <summary>
+        /// 把对话回退到某条用户消息之前：删除该消息及之后的所有消息与轮次（原地截断当前会话）。
+        /// 截断点取该用户消息在 <c>_messages</c> 中的实际位置（按 <see cref="ConversationTurn.MessageEndIndex"/> 定位，
+        /// 再核对角色与内容），之前的历史天然完整，不会留下没有结果的 tool_calls。
+        /// </summary>
+        /// <param name="userTurnId">用户消息的 turn.Id（即气泡 MessageId）。</param>
+        /// <param name="userText">输出：被回退的用户消息原文，供 UI 放回输入框。</param>
+        /// <returns>找不到可靠的截断点或 Agent 非空闲时返回 false，历史不变。</returns>
+        public bool TruncateBeforeTurn(string userTurnId, out string userText)
+        {
+            userText = null;
+            if (CurrentState != AgentState.Idle || string.IsNullOrEmpty(userTurnId))
+                return false;
+
+            int turnIndex = _conversationTurns.FindIndex(t => t.Id == userTurnId);
+            if (turnIndex < 0 || _conversationTurns[turnIndex].Role != "user")
+                return false;
+
+            var turn = _conversationTurns[turnIndex];
+            int cut = -1;
+            int hint = turn.MessageEndIndex > 0 ? Math.Min(turn.MessageEndIndex, _messages.Count) - 1 : _messages.Count - 1;
+            // MessageEndIndex 之后可能有 system 消息插在它前面（记忆 / 技能注入），所以从提示位置向后再向前找
+            for (int i = hint; i < _messages.Count && cut < 0; i++)
+            {
+                if (IsUserMessageFor(_messages[i], turn))
+                    cut = i;
+            }
+            for (int i = Math.Min(hint, _messages.Count - 1); i >= 0 && cut < 0; i--)
+            {
+                if (IsUserMessageFor(_messages[i], turn))
+                    cut = i;
+            }
+            if (cut < 0)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Rewind: user message for turn {userTurnId} not found in history.");
+                return false;
+            }
+
+            userText = turn.Content;
+            _messages.RemoveRange(cut, _messages.Count - cut);
+            _conversationTurns.RemoveRange(turnIndex, _conversationTurns.Count - turnIndex);
+            SessionManager.Instance.MarkDirty();
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Rewound conversation to before turn {userTurnId} ({_messages.Count} messages kept).");
+            return true;
+        }
+
+        private static bool IsUserMessageFor(ChatMessage message, ConversationTurn turn)
+        {
+            return message.Role == "user" && message.Content != null && !string.IsNullOrEmpty(turn.Content) &&
+                   message.Content.StartsWith(turn.Content, StringComparison.Ordinal);
         }
 
         /// <summary>

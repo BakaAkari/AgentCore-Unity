@@ -102,6 +102,9 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>Fork 按钮引用（如果 UXML 中存在）</summary>
         private Button _forkButton;
 
+        /// <summary>回退按钮（仅 user 消息，代码创建，放在 Fork 按钮左侧）</summary>
+        private Button _rewindButton;
+
         /// <summary>底部资源引用栏（仅 assistant 消息使用，含消息里出现的文件/GO 引用 chip）</summary>
         private MessageReferenceBar _referenceBar;
 
@@ -117,6 +120,11 @@ namespace AgentCore.Editor.UI.Components
         /// （即对应 turn.Id）作为参数调用，外部负责实际的 <c>SessionManager.ForkSession</c> + 切换会话。
         /// </summary>
         public Action<string> OnForkClicked { get; set; }
+
+        /// <summary>
+        /// 回退按钮点击回调（仅 user 消息）。参数为本气泡的 <see cref="MessageId"/> 与按钮本身（用于弹出菜单定位）。
+        /// </summary>
+        public Action<string, VisualElement> OnRewindClicked { get; set; }
 
         /// <summary>
         /// 当前气泡显示的完整原始文本内容（供外部读取或复制使用）。
@@ -192,6 +200,7 @@ namespace AgentCore.Editor.UI.Components
 
             // 初始化 Fork 按钮（error 角色不显示——错误消息不构成有效的对话延续点）
             SetupForkButton();
+            SetupRewindButton();
 
             // 设置角色样式类
             if (_bubbleRoot != null)
@@ -783,6 +792,31 @@ namespace AgentCore.Editor.UI.Components
             // 默认禁用：外部（ChatWindow）必须显式调用 SetForkAvailable(true) 才能启用，
             // 这样"忘记接线"的失败模式是"按钮看起来存在但置灰"，而不是"点了没反应"。
             _forkButton.SetEnabled(false);
+        }
+
+        /// <summary>
+        /// 回退按钮：回到这条用户消息之前（恢复 Agent 改过的文件 / 截断对话）。只给 user 消息，
+        /// 与 Fork 一样默认禁用，由 ChatWindow 通过 <see cref="SetRewindAvailable"/> 启用。
+        /// </summary>
+        private void SetupRewindButton()
+        {
+            if (Role != "user" || _forkButton?.parent == null)
+                return;
+
+            _rewindButton = new Button { name = "rewind-button", focusable = false };
+            _rewindButton.AddToClassList("bubble-fork-button");
+            _rewindButton.text = AgentCore.Editor.L10n.Loc.Tr("message.rewind", "Rewind");
+            _rewindButton.tooltip = AgentCore.Editor.L10n.Loc.Tr("message.rewind.tooltip",
+                "回到这条消息之前：恢复 Agent 之后改过的文件，和/或删除这条消息及之后的对话");
+            _rewindButton.clicked += () => OnRewindClicked?.Invoke(MessageId, _rewindButton);
+            _rewindButton.SetEnabled(false);
+            _forkButton.parent.Insert(_forkButton.parent.IndexOf(_forkButton), _rewindButton);
+        }
+
+        /// <summary>设置回退按钮是否可用（Agent 忙时禁用）。</summary>
+        public void SetRewindAvailable(bool available)
+        {
+            _rewindButton?.SetEnabled(available);
         }
 
         /// <summary>
