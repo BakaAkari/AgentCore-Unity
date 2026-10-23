@@ -1,4 +1,6 @@
-﻿using AgentCore.Editor.L10n;
+using AgentCore.Editor.L10n;
+using AgentCore.Editor.LLM;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -41,6 +43,12 @@ namespace AgentCore.Editor.UI.Components
         private readonly Label _compressionStatsLabel;// value 部分
         private readonly Label _compressionBadgeLabel;
         private readonly VisualElement _compressionBadge;
+        private readonly Label _headerUsageLabel;     // v1.17.0: 折叠时也可见的缓存命中 / 费用摘要
+        private readonly Label _llmUsageRowLabel;
+        private readonly Label _llmUsageValueLabel;
+        private readonly Label _lastCallRowLabel;
+        private readonly Label _lastCallValueLabel;
+        private bool _usageRefreshQueued;
         #endregion
 
         #region State
@@ -69,6 +77,13 @@ namespace AgentCore.Editor.UI.Components
 
             _headerLabel = new Label(Loc.Tr("contextUsage.header", "上下文使用情况"));
             _header.Add(_headerLabel);
+
+            _headerUsageLabel = new Label();
+            _headerUsageLabel.AddToClassList(StatValueClassName);
+            _headerUsageLabel.style.flexGrow = 1;
+            _headerUsageLabel.style.unityTextAlign = TextAnchor.MiddleRight;
+            _headerUsageLabel.style.marginRight = 6;
+            _header.Add(_headerUsageLabel);
 
             // 展开/收起指示符 (只是视觉指示,不再是可独立点击的 Button)
             _toggleIndicator = new Label("v");
@@ -104,6 +119,10 @@ namespace AgentCore.Editor.UI.Components
             var compressionRow = CreateStatsRow(out _compressionRowLabel, out _compressionStatsLabel);
             _content.Add(compressionRow);
 
+            // v1.17.0: LLM 实际用量（来自供应商 usage 字段：缓存命中 / 写入 / 输出 / 估算费用）
+            _content.Add(CreateStatsRow(out _llmUsageRowLabel, out _llmUsageValueLabel));
+            _content.Add(CreateStatsRow(out _lastCallRowLabel, out _lastCallValueLabel));
+
             // Compression badge
             _compressionBadge = new VisualElement();
             _compressionBadge.AddToClassList(CompressionBadgeClassName);
@@ -121,8 +140,17 @@ namespace AgentCore.Editor.UI.Components
             SetCollapsed(true);
 
             // v1.9.0+: 订阅语言事件, 切语言时用最近 budget 重绘
-            RegisterCallback<AttachToPanelEvent>(_ => LanguageManager.LanguageChanged += OnLanguageChanged);
-            RegisterCallback<DetachFromPanelEvent>(_ => LanguageManager.LanguageChanged -= OnLanguageChanged);
+            RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                LanguageManager.LanguageChanged += OnLanguageChanged;
+                UsageLedger.OnUsageRecorded += OnUsageRecorded;
+                RenderUsage();
+            });
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                LanguageManager.LanguageChanged -= OnLanguageChanged;
+                UsageLedger.OnUsageRecorded -= OnUsageRecorded;
+            });
         }
         #endregion
 
@@ -163,6 +191,65 @@ namespace AgentCore.Editor.UI.Components
         {
             _headerLabel.text = Loc.Tr("contextUsage.header", "上下文使用情况");
             RenderCurrent();
+            RenderUsage();
+        }
+
+        /// <summary>
+        /// v1.17.0: UsageLedger 事件可能来自后台线程（HTTP 回调），合并后切回主线程刷新。
+        /// </summary>
+        private void OnUsageRecorded(LlmUsage _)
+        {
+            if (_usageRefreshQueued) return;
+            _usageRefreshQueued = true;
+            EditorApplication.delayCall += () =>
+            {
+                _usageRefreshQueued = false;
+                RenderUsage();
+            };
+        }
+
+        /// <summary>v1.17.0: 渲染会话累计用量与最近一次调用。</summary>
+        private void RenderUsage()
+        {
+            var session = UsageLedger.Session;
+            var last = UsageLedger.Last;
+            double cost = UsageLedger.SessionCostUsd;
+            bool partial = UsageLedger.SessionCostPartial;
+
+            _llmUsageRowLabel.text = Loc.Tr("contextUsage.llmUsage.label", "LLM 用量");
+            _lastCallRowLabel.text = Loc.Tr("contextUsage.lastCall.label", "上次调用");
+
+            if (session == null || session.Calls == 0)
+            {
+                _llmUsageValueLabel.text = Loc.Tr("contextUsage.llmUsage.none", "暂无调用");
+                _lastCallValueLabel.text = "-";
+                _headerUsageLabel.text = string.Empty;
+                return;
+            }
+
+            string costText = cost > 0 ? $"≈${cost:F2}{(partial ? "+" : "")}" : (partial ? Loc.Tr("contextUsage.cost.notAvailable", "未知") : "$0");
+            _llmUsageValueLabel.text = Loc.Tr(
+                "contextUsage.llmUsage.cacheStatusValue",
+                "{0} 次 | 输入 {1}（缓存命中 {2}）| 输出 {3} | 费用 {4}",
+                session.Calls,
+                UsageLedger.FormatTokens(session.TotalInput),
+                session.CacheStatus == "unknown" ? Loc.Tr("contextUsage.cache.unknown", "未知") : session.CacheStatus,
+                UsageLedger.FormatTokens(session.Output),
+                costText);
+
+            _lastCallValueLabel.text = Loc.Tr("contextUsage.cache.notReported", "缓存未知（服务未上报）");
+            if (last != null && !last.IsEmpty && last.CacheMetricsKnown)
+            {
+                _lastCallValueLabel.text = Loc.Tr(
+                    "contextUsage.lastCall.value",
+                    "读缓存 {0} | 写缓存 {1} | 未缓存 {2} | 输出 {3}",
+                    UsageLedger.FormatTokens(last.CacheRead),
+                    UsageLedger.FormatTokens(last.CacheWrite),
+                    UsageLedger.FormatTokens(last.InputUncached),
+                    UsageLedger.FormatTokens(last.Output));
+            }
+
+            _headerUsageLabel.text = Loc.Tr("contextUsage.cache.header", "缓存 {0} · {1}", session.CacheStatus == "unknown" ? Loc.Tr("contextUsage.cache.unknown", "未知") : session.CacheStatus, costText);
         }
 
         /// <summary>
