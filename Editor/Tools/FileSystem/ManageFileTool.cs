@@ -104,6 +104,28 @@ namespace AgentCore.Editor.Tools.FileSystem
         };
 
         /// <summary>
+        /// Extensions skipped by search_content (binary formats, plus large Unity YAML assets that would flood results).
+        /// </summary>
+        private static readonly HashSet<string> SearchSkippedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".psd", ".tif", ".tiff",
+            ".wav", ".mp3", ".ogg", ".aiff", ".flac",
+            ".fbx", ".obj", ".blend", ".3ds", ".dae", ".max",
+            ".dll", ".exe", ".so", ".dylib", ".pdb",
+            ".asset", ".unity", ".prefab", ".mat", ".controller", ".anim",
+            ".ttf", ".otf", ".woff", ".woff2",
+            ".zip", ".rar", ".7z", ".gz", ".tar",
+            ".pdf", ".doc", ".docx",
+            ".mp4", ".avi", ".mov", ".mkv",
+            ".cubemap", ".exr", ".hdr"
+        };
+
+        /// <summary>
+        /// Lines longer than this are clipped in ripgrep results (minified / generated files).
+        /// </summary>
+        private const int SearchMaxLineChars = 2000;
+
+        /// <summary>
         /// The project root directory (parent of Assets/).
         /// </summary>
         private static readonly string ProjectRoot = Path.GetFullPath(
@@ -686,9 +708,10 @@ namespace AgentCore.Editor.Tools.FileSystem
         /// <summary>
         /// Search file contents using regex pattern across the project.
         /// <para>
-        /// Safety: the pattern is capped at 512 chars and each match has a 200 ms timeout; a timeout
-        /// is returned as an error, never as "0 matches". The scan honours cancellation per file and
-        /// stops at a time / file / byte budget, returning what it found with truncatedReason set.
+        /// Engine: ripgrep when it is available (linear-time Rust regex — no catastrophic backtracking —
+        /// multi-threaded, honours .gitignore); otherwise, or when rg cannot compile the pattern
+        /// (look-around / backreferences) or fails to run, the built-in .NET scanner. The result shape is
+        /// identical for both; <c>engine</c> says which one answered and <c>engine_note</c> why rg was not used.
         /// </para>
         /// </summary>
         private ToolResponse HandleSearchContent(JObject parameters, CancellationToken ct)
@@ -700,12 +723,256 @@ namespace AgentCore.Editor.Tools.FileSystem
             if (!Directory.Exists(fullPath))
                 return ToolResponse.Fail($"Directory not found: '{path}'");
 
-            var recursive = ToolHelpers.GetOptionalBool(parameters, "recursive", true);
-            var maxResults = Math.Max(1, ToolHelpers.GetOptionalInt(parameters, "max_results", DefaultMaxResults));
-            var contextLines = Math.Max(0, ToolHelpers.GetOptionalInt(parameters, "context_lines", DefaultContextLines));
-            var caseSensitive = ToolHelpers.GetOptionalBool(parameters, "case_sensitive", false);
-            var filePattern = ToolHelpers.GetOptionalString(parameters, "file_pattern", "*");
-            var includeHidden = ToolHelpers.GetOptionalBool(parameters, "include_hidden", false);
+            var request = new ContentSearchRequest
+            {
+                Pattern = searchPattern,
+                FullPath = fullPath,
+                Recursive = ToolHelpers.GetOptionalBool(parameters, "recursive", true),
+                MaxResults = Math.Max(1, ToolHelpers.GetOptionalInt(parameters, "max_results", DefaultMaxResults)),
+                ContextLines = Math.Max(0, ToolHelpers.GetOptionalInt(parameters, "context_lines", DefaultContextLines)),
+                CaseSensitive = ToolHelpers.GetOptionalBool(parameters, "case_sensitive", false),
+                FilePatterns = ToolHelpers.GetOptionalString(parameters, "file_pattern", "*").Split('|')
+                    .Select(fp => fp.Trim())
+                    .Where(fp => fp.Length > 0)
+                    .DefaultIfEmpty("*")
+                    .ToArray(),
+                IncludeHidden = ToolHelpers.GetOptionalBool(parameters, "include_hidden", false),
+            };
+
+            string engineNote = null;
+            if (RgLocator.TryGetExecutable(out var rgPath))
+            {
+                var rgResponse = SearchContentWithRipgrep(rgPath, request, ct, out engineNote);
+                if (rgResponse != null)
+                    return rgResponse;
+            }
+
+            return SearchContentDotnet(request, engineNote, ct);
+        }
+
+        /// <summary>
+        /// Parsed search_content parameters shared by both engines.
+        /// </summary>
+        private sealed class ContentSearchRequest
+        {
+            public string Pattern;
+            public string FullPath;
+            public bool Recursive;
+            public int MaxResults;
+            public int ContextLines;
+            public bool CaseSensitive;
+            public string[] FilePatterns;
+            public bool IncludeHidden;
+        }
+
+        /// <summary>
+        /// Whether file_pattern names this extension explicitly (e.g. '*.prefab'), which re-enables
+        /// an extension that search_content skips by default.
+        /// </summary>
+        private static bool IsExtensionRequested(string[] filePatterns, string extension)
+        {
+            return filePatterns.Any(fp => fp != "*" && fp != "*.*" && fp.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// search_content via ripgrep. Returns null — with <paramref name="fallbackNote"/> explaining why when it
+        /// matters — when the .NET scanner should answer instead; an rg-specific problem is never an error.
+        /// <para>
+        /// Scope mirrors the .NET scanner: Library/ Temp/ Logs/ under the project root and obj/ at any depth are
+        /// skipped unless they are the requested path; hidden entries need include_hidden; the same binary /
+        /// Unity-YAML extensions are skipped unless file_pattern names them; files over 5 MB are skipped.
+        /// Unlike the .NET scanner, rg also honours .gitignore / .ignore files inside the searched directories.
+        /// </para>
+        /// </summary>
+        private ToolResponse SearchContentWithRipgrep(string rgPath, ContentSearchRequest req, CancellationToken ct, out string fallbackNote)
+        {
+            fallbackNote = null;
+            var excludedDirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var options = new RgSearchOptions
+            {
+                Pattern = req.Pattern,
+                CaseSensitive = req.CaseSensitive,
+                WorkingDirectory = ProjectRoot,
+                IncludeHidden = req.IncludeHidden,
+                MaxFileSizeBytes = MaxReadSize,
+                MaxColumns = SearchMaxLineChars,
+                MaxLineChars = SearchMaxLineChars,
+                ContextLines = req.ContextLines,
+                MaxResults = req.MaxResults,
+                KeepCountingAfterLimit = true,
+                Timeout = SearchTimeBudget,
+            };
+
+            bool allFiles = req.FilePatterns.Any(fp => fp == "*" || fp == "*.*");
+            if (!allFiles)
+                options.IncludeGlobs.AddRange(req.FilePatterns);
+
+            foreach (var ext in SearchSkippedExtensions)
+            {
+                if (allFiles || !IsExtensionRequested(req.FilePatterns, ext))
+                    options.ExcludeGlobs.Add("*" + ext);
+            }
+
+            foreach (var dirName in ExcludedDirsAnywhere)
+                options.ExcludeGlobs.Add(dirName + "/");
+
+            bool isProjectRoot = string.Equals(
+                req.FullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                ProjectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+            var relativeRoot = isProjectRoot ? "." : ToRelativePath(req.FullPath);
+
+            if (!req.Recursive)
+            {
+                options.MaxDepth = 1;
+                options.Paths.Add(relativeRoot);
+            }
+            else if (isProjectRoot)
+            {
+                // Name the project root's children explicitly so Library/ Temp/ Logs/ are pruned without being
+                // walked (an rg glob cannot cheaply anchor a directory exclusion to the root).
+                string[] childDirs;
+                try
+                {
+                    childDirs = Directory.GetDirectories(ProjectRoot);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    return null;
+                }
+                Array.Sort(childDirs, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var child in childDirs)
+                {
+                    var name = Path.GetFileName(child);
+                    if (IsExcludedDirectory(ProjectRoot, name))
+                    {
+                        excludedDirs.Add(ToRelativePath(child));
+                        continue;
+                    }
+                    if (!req.IncludeHidden && name.StartsWith("."))
+                        continue;
+                    options.Paths.Add(name);
+                }
+
+                // rg searches explicitly named files regardless of --glob, so root-level files are filtered here.
+                var rootFiles = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var fp in req.FilePatterns)
+                {
+                    foreach (var file in SafeEnumerateFiles(ProjectRoot, fp))
+                    {
+                        var fileName = Path.GetFileName(file);
+                        var ext = Path.GetExtension(file);
+                        if (!req.IncludeHidden && fileName.StartsWith("."))
+                            continue;
+                        if (SearchSkippedExtensions.Contains(ext) && (allFiles || !IsExtensionRequested(req.FilePatterns, ext)))
+                            continue;
+                        rootFiles.Add(fileName);
+                    }
+                }
+                options.Paths.AddRange(rootFiles);
+
+                if (options.Paths.Count == 0)
+                    return null; // nothing to search; the .NET scanner answers trivially
+            }
+            else
+            {
+                options.Paths.Add(relativeRoot);
+                foreach (var dirName in ExcludedDirsAnywhere)
+                {
+                    var nested = Path.Combine(req.FullPath, dirName);
+                    if (Directory.Exists(nested))
+                        excludedDirs.Add(ToRelativePath(nested));
+                }
+            }
+
+            RgSearchResult rg;
+            try
+            {
+                rg = RgSearch.Run(rgPath, options, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                fallbackNote = $"ripgrep failed ({ex.Message}); searched with the built-in .NET scanner instead.";
+                return null;
+            }
+
+            switch (rg.Status)
+            {
+                case RgSearchStatus.RegexUnsupported:
+                    fallbackNote = "ripgrep's regex engine (Rust syntax: no look-around or backreferences) could not compile this pattern " +
+                                   $"({rg.ErrorMessage}); searched with the .NET regex engine instead.";
+                    return null;
+                case RgSearchStatus.Failed:
+                    if (rg.StartFailed)
+                        RgLocator.MarkUnavailable(rg.ErrorMessage);
+                    fallbackNote = $"ripgrep failed ({rg.ErrorMessage}); searched with the built-in .NET scanner instead.";
+                    return null;
+            }
+
+            var matches = new JArray();
+            foreach (var m in rg.Matches)
+            {
+                matches.Add(new JObject
+                {
+                    ["file"] = m.Path,
+                    ["line"] = m.Line,
+                    ["column"] = m.Column,
+                    ["match"] = m.Match,
+                    ["context"] = m.Context
+                });
+            }
+
+            var overMax = rg.TotalMatches > req.MaxResults;
+            var data = new JObject
+            {
+                ["pattern"] = req.Pattern,
+                ["search_path"] = ToRelativePath(req.FullPath),
+                ["files_searched"] = rg.FilesSearched,
+                ["files_matched"] = rg.FilesMatched,
+                ["files_unreadable"] = rg.FilesUnreadable,
+                ["matches"] = matches,
+                ["totalMatches"] = rg.TotalMatches,
+                ["totalIsLowerBound"] = rg.TotalIsLowerBound,
+                ["truncated"] = rg.Truncated,
+                ["truncatedReason"] = rg.TruncatedReason,
+                ["excluded_dirs"] = new JArray(excludedDirs),
+                ["engine"] = "ripgrep"
+            };
+
+            var plus = rg.TotalIsLowerBound ? "+" : "";
+            var msg = $"Found {rg.TotalMatches}{plus} matching lines in {rg.FilesMatched}{plus} files (searched {rg.FilesSearched}{plus} files with ripgrep; .gitignore'd files skipped)";
+            if (overMax)
+                msg += $"; showing {matches.Count} (max_results={req.MaxResults})";
+            if (rg.TruncatedReason == "timeout")
+                msg += $"; scan stopped after {SearchTimeBudget.TotalSeconds:0}s budget, narrow path/file_pattern for complete results";
+            if (excludedDirs.Count > 0)
+                msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to search it)";
+
+            return ToolResponse.OkWithData(data, msg);
+        }
+
+        /// <summary>
+        /// search_content via the built-in .NET scanner.
+        /// <para>
+        /// Safety: the pattern is capped at 512 chars and each match has a 200 ms timeout; a timeout
+        /// is returned as an error, never as "0 matches". The scan honours cancellation per file and
+        /// stops at a time / file / byte budget, returning what it found with truncatedReason set.
+        /// </para>
+        /// </summary>
+        private ToolResponse SearchContentDotnet(ContentSearchRequest req, string engineNote, CancellationToken ct)
+        {
+            var searchPattern = req.Pattern;
+            var fullPath = req.FullPath;
+            var recursive = req.Recursive;
+            var maxResults = req.MaxResults;
+            var contextLines = req.ContextLines;
+            var caseSensitive = req.CaseSensitive;
+            var includeHidden = req.IncludeHidden;
 
             // Validate regex (length cap + match timeout; invalid patterns explain why)
             Regex regex;
@@ -715,7 +982,7 @@ namespace AgentCore.Editor.Tools.FileSystem
             }
             catch (ArgumentException ex)
             {
-                return ToolResponse.Fail(ex.Message);
+                return ToolResponse.Fail(engineNote != null ? $"{ex.Message} (note: {engineNote})" : ex.Message);
             }
 
             var matches = new JArray();
@@ -728,26 +995,8 @@ namespace AgentCore.Editor.Tools.FileSystem
             string scanStopReason = null;
             var budget = Stopwatch.StartNew();
 
-            // Binary file extensions to skip
-            var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".psd", ".tif", ".tiff",
-                ".wav", ".mp3", ".ogg", ".aiff", ".flac",
-                ".fbx", ".obj", ".blend", ".3ds", ".dae", ".max",
-                ".dll", ".exe", ".so", ".dylib", ".pdb",
-                ".asset", ".unity", ".prefab", ".mat", ".controller", ".anim",
-                ".ttf", ".otf", ".woff", ".woff2",
-                ".zip", ".rar", ".7z", ".gz", ".tar",
-                ".pdf", ".doc", ".docx",
-                ".mp4", ".avi", ".mov", ".mkv",
-                ".cubemap", ".exr", ".hdr"
-            };
-
-            var filePatterns = filePattern.Split('|')
-                .Select(fp => fp.Trim())
-                .Where(fp => fp.Length > 0)
-                .DefaultIfEmpty("*")
-                .ToArray();
+            var binaryExtensions = SearchSkippedExtensions;
+            var filePatterns = req.FilePatterns;
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var directories = new[] { fullPath }.Concat(recursive
@@ -868,8 +1117,11 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ["totalIsLowerBound"] = scanStopReason != null,
                 ["truncated"] = truncated,
                 ["truncatedReason"] = truncatedReason,
-                ["excluded_dirs"] = new JArray(excludedDirs)
+                ["excluded_dirs"] = new JArray(excludedDirs),
+                ["engine"] = "dotnet"
             };
+            if (engineNote != null)
+                data["engine_note"] = engineNote;
 
             var msg = $"Found {matchCount}{(scanStopReason != null ? "+" : "")} matching lines in {filesMatched} files (searched {filesSearched} files)";
             if (overMax)
@@ -880,6 +1132,8 @@ namespace AgentCore.Editor.Tools.FileSystem
                 msg += $"; scan stopped at file/byte cap ({SearchFileCap} files / {SearchByteBudget / (1024 * 1024)}MB), narrow path/file_pattern for complete results";
             if (excludedDirs.Count > 0)
                 msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to search it)";
+            if (engineNote != null)
+                msg += $"; note: {engineNote}";
 
             return ToolResponse.OkWithData(data, msg);
         }

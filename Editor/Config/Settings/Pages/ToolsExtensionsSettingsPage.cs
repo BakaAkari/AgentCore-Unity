@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Tools;
+using AgentCore.Editor.Tools.Infrastructure;
 using UnityEditor;
 using UnityEngine;
 
@@ -40,6 +41,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
             DrawCapabilityOverviewCard(context);
             EditorGUILayout.Space(8);
             DrawToolVisibilityCard(context);
+            EditorGUILayout.Space(8);
+            DrawTextSearchCard(context);
             EditorGUILayout.Space(8);
             DrawOptionalComponentsCard(context);
             EditorGUILayout.Space(8);
@@ -298,6 +301,50 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 return string.Empty;
 
             return text.Length <= maxLength ? text : text.Substring(0, maxLength) + "...";
+        }
+
+        // ── Text Search (ripgrep) ──
+
+        /// <summary>
+        /// ripgrep 检测结果（只读缓存，重绘时不探测）、可选的自定义路径与 "Re-detect"。
+        /// </summary>
+        private static void DrawTextSearchCard(AgentCoreSettingsContext context)
+        {
+            context.Ui.DrawCard(
+                "Text Search (ripgrep)",
+                "manage_file search_content and search_code search_text use ripgrep when it is installed (fast, no regex backtracking, honours .gitignore); otherwise the built-in .NET scanner.",
+                () =>
+                {
+                    var availability = RgLocator.Availability;
+                    var level = availability == RgAvailability.Available
+                        ? SettingsStatusLevel.Success
+                        : availability == RgAvailability.Unavailable ? SettingsStatusLevel.Warning : SettingsStatusLevel.None;
+                    context.Ui.DrawStatusLabel(RgLocator.Describe(), level, miniLabel: true);
+
+                    var probeError = RgLocator.ProbeError;
+                    if (!string.IsNullOrEmpty(probeError))
+                        context.Ui.DrawHelpText(probeError);
+
+                    EditorGUILayout.BeginHorizontal();
+                    var customPath = EditorGUILayout.DelayedTextField(
+                        new GUIContent("rg path (optional)", "Full path to rg / rg.exe, or the folder containing it. Leave empty to search PATH and common install folders. Saved per user (EditorPrefs)."),
+                        RgLocator.CustomPath);
+                    if (customPath != RgLocator.CustomPath)
+                        RgLocator.CustomPath = customPath;
+
+                    if (GUILayout.Button("Browse", GUILayout.Width(64)))
+                    {
+                        var picked = EditorUtility.OpenFilePanel("Select ripgrep executable", string.Empty, Application.platform == RuntimePlatform.WindowsEditor ? "exe" : string.Empty);
+                        if (!string.IsNullOrEmpty(picked))
+                            RgLocator.CustomPath = picked;
+                    }
+                    EditorGUILayout.EndHorizontal();
+
+                    if (GUILayout.Button(new GUIContent("Re-detect", "Check for ripgrep again in the background (custom path, package Plugins/rg, PATH, common install folders).")))
+                    {
+                        _ = RgLocator.Refresh();
+                    }
+                });
         }
 
         // ── Optional Components ──

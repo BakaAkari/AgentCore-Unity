@@ -38,7 +38,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                       "list_root_states (per-root Ready/Indexing/Stale/NotIndexed/Failed with counts), " +
                       "mark_stale (force re-index of a root/scope on next background pass), " +
                       "resolve_workspace, list_roots, index_full, index_scope, index_incremental, " +
-                      "search_symbol, search_text, list_namespaces, get_file_symbols, get_stats, clear_index, " +
+                      "search_symbol, search_text (symbol-name text search; also returns literal *.cs source-line hits via ripgrep as text_matches when rg is installed), list_namespaces, get_file_symbols, get_stats, clear_index, " +
                       "get_dependencies, find_usages, get_symbol_context, get_backend_info. " +
                       "USE FOR: finding class/method definitions, understanding code structure, dependency analysis, " +
                       "navigating large codebases, finding all usages of a symbol, diagnosing why searches return no results. " +
@@ -944,7 +944,9 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         }
 
         /// <summary>
-        /// search_text — FTS5 全文搜索符号名称（比 search_symbol 更快，适合模糊关键词）。
+        /// search_text — 全文搜索符号名称（比 search_symbol 更快，适合模糊关键词）。
+        /// rg 可用时并行用 ripgrep 在 Unity 工程 *.cs 中按字面量搜索，结果放在 text_matches；
+        /// 索引尚未建立时只返回 text_matches（附 index_warning），而不是直接失败。
         /// </summary>
         private static async Task<ToolResponse> HandleSearchTextAsync(JObject parameters, CancellationToken ct)
         {
@@ -954,14 +956,27 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
             var limit = Math.Min(ToolHelpers.GetOptionalInt(parameters, "limit", 50), 200);
 
+            // 源码全文命中交给 ripgrep（与索引查询并行）；索引只负责 Roslyn 符号
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var textTask = RgLocator.TryGetExecutable(out var rgPath)
+                ? Task.Run(() => SearchSourceTextWithRipgrep(rgPath, text, limit, workspace?.UnityRoot, ct))
+                : null;
+
             using var store = CreateStore();
             if (store == null)
+            {
+                if (textTask != null)
+                    return await BuildTextOnlyResultAsync(text, textTask, "索引存储初始化失败，仅返回 ripgrep 源码文本命中；符号结果需先执行 index_full。");
                 return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
+            }
 
-            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
+            {
+                if (textTask != null)
+                    return await BuildTextOnlyResultAsync(text, textTask, "尚未建立索引，仅返回 ripgrep 源码文本命中；符号结果需先执行 index_full 或 index_incremental。");
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
+            }
 
             SymbolSearchPage page;
             if (store is IPagedSymbolSearch paged)
@@ -983,6 +998,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             }
 
             var resultItems = page.Matches.Select(s => BuildSymbolResult(s, workspace)).ToList();
+            var textResult = textTask != null ? await textTask : null;
             return ToolResponse.OkWithData(new
             {
                 query = text,
@@ -993,7 +1009,163 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 truncated = page.Truncated,
                 truncatedReason = page.TruncatedReason,
                 index_warning = GetIndexHealthWarning(store),
-            }, $"全文搜索 '{text}'：" + DescribePage("符号", resultItems.Count, page));
+                engine = textResult?.Engine ?? "dotnet",
+                engine_note = textResult?.Note,
+                text_matches = textResult?.Matches,
+                text_totalMatches = textResult?.TotalMatches,
+                text_totalIsLowerBound = textResult?.TotalIsLowerBound == true ? true : (bool?)null,
+                text_truncated = textResult?.Truncated,
+                text_truncatedReason = textResult?.TruncatedReason,
+            }, $"全文搜索 '{text}'：" + DescribePage("符号", resultItems.Count, page) + DescribeTextResult(textResult));
+        }
+
+        /// <summary>
+        /// search_text 的 ripgrep 源码文本命中（字面量、大小写不敏感、只搜 *.cs）。
+        /// </summary>
+        private sealed class SourceTextResult
+        {
+            public string Engine;
+            public string Note;
+            public List<object> Matches;
+            public int? TotalMatches;
+            public bool TotalIsLowerBound;
+            public bool? Truncated;
+            public string TruncatedReason;
+        }
+
+        /// <summary>search_text 附带的源码文本搜索时间预算（索引查询之外的补充，比 manage_file 短）。</summary>
+        private static readonly TimeSpan SourceTextSearchBudget = TimeSpan.FromSeconds(5);
+
+        /// <summary>Unity 工程根下默认不搜索的生成 / 缓存目录（与 manage_file search_content 一致）。</summary>
+        private static readonly HashSet<string> SourceTextExcludedRootDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Library", "Temp", "Logs", "obj"
+        };
+
+        /// <summary>
+        /// 用 ripgrep 在 Unity 工程源码（*.cs）中按字面量搜索 <paramref name="text"/>。
+        /// rg 失败时返回 engine = dotnet 与说明（只剩索引符号结果），不让整个 search_text 失败。
+        /// </summary>
+        private static SourceTextResult SearchSourceTextWithRipgrep(string rgPath, string text, int limit, string unityRoot, CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(unityRoot) || !System.IO.Directory.Exists(unityRoot))
+                return new SourceTextResult { Engine = "dotnet", Note = "Unity 工程根目录未知，未执行 ripgrep 源码文本搜索。" };
+
+            var options = new RgSearchOptions
+            {
+                Pattern = text,
+                FixedStrings = true,
+                CaseSensitive = false,
+                WorkingDirectory = unityRoot,
+                IncludeGlobs = { "*.cs" },
+                ExcludeGlobs = { "obj/" },
+                MaxResults = Math.Max(1, limit),
+                KeepCountingAfterLimit = true,
+                MaxFileSizeBytes = 5L * 1024 * 1024,
+                MaxLineChars = 500,
+                Timeout = SourceTextSearchBudget,
+            };
+
+            try
+            {
+                // 显式列出工程根的子目录，跳过 Library / Temp / Logs / obj 与隐藏目录而不遍历它们
+                foreach (var dir in System.IO.Directory.GetDirectories(unityRoot).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+                {
+                    var name = System.IO.Path.GetFileName(dir);
+                    if (SourceTextExcludedRootDirs.Contains(name) || name.StartsWith("."))
+                        continue;
+                    options.Paths.Add(name);
+                }
+                foreach (var file in System.IO.Directory.GetFiles(unityRoot, "*.cs"))
+                    options.Paths.Add(System.IO.Path.GetFileName(file));
+            }
+            catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
+            {
+                return new SourceTextResult { Engine = "dotnet", Note = $"无法列出工程目录（{ex.Message}），未执行 ripgrep 源码文本搜索。" };
+            }
+
+            if (options.Paths.Count == 0)
+                return new SourceTextResult { Engine = "ripgrep", Matches = new List<object>(), TotalMatches = 0, Truncated = false };
+
+            RgSearchResult rg;
+            try
+            {
+                rg = RgSearch.Run(rgPath, options, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new SourceTextResult { Engine = "dotnet", Note = $"ripgrep 运行失败（{ex.Message}），仅返回索引符号结果。" };
+            }
+
+            if (rg.Status != RgSearchStatus.Ok)
+            {
+                if (rg.StartFailed)
+                    RgLocator.MarkUnavailable(rg.ErrorMessage);
+                return new SourceTextResult { Engine = "dotnet", Note = $"ripgrep 运行失败（{rg.ErrorMessage}），仅返回索引符号结果。" };
+            }
+
+            return new SourceTextResult
+            {
+                Engine = "ripgrep",
+                Matches = rg.Matches.Select(m => (object)new
+                {
+                    file = m.Path,
+                    line = m.Line,
+                    column = m.Column,
+                    text = m.LineText,
+                }).ToList(),
+                TotalMatches = rg.TotalMatches,
+                TotalIsLowerBound = rg.TotalIsLowerBound,
+                Truncated = rg.Truncated,
+                TruncatedReason = rg.TruncatedReason,
+            };
+        }
+
+        /// <summary>
+        /// 索引不可用但 ripgrep 可用：返回空符号结果 + 源码文本命中，而不是直接失败。
+        /// </summary>
+        private static async Task<ToolResponse> BuildTextOnlyResultAsync(string text, Task<SourceTextResult> textTask, string indexWarning)
+        {
+            var textResult = await textTask;
+            return ToolResponse.OkWithData(new
+            {
+                query = text,
+                backend = (string)null,
+                matches = new object[0],
+                totalMatches = 0,
+                totalIsLowerBound = (bool?)null,
+                truncated = false,
+                truncatedReason = (string)null,
+                index_warning = indexWarning,
+                engine = textResult.Engine,
+                engine_note = textResult.Note,
+                text_matches = textResult.Matches,
+                text_totalMatches = textResult.TotalMatches,
+                text_totalIsLowerBound = textResult.TotalIsLowerBound ? true : (bool?)null,
+                text_truncated = textResult.Truncated,
+                text_truncatedReason = textResult.TruncatedReason,
+            }, $"全文搜索 '{text}'：{indexWarning}" + DescribeTextResult(textResult));
+        }
+
+        private static string DescribeTextResult(SourceTextResult r)
+        {
+            if (r == null)
+                return string.Empty;
+            if (r.Engine != "ripgrep")
+                return string.IsNullOrEmpty(r.Note) ? string.Empty : $"；{r.Note}";
+
+            var total = r.TotalIsLowerBound ? $"至少 {r.TotalMatches}" : $"{r.TotalMatches}";
+            var shown = r.Matches?.Count ?? 0;
+            var line = $"；源码文本命中 {total} 行（ripgrep，*.cs，字面量匹配，跳过 .gitignore 文件）";
+            if (r.Truncated == true)
+                line += r.TruncatedReason == "timeout"
+                    ? $"，{SourceTextSearchBudget.TotalSeconds:0}s 预算内显示 {shown} 行（text_truncatedReason=timeout）"
+                    : $"，显示前 {shown} 行（text_truncatedReason=max_results）";
+            return line;
         }
 
         /// <summary>
