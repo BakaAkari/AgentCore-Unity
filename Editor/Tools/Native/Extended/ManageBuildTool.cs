@@ -228,6 +228,15 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
             bool success = EditorUserBuildSettings.SwitchActiveBuildTarget(buildTargetGroup, buildTarget);
 
+            // 以切换后的实际 activeBuildTarget 为准，返回值为 true 但平台没变也视为失败
+            var actualTarget = EditorUserBuildSettings.activeBuildTarget;
+            if (success && actualTarget != buildTarget)
+            {
+                return ToolResponse.Fail(
+                    $"SwitchActiveBuildTarget reported success but the active build target is still {actualTarget} (requested {buildTarget}). " +
+                    "The switch may still be pending or was rejected; check the Unity Console.");
+            }
+
             if (success)
             {
                 var data = new JObject
@@ -296,11 +305,36 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
             EditorBuildSettings.scenes = newScenes.ToArray();
 
+            // 写入行为不变（缺失的场景也照常写入）；只是如实回报哪些条目指向不存在的场景
+            var appliedCount = EditorBuildSettings.scenes.Length;
+            var items = new List<ToolItemResult>();
+            foreach (var scene in newScenes)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scene.path) != null)
+                    items.Add(ToolItemResult.Succeeded(scene.path));
+                else
+                    items.Add(ToolItemResult.Failed(scene.path,
+                        "scene asset not found at this path (the entry was still written to build settings and will break builds until fixed)"));
+            }
+
             var data = new JObject
             {
-                ["scene_count"] = newScenes.Count,
-                ["enabled_count"] = newScenes.Count(s => s.enabled)
+                ["scene_count"] = appliedCount,
+                ["enabled_count"] = EditorBuildSettings.scenes.Count(s => s.enabled)
             };
+
+            if (appliedCount != newScenes.Count)
+            {
+                return ToolResponse.Fail(
+                    $"Build scene list was not applied as requested: requested {newScenes.Count} scene(s), build settings now contain {appliedCount}.");
+            }
+
+            if (items.Any(i => !i.Ok))
+            {
+                return ToolResponse.Partial(
+                    $"Build scenes updated ({newScenes.Count} entries written), but some paths do not point to an existing scene",
+                    items, data);
+            }
 
             return ToolResponse.OkWithData(data, $"Build scenes updated. {newScenes.Count} scene(s) configured.");
         }
@@ -356,44 +390,94 @@ namespace AgentCore.Editor.Tools.Native.Extended
             // Trigger build
             var report = BuildPipeline.BuildPlayer(enabledScenes, outputPath, EditorUserBuildSettings.activeBuildTarget, buildOptions);
 
+            var summary = report.summary;
             var data = new JObject
             {
                 ["output_path"] = outputPath,
                 ["target"] = EditorUserBuildSettings.activeBuildTarget.ToString(),
                 ["options"] = buildOptions.ToString(),
                 ["scene_count"] = enabledScenes.Length,
-                ["result"] = report.summary.result.ToString(),
-                ["total_errors"] = report.summary.totalErrors,
-                ["total_warnings"] = report.summary.totalWarnings,
-                ["total_time_seconds"] = Math.Round(report.summary.totalTime.TotalSeconds, 2),
-                ["total_size_bytes"] = report.summary.totalSize
+                ["result"] = summary.result.ToString(),
+                ["total_errors"] = summary.totalErrors,
+                ["total_warnings"] = summary.totalWarnings,
+                ["total_time_seconds"] = Math.Round(summary.totalTime.TotalSeconds, 2),
+                ["total_size_bytes"] = summary.totalSize
             };
 
-            if (report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded)
+            // 成功与否只看 BuildReport.summary.result：仅 Succeeded 视为成功，
+            // Failed / Cancelled / Unknown 一律报失败，绝不把失败的构建报成成功
+            if (summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded)
             {
-                return ToolResponse.OkWithData(data, "Build completed successfully.");
+                return ToolResponse.OkWithData(data,
+                    $"Build succeeded: {summary.totalErrors} error(s), {summary.totalWarnings} warning(s), " +
+                    $"{Math.Round(summary.totalTime.TotalSeconds, 1)}s, output '{outputPath}'.");
             }
-            else
+
+            // 失败结果只有 Error 文本会交给模型，因此关键信息（结果、计数、错误消息）全部写进 Error
+            var errors = CollectBuildErrors(report, MaxReportedBuildErrors, out int errorMessageCount);
+            string reason;
+            switch (summary.result)
             {
-                // Include error steps
-                var errors = new JArray();
-                foreach (var step in report.steps)
+                case UnityEditor.Build.Reporting.BuildResult.Cancelled:
+                    reason = "Build was cancelled";
+                    break;
+                case UnityEditor.Build.Reporting.BuildResult.Failed:
+                    reason = "Build failed";
+                    break;
+                default:
+                    reason = $"Build result is '{summary.result}' — Unity did not confirm success, so the build must not be treated as successful";
+                    break;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append(reason)
+              .Append($" (target {EditorUserBuildSettings.activeBuildTarget}, output '{outputPath}', ")
+              .Append($"{summary.totalErrors} error(s), {summary.totalWarnings} warning(s), ")
+              .Append($"{Math.Round(summary.totalTime.TotalSeconds, 1)}s).");
+            if (errors.Count > 0)
+            {
+                sb.Append(" Errors:");
+                foreach (var e in errors)
+                    sb.Append("\n- [").Append(e["step"]).Append("] ").Append(e["message"]);
+                if (errorMessageCount > errors.Count)
+                    sb.Append($"\n... and {errorMessageCount - errors.Count} more error message(s) in the build report / Console.");
+            }
+            else if (summary.result == UnityEditor.Build.Reporting.BuildResult.Failed)
+            {
+                sb.Append(" No error messages were recorded in the build report; check the Unity Console for details.");
+            }
+
+            return ToolResponse.Fail(sb.ToString());
+        }
+
+        /// <summary>失败构建最多回报的错误消息条数（避免撑爆上下文）</summary>
+        private const int MaxReportedBuildErrors = 20;
+
+        /// <summary>
+        /// 从 BuildReport 各步骤中收集错误消息（Error / Exception / Assert），最多 maxCount 条。
+        /// </summary>
+        private static List<JObject> CollectBuildErrors(UnityEditor.Build.Reporting.BuildReport report, int maxCount, out int totalCount)
+        {
+            var errors = new List<JObject>();
+            totalCount = 0;
+            foreach (var step in report.steps)
+            {
+                foreach (var msg in step.messages)
                 {
-                    foreach (var msg in step.messages)
+                    if (msg.type != LogType.Error && msg.type != LogType.Exception && msg.type != LogType.Assert)
+                        continue;
+                    totalCount++;
+                    if (errors.Count < maxCount)
                     {
-                        if (msg.type == LogType.Error)
+                        errors.Add(new JObject
                         {
-                            errors.Add(new JObject
-                            {
-                                ["step"] = step.name,
-                                ["message"] = msg.content
-                            });
-                        }
+                            ["step"] = step.name,
+                            ["message"] = msg.content
+                        });
                     }
                 }
-                data["errors"] = errors;
-                return ToolResponse.OkWithData(data, $"Build failed with {report.summary.totalErrors} error(s).");
             }
+            return errors;
         }
 
         private ToolResponse HandleGetPlayerSettings(JObject parameters)
