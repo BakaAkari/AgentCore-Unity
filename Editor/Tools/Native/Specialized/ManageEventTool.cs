@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Events;
@@ -31,7 +32,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'onClick', 'UnityEvent', 'button callback', 'event listener', 'wire up event', 'persistent listener'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "get_listeners", "list_events", "get_listener_count" },
+        // invoke 会在编辑器里触发任意已注册回调（任意组件的任意 public 方法），等同执行代码
+        ExecuteCodeActions = new[] { "invoke" })]
     public class ManageEventTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

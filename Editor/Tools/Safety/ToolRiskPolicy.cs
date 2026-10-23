@@ -403,7 +403,9 @@ namespace AgentCore.Editor.Tools.Safety
                 return true;
             }
 
-            if ((caps & ToolCapability.ExecuteCode) != 0 || metadata.RiskLevel == ToolRiskLevel.CodeExecution)
+            if ((caps & ToolCapability.ExecuteCode) != 0 ||
+                metadata.RiskLevel == ToolRiskLevel.CodeExecution ||
+                metadata.IsExecuteCodeAction(action))
             {
                 reason = "Tool executes arbitrary code; approval required every time.";
                 return true;

@@ -82,6 +82,15 @@ namespace AgentCore.Editor.Tools.Infrastructure
         public string[] ReadOnlyActions { get; set; } = System.Array.Empty<string>();
 
         /// <summary>
+        /// 等同执行任意代码的 action 列表（如 manage_event 的 invoke 会触发任意已注册回调）。
+        /// <para>
+        /// 工具级 <see cref="Capabilities"/> 不含 ExecuteCode 时，用它把个别 action 提升到
+        /// <see cref="Safety.ToolRiskPolicy"/> 的"底线确认"：每次都要用户批准，YOLO 不可绕过。大小写不敏感。
+        /// </para>
+        /// </summary>
+        public string[] ExecuteCodeActions { get; set; } = System.Array.Empty<string>();
+
+        /// <summary>
         /// Playmode 硬禁止 action 列表（v1.12+ ModifyRuntimeState）。
         /// <para>
         /// 这些 action 在 Playmode 中<b>无论工具 Capabilities 如何一律 Block</b>

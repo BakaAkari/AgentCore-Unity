@@ -164,7 +164,8 @@ namespace AgentCore.Editor.Tools.Infrastructure
                     attr.Visibility,
                     attr.ReadOnlyActions,
                     attr.PlaymodeHardBlockedActions,
-                    attr.PlaymodeRuntimeSafeActions)
+                    attr.PlaymodeRuntimeSafeActions,
+                    attr.ExecuteCodeActions)
                     // G.1 认知对齐：以 [AgentTool] 特性的 Description 为 LLM 认知的单一真源。
                     // 工具类 Metadata => 里写的 description 多为占位/简化版，直接喂 LLM 会丢失
                     // USE FOR / NOT FOR / ACTIVATE WHEN 等认知，导致五花八门的 LLM 用错工具。

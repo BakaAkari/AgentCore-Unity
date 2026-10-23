@@ -66,6 +66,26 @@ namespace AgentCore.Editor.Tools
         public IReadOnlyList<string> ReadOnlyActions { get; }
 
         /// <summary>
+        /// 等同执行任意代码的 action 列表，命中时走底线确认（见 <c>AgentToolAttribute.ExecuteCodeActions</c>）。
+        /// </summary>
+        public IReadOnlyList<string> ExecuteCodeActions { get; }
+
+        /// <summary>
+        /// 判断给定 action 是否等同执行任意代码（大小写不敏感）。
+        /// </summary>
+        public bool IsExecuteCodeAction(string action)
+        {
+            if (string.IsNullOrWhiteSpace(action) || ExecuteCodeActions == null)
+                return false;
+            for (int i = 0; i < ExecuteCodeActions.Count; i++)
+            {
+                if (string.Equals(ExecuteCodeActions[i], action, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 判断给定 action 是否在只读白名单中（大小写不敏感）。
         /// </summary>
         public bool IsReadOnlyAction(string action)
@@ -205,7 +225,8 @@ namespace AgentCore.Editor.Tools
             ToolVisibility visibility = ToolVisibility.AlwaysVisible,
             IReadOnlyList<string> readOnlyActions = null,
             IReadOnlyList<string> playmodeHardBlockedActions = null,
-            IReadOnlyList<string> playmodeRuntimeSafeActions = null)
+            IReadOnlyList<string> playmodeRuntimeSafeActions = null,
+            IReadOnlyList<string> executeCodeActions = null)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Description = description ?? throw new ArgumentNullException(nameof(description));
@@ -219,6 +240,7 @@ namespace AgentCore.Editor.Tools
             ReadOnlyActions = readOnlyActions ?? Array.Empty<string>();
             PlaymodeHardBlockedActions = playmodeHardBlockedActions ?? Array.Empty<string>();
             PlaymodeRuntimeSafeActions = playmodeRuntimeSafeActions ?? Array.Empty<string>();
+            ExecuteCodeActions = executeCodeActions ?? Array.Empty<string>();
         }
 
         /// <summary>
@@ -235,7 +257,8 @@ namespace AgentCore.Editor.Tools
             ToolVisibility visibility,
             IReadOnlyList<string> readOnlyActions = null,
             IReadOnlyList<string> playmodeHardBlockedActions = null,
-            IReadOnlyList<string> playmodeRuntimeSafeActions = null)
+            IReadOnlyList<string> playmodeRuntimeSafeActions = null,
+            IReadOnlyList<string> executeCodeActions = null)
         {
             return new ToolMetadata(
                 Name,
@@ -249,7 +272,8 @@ namespace AgentCore.Editor.Tools
                 visibility,
                 readOnlyActions,
                 playmodeHardBlockedActions,
-                playmodeRuntimeSafeActions);
+                playmodeRuntimeSafeActions,
+                executeCodeActions);
         }
 
         /// <summary>
@@ -275,7 +299,8 @@ namespace AgentCore.Editor.Tools
                 Visibility,
                 ReadOnlyActions,
                 PlaymodeHardBlockedActions,
-                PlaymodeRuntimeSafeActions);
+                PlaymodeRuntimeSafeActions,
+                ExecuteCodeActions);
         }
     }
 
