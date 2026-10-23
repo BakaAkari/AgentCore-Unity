@@ -13,11 +13,20 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// <summary>本地有变更（或冲突）的条目；normal / ignored 条目不包含在内。</summary>
         public List<VcsFileStatus> Files { get; } = new List<VcsFileStatus>();
 
+        /// <summary>
+        /// 带锁信息的条目（K 本工作副本持有锁 / O 他人持有锁 / T 锁被偷 / B 锁已失效），
+        /// 包括内容未修改、只是被锁定的文件（它们不在 <see cref="Files"/> 中）。O / T / B 只有 <c>-u</c> 时才能看到。
+        /// </summary>
+        public List<VcsFileStatus> LockedFiles { get; } = new List<VcsFileStatus>();
+
         /// <summary>远端有更新的路径（仅 <c>svn status -u --xml</c> 输出含 repos-status 时有值）。</summary>
         public List<string> RemoteChangedFiles { get; } = new List<string>();
 
         /// <summary><c>&lt;against revision="N"/&gt;</c> 中的远端版本号（-u 时才有）。</summary>
         public string AgainstRevision { get; set; }
+
+        /// <summary>需要提醒用户的情况（如工作副本被锁、需要 cleanup）。</summary>
+        public List<string> Warnings { get; } = new List<string>();
 
         /// <summary>XML 不完整（输出被截断等），已解析出的条目仍然保留。</summary>
         public bool IsIncomplete { get; set; }
@@ -35,10 +44,21 @@ namespace AgentCore.Editor.Components.VCS.Tools
     /// <para>
     /// 冲突判定覆盖三种情况：<c>item="conflicted"</c>（文本冲突）、<c>props="conflicted"</c>（属性冲突）、
     /// <c>tree-conflicted="true"</c>（树冲突）。只改了属性（<c>item="normal" props="modified"</c>）也算 Modified。
+    /// 另外解析 svn status 文本输出中第 3 列（L 工作副本锁）、第 5 列（S 已切换）、第 6 列（K/O/T/B 锁）
+    /// 与 move 信息（moved-from / moved-to）、copied（+ 带历史添加）。
     /// </para>
     /// </summary>
     public static class SvnStatusXmlParser
     {
+        private sealed class EntryState
+        {
+            public string Path;
+            public string Item, Props, TreeConflicted, Copied, Switched, WcLocked, MovedFrom, MovedTo;
+            public string ReposItem, ReposProps;
+            public bool HasReposStatus;
+            public string WcLockToken, WcLockOwner, WcLockComment, ReposLockToken, ReposLockOwner, ReposLockComment;
+        }
+
         public static SvnStatusParseResult Parse(string xml)
         {
             var result = new SvnStatusParseResult();
@@ -52,10 +72,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 IgnoreWhitespace = true
             };
 
-            string path = null;
-            string item = null, props = null, treeConflicted = null;
-            string reposItem = null, reposProps = null;
-            var inEntry = false;
+            EntryState entry = null;
+            // 当前所在的状态块：wc-status / repos-status / null
+            string block = null;
+            var inLock = false;
+            string textField = null;
+            var wcLockedSeen = false;
 
             try
             {
@@ -63,41 +85,106 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 {
                     while (reader.Read())
                     {
-                        if (reader.NodeType == XmlNodeType.Element)
+                        switch (reader.NodeType)
                         {
-                            switch (reader.Name)
-                            {
-                                case "entry":
-                                    path = reader.GetAttribute("path");
-                                    item = props = treeConflicted = reposItem = reposProps = null;
-                                    inEntry = !reader.IsEmptyElement;
-                                    if (reader.IsEmptyElement)
-                                        AddEntry(result, path, null, null, null, null, null);
-                                    break;
-                                case "wc-status":
-                                    if (inEntry)
+                            case XmlNodeType.Element:
+                                switch (reader.Name)
+                                {
+                                    case "entry":
+                                        entry = new EntryState { Path = reader.GetAttribute("path") };
+                                        block = null;
+                                        inLock = false;
+                                        if (reader.IsEmptyElement)
+                                        {
+                                            AddEntry(result, entry);
+                                            entry = null;
+                                        }
+                                        break;
+                                    case "wc-status":
+                                        if (entry != null)
+                                        {
+                                            entry.Item = reader.GetAttribute("item");
+                                            entry.Props = reader.GetAttribute("props");
+                                            entry.TreeConflicted = reader.GetAttribute("tree-conflicted");
+                                            entry.Copied = reader.GetAttribute("copied");
+                                            entry.Switched = reader.GetAttribute("switched");
+                                            entry.WcLocked = reader.GetAttribute("wc-locked");
+                                            entry.MovedFrom = reader.GetAttribute("moved-from");
+                                            entry.MovedTo = reader.GetAttribute("moved-to");
+                                            if (!reader.IsEmptyElement)
+                                                block = "wc";
+                                        }
+                                        break;
+                                    case "repos-status":
+                                        if (entry != null)
+                                        {
+                                            entry.HasReposStatus = true;
+                                            entry.ReposItem = reader.GetAttribute("item");
+                                            entry.ReposProps = reader.GetAttribute("props");
+                                            if (!reader.IsEmptyElement)
+                                                block = "repos";
+                                        }
+                                        break;
+                                    case "lock":
+                                        inLock = entry != null && block != null && !reader.IsEmptyElement;
+                                        break;
+                                    case "token":
+                                    case "owner":
+                                    case "comment":
+                                        textField = inLock && !reader.IsEmptyElement ? reader.Name : null;
+                                        break;
+                                    case "against":
+                                        result.AgainstRevision = reader.GetAttribute("revision");
+                                        break;
+                                }
+                                break;
+
+                            case XmlNodeType.Text:
+                            case XmlNodeType.CDATA:
+                                if (textField != null && entry != null)
+                                {
+                                    var value = reader.Value;
+                                    if (block == "wc")
                                     {
-                                        item = reader.GetAttribute("item");
-                                        props = reader.GetAttribute("props");
-                                        treeConflicted = reader.GetAttribute("tree-conflicted");
+                                        if (textField == "token") entry.WcLockToken = value;
+                                        else if (textField == "owner") entry.WcLockOwner = value;
+                                        else entry.WcLockComment = (entry.WcLockComment ?? string.Empty) + value;
                                     }
-                                    break;
-                                case "repos-status":
-                                    if (inEntry)
+                                    else if (block == "repos")
                                     {
-                                        reposItem = reader.GetAttribute("item");
-                                        reposProps = reader.GetAttribute("props");
+                                        if (textField == "token") entry.ReposLockToken = value;
+                                        else if (textField == "owner") entry.ReposLockOwner = value;
+                                        else entry.ReposLockComment = (entry.ReposLockComment ?? string.Empty) + value;
                                     }
-                                    break;
-                                case "against":
-                                    result.AgainstRevision = reader.GetAttribute("revision");
-                                    break;
-                            }
-                        }
-                        else if (reader.NodeType == XmlNodeType.EndElement && reader.Name == "entry" && inEntry)
-                        {
-                            AddEntry(result, path, item, props, treeConflicted, reposItem, reposProps);
-                            inEntry = false;
+                                }
+                                break;
+
+                            case XmlNodeType.EndElement:
+                                switch (reader.Name)
+                                {
+                                    case "token":
+                                    case "owner":
+                                    case "comment":
+                                        textField = null;
+                                        break;
+                                    case "lock":
+                                        inLock = false;
+                                        break;
+                                    case "wc-status":
+                                    case "repos-status":
+                                        block = null;
+                                        break;
+                                    case "entry":
+                                        if (entry != null)
+                                        {
+                                            if (string.Equals(entry.WcLocked, "true", StringComparison.OrdinalIgnoreCase))
+                                                wcLockedSeen = true;
+                                            AddEntry(result, entry);
+                                        }
+                                        entry = null;
+                                        break;
+                                }
+                                break;
                         }
                     }
                 }
@@ -108,6 +195,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.IsIncomplete = true;
                 result.Error = ex.Message;
             }
+
+            if (wcLockedSeen)
+                result.Warnings.Add("Parts of the working copy are locked by an interrupted svn operation (status column 'L'). Run version_control action 'cleanup' before other write operations.");
 
             return result;
         }
@@ -176,28 +266,116 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return null;
         }
 
-        private static void AddEntry(SvnStatusParseResult result, string path, string item, string props, string treeConflicted, string reposItem, string reposProps)
+        /// <summary>
+        /// 由本地锁 token 与远端锁 token 推导 svn status 第 6 列：
+        /// K 本工作副本持有锁；O 他人持有锁；T 本地锁已被他人抢走；B 本地锁已失效（仅 -u 时能判定 T / B）。
+        /// </summary>
+        public static string MapLockState(string wcToken, string reposToken, bool hasReposStatus)
         {
-            if (string.IsNullOrEmpty(path))
+            var hasWc = !string.IsNullOrEmpty(wcToken);
+            var hasRepos = !string.IsNullOrEmpty(reposToken);
+            if (hasWc && hasRepos)
+                return string.Equals(wcToken, reposToken, StringComparison.Ordinal) ? "K" : "T";
+            if (hasWc)
+                return hasReposStatus ? "B" : "K";
+            if (hasRepos)
+                return "O";
+            return null;
+        }
+
+        private static void AddEntry(SvnStatusParseResult result, EntryState e)
+        {
+            if (string.IsNullOrEmpty(e.Path))
                 return;
 
-            var state = MapWorkingCopyState(item, props, treeConflicted, out var description);
+            var lockState = MapLockState(e.WcLockToken, e.ReposLockToken, e.HasReposStatus);
+            var lockOwner = lockState == "K" || lockState == "B" ? e.WcLockOwner ?? e.ReposLockOwner : e.ReposLockOwner ?? e.WcLockOwner;
+            var lockComment = lockState == "K" || lockState == "B" ? e.WcLockComment ?? e.ReposLockComment : e.ReposLockComment ?? e.WcLockComment;
+            var switched = string.Equals(e.Switched, "true", StringComparison.OrdinalIgnoreCase);
+
+            var state = MapWorkingCopyState(e.Item, e.Props, e.TreeConflicted, out var description);
+            VcsFileStatus status = null;
             if (state.HasValue && state.Value != VcsFileState.Ignored)
             {
-                result.Files.Add(new VcsFileStatus
+                var finalState = state.Value;
+                string originalPath = null;
+                if (finalState == VcsFileState.Added && !string.IsNullOrEmpty(e.MovedFrom))
                 {
-                    FilePath = path,
-                    State = state.Value,
+                    // svn move 的目标端：带历史添加 + moved-from
+                    finalState = VcsFileState.Renamed;
+                    originalPath = e.MovedFrom;
+                    description = $"Moved from {e.MovedFrom}";
+                }
+                else if (finalState == VcsFileState.Added && string.Equals(e.Copied, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    finalState = VcsFileState.Copied;
+                    description = "Added with history (copied)";
+                }
+                else if (finalState == VcsFileState.Deleted && !string.IsNullOrEmpty(e.MovedTo))
+                {
+                    description = $"Deleted (moved to {e.MovedTo})";
+                }
+
+                status = new VcsFileStatus
+                {
+                    FilePath = e.Path,
+                    State = finalState,
                     StateDescription = description,
-                    StatusCode = item
-                });
+                    StatusCode = e.Item,
+                    OriginalPath = originalPath,
+                    MovedToPath = e.MovedTo
+                };
+                result.Files.Add(status);
+            }
+
+            if (lockState != null || switched)
+            {
+                if (status == null)
+                {
+                    status = new VcsFileStatus
+                    {
+                        FilePath = e.Path,
+                        State = VcsFileState.Unmodified,
+                        StateDescription = "Unmodified",
+                        StatusCode = e.Item
+                    };
+                }
+                status.LockState = lockState;
+                status.LockOwner = lockOwner;
+                status.LockComment = lockComment;
+                status.IsSwitched = switched;
+                if (switched)
+                {
+                    status.StateDescription += " [switched]";
+                    // 被 switch 到其他分支的子目录：提交 / 更新会作用到另一个 URL，提醒一次
+                    result.Warnings.Add($"'{e.Path}' is switched to a different repository URL than its parent; commits and updates there go to that branch.");
+                }
+                if (lockState != null)
+                {
+                    status.StateDescription += $" [{DescribeLock(lockState, lockOwner)}]";
+                    result.LockedFiles.Add(status);
+                }
             }
 
             // repos-status item/props 非 none 即远端有更新
-            if ((!string.IsNullOrEmpty(reposItem) && reposItem != "none")
-                || (!string.IsNullOrEmpty(reposProps) && reposProps != "none"))
+            if ((!string.IsNullOrEmpty(e.ReposItem) && e.ReposItem != "none")
+                || (!string.IsNullOrEmpty(e.ReposProps) && e.ReposProps != "none"))
             {
-                result.RemoteChangedFiles.Add(path);
+                result.RemoteChangedFiles.Add(e.Path);
+            }
+        }
+
+        /// <summary>锁状态的可读描述。</summary>
+        public static string DescribeLock(string lockState, string owner)
+        {
+            var by = string.IsNullOrEmpty(owner) ? string.Empty : $" by {owner}";
+            switch (lockState)
+            {
+                case "K": return $"locked in this working copy{by}";
+                case "O": return $"locked by another user/working copy{by}";
+                case "T": return $"lock stolen{by}";
+                case "B": return "lock broken (no longer valid)";
+                default: return lockState;
             }
         }
     }

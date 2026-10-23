@@ -20,7 +20,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                       "get_sync_status, get_commit_info, get_client_info, get_changelist, get_info, get_file_log. " +
                       "Write actions (the user is asked to approve each one in the editor; there is no confirm parameter): stage_files, unstage_files, commit, commit_files, " +
                       "create_branch, switch_branch, stash, stash_pop, checkout_files, revert_files, resolve_files, " +
-                      "ignore_file, ignore_folder, ignore_extension, remove_files, cleanup. " +
+                      "ignore_file, ignore_folder, ignore_extension, remove_files, cleanup, lock_files, unlock_files (SVN). " +
                       "USE FOR: checking file status before/after changes, reviewing diffs, committing work, managing branches. " +
                       "NOT FOR: file content reading (use manage_file), project-wide search (use search_code). " +
                       "ACTIVATE WHEN: user mentions git/svn/p4/commit/diff/branch/status/revert/blame. " +
@@ -78,6 +78,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""ignore_folder"",
                         ""ignore_extension"",
                         ""remove_files"",
+                        ""lock_files"",
+                        ""unlock_files"",
                         ""submit"",
                         ""sync"",
                         ""update"",
@@ -85,7 +87,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""revert_svn"",
                         ""add_files""
                     ],
-                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (each one is approved by the user in the editor): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files (SVN).""
+                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (each one is approved by the user in the editor): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files, lock_files, unlock_files (SVN). SVN notes: Unity .meta files are added/deleted/reverted/committed together with their assets automatically; get_status reports locks and svn:needs-lock files modified without a lock; operations that only partly succeed return status=partial with per-path results.""
                 },
                 ""file_path"": {
                     ""type"": ""string"",
@@ -94,7 +96,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 ""file_paths"": {
                     ""type"": ""array"",
                     ""items"": { ""type"": ""string"" },
-                    ""description"": ""List of file paths for stage_files, unstage_files, revert_files, checkout_files, add_files, commit_files, resolve_files, remove_files actions""
+                    ""description"": ""List of file paths for stage_files, unstage_files, revert_files, checkout_files, add_files, commit_files, resolve_files, remove_files, lock_files, unlock_files actions (relative to project root or absolute)""
+                },
+                ""recursive"": {
+                    ""type"": ""boolean"",
+                    ""description"": ""SVN revert_files / revert_svn only: revert directories recursively (--depth infinity). Default false: a directory path reverts only the directory itself.""
                 },
                 ""max_count"": {
                     ""type"": ""integer"",
@@ -108,7 +114,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 },
                 ""message"": {
                     ""type"": ""string"",
-                    ""description"": ""Commit/submit message for commit, commit_files, commit_svn, submit, stash actions""
+                    ""description"": ""Commit/submit message for commit, commit_files, commit_svn, submit, stash actions; optional lock comment for lock_files""
                 },
                 ""ignore_pattern"": {
                     ""type"": ""string"",
@@ -171,6 +177,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     "ignore_folder" => await HandleIgnore(parameters, "folder", cancellationToken),
                     "ignore_extension" => await HandleIgnore(parameters, "extension", cancellationToken),
                     "remove_files" => await HandleRemoveFiles(parameters, cancellationToken),
+                    "lock_files" => await HandleLockFiles(parameters, true, cancellationToken),
+                    "unlock_files" => await HandleLockFiles(parameters, false, cancellationToken),
 
                     // Phase 2: Git 操作
                     "create_branch" => await HandleCreateBranch(parameters, cancellationToken),
@@ -263,20 +271,24 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (!result.Success)
                 return ToolResponse.Fail($"Failed to get status: {result.ErrorMessage}");
 
-            var data = new
+            var data = new Dictionary<string, object>
             {
-                vcs_type = adapter.VcsType.ToString(),
-                total_files = result.Files.Count,
-                files = result.Files.Select(f => new
-                {
-                    path = f.FilePath,
-                    state = f.State.ToString(),
-                    description = f.StateDescription
-                }).ToList(),
-                summary = BuildStatusSummary(result.Files)
+                { "vcs_type", adapter.VcsType.ToString() },
+                { "total_files", result.Files.Count },
+                { "files", result.Files.Select(DescribeFile).ToList() },
+                { "summary", BuildStatusSummary(result.Files) }
             };
+            if (result.LockedFiles.Count > 0)
+                data["locked_files"] = result.LockedFiles.Select(DescribeFile).ToList();
+            if (result.Warnings.Count > 0)
+                data["warnings"] = result.Warnings;
+            if (result.Truncated)
+                data["truncated"] = true;
 
-            return ToolResponse.OkWithData(data, $"Found {result.Files.Count} changed files in working copy.");
+            var message = $"Found {result.Files.Count} changed files in working copy.";
+            if (result.Warnings.Count > 0)
+                message += " Warnings: " + string.Join(" ", result.Warnings);
+            return ToolResponse.OkWithData(data, message);
         }
 
         private async Task<ToolResponse> HandleGetBranch(CancellationToken ct)
@@ -312,7 +324,19 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (maxCount > 100) maxCount = 100;
             if (maxCount < 1) maxCount = 1;
 
-            var commits = await adapter.GetLogAsync(maxCount, ct);
+            List<VcsCommit> commits;
+            if (adapter is SvnAdapter svnLogAdapter)
+            {
+                // SVN：认证失败 / 网络不通要如实报错，而不是返回"0 个提交"
+                var (svnCommits, error) = await svnLogAdapter.GetLogWithErrorAsync(maxCount, ct);
+                if (error != null)
+                    return ToolResponse.Fail($"Failed to get log: {error}");
+                commits = svnCommits;
+            }
+            else
+            {
+                commits = await adapter.GetLogAsync(maxCount, ct);
+            }
 
             var data = new
             {
@@ -470,6 +494,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 behind_count = result.BehindCount,
                 remote_changed_files = result.RemoteChangedFiles,
                 conflicted_files = result.ConflictedFiles,
+                locked_files = result.LockedFiles.Select(DescribeFile).ToList(),
                 summary = result.Summary
             };
 
@@ -708,19 +733,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             var filePaths = GetFilePathsList(parameters);
 
             var result = await adapter.StageFilesAsync(filePaths, ct);
-
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to stage files: {result.ErrorMessage}");
-
-            var data = new
-            {
-                vcs_type = adapter.VcsType.ToString(),
-                affected_files = result.AffectedFiles,
-                affected_count = result.AffectedFiles.Count,
-                message = result.Message
-            };
-
-            return ToolResponse.OkWithData(data, result.Message);
+            return ToOperationResponse(adapter, result, "Failed to stage files");
         }
 
         private async Task<ToolResponse> HandleUnstageFiles(JObject parameters, CancellationToken ct)
@@ -732,19 +745,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             var filePaths = GetFilePathsList(parameters);
 
             var result = await adapter.UnstageFilesAsync(filePaths, ct);
-
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to unstage files: {result.ErrorMessage}");
-
-            var data = new
-            {
-                vcs_type = adapter.VcsType.ToString(),
-                affected_files = result.AffectedFiles,
-                affected_count = result.AffectedFiles.Count,
-                message = result.Message
-            };
-
-            return ToolResponse.OkWithData(data, result.Message);
+            return ToOperationResponse(adapter, result, "Failed to unstage files");
         }
 
         private async Task<ToolResponse> HandleCommit(JObject parameters, CancellationToken ct)
@@ -758,12 +759,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return ToolResponse.Fail("message is required for commit/submit action.");
 
             var result = await adapter.CommitAsync(message, ct);
-
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to commit: {result.ErrorMessage}");
-
-            var data = BuildOperationData(adapter, result);
-            return ToolResponse.OkWithData(data, result.Message);
+            return ToOperationResponse(adapter, result, "Failed to commit");
         }
 
         private async Task<ToolResponse> HandleCommitFiles(JObject parameters, CancellationToken ct)
@@ -781,11 +777,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return ToolResponse.Fail("file_paths is required for commit_files action.");
 
             var result = await ExecuteCommitFilesAsync(adapter, message, filePaths, ct);
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to commit files: {result.ErrorMessage}");
-
-            var data = BuildOperationData(adapter, result);
-            return ToolResponse.OkWithData(data, result.Message);
+            return ToOperationResponse(adapter, result, "Failed to commit files");
         }
 
         private async Task<ToolResponse> HandleCreateBranch(JObject parameters, CancellationToken ct)
@@ -901,20 +893,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (filePaths == null || filePaths.Count == 0)
                 return ToolResponse.Fail("file_paths is required for revert action.");
 
-            var result = await adapter.RevertFilesAsync(filePaths, ct);
-
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to revert files: {result.ErrorMessage}");
-
-            var data = new
-            {
-                vcs_type = adapter.VcsType.ToString(),
-                affected_files = result.AffectedFiles,
-                affected_count = result.AffectedFiles.Count,
-                message = result.Message
-            };
-
-            return ToolResponse.OkWithData(data, result.Message);
+            var result = adapter is SvnAdapter svnAdapter
+                ? await svnAdapter.RevertFilesAsync(filePaths, ToolHelpers.GetOptionalBool(parameters, "recursive", false), ct)
+                : await adapter.RevertFilesAsync(filePaths, ct);
+            return ToOperationResponse(adapter, result, "Failed to revert files");
         }
 
         private async Task<ToolResponse> HandleResolveFiles(JObject parameters, CancellationToken ct)
@@ -928,11 +910,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return ToolResponse.Fail("file_paths is required for resolve_files action.");
 
             var result = await ExecuteResolveFilesAsync(adapter, filePaths, ct);
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to resolve files: {result.ErrorMessage}");
-
-            var data = BuildOperationData(adapter, result);
-            return ToolResponse.OkWithData(data, result.Message);
+            return ToOperationResponse(adapter, result, "Failed to resolve files");
         }
 
         private async Task<ToolResponse> HandleIgnore(JObject parameters, string mode, CancellationToken ct)
@@ -965,11 +943,27 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return ToolResponse.Fail("file_paths is required for remove_files action.");
 
             var result = await ExecuteRemoveFilesAsync(adapter, filePaths, ct);
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to remove files: {result.ErrorMessage}");
+            return ToOperationResponse(adapter, result, "Failed to remove files");
+        }
 
-            var data = BuildOperationData(adapter, result);
-            return ToolResponse.OkWithData(data, result.Message);
+        private async Task<ToolResponse> HandleLockFiles(JObject parameters, bool doLock, CancellationToken ct)
+        {
+            var adapter = GetAdapter();
+            if (adapter == null)
+                return ToolResponse.Fail(AdapterUnavailableMessage);
+
+            var action = doLock ? "lock_files" : "unlock_files";
+            if (adapter is not SvnAdapter svnAdapter)
+                return ToolResponse.Fail($"{action} is only available for SVN. Current VCS: " + adapter.VcsType);
+
+            var filePaths = GetFilePathsList(parameters);
+            if (filePaths == null || filePaths.Count == 0)
+                return ToolResponse.Fail($"file_paths is required for {action} action.");
+
+            var result = doLock
+                ? await svnAdapter.LockFilesAsync(filePaths, ToolHelpers.GetOptionalString(parameters, "message"), ct)
+                : await svnAdapter.UnlockFilesAsync(filePaths, ct);
+            return ToOperationResponse(adapter, result, doLock ? "Failed to lock files" : "Failed to unlock files");
         }
 
         private async Task<ToolResponse> HandleSync(CancellationToken ct)
@@ -979,16 +973,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.SyncAsync(ct);
-
-            if (!result.Success)
-                return ToolResponse.Fail($"Failed to sync/update: {result.ErrorMessage}");
-
-            var data = BuildOperationData(adapter, result, new Dictionary<string, object>
+            return ToOperationResponse(adapter, result, "Failed to sync/update", new Dictionary<string, object>
             {
                 { "conflicted_files", result.ConflictedFiles }
             });
-
-            return ToolResponse.OkWithData(data, result.Message);
         }
 
         // ===== 辅助方法 =====
@@ -1086,6 +1074,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 { "raw_output_truncated", rawOutputTruncated }
             };
 
+            if (result.FailedFiles != null && result.FailedFiles.Count > 0)
+                data["failed_files"] = result.FailedFiles;
+            if (result.SkippedFiles != null && result.SkippedFiles.Count > 0)
+                data["skipped_files"] = result.SkippedFiles;
+            if (result.Warnings != null && result.Warnings.Count > 0)
+                data["warnings"] = result.Warnings;
+
             if (extra != null)
             {
                 foreach (var pair in extra)
@@ -1095,6 +1090,82 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return data;
         }
 
+        /// <summary>
+        /// 把操作结果转换为 ok / partial / failed 三态响应：
+        /// 部分路径失败、更新后有冲突、更新中途出错但已更新部分内容时返回 partial（逐项列出），不再报告为完全成功。
+        /// </summary>
+        private static ToolResponse ToOperationResponse(IVcsAdapter adapter, VcsOperationResult result, string failPrefix, Dictionary<string, object> extra = null)
+        {
+            var hasFailures = result.FailedFiles != null && result.FailedFiles.Count > 0;
+            if (!result.Success && !result.IsPartial)
+            {
+                var error = string.IsNullOrEmpty(result.ErrorMessage) ? result.Message : result.ErrorMessage;
+                if (hasFailures && (result.FailedFiles.Count > 1 || string.IsNullOrEmpty(error)))
+                    error = string.Join("; ", result.FailedFiles.Take(10).Select(kv => $"{kv.Key}: {kv.Value}"));
+                return ToolResponse.Fail($"{failPrefix}: {error}");
+            }
+
+            var data = BuildOperationData(adapter, result, extra);
+            if (!result.IsPartial && !hasFailures)
+                return ToolResponse.OkWithData(data, result.Message);
+
+            var items = new List<ToolItemResult>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var conflicted in result.ConflictedFiles ?? new List<string>())
+            {
+                if (seen.Add(conflicted))
+                    items.Add(ToolItemResult.Failed(conflicted, "conflict: resolve the file, then call resolve_files"));
+            }
+            if (hasFailures)
+            {
+                foreach (var pair in result.FailedFiles)
+                {
+                    if (seen.Add(pair.Key))
+                        items.Add(ToolItemResult.Failed(pair.Key, pair.Value));
+                }
+            }
+            foreach (var affected in result.AffectedFiles ?? new List<string>())
+            {
+                if (seen.Add(affected))
+                    items.Add(ToolItemResult.Succeeded(affected));
+            }
+            if (!items.Any(i => i.Ok))
+                items.Add(ToolItemResult.Succeeded(result.OperationName ?? "operation", result.Message));
+            if (!result.Success)
+                items.Add(ToolItemResult.Failed(result.OperationName ?? "operation", result.ErrorMessage));
+            if (items.All(i => i.Ok) && result.Warnings != null && result.Warnings.Count > 0)
+                items.Add(ToolItemResult.Failed("warnings", string.Join(" | ", result.Warnings)));
+
+            return ToolResponse.Partial(result.Message, items, data);
+        }
+
+        private static object DescribeFile(VcsFileStatus f)
+        {
+            var entry = new Dictionary<string, object>
+            {
+                { "path", f.FilePath },
+                { "state", f.State.ToString() },
+                { "description", f.StateDescription }
+            };
+            if (!string.IsNullOrEmpty(f.OriginalPath))
+                entry["original_path"] = f.OriginalPath;
+            if (!string.IsNullOrEmpty(f.MovedToPath))
+                entry["moved_to"] = f.MovedToPath;
+            if (!string.IsNullOrEmpty(f.LockState))
+            {
+                entry["lock"] = f.LockState;
+                if (!string.IsNullOrEmpty(f.LockOwner))
+                    entry["lock_owner"] = f.LockOwner;
+                if (!string.IsNullOrEmpty(f.LockComment))
+                    entry["lock_comment"] = f.LockComment;
+            }
+            if (f.NeedsLock)
+                entry["needs_lock"] = true;
+            if (f.IsSwitched)
+                entry["switched"] = true;
+            return entry;
+        }
+
         private async Task<CommandResult> ExecutePathLogAsync(IVcsAdapter adapter, string filePath, int maxCount, CancellationToken ct)
         {
             switch (adapter.VcsType)
@@ -1102,7 +1173,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 case VcsType.Git:
                     return await VcsCommandExecutor.ExecuteAsync("git", new List<string> { "log", $"-{maxCount}", "--follow", "--", filePath }, VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
                 case VcsType.Svn:
-                    return await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "log", "-l", maxCount.ToString(), "--non-interactive", SvnAdapter.SvnPathArg(filePath) }, VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
+                    return await ((SvnAdapter)adapter).GetPathLogAsync(filePath, maxCount, ct);
                 case VcsType.Perforce:
                     return await VcsCommandExecutor.ExecuteAsync("p4", new List<string> { "filelog", "-m", maxCount.ToString(), filePath }, VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
                 default:
@@ -1119,8 +1190,14 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Svn:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "cleanup", "--non-interactive", SvnAdapter.SvnPathArg(cleanupTarget) }, rootPath, timeoutSeconds: 120, ct: ct);
+                {
+                    var svnTarget = string.IsNullOrWhiteSpace(target) ? rootPath : ((SvnAdapter)adapter).ResolvePath(target);
+                    if (!SvnCommandLine.CanPassToSvn(svnTarget))
+                        return OperationFailure(SvnCommandLine.UnrepresentablePathError(target));
+                    // 大工作副本的 cleanup 可能很慢：中途被杀会让工作副本保持锁定
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "cleanup", "--non-interactive", SvnCommandLine.PathArg(svnTarget) }, rootPath, timeoutSeconds: 900, ct: ct);
                     break;
+                }
                 case VcsType.Git:
                     commandResult = await VcsCommandExecutor.ExecuteAsync("git", new List<string> { "gc", "--auto" }, rootPath, timeoutSeconds: 120, ct: ct);
                     break;
@@ -1147,8 +1224,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     commandResult = await ExecuteGitCommitFilesAsync(rootPath, commitMessage, filePaths, ct);
                     break;
                 case VcsType.Svn:
-                    commandResult = await ExecuteSvnCommitFilesAsync(rootPath, commitMessage, filePaths, ct);
-                    break;
+                    // 单次原子提交，自动补齐 .meta / 新增父目录 / move 另一端，见 SvnAdapter.CommitFilesAsync
+                    return await ((SvnAdapter)adapter).CommitFilesAsync(commitMessage, filePaths, ct);
                 case VcsType.Perforce:
                     return OperationFailure("commit_files is not supported for Perforce because p4 submit scope depends on changelist state. Use submit for the active changelist.");
                 default:
@@ -1185,54 +1262,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
-        /// <summary>
-        /// svn commit 指定文件，尽量保持原子：
-        /// 命令行放得下时直接传路径；超过上限且路径全为 ASCII 时用 <c>--targets</c> 文件一次提交；
-        /// 含非 ASCII 路径时（svn 在 Windows 上按系统本地代码页读取 targets 文件，可能误读）退化为分批提交，
-        /// 并在结果中明确标注为多次提交。
-        /// </summary>
-        private static async Task<CommandResult> ExecuteSvnCommitFilesAsync(string rootPath, string commitMessage, List<string> filePaths, CancellationToken ct)
-        {
-            var prefix = new List<string> { "commit", "--non-interactive", "-m", commitMessage };
-            var svnPaths = filePaths.Select(SvnAdapter.SvnPathArg).ToList();
-            if (VcsArgs.ChunkPaths("svn", prefix, svnPaths).Count <= 1)
-            {
-                var svnArgs = new List<string>(prefix);
-                svnArgs.AddRange(svnPaths);
-                return await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, timeoutSeconds: 120, ct: ct);
-            }
-
-            if (svnPaths.All(IsAscii))
-            {
-                var targetsFile = Path.Combine(Path.GetTempPath(), $"agentcore-commit-{Guid.NewGuid():N}.targets");
-                try
-                {
-                    File.WriteAllText(targetsFile, string.Join("\n", svnPaths) + "\n", new UTF8Encoding(false));
-                    var args = new List<string>(prefix) { "--targets", targetsFile };
-                    return await VcsCommandExecutor.ExecuteAsync("svn", args, rootPath, timeoutSeconds: 300, ct: ct);
-                }
-                finally
-                {
-                    TryDeleteFile(targetsFile);
-                }
-            }
-
-            var chunked = await VcsCommandExecutor.ExecuteChunkedAsync("svn", prefix, svnPaths, rootPath, timeoutSeconds: 120, ct: ct);
-            var note = $"[Note] {filePaths.Count} paths exceed the command-line limit and contain non-ASCII characters; committed in several batches (multiple revisions) with the same message.";
-            chunked.Output = string.IsNullOrEmpty(chunked.Output) ? note : note + "\n" + chunked.Output;
-            return chunked;
-        }
-
-        private static bool IsAscii(string value)
-        {
-            foreach (var c in value)
-            {
-                if (c > 0x7F)
-                    return false;
-            }
-            return true;
-        }
-
         private static void TryDeleteFile(string path)
         {
             try
@@ -1258,10 +1287,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("git", new[] { "add", "--" }, filePaths, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync(
-                        "svn", new[] { "resolve", "--accept", "working", "--non-interactive" },
-                        filePaths.Select(SvnAdapter.SvnPathArg).ToList(), rootPath, ct: ct);
-                    break;
+                    return await ((SvnAdapter)adapter).ResolveFilesAsync(filePaths, ct);
                 case VcsType.Perforce:
                     commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("p4", new[] { "resolve", "-am" }, filePaths, rootPath, timeoutSeconds: 60, ct: ct);
                     break;
@@ -1275,6 +1301,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private async Task<VcsOperationResult> ExecuteIgnoreAsync(IVcsAdapter adapter, string filePath, string explicitPattern, string mode, CancellationToken ct)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
+            if (adapter is SvnAdapter svnIgnoreAdapter)
+                return await ExecuteSvnIgnoreAsync(svnIgnoreAdapter, rootPath, filePath, explicitPattern, mode, ct);
+
             var pattern = string.IsNullOrWhiteSpace(explicitPattern) ? BuildIgnorePattern(filePath, mode) : explicitPattern.Trim();
             if (string.IsNullOrWhiteSpace(pattern))
                 return OperationFailure("Could not determine ignore pattern.");
@@ -1283,8 +1312,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 case VcsType.Git:
                     return await AppendIgnoreLineAsync(Path.Combine(rootPath, ".gitignore"), pattern, "Git", ct);
-                case VcsType.Svn:
-                    return await ExecuteSvnIgnoreAsync(rootPath, filePath, pattern, mode, ct);
                 default:
                     return OperationFailure($"ignore actions are not supported for {adapter.VcsType}.");
             }
@@ -1302,10 +1329,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("git", new[] { "rm", "--" }, filePaths, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync(
-                        "svn", new[] { "delete", "--force", "--non-interactive" },
-                        filePaths.Select(SvnAdapter.SvnPathArg).ToList(), rootPath, ct: ct);
-                    break;
+                    // 对应的 .meta / 资源一并删除，见 SvnAdapter.DeleteFilesAsync
+                    return await ((SvnAdapter)adapter).DeleteFilesAsync(filePaths, ct);
                 case VcsType.Perforce:
                     commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("p4", new[] { "delete" }, filePaths, rootPath, ct: ct);
                     break;
@@ -1341,28 +1366,147 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
-        private async Task<VcsOperationResult> ExecuteSvnIgnoreAsync(string rootPath, string filePath, string pattern, string mode, CancellationToken ct)
+        /// <summary>
+        /// SVN 忽略规则写入目标目录的 svn:ignore 属性（与已有规则合并）。
+        /// <list type="bullet">
+        /// <item>读取现有属性失败（属性不存在除外）时直接报错，不覆盖已有规则；</item>
+        /// <item>svn:ignore 只匹配目标目录的直接子项名，不支持 "dir/" 写法：目录名不带结尾斜杠；</item>
+        /// <item>Unity 项目中被忽略资源的 .meta 同样要忽略，否则会一直显示为未版本控制文件。</item>
+        /// </list>
+        /// </summary>
+        private async Task<VcsOperationResult> ExecuteSvnIgnoreAsync(SvnAdapter svnAdapter, string rootPath, string filePath, string explicitPattern, string mode, CancellationToken ct)
         {
-            var target = GetSvnIgnoreTarget(rootPath, filePath, mode);
-            var propGet = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "propget", "svn:ignore", "--non-interactive", SvnAdapter.SvnPathArg(target) }, rootPath, ct: ct);
-            var existingPatterns = propGet.Success && !string.IsNullOrEmpty(propGet.Output)
-                ? propGet.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(line => line.Trim()).ToList()
-                : new List<string>();
+            var plan = BuildSvnIgnorePlan(
+                string.IsNullOrWhiteSpace(filePath) ? null : svnAdapter.ResolvePath(filePath),
+                rootPath, explicitPattern, mode, path => Directory.Exists(path));
+            if (plan.Patterns.Count == 0)
+                return OperationFailure("Could not determine ignore pattern.");
+            if (!SvnCommandLine.CanPassToSvn(plan.Target))
+                return OperationFailure(SvnCommandLine.UnrepresentablePathError(plan.Target));
+            if (!Directory.Exists(plan.Target))
+                return OperationFailure($"Ignore target directory does not exist: {plan.Target}");
 
-            if (!existingPatterns.Any(line => string.Equals(line, pattern, StringComparison.Ordinal)))
-                existingPatterns.Add(pattern);
+            var targetArg = SvnCommandLine.PathArg(plan.Target);
+            var propGet = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "propget", "svn:ignore", "--xml", "--non-interactive", targetArg }, rootPath, ct: ct);
+            // 属性不存在：svn 以 W200017 非零退出；其他错误（未纳入版本控制、工作副本被锁……）不能当作"没有规则"然后覆盖
+            if (!propGet.Success && (propGet.ErrorMessage ?? string.Empty).IndexOf("W200017", StringComparison.Ordinal) < 0)
+                return OperationFailure($"Could not read existing svn:ignore on {plan.Target}: {propGet.ErrorMessage}");
 
-            var tempFile = Path.GetTempFileName();
+            var existingPatterns = ParseSvnIgnoreProperty(propGet.Output);
+            var added = plan.Patterns.Where(p => !existingPatterns.Contains(p, StringComparer.Ordinal)).ToList();
+            if (added.Count == 0)
+            {
+                return new VcsOperationResult
+                {
+                    Success = true,
+                    Message = $"SVN ignore rule already present on {plan.Target}: {string.Join(", ", plan.Patterns)}",
+                    AffectedFiles = new List<string> { plan.Target }
+                };
+            }
+
+            existingPatterns.AddRange(added);
+            string valueFile = null;
             try
             {
-                File.WriteAllLines(tempFile, existingPatterns);
-                var propSet = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "propset", "svn:ignore", "--non-interactive", "--file", tempFile, SvnAdapter.SvnPathArg(target) }, rootPath, ct: ct);
-                return OperationFromCommand(propSet, $"Updated SVN ignore rule: {pattern}", new List<string> { target });
+                // svn:ignore 是 svn:* 属性，值必须为 LF 换行；UTF-8 文件 + --encoding 保证中文规则不被按代码页误读
+                valueFile = SvnCommandLine.WriteMessageFile(string.Join("\n", existingPatterns) + "\n", rootPath);
+                var args = new List<string> { "propset", "svn:ignore", "--non-interactive" };
+                args.AddRange(SvnCommandLine.MessageFileArgs(valueFile));
+                args.Add(targetArg);
+                var propSet = await VcsCommandExecutor.ExecuteAsync("svn", args, rootPath, ct: ct);
+                var result = OperationFromCommand(propSet, $"Updated svn:ignore on {plan.Target}: added {string.Join(", ", added)} (commit the directory to share the rule).", new List<string> { plan.Target });
+                return result;
             }
             finally
             {
-                try { File.Delete(tempFile); } catch { /* ignore */ }
+                SvnCommandLine.TryDeleteFile(valueFile);
             }
+        }
+
+        /// <summary>svn:ignore 规则的写入位置与模式。</summary>
+        public sealed class SvnIgnorePlan
+        {
+            public string Target;
+            public List<string> Patterns = new List<string>();
+        }
+
+        /// <summary>
+        /// 计算 svn:ignore 的目标目录与模式（纯函数，便于测试）。
+        /// <para>file：文件名，写在所在目录；folder：目录名，写在父目录（<paramref name="absolutePath"/> 是文件时取其所在目录）；
+        /// extension：<c>*.ext</c>，写在所在目录。每个模式都附带对应的 <c>.meta</c> 模式。</para>
+        /// </summary>
+        public static SvnIgnorePlan BuildSvnIgnorePlan(string absolutePath, string rootPath, string explicitPattern, string mode, Func<string, bool> isDirectory)
+        {
+            var plan = new SvnIgnorePlan();
+            string pattern;
+            if (string.IsNullOrWhiteSpace(absolutePath))
+            {
+                plan.Target = rootPath;
+                pattern = explicitPattern;
+            }
+            else
+            {
+                var trimmed = absolutePath.TrimEnd('\\', '/');
+                var isDir = isDirectory(trimmed);
+                switch (mode)
+                {
+                    case "folder":
+                    {
+                        var folder = isDir ? trimmed : Path.GetDirectoryName(trimmed);
+                        plan.Target = Path.GetDirectoryName(folder);
+                        pattern = explicitPattern ?? Path.GetFileName(folder);
+                        break;
+                    }
+                    case "extension":
+                    {
+                        plan.Target = isDir ? trimmed : Path.GetDirectoryName(trimmed);
+                        var extension = Path.GetExtension(trimmed);
+                        pattern = explicitPattern ?? (string.IsNullOrEmpty(extension) || isDir ? Path.GetFileName(trimmed) : "*" + extension);
+                        break;
+                    }
+                    default:
+                        plan.Target = isDir && !string.IsNullOrWhiteSpace(explicitPattern) ? trimmed : Path.GetDirectoryName(trimmed);
+                        pattern = explicitPattern ?? Path.GetFileName(trimmed);
+                        break;
+                }
+                if (string.IsNullOrEmpty(plan.Target))
+                    plan.Target = rootPath;
+            }
+
+            pattern = pattern?.Trim().TrimEnd('/', '\\');
+            if (string.IsNullOrEmpty(pattern))
+                return plan;
+
+            plan.Patterns.Add(pattern);
+            if (!UnityMetaPaths.IsMeta(pattern) && pattern != "*")
+                plan.Patterns.Add(pattern + UnityMetaPaths.MetaExtension);
+            return plan;
+        }
+
+        /// <summary>解析 <c>svn propget svn:ignore --xml</c> 的规则列表。</summary>
+        public static List<string> ParseSvnIgnoreProperty(string xml)
+        {
+            var patterns = new List<string>();
+            if (string.IsNullOrWhiteSpace(xml))
+                return patterns;
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Parse(xml);
+                foreach (var property in doc.Descendants("property"))
+                {
+                    foreach (var line in property.Value.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var trimmed = line.Trim();
+                        if (trimmed.Length > 0 && !patterns.Contains(trimmed, StringComparer.Ordinal))
+                            patterns.Add(trimmed);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 不完整的 XML：按无规则处理（读取失败的情况已在调用方单独拦截）
+            }
+            return patterns;
         }
 
         private static VcsOperationResult OperationFromCommand(CommandResult commandResult, string successMessage, List<string> affectedFiles)
@@ -1410,19 +1554,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 default:
                     return Path.GetFileName(filePath);
             }
-        }
-
-        private static string GetSvnIgnoreTarget(string rootPath, string filePath, string mode)
-        {
-            if (string.IsNullOrWhiteSpace(filePath))
-                return rootPath;
-
-            var absolutePath = Path.IsPathRooted(filePath) ? filePath : Path.Combine(rootPath, filePath);
-            var directory = Directory.Exists(absolutePath) ? absolutePath : Path.GetDirectoryName(absolutePath);
-            if (mode == "folder")
-                directory = Path.GetDirectoryName(directory);
-
-            return string.IsNullOrEmpty(directory) ? rootPath : directory;
         }
 
         private static string Truncate(string value, int maxLength, out bool truncated)

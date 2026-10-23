@@ -13,16 +13,76 @@ namespace AgentCore.Editor.Components.VCS.Tools
     /// <summary>
     /// SVN 适配器
     /// 实现 Subversion 版本控制系统的所有查询和操作
+    /// <para>
+    /// 约定：
+    /// <list type="bullet">
+    /// <item>输出要解析的命令一律 <c>--xml</c>（UTF-8，不受系统代码页影响）；文本输出由 <see cref="VcsCommandExecutor"/> 逐行解码。</item>
+    /// <item>多路径操作走 <c>--targets</c> 文件（一次调用、原子、不受 32K 命令行限制），提交信息走 <c>-F 文件 --encoding UTF-8</c>。</item>
+    /// <item>Unity 的 .meta 与资源同进同出：add / delete / revert / commit 自动带上对应的 .meta（或资源），
+    ///       新增目录时带上祖先目录的 .meta；move 的两端一起提交 / 还原。</item>
+    /// <item>svn:needs-lock 文件被修改却没有持有锁时只报告（Warnings），不阻断。</item>
+    /// <item>相对路径先按 svn 工作副本根解析，不存在时再按 Unity 项目根解析（工作副本根可能在项目根之上）。</item>
+    /// </list>
+    /// </para>
     /// </summary>
     public class SvnAdapter : IVcsAdapter
     {
+        /// <summary>update / commit 可能传输大量二进制资源：超时放宽，避免中途被杀导致工作副本被锁。</summary>
+        private const int LongOperationTimeoutSeconds = 900;
+
         private readonly string _workingDirectory;
+        private readonly string _projectDirectory;
 
         public VcsType VcsType => VcsType.Svn;
+
+        /// <summary>
+        /// 为 false（默认）且 Unity 项目位于工作副本根之下时，status / sync status / diff / 整体 commit
+        /// 只针对 Unity 项目目录（大工作副本里只扫描项目部分，避免整库扫描很慢，也不会顺带提交项目外的改动）。
+        /// 为 true 时针对整个工作副本。update 始终更新整个工作副本（避免混合版本）。
+        /// </summary>
+        public bool WholeWorkingCopy { get; set; }
+
+        /// <summary>Unity 项目目录相对工作副本根的 svn 参数；项目即工作副本根（或不在其下）时为 null。</summary>
+        private readonly string _projectScopeArg;
+
+        private string ScopeArg => WholeWorkingCopy ? null : _projectScopeArg;
 
         public SvnAdapter(string workingDirectory)
         {
             _workingDirectory = workingDirectory;
+            // Unity 编辑器的当前目录就是项目根；线程安全，不依赖 Application.dataPath
+            try { _projectDirectory = Directory.GetCurrentDirectory(); }
+            catch { _projectDirectory = workingDirectory; }
+            _projectScopeArg = ComputeProjectScopeArg(workingDirectory, _projectDirectory);
+        }
+
+        /// <summary>
+        /// 项目目录严格位于工作副本根之下时返回其相对路径（作为 svn 参数，status 输出的路径格式因此与整库扫描一致）；否则 null。
+        /// </summary>
+        public static string ComputeProjectScopeArg(string workingDirectory, string projectDirectory)
+        {
+            if (string.IsNullOrEmpty(workingDirectory) || string.IsNullOrEmpty(projectDirectory))
+                return null;
+            try
+            {
+                var root = Path.GetFullPath(workingDirectory).TrimEnd('\\', '/');
+                var project = Path.GetFullPath(projectDirectory).TrimEnd('\\', '/');
+                if (!IsUnder(project, root))
+                    return null;
+                var relative = project.Substring(root.Length + 1);
+                return SvnCommandLine.CanPassToSvn(relative) ? SvnCommandLine.PathArg(relative) : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private List<string> WithScope(List<string> args, string scope)
+        {
+            if (!string.IsNullOrEmpty(scope))
+                args.Add(scope);
+            return args;
         }
 
         public bool IsAvailable()
@@ -32,7 +92,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ===== Phase 1: 只读查询 =====
 
-        public async Task<VcsStatusResult> GetStatusAsync(CancellationToken ct = default)
+        public Task<VcsStatusResult> GetStatusAsync(CancellationToken ct = default)
+        {
+            return GetStatusAsync(ScopeArg, ct);
+        }
+
+        private async Task<VcsStatusResult> GetStatusAsync(string scope, CancellationToken ct)
         {
             var result = new VcsStatusResult();
 
@@ -40,7 +105,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // 使用 XML 输出格式便于解析，保持与 SVN 客户端默认 status 输出一致
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", new List<string> { "status", "--xml", "--non-interactive" }, _workingDirectory, ct: ct);
+                    "svn", WithScope(new List<string> { "status", "--xml", "--non-interactive" }, scope), _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -52,11 +117,19 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.RawOutput = cmdResult.Output;
                 var parsed = SvnStatusXmlParser.Parse(cmdResult.Output);
                 result.Files = parsed.Files;
+                result.LockedFiles = parsed.LockedFiles;
+                result.Warnings.AddRange(parsed.Warnings);
                 result.Success = true;
                 // 输出超过上限被截断 / XML 不完整：保留已解析的条目，同时明确标记，不静默当作"没有变更"
                 result.Truncated = cmdResult.OutputTruncated || parsed.IsIncomplete;
                 if (result.Truncated)
                     AgentCoreLog.Warning($"[Version Control] SVN status output incomplete ({result.Files.Count} entries parsed): {parsed.Error ?? "output truncated"}");
+
+                await AnnotateNeedsLockAsync(result, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -65,6 +138,84 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 对内容已修改、但本工作副本没有持有锁的文件检查 svn:needs-lock：
+        /// 这类文件（场景 / 预制体等二进制资源）无法合并，别人同时修改时提交会冲突。只报告，不阻断。
+        /// </summary>
+        private async Task AnnotateNeedsLockAsync(VcsStatusResult result, CancellationToken ct)
+        {
+            var candidates = result.Files
+                .Where(f => f.State == VcsFileState.Modified
+                            && (f.StatusCode == "modified" || f.StatusCode == "replaced")
+                            && f.LockState != "K")
+                .ToList();
+            if (candidates.Count == 0)
+                return;
+
+            var byAbs = new Dictionary<string, VcsFileStatus>();
+            var args = new List<string>();
+            foreach (var file in candidates)
+            {
+                var abs = ResolveAbsolutePath(file.FilePath, _workingDirectory);
+                if (!SvnCommandLine.CanPassToSvn(abs))
+                    continue;
+                byAbs[NormalizePath(abs)] = file;
+                args.Add(SvnCommandLine.PathArg(abs));
+            }
+            if (args.Count == 0)
+                return;
+
+            var prefix = new[] { "propget", "svn:needs-lock", "--xml", "--non-interactive" };
+            foreach (var chunk in VcsArgs.ChunkPaths("svn", prefix, args))
+            {
+                var arguments = new List<string>(prefix);
+                arguments.AddRange(chunk);
+                // 没有该属性的目标会让 svn 以 W200017 + 非零退出码结束，但 XML 仍然完整输出，照常解析
+                var cmd = await VcsCommandExecutor.ExecuteAsync("svn", arguments, _workingDirectory, ct: ct);
+                foreach (var path in ParsePropgetTargets(cmd.Output))
+                {
+                    if (byAbs.TryGetValue(NormalizePath(ResolveAbsolutePath(path, _workingDirectory)), out var file))
+                        file.NeedsLock = true;
+                }
+            }
+
+            var unlocked = candidates.Where(f => f.NeedsLock).ToList();
+            if (unlocked.Count == 0)
+                return;
+
+            foreach (var file in unlocked)
+                file.StateDescription += " [needs-lock, not locked]";
+
+            var listed = string.Join(", ", unlocked.Take(10).Select(f => f.FilePath));
+            var more = unlocked.Count > 10 ? $" (+{unlocked.Count - 10} more)" : string.Empty;
+            result.Warnings.Add(
+                $"{unlocked.Count} file(s) marked svn:needs-lock were modified without holding the lock: {listed}{more}. " +
+                "They are usually binary (scenes/prefabs) and cannot be merged; lock them (lock_files) or coordinate before committing.");
+        }
+
+        /// <summary>解析 <c>svn propget --xml</c> 输出中带属性值的 target 路径。</summary>
+        public static List<string> ParsePropgetTargets(string xml)
+        {
+            var paths = new List<string>();
+            if (string.IsNullOrWhiteSpace(xml))
+                return paths;
+            try
+            {
+                var doc = XDocument.Parse(xml);
+                foreach (var target in doc.Descendants("target"))
+                {
+                    var path = target.Attribute("path")?.Value;
+                    if (!string.IsNullOrEmpty(path) && target.Elements("property").Any())
+                        paths.Add(path);
+                }
+            }
+            catch (Exception)
+            {
+                // XML 不完整：needs-lock 只是提示信息，忽略
+            }
+            return paths;
         }
 
         public async Task<VcsBranchInfo> GetBranchInfoAsync(CancellationToken ct = default)
@@ -98,8 +249,18 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         public async Task<List<VcsCommit>> GetLogAsync(int maxCount = 20, CancellationToken ct = default)
         {
-            var commits = new List<VcsCommit>();
+            var (commits, error) = await GetLogWithErrorAsync(maxCount, ct);
+            if (error != null)
+                AgentCoreLog.Warning($"Failed to get SVN log: {error}");
+            return commits;
+        }
 
+        /// <summary>
+        /// 获取提交历史；失败时返回错误信息（<see cref="GetLogAsync"/> 的接口只能返回空列表，
+        /// 认证失败 / 网络不通会被误报成"没有提交"）。
+        /// </summary>
+        public async Task<(List<VcsCommit> commits, string error)> GetLogWithErrorAsync(int maxCount = 20, CancellationToken ct = default)
+        {
             try
             {
                 // 使用 -r HEAD:1 确保从远程服务器获取最新的 commit 列表
@@ -110,27 +271,49 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     timeoutSeconds: 60, ct: ct);
 
                 if (!cmdResult.Success)
-                    return commits;
+                    return (new List<VcsCommit>(), cmdResult.ErrorMessage);
 
-                commits = ParseSvnLogXml(cmdResult.Output);
+                return (ParseSvnLogXml(cmdResult.Output), null);
             }
             catch (Exception ex)
             {
-                AgentCoreLog.Warning($"Failed to get SVN log: {ex.Message}");
+                return (new List<VcsCommit>(), ex.Message);
             }
+        }
 
-            return commits;
+        /// <summary>单个文件 / 目录的提交历史（文本输出，供模型阅读）。</summary>
+        public async Task<CommandResult> GetPathLogAsync(string filePath, int maxCount, CancellationToken ct = default)
+        {
+            var abs = ResolvePath(filePath);
+            if (!SvnCommandLine.CanPassToSvn(abs))
+                return new CommandResult { Success = false, ExitCode = -1, ErrorMessage = SvnCommandLine.UnrepresentablePathError(filePath) };
+
+            return await VcsCommandExecutor.ExecuteAsync(
+                "svn", new List<string> { "log", "-l", maxCount.ToString(), "--non-interactive", SvnCommandLine.PathArg(abs) },
+                _workingDirectory, timeoutSeconds: 60, ct: ct);
         }
 
         public async Task<string> GetDiffAsync(string filePath = null, CancellationToken ct = default)
         {
             try
             {
-                var args = new List<string> { "diff", "--non-interactive" };
+                // --internal-diff：用户在 ~/.subversion/config 里配了 diff-cmd（如 TortoiseMerge）时，
+                // 不加此参数 svn diff 会启动外部 GUI 工具并一直挂起
+                var args = new List<string> { "diff", "--internal-diff", "--non-interactive" };
                 if (!string.IsNullOrEmpty(filePath))
-                    args.Add(SvnPathArg(filePath));
+                {
+                    var abs = ResolvePath(filePath);
+                    if (!SvnCommandLine.CanPassToSvn(abs))
+                        return $"Error: {SvnCommandLine.UnrepresentablePathError(filePath)}";
+                    // 相对工作副本根传入：diff 头部显示相对路径而不是很长的绝对路径
+                    args.Add(SvnCommandLine.LocalDiffPathArg(ToDisplayPath(abs)));
+                }
+                else
+                {
+                    WithScope(args, ScopeArg);
+                }
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", args, _workingDirectory, ct: ct);
+                    "svn", args, _workingDirectory, timeoutSeconds: 60, ct: ct);
 
                 return cmdResult.Success ? cmdResult.Output : $"Error: {cmdResult.ErrorMessage}";
             }
@@ -188,15 +371,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 var tagsUrl = $"{repoRoot}/tags";
                 var listResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", new List<string> { "list", "--non-interactive", tagsUrl }, _workingDirectory, ct: ct);
+                    "svn", new List<string> { "list", "--xml", "--non-interactive", tagsUrl }, _workingDirectory, timeoutSeconds: 60, ct: ct);
 
-                if (listResult.Success && !string.IsNullOrEmpty(listResult.Output))
-                {
-                    tags = listResult.Output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(t => t.TrimEnd('/'))
-                        .Where(t => !string.IsNullOrEmpty(t))
-                        .ToList();
-                }
+                if (listResult.Success)
+                    tags = ParseSvnListNames(listResult.Output);
             }
             catch (Exception ex)
             {
@@ -219,13 +397,30 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
+                var abs = ResolvePath(filePath);
+                if (!SvnCommandLine.CanPassToSvn(abs))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = SvnCommandLine.UnrepresentablePathError(filePath);
+                    return result;
+                }
+
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", new List<string> { "blame", "--non-interactive", SvnPathArg(filePath) }, _workingDirectory, ct: ct);
+                    "svn", new List<string> { "blame", "--non-interactive", SvnCommandLine.PathArg(abs) }, _workingDirectory, timeoutSeconds: 60, ct: ct);
 
                 if (!cmdResult.Success)
                 {
                     result.Success = false;
                     result.ErrorMessage = cmdResult.ErrorMessage;
+                    return result;
+                }
+
+                // svn:mime-type 为二进制的文件：svn 只在 stderr 打印 "Skipping binary file" 并以 0 退出
+                if (string.IsNullOrEmpty(cmdResult.Output) && (cmdResult.Error ?? string.Empty).IndexOf("Skipping binary file", StringComparison.Ordinal) >= 0)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = "SVN treats this file as binary (svn:mime-type), so blame is not available. " +
+                                          "If it is actually text, remove or change its svn:mime-type property. " + cmdResult.Error.Trim();
                     return result;
                 }
 
@@ -251,7 +446,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 var statusTask = GetStatusAsync(ct);
                 // -u --xml：远端更新看 repos-status，避免解析文本列（旧实现会把版本号当成路径的一部分）
                 var remoteTask = VcsCommandExecutor.ExecuteAsync(
-                    "svn", new List<string> { "status", "-u", "-q", "--xml", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "svn", WithScope(new List<string> { "status", "-u", "-q", "--xml", "--non-interactive" }, ScopeArg), _workingDirectory, timeoutSeconds: 120, ct: ct);
 
                 await Task.WhenAll(statusTask, remoteTask);
 
@@ -262,6 +457,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 {
                     result.Success = false;
                     result.ErrorMessage = remoteStatus.ErrorMessage;
+                    result.RawOutput = string.Join("\n", new[] { remoteStatus.Output, remoteStatus.Error }
+                        .Where(s => !string.IsNullOrWhiteSpace(s)));
                     return result;
                 }
 
@@ -273,6 +470,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.RemoteChangedFiles = remoteParsed.RemoteChangedFiles;
                 result.RemoteChangeCount = result.RemoteChangedFiles.Count;
                 result.HasRemoteChanges = result.RemoteChangeCount > 0;
+                // -u 才能看到他人的锁（O）与本地失效的锁（T / B）
+                result.LockedFiles = remoteParsed.LockedFiles;
                 result.HasConflicts = localStatus.Success && localStatus.Files.Any(f => f.State == VcsFileState.Conflicted);
                 result.ConflictedFiles = localStatus.Success
                     ? localStatus.Files.Where(f => f.State == VcsFileState.Conflicted).Select(f => f.FilePath).ToList()
@@ -280,6 +479,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.Summary = result.HasRemoteChanges
                     ? $"Remote has {result.RemoteChangeCount} pending update(s)."
                     : "Working copy is up to date with remote.";
+                var lockedByOthers = result.LockedFiles.Count(f => f.LockState == "O");
+                if (lockedByOthers > 0)
+                    result.Summary += $" {lockedByOthers} file(s) are locked by other users.";
+                var lostLocks = result.LockedFiles.Count(f => f.LockState == "T" || f.LockState == "B");
+                if (lostLocks > 0)
+                    result.Summary += $" {lostLocks} of your lock(s) were stolen or broken.";
                 if (remoteParsed.IsIncomplete || remoteStatus.OutputTruncated)
                     result.Summary += " (remote status output was incomplete; the list may be partial)";
             }
@@ -303,7 +508,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 var args = new List<string> { "info", "--xml", "--non-interactive" };
                 if (!string.IsNullOrEmpty(target))
-                    args.Add(SvnPathArg(target));
+                {
+                    var abs = ResolvePath(target);
+                    if (!SvnCommandLine.CanPassToSvn(abs))
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = SvnCommandLine.UnrepresentablePathError(target);
+                        return result;
+                    }
+                    args.Add(SvnCommandLine.PathArg(abs));
+                }
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
                     "svn", args, _workingDirectory, ct: ct);
 
@@ -349,53 +563,58 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 var allOutput = new List<string>();
                 var affectedFiles = new List<string>();
 
-                // 构建路径查找字典：将 svn status 返回的路径（可能是绝对路径）
-                // 规范化后建立映射，以便与传入的相对/绝对路径匹配。
-                var statusResult = await GetStatusAsync(ct);
-                // key: 规范化绝对路径（小写，统一分隔符），value: 状态
-                var stateByAbsPath = statusResult.Files
-                    .GroupBy(f => NormalizePath(ResolveAbsolutePath(f.FilePath, _workingDirectory)))
-                    .ToDictionary(g => g.Key, g => g.First().State);
+                // svn status 返回的路径（相对工作副本根）规范化为绝对路径建立索引，以便与传入的相对/绝对路径匹配
+                var index = await LoadStatusIndexAsync(ct, filePaths);
 
                 result.LogLines.Add($"Preparing {filePaths.Count} SVN path(s) for commit.");
 
                 // 先分类，再按 add / delete 分批执行：大量文件时不再每个文件启动一个 svn 进程
-                var toDelete = new List<(string original, string abs)>();
-                var toAdd = new List<(string original, string abs)>();
-                foreach (var filePath in filePaths)
+                var toDelete = new List<PathItem>();
+                var toAdd = new List<PathItem>();
+                foreach (var item in ExpandForSchedule(filePaths, index, result.LogLines))
                 {
-                    // 将传入路径解析为绝对路径，再规范化后查找状态
-                    var absPath = ResolveAbsolutePath(filePath, _workingDirectory);
-                    var normAbs = NormalizePath(absPath);
-                    stateByAbsPath.TryGetValue(normAbs, out var state);
+                    if (!SvnCommandLine.CanPassToSvn(item.Abs))
+                    {
+                        result.FailedFiles[item.Display] = SvnCommandLine.UnrepresentablePathError(item.Display);
+                        result.LogLines.Add($"Failed: {item.Display} - path not representable in the system code page");
+                        continue;
+                    }
 
+                    var state = EffectiveState(index, item.Abs);
                     var shouldDelete = state == VcsFileState.Missing;
-                    // 若路径在 status 中找不到（state == Unmodified/default），
-                    // 也尝试执行 svn add，让 SVN 自己判断（可能是新建文件尚未被 status 捕获）
-                    var shouldAdd = state == VcsFileState.Untracked || state == VcsFileState.Unmodified;
+                    // 若路径在 status 中找不到（state == Unmodified），也尝试执行 svn add --force：
+                    // 已纳入版本控制的文件是无操作，新建文件则被添加（可能尚未被 status 捕获）
+                    // 显式点名的被忽略文件 svn add 也会添加（忽略规则只作用于递归）
+                    var shouldAdd = state == VcsFileState.Untracked || state == VcsFileState.Unmodified || state == VcsFileState.Ignored;
 
                     if (!shouldDelete && !shouldAdd)
                     {
                         // 已纳入版本控制且有变更（Modified/Added/Conflicted 等），无需 add/delete
-                        affectedFiles.Add(filePath);
-                        result.LogLines.Add($"No schedule command needed: {filePath} ({state}).");
+                        affectedFiles.Add(item.Display);
+                        result.LogLines.Add($"No schedule command needed: {item.Display} ({state}).");
                         continue;
                     }
 
-                    // 使用绝对路径执行命令，避免工作目录不一致导致路径解析错误
-                    (shouldDelete ? toDelete : toAdd).Add((filePath, absPath));
+                    (shouldDelete ? toDelete : toAdd).Add(item);
                 }
 
                 await ScheduleBatchAsync(new[] { "delete", "--force", "--non-interactive" }, toDelete, "scheduled delete", result, allOutput, affectedFiles, ct);
                 await ScheduleBatchAsync(new[] { "add", "--parents", "--force", "--non-interactive" }, toAdd, "scheduled add", result, allOutput, affectedFiles, ct);
 
                 result.Success = affectedFiles.Count > 0;
-                result.Message = $"Prepared {affectedFiles.Count} of {filePaths.Count} file(s) for SVN commit.";
+                result.IsPartial = result.Success && result.FailedFiles.Count > 0;
+                result.Message = $"Prepared {affectedFiles.Count} of {affectedFiles.Count + result.FailedFiles.Count} path(s) for SVN commit.";
                 result.AffectedFiles = affectedFiles;
                 result.RawOutput = string.Join("\n", allOutput);
 
                 if (!result.Success)
-                    result.ErrorMessage = "No SVN files were prepared for commit. Check the operation log for command output.";
+                    result.ErrorMessage = result.FailedFiles.Count > 0
+                        ? "No SVN files were prepared for commit: " + string.Join("; ", result.FailedFiles.Select(kv => $"{kv.Key}: {kv.Value}").Take(5))
+                        : "No SVN files were prepared for commit. Check the operation log for command output.";
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -407,10 +626,81 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return result;
         }
 
+        /// <summary>
+        /// SVN 没有暂存区：unstage 只撤销"计划"（已 add / delete / 带历史复制或移动的条目），
+        /// 内容修改（Modified / Replaced / Conflicted）保持不动——直接 revert 会丢掉用户的改动。
+        /// 撤销 add 的文件留在磁盘上成为未版本控制文件。
+        /// </summary>
         public async Task<VcsOperationResult> UnstageFilesAsync(List<string> filePaths, CancellationToken ct = default)
         {
-            // SVN 没有 staging 概念，unstage 等同于 revert 新添加的文件
-            return await RevertFilesAsync(filePaths, ct);
+            var result = new VcsOperationResult { OperationName = "SVN Unstage" };
+
+            try
+            {
+                if (filePaths == null || filePaths.Count == 0)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = "At least one file path is required.";
+                    return result;
+                }
+
+                var index = await LoadStatusIndexAsync(ct, filePaths);
+                var targets = new List<PathItem>();
+                foreach (var item in ExpandWithCompanions(filePaths, index, includeChangedCompanionsOnly: true, result.LogLines))
+                {
+                    var status = index.Get(item.Abs);
+                    var state = status?.State ?? VcsFileState.Unmodified;
+                    var scheduleOnly = state == VcsFileState.Added || state == VcsFileState.Copied
+                                       || state == VcsFileState.Renamed
+                                       || (state == VcsFileState.Deleted);
+                    if (!scheduleOnly)
+                    {
+                        if (item.Requested)
+                            result.SkippedFiles[item.Display] = state == VcsFileState.Untracked
+                                ? "not under version control"
+                                : $"{state}: SVN has no staging area; content changes are kept (use revert_files to discard them)";
+                        continue;
+                    }
+                    if (!SvnCommandLine.CanPassToSvn(item.Abs))
+                    {
+                        result.FailedFiles[item.Display] = SvnCommandLine.UnrepresentablePathError(item.Display);
+                        continue;
+                    }
+                    targets.Add(item);
+                }
+
+                if (targets.Count > 0)
+                {
+                    // 只含计划类条目：递归撤销不会丢内容（新增目录下的子项也都是新增）
+                    var cmd = await RunWithTargetsAsync(new List<string> { "revert", "--depth", "infinity", "--non-interactive" }, targets, ct);
+                    result.RawOutput = cmd.Output;
+                    if (!cmd.Success)
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = cmd.ErrorMessage;
+                        return result;
+                    }
+                }
+
+                result.AffectedFiles = targets.Select(t => t.Display).ToList();
+                result.Success = targets.Count > 0 || result.FailedFiles.Count == 0;
+                result.IsPartial = result.Success && result.FailedFiles.Count > 0;
+                result.Message = $"Unscheduled {targets.Count} path(s) (add/delete undone; files kept on disk)."
+                                 + (result.SkippedFiles.Count > 0 ? $" {result.SkippedFiles.Count} path(s) left unchanged." : string.Empty);
+                if (!result.Success)
+                    result.ErrorMessage = string.Join("; ", result.FailedFiles.Select(kv => $"{kv.Key}: {kv.Value}").Take(5));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to unstage files: {ex.Message}";
+            }
+
+            return result;
         }
 
         public async Task<VcsOperationResult> CommitAsync(string message, CancellationToken ct = default)
@@ -431,6 +721,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
 
                 var statusResult = await GetStatusAsync(ct);
+                result.Warnings.AddRange(statusResult.Warnings);
                 var missingFiles = statusResult.Files
                     .Where(f => f.State == VcsFileState.Missing)
                     .Select(f => f.FilePath)
@@ -453,35 +744,18 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     }
                 }
 
-                // 提交信息作为单个 argv 传入（可含引号、换行），由 VcsArgs 负责转义
-                var arguments = new List<string> { "commit", "--non-interactive", "-m", message };
-                result.CommandLine = $"svn {VcsArgs.Join(arguments)}";
-                result.LogLines.Add($"Run: {result.CommandLine}");
+                var unversioned = statusResult.Files.Count(f => f.State == VcsFileState.Untracked);
+                if (unversioned > 0)
+                    result.Warnings.Add($"{unversioned} unversioned path(s) are not part of this commit (svn commit only sends versioned changes; use add_files or commit_files to include them).");
 
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", arguments, _workingDirectory, timeoutSeconds: 120, ct: ct);
-
-                var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
-                    .Where(s => !string.IsNullOrWhiteSpace(s)));
-
-                if (!cmdResult.Success)
-                {
-                    result.Success = false;
-                    result.ErrorMessage = cmdResult.ErrorMessage;
-                    result.Message = string.IsNullOrWhiteSpace(cmdResult.ErrorMessage)
-                        ? "SVN commit failed. Check Unity Console or SVN credentials."
-                        : cmdResult.ErrorMessage.Trim();
-                    result.RawOutput = string.Join("\n", new[] { result.RawOutput, commandOutput }
-                        .Where(s => !string.IsNullOrWhiteSpace(s)));
-                    result.LogLines.Add($"Failed: {result.Message}");
-                    return result;
-                }
-
-                result.Success = true;
-                result.Message = $"Committed with message: {message}";
-                result.RawOutput = string.Join("\n", new[] { result.RawOutput, commandOutput }
-                    .Where(s => !string.IsNullOrWhiteSpace(s)));
-                result.LogLines.Add("Success: SVN commit completed.");
+                // 整体提交与 status 的范围一致：Unity 项目在大工作副本中时只提交项目目录
+                var scopeTargets = ScopeArg == null ? null : new List<string> { _projectDirectory };
+                var cmdResult = await RunCommitAsync(message, scopeTargets, depthEmpty: false, result, ct);
+                return FinishCommit(result, cmdResult, message);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -494,12 +768,227 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         /// <summary>
-        /// 分批执行 svn add / delete：每批一个进程（命令行不超过上限）；
-        /// 某批失败时对该批逐个文件重试，保证一个坏路径不会连累同批其他文件，且每个失败都写入日志。
+        /// 提交指定路径（commit_files）。一次 svn commit 完成（--targets 文件，原子），并补齐 svn 要求或 Unity 需要的路径：
+        /// <list type="bullet">
+        /// <item>未纳入版本控制的路径先 svn add，缺失（!）的先 svn delete；</item>
+        /// <item>对应的 .meta / 资源有变更时一并提交；move 的两端一并提交（svn 要求）；</item>
+        /// <item>新增目录下的文件：其尚未提交的新增祖先目录一并提交（svn 要求，否则 E200009），
+        ///       此时用 <c>--depth empty</c> 并把请求中的目录展开为其下的变更条目，避免把未请求的兄弟文件带进提交。</item>
+        /// </list>
+        /// </summary>
+        public async Task<VcsOperationResult> CommitFilesAsync(string message, List<string> filePaths, CancellationToken ct = default)
+        {
+            var result = new VcsOperationResult { OperationName = "SVN Commit Files" };
+
+            try
+            {
+                if (string.IsNullOrEmpty(message))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = "Commit message is required.";
+                    return result;
+                }
+                if (filePaths == null || filePaths.Count == 0)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = "At least one file path is required.";
+                    return result;
+                }
+
+                var bad = filePaths.Where(p => !SvnCommandLine.CanPassToSvn(ResolvePath(p))).ToList();
+                if (bad.Count > 0)
+                {
+                    // 提交应是原子的：不悄悄提交其余文件
+                    result.Success = false;
+                    result.ErrorMessage = SvnCommandLine.UnrepresentablePathError(string.Join(", ", bad.Take(5)));
+                    return result;
+                }
+
+                var index = await LoadStatusIndexAsync(ct, filePaths);
+                result.Warnings.AddRange(index.Warnings);
+
+                // 1) 未纳入版本控制 / 缺失的路径先调度 add / delete（含 .meta 配对与祖先目录 .meta）
+                var needSchedule = ExpandForSchedule(filePaths, index, result.LogLines)
+                    .Where(i => { var s = EffectiveState(index, i.Abs); return s == VcsFileState.Untracked || s == VcsFileState.Missing || (s == VcsFileState.Ignored && i.Requested); })
+                    .Select(i => i.Abs)
+                    .ToList();
+                if (needSchedule.Count > 0)
+                {
+                    result.LogLines.Add($"Scheduling {needSchedule.Count} unversioned/missing path(s) before commit.");
+                    var stage = await StageFilesAsync(needSchedule, ct);
+                    result.LogLines.AddRange(stage.LogLines);
+                    foreach (var kv in stage.FailedFiles)
+                        result.FailedFiles[kv.Key] = kv.Value;
+                    if (!stage.Success || stage.FailedFiles.Count > 0)
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = "Could not schedule all paths for commit; nothing was committed. "
+                                              + (stage.ErrorMessage ?? string.Join("; ", stage.FailedFiles.Select(kv => $"{kv.Key}: {kv.Value}").Take(5)));
+                        return result;
+                    }
+                    index = await LoadStatusIndexAsync(ct, filePaths);
+                }
+
+                // 2) 收集提交目标
+                var targets = new OrderedPathSet();
+                var requestedDirs = new List<string>();
+                foreach (var item in ExpandWithCompanions(filePaths, index, includeChangedCompanionsOnly: true, result.LogLines))
+                {
+                    targets.Add(item.Abs, item.Display);
+                    if (item.Requested && Directory.Exists(item.Abs))
+                        requestedDirs.Add(item.Abs);
+                }
+
+                // move 的两端必须一起提交
+                foreach (var abs in targets.Keys.ToList())
+                {
+                    var status = index.Get(abs);
+                    var counterpart = status?.State == VcsFileState.Renamed ? status.OriginalPath : status?.MovedToPath;
+                    if (string.IsNullOrEmpty(counterpart))
+                        continue;
+                    var counterAbs = ResolveAbsolutePath(counterpart, _workingDirectory);
+                    if (targets.Add(counterAbs, ToDisplayPath(counterAbs)))
+                        result.LogLines.Add($"Also committing the other side of the move: {ToDisplayPath(counterAbs)}");
+                }
+
+                // 新增祖先目录（及其 .meta）
+                var addedAncestors = new List<string>();
+                foreach (var abs in targets.Keys.ToList())
+                {
+                    foreach (var ancestor in GetAncestors(abs))
+                    {
+                        var state = index.GetState(ancestor);
+                        if (state != VcsFileState.Added && state != VcsFileState.Copied && state != VcsFileState.Renamed)
+                            continue;
+                        if (targets.Add(ancestor, ToDisplayPath(ancestor)))
+                        {
+                            addedAncestors.Add(ancestor);
+                            result.LogLines.Add($"Also committing added parent directory: {ToDisplayPath(ancestor)}");
+                        }
+                        var meta = ancestor + UnityMetaPaths.MetaExtension;
+                        if (index.Get(meta) != null && targets.Add(meta, ToDisplayPath(meta)))
+                            result.LogLines.Add($"Also committing .meta of added parent directory: {ToDisplayPath(meta)}");
+                    }
+                }
+
+                // 带历史复制 / 移动来的目录不能用 depth empty 提交（会丢掉复制来的子项）
+                var hasCopiedDir = targets.Keys.Any(abs =>
+                {
+                    var s = index.GetState(abs);
+                    return (s == VcsFileState.Copied || s == VcsFileState.Renamed) && Directory.Exists(abs);
+                });
+                var depthEmpty = addedAncestors.Count > 0 && !hasCopiedDir;
+                if (depthEmpty)
+                {
+                    // 请求中的目录展开为其下所有已纳入版本控制的变更条目
+                    foreach (var dir in requestedDirs)
+                    {
+                        foreach (var status in index.All)
+                        {
+                            if (status.State == VcsFileState.Untracked || status.State == VcsFileState.Ignored)
+                                continue;
+                            var abs = ResolveAbsolutePath(status.FilePath, _workingDirectory);
+                            if (IsUnder(abs, dir))
+                                targets.Add(abs, ToDisplayPath(abs));
+                        }
+                    }
+                    result.LogLines.Add("Using --depth empty so that only the listed paths (plus required parents) are committed.");
+                }
+
+                var cmdResult = await RunCommitAsync(message, targets.Keys.ToList(), depthEmpty, result, ct);
+                result.AffectedFiles = targets.Displays.ToList();
+                return FinishCommit(result, cmdResult, message);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to commit files: {ex.Message}";
+            }
+
+            return result;
+        }
+
+        private async Task<CommandResult> RunCommitAsync(string message, List<string> absTargets, bool depthEmpty, VcsOperationResult result, CancellationToken ct)
+        {
+            string messageFile = null;
+            string targetsFile = null;
+            try
+            {
+                // 提交信息经 UTF-8 文件传入：argv 按系统代码页解码会丢字符；消息恰好是某个路径时 -m 会报 E205005
+                messageFile = SvnCommandLine.WriteMessageFile(message, _workingDirectory);
+                var arguments = new List<string> { "commit", "--non-interactive" };
+                arguments.AddRange(SvnCommandLine.MessageFileArgs(messageFile));
+                if (depthEmpty)
+                    arguments.AddRange(new[] { "--depth", "empty" });
+                if (absTargets != null)
+                {
+                    targetsFile = SvnCommandLine.WriteTargetsFile(absTargets.Select(SvnCommandLine.PathArg), _workingDirectory);
+                    arguments.Add("--targets");
+                    arguments.Add(targetsFile);
+                }
+
+                result.CommandLine = $"svn {VcsArgs.Join(arguments)}";
+                result.LogLines.Add(absTargets == null
+                    ? $"Run: {result.CommandLine}"
+                    : $"Run: svn commit ({absTargets.Count} target(s){(depthEmpty ? ", --depth empty" : string.Empty)})");
+
+                return await VcsCommandExecutor.ExecuteAsync(
+                    "svn", arguments, _workingDirectory, timeoutSeconds: LongOperationTimeoutSeconds, ct: ct);
+            }
+            finally
+            {
+                SvnCommandLine.TryDeleteFile(messageFile);
+                SvnCommandLine.TryDeleteFile(targetsFile);
+            }
+        }
+
+        private static readonly Regex CommittedRevisionRegex = new Regex(@"Committed revision (\d+)\.", RegexOptions.Compiled);
+
+        private static VcsOperationResult FinishCommit(VcsOperationResult result, CommandResult cmdResult, string message)
+        {
+            var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+            result.RawOutput = string.Join("\n", new[] { result.RawOutput, commandOutput }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+
+            if (!cmdResult.Success)
+            {
+                result.Success = false;
+                result.ErrorMessage = cmdResult.ErrorMessage;
+                result.Message = string.IsNullOrWhiteSpace(cmdResult.ErrorMessage)
+                    ? "SVN commit failed. Check Unity Console or SVN credentials."
+                    : cmdResult.ErrorMessage.Trim();
+                result.LogLines.Add($"Failed: {result.Message}");
+                return result;
+            }
+
+            result.Success = true;
+            var match = CommittedRevisionRegex.Match(cmdResult.Output ?? string.Empty);
+            if (match.Success)
+            {
+                result.Message = $"Committed revision {match.Groups[1].Value} with message: {message}";
+                result.LogLines.Add($"Success: SVN commit completed (r{match.Groups[1].Value}).");
+            }
+            else
+            {
+                // svn 没有可提交的内容时也以 0 退出、什么都不输出：如实告知，而不是声称已提交
+                result.Message = "Nothing was committed: there are no versioned local changes in the given scope.";
+                result.LogLines.Add("SVN commit finished without creating a revision (nothing to commit).");
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 分批执行 svn add / delete：路径写入 --targets 文件一次执行；
+        /// 失败时对该批逐个文件重试，保证一个坏路径不会连累同批其他文件，且每个失败都写入日志。
         /// </summary>
         private async Task ScheduleBatchAsync(
             IReadOnlyList<string> prefix,
-            List<(string original, string abs)> items,
+            List<PathItem> items,
             string successLabel,
             VcsOperationResult result,
             List<string> allOutput,
@@ -509,84 +998,87 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (items.Count == 0)
                 return;
 
-            var byArg = new Dictionary<string, (string original, string abs)>(StringComparer.Ordinal);
-            var args = new List<string>(items.Count);
-            foreach (var item in items)
+            var batch = await RunWithTargetsAsync(new List<string>(prefix), items, ct);
+            RecordCommand(result, allOutput, batch, $"svn {prefix[0]} ({items.Count} path(s), --targets)");
+
+            if (batch.Success)
             {
-                var arg = SvnPathArg(item.abs);
-                byArg[arg] = item;
-                args.Add(arg);
+                foreach (var item in items)
+                {
+                    affectedFiles.Add(item.Display);
+                    result.LogLines.Add($"Success: {item.Display} ({successLabel})");
+                }
+                return;
             }
 
-            foreach (var chunk in VcsArgs.ChunkPaths("svn", prefix, args))
+            if (items.Count == 1)
             {
-                var arguments = new List<string>(prefix);
-                arguments.AddRange(chunk);
-                var cmdResult = await RunScheduleCommandAsync(arguments, result, allOutput, ct);
+                result.FailedFiles[items[0].Display] = batch.ErrorMessage?.Trim();
+                result.LogLines.Add($"Failed: {items[0].Display} - {batch.ErrorMessage}");
+                return;
+            }
 
-                if (cmdResult.Success)
+            // 整批失败：逐个重试，定位具体失败的文件
+            result.LogLines.Add($"Batch of {items.Count} path(s) failed, retrying one by one: {batch.ErrorMessage}");
+            foreach (var item in items)
+            {
+                var single = new List<string>(prefix) { SvnCommandLine.PathArg(item.Abs) };
+                var singleResult = await VcsCommandExecutor.ExecuteAsync("svn", single, _workingDirectory, ct: ct);
+                RecordCommand(result, allOutput, singleResult, $"svn {VcsArgs.Join(single)}");
+                if (singleResult.Success)
                 {
-                    foreach (var arg in chunk)
-                    {
-                        affectedFiles.Add(byArg[arg].original);
-                        result.LogLines.Add($"Success: {byArg[arg].original} ({successLabel})");
-                    }
-                    continue;
+                    affectedFiles.Add(item.Display);
+                    result.LogLines.Add($"Success: {item.Display} ({successLabel})");
                 }
-
-                if (chunk.Count == 1)
+                else
                 {
-                    result.LogLines.Add($"Failed: {byArg[chunk[0]].original} - {cmdResult.ErrorMessage}");
-                    continue;
-                }
-
-                // 整批失败：逐个重试，定位具体失败的文件
-                result.LogLines.Add($"Batch of {chunk.Count} path(s) failed, retrying one by one: {cmdResult.ErrorMessage}");
-                foreach (var arg in chunk)
-                {
-                    var single = new List<string>(prefix) { arg };
-                    var singleResult = await RunScheduleCommandAsync(single, result, allOutput, ct);
-                    if (singleResult.Success)
-                    {
-                        affectedFiles.Add(byArg[arg].original);
-                        result.LogLines.Add($"Success: {byArg[arg].original} ({successLabel})");
-                    }
-                    else
-                    {
-                        result.LogLines.Add($"Failed: {byArg[arg].original} - {singleResult.ErrorMessage}");
-                    }
+                    result.FailedFiles[item.Display] = singleResult.ErrorMessage?.Trim();
+                    result.LogLines.Add($"Failed: {item.Display} - {singleResult.ErrorMessage}");
                 }
             }
         }
 
-        private async Task<CommandResult> RunScheduleCommandAsync(
-            List<string> arguments, VcsOperationResult result, List<string> allOutput, CancellationToken ct)
+        private static void RecordCommand(VcsOperationResult result, List<string> allOutput, CommandResult cmdResult, string commandLine)
         {
-            var commandLine = $"svn {VcsArgs.Join(arguments)}";
             if (string.IsNullOrEmpty(result.CommandLine))
                 result.CommandLine = commandLine;
-
-            // 批量命令行可能很长，日志里只记录路径数量
-            var pathCount = arguments.Count(a => !a.StartsWith("-", StringComparison.Ordinal)) - 1;
-            result.LogLines.Add(pathCount > 1 ? $"Run: svn {arguments[0]} ({pathCount} paths)" : $"Run: {commandLine}");
-
-            var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                "svn", arguments, _workingDirectory, ct: ct);
+            result.LogLines.Add($"Run: {commandLine}");
 
             var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
                 .Where(s => !string.IsNullOrWhiteSpace(s)));
-
-            if (!string.IsNullOrWhiteSpace(commandOutput))
-                allOutput.Add($"$ {commandLine}\n{commandOutput.Trim()}");
-            else
-                allOutput.Add($"$ {commandLine}");
-
-            return cmdResult;
+            allOutput.Add(string.IsNullOrWhiteSpace(commandOutput) ? $"$ {commandLine}" : $"$ {commandLine}\n{commandOutput.Trim()}");
         }
 
-        public async Task<VcsOperationResult> RevertFilesAsync(List<string> filePaths, CancellationToken ct = default)
+        /// <summary>执行 <c>svn &lt;prefix&gt; --targets 文件</c>；路径须已通过 <see cref="SvnCommandLine.CanPassToSvn"/> 检查。</summary>
+        private async Task<CommandResult> RunWithTargetsAsync(List<string> prefix, IEnumerable<PathItem> items, CancellationToken ct, int timeoutSeconds = 120)
         {
-            var result = new VcsOperationResult();
+            string targetsFile = null;
+            try
+            {
+                targetsFile = SvnCommandLine.WriteTargetsFile(items.Select(i => SvnCommandLine.PathArg(i.Abs)), _workingDirectory);
+                var arguments = new List<string>(prefix) { "--targets", targetsFile };
+                return await VcsCommandExecutor.ExecuteAsync("svn", arguments, _workingDirectory, timeoutSeconds, ct);
+            }
+            finally
+            {
+                SvnCommandLine.TryDeleteFile(targetsFile);
+            }
+        }
+
+        public Task<VcsOperationResult> RevertFilesAsync(List<string> filePaths, CancellationToken ct = default)
+        {
+            return RevertFilesAsync(filePaths, recursive: false, ct);
+        }
+
+        /// <summary>
+        /// 还原文件（svn revert）。默认不递归：目录只还原自身属性；<paramref name="recursive"/> 为 true 时 <c>--depth infinity</c>。
+        /// 对应的 .meta / 资源有本地变更时一并还原；move 的两端一并还原（只还原一端会留下孤立的删除）。
+        /// 未纳入版本控制的文件不受 svn revert 影响，原样留在磁盘上并在结果中注明（不删除用户文件）；
+        /// 撤销 add 的文件同样留在磁盘上。
+        /// </summary>
+        public async Task<VcsOperationResult> RevertFilesAsync(List<string> filePaths, bool recursive, CancellationToken ct = default)
+        {
+            var result = new VcsOperationResult { OperationName = "SVN Revert" };
 
             try
             {
@@ -597,21 +1089,69 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                // 路径多时自动分批，避免超出 Windows 命令行长度上限
-                var cmdResult = await VcsCommandExecutor.ExecuteChunkedAsync(
-                    "svn", new[] { "revert", "--non-interactive" }, filePaths.Select(SvnPathArg).ToList(), _workingDirectory, ct: ct);
-
-                if (!cmdResult.Success)
+                var index = await LoadStatusIndexAsync(ct, filePaths);
+                var targets = new OrderedPathSet();
+                var keptOnDisk = 0;
+                foreach (var item in ExpandWithCompanions(filePaths, index, includeChangedCompanionsOnly: true, result.LogLines))
                 {
-                    result.Success = false;
-                    result.ErrorMessage = cmdResult.ErrorMessage;
-                    return result;
+                    var status = index.Get(item.Abs);
+                    if (EffectiveState(index, item.Abs) == VcsFileState.Untracked)
+                    {
+                        if (item.Requested)
+                            result.SkippedFiles[item.Display] = "unversioned: svn revert does not touch it (left on disk)";
+                        continue;
+                    }
+                    if (!SvnCommandLine.CanPassToSvn(item.Abs))
+                    {
+                        result.FailedFiles[item.Display] = SvnCommandLine.UnrepresentablePathError(item.Display);
+                        continue;
+                    }
+                    if (status != null && (status.State == VcsFileState.Added || status.State == VcsFileState.Copied || status.State == VcsFileState.Renamed))
+                        keptOnDisk++;
+                    targets.Add(item.Abs, item.Display);
+
+                    var counterpart = status?.State == VcsFileState.Renamed ? status.OriginalPath : status?.MovedToPath;
+                    if (!string.IsNullOrEmpty(counterpart))
+                    {
+                        var counterAbs = ResolveAbsolutePath(counterpart, _workingDirectory);
+                        if (targets.Add(counterAbs, ToDisplayPath(counterAbs)))
+                            result.LogLines.Add($"Also reverting the other side of the move: {ToDisplayPath(counterAbs)}");
+                    }
                 }
 
-                result.Success = true;
-                result.Message = $"Reverted {filePaths.Count} file(s).";
-                result.AffectedFiles = filePaths;
-                result.RawOutput = cmdResult.Output;
+                if (targets.Count > 0)
+                {
+                    var prefix = new List<string> { "revert", "--non-interactive" };
+                    if (recursive)
+                        prefix.AddRange(new[] { "--depth", "infinity" });
+                    var items = targets.Keys.Select(k => new PathItem(k, targets.DisplayOf(k), true)).ToList();
+                    var cmdResult = await RunWithTargetsAsync(prefix, items, ct);
+                    result.CommandLine = $"svn {string.Join(" ", prefix)} --targets <{items.Count} path(s)>";
+                    result.RawOutput = cmdResult.Output;
+
+                    if (!cmdResult.Success)
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = cmdResult.ErrorMessage;
+                        return result;
+                    }
+                }
+
+                var revertedCount = CountLines(result.RawOutput, "Reverted ");
+                result.Success = targets.Count > 0 || result.FailedFiles.Count == 0;
+                result.IsPartial = result.Success && result.FailedFiles.Count > 0;
+                result.AffectedFiles = targets.Displays.ToList();
+                result.Message = $"Reverted {revertedCount} item(s) ({targets.Count} target path(s){(recursive ? ", recursive" : string.Empty)}).";
+                if (keptOnDisk > 0)
+                    result.Message += $" {keptOnDisk} added item(s) were unscheduled and left on disk as unversioned files.";
+                if (result.SkippedFiles.Count > 0)
+                    result.Message += $" {result.SkippedFiles.Count} unversioned path(s) were left untouched.";
+                if (!result.Success)
+                    result.ErrorMessage = string.Join("; ", result.FailedFiles.Select(kv => $"{kv.Key}: {kv.Value}").Take(5));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -622,30 +1162,80 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return result;
         }
 
+        private static readonly Regex UpdatedRevisionRegex = new Regex(@"(?:Updated to|At) revision (\d+)\.", RegexOptions.Compiled);
+
+        /// <summary>
+        /// svn update。冲突以更新后的 <c>svn status --xml</c> 为准（文本、属性、树冲突都能拿到，且不受输出编码影响）：
+        /// 有冲突 → 成功但 <see cref="VcsOperationResult.IsPartial"/>；svn 非零退出但已经更新了部分内容（如 externals 失败）
+        /// → 失败且 IsPartial；完全没更新 → 失败。
+        /// </summary>
         public async Task<VcsOperationResult> SyncAsync(CancellationToken ct = default)
         {
-            var result = new VcsOperationResult();
+            var result = new VcsOperationResult { OperationName = "SVN Update" };
 
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", new List<string> { "update", "--accept", "postpone", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "svn", new List<string> { "update", "--accept", "postpone", "--non-interactive" }, _workingDirectory,
+                    timeoutSeconds: LongOperationTimeoutSeconds, ct: ct);
 
-                result.RawOutput = cmdResult.Output;
-                result.ConflictedFiles = ParseSvnUpdateConflicts(cmdResult.Output);
+                result.RawOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                var revisions = UpdatedRevisionRegex.Matches(cmdResult.Output ?? string.Empty);
+                var revision = revisions.Count > 0 ? revisions[0].Groups[1].Value : null;
+
+                // 冲突列表：以 status 为准；status 失败时退回解析 update 文本输出
+                var status = await GetStatusAsync(ct);
+                // status 只覆盖项目目录（见 WholeWorkingCopy）而 update 作用于整个工作副本：再合并 update 输出里的冲突行
+                result.ConflictedFiles = status.Success
+                    ? status.Files.Where(f => f.State == VcsFileState.Conflicted).Select(f => f.FilePath).ToList()
+                    : new List<string>();
+                var known = new HashSet<string>(result.ConflictedFiles.Select(f => NormalizePath(ResolveAbsolutePath(f, _workingDirectory))));
+                foreach (var path in ParseSvnUpdateConflicts(cmdResult.Output))
+                {
+                    if (known.Add(NormalizePath(ResolveAbsolutePath(path, _workingDirectory))))
+                        result.ConflictedFiles.Add(path);
+                }
+                if (status.Success)
+                    result.Warnings.AddRange(status.Warnings);
+
+                foreach (var line in SplitLines(cmdResult.Output))
+                {
+                    if (line.StartsWith("Skipped ", StringComparison.Ordinal))
+                        result.Warnings.Add(line.Trim());
+                }
 
                 if (!cmdResult.Success)
                 {
                     result.Success = false;
                     result.ErrorMessage = cmdResult.ErrorMessage;
-                    result.Message = string.IsNullOrEmpty(cmdResult.ErrorMessage) ? "Update failed." : cmdResult.ErrorMessage;
+                    // 已有 "Updated to / At revision" 说明主体更新已完成，只是部分失败（externals、被占用的文件等）
+                    result.IsPartial = revision != null;
+                    result.Message = result.IsPartial
+                        ? $"Update reached revision {revision} but reported errors: {cmdResult.ErrorMessage?.Trim()}"
+                        : (string.IsNullOrEmpty(cmdResult.ErrorMessage) ? "Update failed." : cmdResult.ErrorMessage.Trim());
                     return result;
                 }
 
                 result.Success = true;
-                result.Message = result.ConflictedFiles.Count > 0
-                    ? $"Update completed with {result.ConflictedFiles.Count} conflict(s). Resolve conflicts before continuing."
-                    : "Update completed successfully.";
+                var revisionText = revision != null ? $" to revision {revision}" : string.Empty;
+                if (result.ConflictedFiles.Count > 0)
+                {
+                    result.IsPartial = true;
+                    result.Message = $"Updated{revisionText} with {result.ConflictedFiles.Count} conflict(s). Resolve conflicts before continuing.";
+                }
+                else if (result.Warnings.Any(w => w.StartsWith("Skipped ", StringComparison.Ordinal)))
+                {
+                    result.IsPartial = true;
+                    result.Message = $"Updated{revisionText}, but some paths were skipped (see warnings).";
+                }
+                else
+                {
+                    result.Message = $"Updated{revisionText} successfully.";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -655,6 +1245,429 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
 
             return result;
+        }
+
+        /// <summary>标记冲突已解决（svn resolve --accept working），--targets 一次执行。</summary>
+        public async Task<VcsOperationResult> ResolveFilesAsync(List<string> filePaths, CancellationToken ct = default)
+        {
+            return await RunSimplePathOperationAsync(
+                "SVN Resolve", new List<string> { "resolve", "--accept", "working", "--non-interactive" },
+                filePaths, includeCompanions: false, n => $"Marked {n} path(s) resolved.", ct);
+        }
+
+        /// <summary>
+        /// svn delete --force（remove_files）：对应的 .meta / 资源一并删除；未纳入版本控制的文件也会从磁盘删除。
+        /// </summary>
+        public async Task<VcsOperationResult> DeleteFilesAsync(List<string> filePaths, CancellationToken ct = default)
+        {
+            return await RunSimplePathOperationAsync(
+                "SVN Delete", new List<string> { "delete", "--force", "--non-interactive" },
+                filePaths, includeCompanions: true, n => $"Removed/scheduled delete for {n} path(s).", ct);
+        }
+
+        /// <summary>
+        /// 锁定文件（svn lock）。被他人锁定的文件不会被抢锁（不加 --force），逐个报告结果。
+        /// </summary>
+        public async Task<VcsOperationResult> LockFilesAsync(List<string> filePaths, string comment = null, CancellationToken ct = default)
+        {
+            return await RunLockOperationAsync(true, filePaths, comment, ct);
+        }
+
+        /// <summary>释放本工作副本持有的锁（svn unlock，不加 --force，不会打破他人的锁）。</summary>
+        public async Task<VcsOperationResult> UnlockFilesAsync(List<string> filePaths, CancellationToken ct = default)
+        {
+            return await RunLockOperationAsync(false, filePaths, null, ct);
+        }
+
+        private async Task<VcsOperationResult> RunLockOperationAsync(bool doLock, List<string> filePaths, string comment, CancellationToken ct)
+        {
+            var result = new VcsOperationResult { OperationName = doLock ? "SVN Lock" : "SVN Unlock" };
+            if (filePaths == null || filePaths.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "At least one file path is required.";
+                return result;
+            }
+
+            string messageFile = null;
+            try
+            {
+                var items = new List<PathItem>();
+                foreach (var path in filePaths)
+                {
+                    var abs = ResolvePath(path);
+                    if (!SvnCommandLine.CanPassToSvn(abs))
+                        result.FailedFiles[path] = SvnCommandLine.UnrepresentablePathError(path);
+                    else if (!File.Exists(abs))
+                        result.FailedFiles[path] = "File not found (only existing files can be locked/unlocked).";
+                    else
+                        items.Add(new PathItem(abs, path, true));
+                }
+
+                var prefix = new List<string> { doLock ? "lock" : "unlock", "--non-interactive" };
+                if (doLock && !string.IsNullOrEmpty(comment))
+                {
+                    messageFile = SvnCommandLine.WriteMessageFile(comment, _workingDirectory);
+                    prefix.AddRange(SvnCommandLine.MessageFileArgs(messageFile));
+                }
+
+                var outputs = new List<string>();
+                if (items.Count > 0)
+                {
+                    var batch = await RunWithTargetsAsync(prefix, items, ct, timeoutSeconds: 120);
+                    outputs.Add(batch.Output);
+                    var errors = new Dictionary<PathItem, string>();
+                    if (!batch.Success)
+                    {
+                        // 一个目标出错 svn 可能整批放弃：逐个重试，得到每个文件各自的结果
+                        foreach (var item in items)
+                        {
+                            var single = await RunWithTargetsAsync(prefix, new[] { item }, ct, timeoutSeconds: 120);
+                            outputs.Add(single.Output);
+                            if (!single.Success)
+                                errors[item] = single.ErrorMessage?.Trim();
+                        }
+                    }
+
+                    // 以 status 中的 K 锁为准核对结果（svn lock 的输出只有文件名，不含路径）
+                    var index = await LoadStatusIndexAsync(ct, filePaths);
+                    foreach (var item in items)
+                    {
+                        var heldHere = index.Get(item.Abs)?.LockState == "K";
+                        if (heldHere == doLock)
+                            result.AffectedFiles.Add(item.Display);
+                        else
+                            result.FailedFiles[item.Display] = errors.TryGetValue(item, out var err) && !string.IsNullOrEmpty(err)
+                                ? err
+                                : (batch.Success ? "svn reported success but the lock state did not change." : batch.ErrorMessage?.Trim());
+                    }
+                }
+
+                result.RawOutput = string.Join("\n", outputs.Where(o => !string.IsNullOrWhiteSpace(o)));
+                result.Success = result.AffectedFiles.Count > 0;
+                result.IsPartial = result.Success && result.FailedFiles.Count > 0;
+                result.Message = doLock
+                    ? $"Locked {result.AffectedFiles.Count} of {filePaths.Count} file(s)."
+                    : $"Unlocked {result.AffectedFiles.Count} of {filePaths.Count} file(s).";
+                if (!result.Success)
+                    result.ErrorMessage = string.Join("; ", result.FailedFiles.Select(kv => $"{kv.Key}: {kv.Value}").Take(5));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to {(doLock ? "lock" : "unlock")} files: {ex.Message}";
+            }
+            finally
+            {
+                SvnCommandLine.TryDeleteFile(messageFile);
+            }
+
+            return result;
+        }
+
+        private async Task<VcsOperationResult> RunSimplePathOperationAsync(
+            string operationName, List<string> prefix, List<string> filePaths, bool includeCompanions,
+            Func<int, string> successMessage, CancellationToken ct)
+        {
+            var result = new VcsOperationResult { OperationName = operationName };
+            if (filePaths == null || filePaths.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "At least one file path is required.";
+                return result;
+            }
+
+            try
+            {
+                var index = includeCompanions ? await LoadStatusIndexAsync(ct, filePaths) : StatusIndex.Empty;
+                IEnumerable<PathItem> expanded = includeCompanions
+                    ? ExpandWithCompanions(filePaths, index, includeChangedCompanionsOnly: false, result.LogLines)
+                    : filePaths.Select(p => new PathItem(ResolvePath(p), p, true));
+
+                var items = new List<PathItem>();
+                foreach (var item in expanded)
+                {
+                    if (!SvnCommandLine.CanPassToSvn(item.Abs))
+                        result.FailedFiles[item.Display] = SvnCommandLine.UnrepresentablePathError(item.Display);
+                    else
+                        items.Add(item);
+                }
+
+                var allOutput = new List<string>();
+                var affected = new List<string>();
+                await ScheduleBatchAsync(prefix, items, operationName, result, allOutput, affected, ct);
+
+                result.AffectedFiles = affected;
+                result.RawOutput = string.Join("\n", allOutput);
+                result.Success = affected.Count > 0;
+                result.IsPartial = result.Success && result.FailedFiles.Count > 0;
+                result.Message = successMessage(affected.Count);
+                if (!result.Success)
+                    result.ErrorMessage = string.Join("; ", result.FailedFiles.Select(kv => $"{kv.Key}: {kv.Value}").Take(5));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"{operationName} failed: {ex.Message}";
+            }
+
+            return result;
+        }
+
+        // ===== 路径展开（.meta 配对 / 祖先目录） =====
+
+        /// <summary>一个待处理路径：绝对路径 + 展示给用户的路径 + 是否为用户直接请求（否则是自动补齐的）。</summary>
+        private sealed class PathItem
+        {
+            public readonly string Abs;
+            public readonly string Display;
+            public readonly bool Requested;
+
+            public PathItem(string abs, string display, bool requested)
+            {
+                Abs = abs;
+                Display = display;
+                Requested = requested;
+            }
+        }
+
+        /// <summary>按规范化绝对路径去重、保持插入顺序的路径集合。</summary>
+        private sealed class OrderedPathSet
+        {
+            private readonly List<string> _keys = new List<string>();
+            private readonly Dictionary<string, (string abs, string display)> _map = new Dictionary<string, (string, string)>();
+
+            public int Count => _keys.Count;
+            public IEnumerable<string> Keys => _keys.Select(k => _map[k].abs);
+            public IEnumerable<string> Displays => _keys.Select(k => _map[k].display);
+
+            public bool Add(string abs, string display)
+            {
+                var key = NormalizePath(abs);
+                if (_map.ContainsKey(key))
+                    return false;
+                _map[key] = (abs, display);
+                _keys.Add(key);
+                return true;
+            }
+
+            public string DisplayOf(string abs) => _map.TryGetValue(NormalizePath(abs), out var v) ? v.display : abs;
+        }
+
+        /// <summary>status 结果按规范化绝对路径索引。</summary>
+        private sealed class StatusIndex
+        {
+            public static readonly StatusIndex Empty = new StatusIndex();
+
+            private readonly Dictionary<string, VcsFileStatus> _byAbs = new Dictionary<string, VcsFileStatus>();
+            public List<VcsFileStatus> All { get; } = new List<VcsFileStatus>();
+            public List<string> Warnings { get; } = new List<string>();
+
+            public void Add(string abs, VcsFileStatus status)
+            {
+                var key = NormalizePath(abs);
+                if (!_byAbs.ContainsKey(key))
+                {
+                    _byAbs[key] = status;
+                    All.Add(status);
+                }
+            }
+
+            public VcsFileStatus Get(string abs) =>
+                abs != null && _byAbs.TryGetValue(NormalizePath(abs), out var s) ? s : null;
+
+            public VcsFileState GetState(string abs) => Get(abs)?.State ?? VcsFileState.Unmodified;
+        }
+
+        private async Task<StatusIndex> LoadStatusIndexAsync(CancellationToken ct, IEnumerable<string> paths = null)
+        {
+            var index = new StatusIndex();
+            // 请求的路径都在项目目录内时只扫描项目目录；否则扫描整个工作副本
+            var scope = ScopeArg;
+            if (scope != null && paths != null && paths.Any(p => !string.IsNullOrEmpty(p) && !IsUnder(ResolvePath(p), _projectDirectory)))
+                scope = null;
+            var status = await GetStatusAsync(scope, ct);
+            if (!status.Success)
+            {
+                // status 失败（如工作副本被锁）时退化为不做配对补齐，后续 svn 命令会给出真正的错误
+                index.Warnings.Add($"svn status failed, .meta pairing was skipped: {status.ErrorMessage}");
+                return index;
+            }
+            index.Warnings.AddRange(status.Warnings);
+            foreach (var file in status.Files)
+                index.Add(ResolveAbsolutePath(file.FilePath, _workingDirectory), file);
+            foreach (var file in status.LockedFiles)
+                index.Add(ResolveAbsolutePath(file.FilePath, _workingDirectory), file);
+            return index;
+        }
+
+        /// <summary>
+        /// 展开请求路径：每个路径之后紧跟其 .meta 配对（或 .meta 对应的资源）。
+        /// <paramref name="includeChangedCompanionsOnly"/> 为 true 时只带上 status 中有变更的配对路径；
+        /// 为 false 时（删除）只要配对路径在磁盘上存在或在 status 中就带上。
+        /// </summary>
+        private List<PathItem> ExpandWithCompanions(IEnumerable<string> filePaths, StatusIndex index, bool includeChangedCompanionsOnly, List<string> log)
+        {
+            var seen = new HashSet<string>();
+            var items = new List<PathItem>();
+            foreach (var path in filePaths)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                    continue;
+                var abs = ResolvePath(path);
+                if (seen.Add(NormalizePath(abs)))
+                    items.Add(new PathItem(abs, Path.IsPathRooted(path) ? ToDisplayPath(abs) : path, true));
+
+                // 目录不作为自动补齐的配对路径：svn add / delete 目录是递归的，会带上用户没点名的内容
+                // （目录本身由 add --parents / 祖先目录逻辑处理）
+                var companion = UnityMetaPaths.GetCompanion(abs);
+                if (companion == null || seen.Contains(NormalizePath(companion)) || Directory.Exists(companion))
+                    continue;
+
+                var exists = File.Exists(companion) || Directory.Exists(companion);
+                bool include;
+                if (includeChangedCompanionsOnly)
+                {
+                    // 只带有变更的配对；只锁定 / 未修改的条目（LockedFiles）不需要处理
+                    var companionState = EffectiveState(index, companion);
+                    include = companionState != VcsFileState.Unmodified && companionState != VcsFileState.Ignored
+                              && (companionState != VcsFileState.Untracked || exists);
+                }
+                else
+                {
+                    include = index.Get(companion) != null || exists;
+                }
+                if (!include)
+                    continue;
+
+                seen.Add(NormalizePath(companion));
+                var display = ToDisplayPath(companion);
+                items.Add(new PathItem(companion, display, false));
+                log?.Add($"Also including Unity counterpart: {display}");
+            }
+            return items;
+        }
+
+        /// <summary>
+        /// add / delete 的展开：在 <see cref="ExpandWithCompanions"/> 之上，为每个将被新增的路径补上
+        /// 未纳入版本控制的祖先目录 .meta（svn add --parents 会添加祖先目录，但不会添加目录旁边的 .meta）。
+        /// </summary>
+        private List<PathItem> ExpandForSchedule(IEnumerable<string> filePaths, StatusIndex index, List<string> log)
+        {
+            var items = ExpandWithCompanions(filePaths, index, includeChangedCompanionsOnly: true, log);
+            var seen = new HashSet<string>(items.Select(i => NormalizePath(i.Abs)));
+            var extra = new List<PathItem>();
+            foreach (var item in items)
+            {
+                var state = EffectiveState(index, item.Abs);
+                if (state != VcsFileState.Untracked && state != VcsFileState.Unmodified)
+                    continue;
+                foreach (var ancestor in GetAncestors(item.Abs))
+                {
+                    var meta = ancestor + UnityMetaPaths.MetaExtension;
+                    if (EffectiveState(index, meta) != VcsFileState.Untracked || !File.Exists(meta) || !seen.Add(NormalizePath(meta)))
+                        continue;
+                    var display = ToDisplayPath(meta);
+                    extra.Add(new PathItem(meta, display, false));
+                    log?.Add($"Also including .meta of new parent directory: {display}");
+                }
+            }
+            items.AddRange(extra);
+            return items;
+        }
+
+        /// <summary>
+        /// 路径的实际状态：svn status 对未纳入版本控制的目录只列出目录本身，其下的文件不出现；
+        /// 这类文件按祖先目录的状态（Untracked / Ignored）处理。
+        /// </summary>
+        private VcsFileState EffectiveState(StatusIndex index, string abs)
+        {
+            var status = index.Get(abs);
+            if (status != null)
+                return status.State;
+            foreach (var ancestor in GetAncestors(abs))
+            {
+                var state = index.Get(ancestor)?.State;
+                if (state == VcsFileState.Untracked || state == VcsFileState.Ignored)
+                    return state.Value;
+            }
+            return VcsFileState.Unmodified;
+        }
+
+        /// <summary>工作副本根之下（不含根本身）的所有祖先目录，由近及远。</summary>
+        private IEnumerable<string> GetAncestors(string abs)
+        {
+            var root = NormalizePath(Path.GetFullPath(_workingDirectory)).TrimEnd('/');
+            string current;
+            try { current = Path.GetDirectoryName(Path.GetFullPath(abs).TrimEnd('\\', '/')); }
+            catch { yield break; }
+
+            while (!string.IsNullOrEmpty(current))
+            {
+                var norm = NormalizePath(current).TrimEnd('/');
+                if (norm.Length <= root.Length || !norm.StartsWith(root + "/", StringComparison.Ordinal))
+                    yield break;
+                yield return current;
+                current = Path.GetDirectoryName(current);
+            }
+        }
+
+        private static bool IsUnder(string abs, string dir)
+        {
+            var a = NormalizePath(abs).TrimEnd('/');
+            var d = NormalizePath(dir).TrimEnd('/');
+            return a.StartsWith(d + "/", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 解析传入路径：绝对路径原样；相对路径先按工作副本根，不存在时再按 Unity 项目根
+        /// （工作副本根可能在项目根之上，而模型通常给出 "Assets/..." 这样相对项目根的路径）。
+        /// </summary>
+        internal string ResolvePath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return path;
+            if (Path.IsPathRooted(path))
+                return path;
+
+            var fromWc = ResolveAbsolutePath(path, _workingDirectory);
+            if (File.Exists(fromWc) || Directory.Exists(fromWc) || string.IsNullOrEmpty(_projectDirectory)
+                || string.Equals(NormalizePath(_projectDirectory), NormalizePath(_workingDirectory), StringComparison.Ordinal))
+                return fromWc;
+
+            var fromProject = ResolveAbsolutePath(path, _projectDirectory);
+            if ((File.Exists(fromProject) || Directory.Exists(fromProject)) && IsUnder(fromProject, _workingDirectory))
+                return fromProject;
+            // 都不存在（可能是已删除的文件）：父目录存在的那个更可能是对的
+            var projectParent = Path.GetDirectoryName(fromProject);
+            var wcParent = Path.GetDirectoryName(fromWc);
+            if (!Directory.Exists(wcParent) && Directory.Exists(projectParent) && IsUnder(fromProject, _workingDirectory))
+                return fromProject;
+            return fromWc;
+        }
+
+        private string ToDisplayPath(string abs)
+        {
+            try
+            {
+                var root = Path.GetFullPath(_workingDirectory).TrimEnd('\\', '/');
+                var full = Path.GetFullPath(abs);
+                if (full.Length > root.Length + 1 && NormalizePath(full).StartsWith(NormalizePath(root) + "/", StringComparison.Ordinal))
+                    return full.Substring(root.Length + 1).Replace('\\', '/');
+                return full;
+            }
+            catch
+            {
+                return abs;
+            }
         }
 
         // ===== 解析方法 =====
@@ -689,7 +1702,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
-        private List<VcsCommit> ParseSvnLogXml(string xmlOutput)
+        public static List<VcsCommit> ParseSvnLogXml(string xmlOutput)
         {
             var commits = new List<VcsCommit>();
 
@@ -710,7 +1723,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         Revision = revision ?? "unknown",
                         Author = author ?? "unknown",
                         Date = date ?? "unknown",
-                        Message = message ?? ""
+                        Message = (message ?? "").Replace("\r\n", "\n")
                     });
                 }
             }
@@ -720,6 +1733,29 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
 
             return commits;
+        }
+
+        /// <summary>解析 <c>svn list --xml</c> 的条目名。</summary>
+        public static List<string> ParseSvnListNames(string xmlOutput)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrWhiteSpace(xmlOutput))
+                return names;
+            try
+            {
+                var doc = XDocument.Parse(xmlOutput);
+                foreach (var entry in doc.Descendants("entry"))
+                {
+                    var name = entry.Element("name")?.Value;
+                    if (!string.IsNullOrEmpty(name))
+                        names.Add(name.TrimEnd('/'));
+                }
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"Failed to parse SVN list XML: {ex.Message}");
+            }
+            return names;
         }
 
         private void ParseSvnRemoteInfo(string xmlOutput, VcsRemoteInfo result)
@@ -745,57 +1781,87 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
-        private List<string> ParseSvnUpdateConflicts(string output)
+        /// <summary>
+        /// 从 svn update 文本输出解析冲突路径（status 不可用时的后备）：
+        /// 前三列（文本 / 属性 / 树）任一为 'C' 即冲突，路径从第 5 列开始。
+        /// </summary>
+        public static List<string> ParseSvnUpdateConflicts(string output)
         {
             var files = new List<string>();
 
-            if (string.IsNullOrEmpty(output))
-                return files;
-
-            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines)
+            foreach (var line in SplitLines(output))
             {
-                var trimmed = line.TrimEnd();
-                if (trimmed.Length > 2 && trimmed[0] == 'C' && char.IsWhiteSpace(trimmed[1]))
-                {
-                    files.Add(trimmed.Substring(2).Trim());
-                }
+                // 状态列只由空格和 A/D/U/C/G/E/R/B 组成，且第 5 列是空格（排除 "Conflict discovered..." 等说明行）
+                if (line.Length < 6 || line[4] != ' ')
+                    continue;
+                var columns = line.Substring(0, 4);
+                if (columns.IndexOf('C') < 0 || columns.Trim(' ', 'C', 'A', 'D', 'U', 'G', 'E', 'R', 'B').Length != 0)
+                    continue;
+                var path = line.Substring(4).Trim();
+                if (path.Length > 0)
+                    files.Add(path);
             }
 
             return files;
         }
 
-        private List<VcsBlameLine> ParseSvnBlame(string output)
+        private static IEnumerable<string> SplitLines(string output)
+        {
+            if (string.IsNullOrEmpty(output))
+                yield break;
+            foreach (var line in output.Split('\n'))
+            {
+                var trimmed = line.TrimEnd('\r');
+                if (trimmed.Length > 0)
+                    yield return trimmed;
+            }
+        }
+
+        private static int CountLines(string output, string prefix)
+        {
+            return SplitLines(output).Count(l => l.StartsWith(prefix, StringComparison.Ordinal));
+        }
+
+        private static readonly Regex BlameLineRegex = new Regex(@"^\s*(\d+|-)\s+(\S+) (.*)$", RegexOptions.Compiled);
+
+        /// <summary>
+        /// 解析 svn blame 文本输出（<c>%6ld %10s 内容</c>）。本地修改尚未提交的行修订号与作者为 "-"。
+        /// </summary>
+        public static List<VcsBlameLine> ParseSvnBlame(string output)
         {
             var lines = new List<VcsBlameLine>();
 
             if (string.IsNullOrEmpty(output))
                 return lines;
 
-            // svn blame 格式: <revision> <author> <content>
-            var rawLines = output.Split(new[] { '\n' }, StringSplitOptions.None);
-            int lineNumber = 0;
+            var rawLines = output.Split('\n');
+            // 输出以换行结尾：最后一个空元素不是文件内容
+            var count = rawLines.Length;
+            if (count > 0 && rawLines[count - 1].Length == 0)
+                count--;
 
-            foreach (var rawLine in rawLines)
+            for (var i = 0; i < count; i++)
             {
-                if (string.IsNullOrEmpty(rawLine))
-                    continue;
-
-                lineNumber++;
-
-                // 格式: "     5    alice  line content here"
-                var match = Regex.Match(rawLine, @"^\s*(\d+)\s+(\S+)\s(.*)$");
-                if (match.Success)
+                var rawLine = rawLines[i].TrimEnd('\r');
+                var match = BlameLineRegex.Match(rawLine);
+                if (!match.Success)
                 {
-                    lines.Add(new VcsBlameLine
-                    {
-                        LineNumber = lineNumber,
-                        Revision = match.Groups[1].Value,
-                        Author = match.Groups[2].Value,
-                        Date = "unknown",
-                        Content = match.Groups[3].Value
-                    });
+                    // 内容为空的行："     5      alice " 之后没有内容
+                    match = Regex.Match(rawLine, @"^\s*(\d+|-)\s+(\S+)\s*$");
+                    if (!match.Success)
+                        continue;
                 }
+
+                var revision = match.Groups[1].Value;
+                var author = match.Groups[2].Value;
+                lines.Add(new VcsBlameLine
+                {
+                    LineNumber = i + 1,
+                    Revision = revision == "-" ? "working copy" : revision,
+                    Author = author == "-" ? "(uncommitted)" : author,
+                    Date = "unknown",
+                    Content = match.Groups.Count > 3 ? match.Groups[3].Value : string.Empty
+                });
             }
 
             return lines;
@@ -868,22 +1934,14 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         /// <summary>
+        /// 将工作副本路径转为单个 svn 参数（见 <see cref="SvnCommandLine.PathArg"/>）。
+        /// </summary>
+        internal static string SvnPathArg(string path) => SvnCommandLine.PathArg(path);
+
+        /// <summary>
         /// 将路径解析为绝对路径。
         /// 若 path 已是绝对路径则直接返回；否则以 basePath 为基准拼接。
         /// </summary>
-        /// <summary>
-        /// 将工作副本路径转为单个 svn 参数：以 '-' 开头的相对路径加 "./" 前缀，避免被当成选项；
-        /// 含 '@' 的路径追加 '@'，避免最后一个 '@' 之后的部分被解析为 peg revision。
-        /// </summary>
-        internal static string SvnPathArg(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-                return path;
-            if (path[0] == '-')
-                path = "./" + path;
-            return path.Contains("@") ? path + "@" : path;
-        }
-
         private static string ResolveAbsolutePath(string path, string basePath)
         {
             if (string.IsNullOrEmpty(path))

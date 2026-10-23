@@ -111,6 +111,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         /// <summary>输出过大被截断，Files 可能不完整。</summary>
         public bool Truncated { get; set; }
+
+        /// <summary>
+        /// 带锁信息的文件（SVN：K/O/T/B），包括内容未修改、只是被锁定的文件。其他 VCS 为空。
+        /// </summary>
+        public List<VcsFileStatus> LockedFiles { get; set; } = new List<VcsFileStatus>();
+
+        /// <summary>
+        /// 需要提醒的情况（只报告不阻断），如：修改了 svn:needs-lock 文件却没有持有锁、工作副本需要 cleanup。
+        /// </summary>
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     /// <summary>
@@ -127,6 +137,26 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         /// <summary>VCS 原始状态码（如 Git 的 XY），可能为 null。</summary>
         public string StatusCode { get; set; }
+
+        /// <summary>SVN move 的源端：该路径已被移动到的新路径（moved-to），其他情况为 null。</summary>
+        public string MovedToPath { get; set; }
+
+        /// <summary>
+        /// SVN 锁状态（svn status 第 6 列）：K 本工作副本持有锁，O 他人持有锁，T 锁被抢，B 锁已失效；无锁为 null。
+        /// </summary>
+        public string LockState { get; set; }
+
+        /// <summary>锁持有者（有锁时）。</summary>
+        public string LockOwner { get; set; }
+
+        /// <summary>锁的注释（svn lock -m）；没有锁或没有注释时为 null</summary>
+        public string LockComment { get; set; }
+
+        /// <summary>文件设置了 svn:needs-lock（只对已修改的文件检测）。</summary>
+        public bool NeedsLock { get; set; }
+
+        /// <summary>SVN：该路径被 switch 到了与父目录不同的 URL（svn status 第 5 列 S）。</summary>
+        public bool IsSwitched { get; set; }
     }
 
     /// <summary>
@@ -223,6 +253,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
         public int AheadCount { get; set; }
         public List<string> RemoteChangedFiles { get; set; } = new List<string>();
         public List<string> ConflictedFiles { get; set; } = new List<string>();
+
+        /// <summary>SVN：被他人锁定（O）或本地锁已失效（T/B）的文件，-u 时才能拿到。</summary>
+        public List<VcsFileStatus> LockedFiles { get; set; } = new List<VcsFileStatus>();
         public string Summary { get; set; }
         public string RawOutput { get; set; }
     }
@@ -241,6 +274,21 @@ namespace AgentCore.Editor.Components.VCS.Tools
         public List<string> LogLines { get; set; } = new List<string>();
         public List<string> AffectedFiles { get; set; } = new List<string>();
         public List<string> ConflictedFiles { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 部分完成：操作已生效但有遗留问题（部分路径失败、更新后有冲突、外部定义更新失败等）。
+        /// 工具层据此返回 partial 而不是 ok。
+        /// </summary>
+        public bool IsPartial { get; set; }
+
+        /// <summary>逐个失败的路径及原因（路径 → 错误）。</summary>
+        public Dictionary<string, string> FailedFiles { get; set; } = new Dictionary<string, string>();
+
+        /// <summary>未执行任何操作的路径及原因（如还原未纳入版本控制的文件）。</summary>
+        public Dictionary<string, string> SkippedFiles { get; set; } = new Dictionary<string, string>();
+
+        /// <summary>需要提醒的情况（只报告不阻断）。</summary>
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     /// <summary>

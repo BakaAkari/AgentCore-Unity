@@ -139,13 +139,20 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             arguments = VcsArgs.ApplyGlobalOptions(command, arguments);
 
+            // svn 的文本输出按控制台代码页编码，diff / blame 里的文件内容又是原始字节（通常 UTF-8）：
+            // 按字节捕获，退出后逐行判别编码再解码（见 SvnCommandLine.DecodeOutput），避免中文路径乱码
+            var svnBytes = !rawStdout && SvnCommandLine.IsSvnCommand(command);
+            var stdoutBytes = svnBytes ? new ByteCapture() : null;
+            var stderrBytes = svnBytes ? new ByteCapture() : null;
+
             try
             {
                 using var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
-                        FileName = command,
+                        // 裸 "svn" 不在 PATH 时回退到 TortoiseSVN 自带的 svn.exe
+                        FileName = SvnCommandLine.ResolveExecutable(command),
                         Arguments = arguments,
                         WorkingDirectory = workingDirectory,
                         UseShellExecute = false,
@@ -160,9 +167,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 };
                 ApplyNonInteractiveEnvironment(process.StartInfo);
 
-                if (!rawStdout)
+                if (!rawStdout && !svnBytes)
                     process.OutputDataReceived += (sender, e) => AppendCapped(outputBuilder, e.Data);
-                process.ErrorDataReceived += (sender, e) => AppendCapped(errorBuilder, e.Data);
+                if (!svnBytes)
+                    process.ErrorDataReceived += (sender, e) => AppendCapped(errorBuilder, e.Data);
 
                 // 先挂 Exited 再 Start，避免进程秒退时错过事件
                 var exited = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -172,11 +180,20 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 // 加入进程级 Job：编辑器退出 / 崩溃时连带结束 git/svn/p4 及其派生的 ssh、credential helper
                 ChildProcessJob.TryAssign(process);
                 Task rawReadTask = null;
-                if (rawStdout)
-                    rawReadTask = ReadRawCappedAsync(process.StandardOutput, outputBuilder, truncated => result.OutputTruncated = truncated);
+                Task errReadTask = null;
+                if (svnBytes)
+                {
+                    rawReadTask = stdoutBytes.ReadAsync(process.StandardOutput.BaseStream);
+                    errReadTask = stderrBytes.ReadAsync(process.StandardError.BaseStream);
+                }
                 else
-                    process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
+                {
+                    if (rawStdout)
+                        rawReadTask = ReadRawCappedAsync(process.StandardOutput, outputBuilder, truncated => result.OutputTruncated = truncated);
+                    else
+                        process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+                }
 
                 // 关闭 stdin：任何读取输入的提示（密码、确认）立即读到 EOF 失败，而不是挂到超时
                 try { process.StandardInput.Close(); } catch { /* 进程已退出 */ }
@@ -194,8 +211,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     result.Success = false;
                     result.ErrorMessage = $"Command timed out after {timeoutSeconds} seconds";
                     result.ExitCode = -1;
-                    result.Output = Snapshot(outputBuilder);
-                    result.Error = Snapshot(errorBuilder);
+                    result.Output = svnBytes ? stdoutBytes.Decode(out _) : Snapshot(outputBuilder);
+                    result.Error = svnBytes ? stderrBytes.Decode(out _) : Snapshot(errorBuilder);
                     return result;
                 }
 
@@ -203,17 +220,31 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 await Task.Run(() => process.WaitForExit());
                 if (rawReadTask != null)
                     await rawReadTask;
+                if (errReadTask != null)
+                    await errReadTask;
 
                 result.ExitCode = process.ExitCode;
                 result.Success = process.ExitCode == 0;
-                result.Output = Snapshot(outputBuilder);
-                result.Error = Snapshot(errorBuilder);
+                if (svnBytes)
+                {
+                    result.Output = stdoutBytes.Decode(out var outTruncated);
+                    result.Error = stderrBytes.Decode(out _);
+                    result.OutputTruncated = outTruncated;
+                }
+                else
+                {
+                    result.Output = Snapshot(outputBuilder);
+                    result.Error = Snapshot(errorBuilder);
+                }
 
                 if (!result.Success && string.IsNullOrEmpty(result.ErrorMessage))
                 {
                     result.ErrorMessage = string.IsNullOrEmpty(result.Error)
                         ? $"Command failed with exit code {result.ExitCode}"
                         : result.Error;
+                    // svn 常见错误码（工作副本被锁、认证失败等）附加可操作提示
+                    if (svnBytes)
+                        result.ErrorMessage = SvnCommandLine.AppendErrorHint(result.ErrorMessage);
                 }
             }
             catch (Exception ex)
@@ -274,6 +305,59 @@ namespace AgentCore.Editor.Components.VCS.Tools
             catch (Exception)
             {
                 // 进程被杀 / 管道关闭：保留已读到的内容
+            }
+        }
+
+        /// <summary>
+        /// 按字节捕获一个输出流（svn 用），超出上限后继续读取并丢弃，避免子进程因管道写满而卡住。
+        /// </summary>
+        private sealed class ByteCapture
+        {
+            private readonly System.IO.MemoryStream _buffer = new System.IO.MemoryStream();
+            private bool _truncated;
+
+            public async Task ReadAsync(System.IO.Stream stream)
+            {
+                var chunk = new byte[8192];
+                try
+                {
+                    int read;
+                    while ((read = await stream.ReadAsync(chunk, 0, chunk.Length).ConfigureAwait(false)) > 0)
+                    {
+                        lock (_buffer)
+                        {
+                            var room = MaxCapturedChars - (int)_buffer.Length;
+                            if (room <= 0)
+                            {
+                                _truncated = true;
+                                continue;
+                            }
+                            if (read > room)
+                            {
+                                _buffer.Write(chunk, 0, room);
+                                _truncated = true;
+                            }
+                            else
+                            {
+                                _buffer.Write(chunk, 0, read);
+                            }
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // 进程被杀 / 管道关闭：保留已读到的内容
+                }
+            }
+
+            public string Decode(out bool truncated)
+            {
+                lock (_buffer)
+                {
+                    truncated = _truncated;
+                    var text = SvnCommandLine.DecodeOutput(_buffer.GetBuffer(), (int)_buffer.Length);
+                    return _truncated ? text + Environment.NewLine + "[AgentCore] Output truncated." + Environment.NewLine : text;
+                }
             }
         }
 
@@ -457,7 +541,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         public string Error { get; set; }
         public string ErrorMessage { get; set; }
 
-        /// <summary>stdout 超过捕获上限被截断（仅 <see cref="VcsCommandExecutor.ExecuteRawAsync"/> 设置）。</summary>
+        /// <summary>stdout 超过捕获上限被截断（<see cref="VcsCommandExecutor.ExecuteRawAsync"/> 与 svn 命令设置）。</summary>
         public bool OutputTruncated { get; set; }
     }
 }
