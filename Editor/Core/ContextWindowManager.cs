@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using AgentCore.Editor.LLM;
 using UnityEngine;
 using AgentCore.Editor.Utils;
@@ -110,6 +111,11 @@ namespace AgentCore.Editor.Core
             if (string.IsNullOrEmpty(modelName))
                 return DefaultMaxTokens;
 
+            // v1.17.0: 模型注册表（内置 + ProjectSettings 覆盖）优先
+            var profile = ModelRegistry.Lookup(modelName);
+            if (profile != null && profile.ContextWindow > 0)
+                return profile.ContextWindow;
+
             // 前缀匹配（按优先级顺序，更具体的前缀排在前面）
             foreach (var (prefix, maxTokens) in ModelPrefixMap)
             {
@@ -149,56 +155,99 @@ namespace AgentCore.Editor.Core
             // 检查当前总 token 数是否已在限制内
             int currentTokens = TokenCounter.EstimateConversationTokens(messages);
             if (currentTokens <= availableTokens)
-                return new List<ChatMessage>(messages);
-
-            // 需要截断
-            int beforeTokens = currentTokens;
-
-            // 1. 分离 system 消息和对话消息
-            ChatMessage systemMessage = null;
-            int conversationStartIndex = 0;
-
-            if (messages.Count > 0 && messages[0].Role == "system")
             {
-                systemMessage = messages[0];
-                conversationStartIndex = 1;
+                TrimAnchors.Remove(messages);
+                return new List<ChatMessage>(messages);
             }
 
-            // 2. 计算 system 消息占用的 token
-            int systemTokens = systemMessage != null ? TokenCounter.EstimateMessageTokens(systemMessage) : 0;
+            int beforeTokens = currentTokens;
+
+            // 1. v1.17.0: 保留整段前导 system 消息（系统提示 + 紧随的 skill / 规则消息），而不只是第一条
+            int conversationStartIndex = 0;
+            while (conversationStartIndex < messages.Count && messages[conversationStartIndex].Role == "system")
+                conversationStartIndex++;
+
+            int systemTokens = 0;
+            for (int i = 0; i < conversationStartIndex; i++)
+                systemTokens += TokenCounter.EstimateMessageTokens(messages[i]);
             int conversationBudget = availableTokens - systemTokens - 3; // 3 = 消息列表固定开销
 
             if (conversationBudget <= 0)
             {
-                // system prompt 已超限，只保留 system prompt
-                var minimal = new List<ChatMessage>();
-                if (systemMessage != null) minimal.Add(systemMessage);
+                // system 段已超限，只保留 system 段
                 AgentCoreLog.Warning("[AgentCore] Context window trimmed: system prompt alone exceeds budget.");
-                return minimal;
+                return messages.GetRange(0, conversationStartIndex);
             }
 
-            // 3. 提取对话消息
-            var conversationMessages = new List<ChatMessage>();
-            for (int i = conversationStartIndex; i < messages.Count; i++)
+            var conversationMessages = messages.GetRange(conversationStartIndex, messages.Count - conversationStartIndex);
+
+            // 2. v1.17.0 水位线：若上一轮已截断且锚点仍在、从锚点起仍放得下，则沿用同一截断点。
+            //    截断点每轮漂移会让 prompt 缓存前缀每轮失效；固定截断点后，后续轮次只在末尾追加，前缀保持命中。
+            List<ChatMessage> trimmedConversation = null;
+            if (TrimAnchors.TryGetValue(messages, out var anchor))
             {
-                conversationMessages.Add(messages[i]);
+                int anchorIndex = conversationMessages.IndexOf(anchor);
+                if (anchorIndex >= 0)
+                {
+                    int tokensFromAnchor = 0;
+                    for (int i = anchorIndex; i < conversationMessages.Count; i++)
+                        tokensFromAnchor += TokenCounter.EstimateMessageTokens(conversationMessages[i]);
+                    if (tokensFromAnchor <= conversationBudget)
+                        trimmedConversation = conversationMessages.GetRange(anchorIndex, conversationMessages.Count - anchorIndex);
+                }
             }
 
-            // 4. 从旧到新删除消息，直到总 token 数在预算内
-            var trimmedConversation = TrimConversation(conversationMessages, conversationBudget);
+            bool reusedAnchor = trimmedConversation != null;
+            if (!reusedAnchor)
+            {
+                // 3. 重新截断到低水位（预算的 LowWaterRatio），给后续若干轮留出追加空间，避免每轮都重新截断
+                int lowWaterBudget = Math.Max(1, (int)(conversationBudget * LowWaterRatio));
+                trimmedConversation = TrimConversation(conversationMessages, lowWaterBudget);
+                if (trimmedConversation.Count > 0)
+                    TrimAnchors.AddOrUpdate(messages, trimmedConversation[0]);
+                else
+                    TrimAnchors.Remove(messages);
+            }
 
-            // 5. 合并结果
-            var result = new List<ChatMessage>();
-            if (systemMessage != null) result.Add(systemMessage);
+            // v1.17.0: 被截掉的 ToolChange（延迟工具启用记录）合并为一条，放在保留段第一条消息之后。
+            // 只依赖截断点，截断点不变则内容与位置不变 → 不影响缓存前缀；否则这些工具会在截断后"消失"。
+            int droppedCount = conversationMessages.Count - trimmedConversation.Count;
+            if (droppedCount > 0 && trimmedConversation.Count > 0)
+            {
+                var keptAdded = ToolChanges.CollectAdded(trimmedConversation);
+                var lost = new List<string>();
+                for (int i = 0; i < droppedCount; i++)
+                    foreach (var name in ToolChanges.GetAddedNames(conversationMessages[i]))
+                        if (keptAdded.Add(name)) lost.Add(name);
+                if (lost.Count > 0)
+                    trimmedConversation.Insert(1, ToolChanges.CreateAddition(lost));
+            }
+
+            var result = new List<ChatMessage>(conversationStartIndex + trimmedConversation.Count);
+            result.AddRange(messages.GetRange(0, conversationStartIndex));
             result.AddRange(trimmedConversation);
 
-            // 6. 输出日志
-            int afterTokens = TokenCounter.EstimateConversationTokens(result);
-            int removedCount = messages.Count - result.Count;
-            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Context window trimmed: removed {removedCount} messages, {beforeTokens} → {afterTokens} tokens");
+            if (!reusedAnchor)
+            {
+                int afterTokens = TokenCounter.EstimateConversationTokens(result);
+                int removedCount = messages.Count - result.Count;
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Context window trimmed: removed {removedCount} messages, {beforeTokens} → {afterTokens} tokens (low-water {LowWaterRatio:P0})");
+            }
 
             return result;
         }
+
+        /// <summary>
+        /// v1.17.0: 截断后的目标水位（相对可用预算）。截断到 70% 而不是刚好 100%，
+        /// 使之后若干轮可以沿用同一截断点（缓存前缀稳定），而不是每轮都向后挪一点。
+        /// </summary>
+        internal const double LowWaterRatio = 0.7;
+
+        /// <summary>
+        /// 每个历史列表上一次截断保留的第一条对话消息（锚点）。弱引用键：会话销毁即释放；
+        /// 压缩 / 清空历史使锚点消失时自动回退为重新截断。
+        /// </summary>
+        private static readonly ConditionalWeakTable<List<ChatMessage>, ChatMessage> TrimAnchors = new();
 
         #endregion
 
@@ -256,6 +305,14 @@ namespace AgentCore.Editor.Core
                 }
 
                 keepFromIndex = nextIndex;
+            }
+
+            // v1.17.0: 尽量从 user 消息开始（避免以孤立的 assistant 回复开头）；只向后移动，不会超预算
+            if (keepFromIndex > 0 && keepFromIndex < messages.Count && messages[keepFromIndex].Role != "user")
+            {
+                int next = keepFromIndex;
+                while (next < messages.Count && messages[next].Role != "user") next++;
+                if (next < messages.Count) keepFromIndex = next;
             }
 
             // 构建结果

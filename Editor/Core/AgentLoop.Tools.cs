@@ -30,11 +30,16 @@ namespace AgentCore.Editor.Core
         {
             try
             {
-                // G.3 ActiveToolScope: 通过 ToolScopeResolver 解析当前应暴露的工具
-                // 当 toolScopingEnabled=true 时，仅暴露 AlwaysVisible + 已激活的 OnDemand 分类
-                // 当 toolScopingEnabled=false 时，退化为旧行为（所有非 Restricted 工具）
-                var visibleMetadata = ToolScopeResolver.ResolveVisibleTools(_toolScopeState);
-                var definitions = ToolDefinitionBuilder.BuildFromMetadata(visibleMetadata);
+                // G.3 ActiveToolScope + v1.17.0: 声明稳定的工具全集，按需工具标记为延迟（DeferLoading）。
+                // 延迟工具在作用域激活后由 AppendPendingToolAdditions 追加 ToolChange 消息启用，
+                // 工具列表本身不变 → 支持的模型上缓存前缀不失效；其他协议只发送已启用的工具（ToolChanges.EffectiveTools）。
+                var declaredMetadata = ToolScopeResolver.ResolveDeclaredTools(out var deferredNames);
+                var definitions = ToolDefinitionBuilder.BuildFromMetadata(declaredMetadata);
+                if (definitions != null)
+                {
+                    foreach (var d in definitions)
+                        d.DeferLoading = d.Function?.Name != null && deferredNames.Contains(d.Function.Name);
+                }
 
                 if (definitions == null || definitions.Count == 0)
                 {
@@ -42,13 +47,41 @@ namespace AgentCore.Editor.Core
                     return null;
                 }
 
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Built {definitions.Count} tool definitions for LLM (scope-resolved).");
+                // v1.17.0: 稳定顺序（已见工具保持首见位置，新工具追加），保证缓存前缀不因顺序抖动失效
+                definitions = _toolOrderStabilizer.Apply(definitions);
+                _lastToolDefinitions = definitions;
+
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Built {definitions.Count} tool definitions for LLM ({deferredNames.Count} deferred).");
                 return definitions;
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"[AgentCore] Failed to build tool definitions: {ex.Message}");
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// v1.17.0: 每次 LLM 调用前，把作用域内已可见、但历史中尚未启用的延迟工具以一条 ToolChange 消息追加到历史末尾。
+        /// 追加式（不改动已缓存前缀），且每轮都检查——request_tools 激活的分类在同一轮工具循环的下一次调用即可用。
+        /// </summary>
+        private void AppendPendingToolAdditions(List<ToolDefinition> tools)
+        {
+            if (tools == null || _toolScopeState == null) return;
+            try
+            {
+                var visible = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var meta in ToolScopeResolver.ResolveVisibleTools(_toolScopeState))
+                    if (meta?.Name != null) visible.Add(meta.Name);
+
+                var pending = ToolChanges.PendingAdditions(tools, visible, _messages);
+                if (pending.Count == 0) return;
+                _messages.Add(ToolChanges.CreateAddition(pending));
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Enabled {pending.Count} deferred tool(s): {string.Join(", ", pending)}");
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Failed to enable deferred tools (non-fatal): {ex.Message}");
             }
         }
 

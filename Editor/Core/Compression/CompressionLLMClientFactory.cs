@@ -43,12 +43,11 @@ namespace AgentCore.Editor.Core.Compression
         /// v1.6.5+: 始终返回 OpenAICompatibleClient，复用统一管道。
         /// </summary>
         /// <returns>OpenAICompatibleClient 实例（null = 主客户端不可用）</returns>
+        /// <remarks>
+        /// v1.17.0: 返回绑定 utility profile 的路由客户端——设置了辅助 profile 时压缩/标题/记忆提取走该
+        /// profile（通常是更便宜的模型），未设置时与主模型一致；线协议（OpenAI / Anthropic）按 profile 自动选择。
+        /// </remarks>
         public static ILLMClient CreateCompressionClient()
-        {
-            // v1.6.5+: 压缩器直接使用主 OpenAICompatibleClient
-            // 所有 reasoning 适配、adaptive defaults、effective max tokens
-            // 由 OpenAICompatibleClient + AgentCoreSettings 统一处理
-            return new OpenAICompatibleClient();
-        }
+            => new ProfileBoundLLMClient(new RoutingLLMClient(), () => AgentCoreProviderProfiles.instance.GetUtility());
     }
 }

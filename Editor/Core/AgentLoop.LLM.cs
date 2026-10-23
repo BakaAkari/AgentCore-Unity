@@ -73,6 +73,9 @@ namespace AgentCore.Editor.Core
                 }
             }
 
+            // v1.17.0: 作用域新激活（或被压缩掉）的延迟工具 → 在历史末尾追加 ToolChange 启用
+            AppendPendingToolAdditions(tools);
+
             var messagesSnapshot = ContextWindowManager.TrimToFit(
                 _messages, maxTokens, reserveTokens);
 

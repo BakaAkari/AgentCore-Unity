@@ -11,6 +11,7 @@ namespace AgentCore.Editor.Core
         private const string ActionMarker = "---ACTION---";
         private string _pendingPrefix = string.Empty;
         private string _planningTail = string.Empty;
+        private bool _skipPlanningNewlines = true;
 
         /// <summary>
         /// Creates a visible planning trace extractor.
@@ -33,6 +34,7 @@ namespace AgentCore.Editor.Core
             State = state;
             _pendingPrefix = string.Empty;
             _planningTail = string.Empty;
+            _skipPlanningNewlines = true;
         }
 
         /// <summary>
@@ -43,6 +45,7 @@ namespace AgentCore.Editor.Core
             State = VisiblePlanningTraceState.None;
             _pendingPrefix = string.Empty;
             _planningTail = string.Empty;
+            _skipPlanningNewlines = true;
         }
 
         /// <summary>
@@ -133,6 +136,13 @@ namespace AgentCore.Editor.Core
 
         private VisiblePlanningTraceDelta ProcessPlanning(string token)
         {
+            // Marker separators may arrive in a later chunk; strip only the initial line breaks.
+            if (_skipPlanningNewlines)
+            {
+                token = token.TrimStart('\r', '\n');
+                if (token.Length == 0) return VisiblePlanningTraceDelta.Empty(State);
+                _skipPlanningNewlines = false;
+            }
             _planningTail += token;
             var actionIndex = _planningTail.IndexOf(ActionMarker, StringComparison.Ordinal);
             if (actionIndex >= 0)

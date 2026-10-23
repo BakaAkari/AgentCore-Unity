@@ -177,6 +177,12 @@ namespace AgentCore.Editor.Core
         /// <summary>工具作用域状态 - 追踪当前会话中 LLM 已激活的 OnDemand 分类（G.3 ActiveToolScope）</summary>
         private ToolScopeState _toolScopeState;
 
+        /// <summary>v1.17.0: 会话内工具顺序稳定器（工具定义处于 prompt 最前端，顺序抖动会让缓存整体失效）。</summary>
+        private readonly ToolOrderStabilizer _toolOrderStabilizer = new();
+
+        /// <summary>v1.17.0: 最近一次构建的工具定义（REVISE 重生成复用，保持 tools 前缀不变以命中缓存）。</summary>
+        private List<ToolDefinition> _lastToolDefinitions;
+
         /// <summary>§3.3 延迟注入内容 — Bootstrap Deferred sections，首轮用户消息时注入</summary>
         private string _deferredContext;
 
@@ -625,8 +631,7 @@ namespace AgentCore.Editor.Core
                 {
                     try
                     {
-                        // 先移除之前注入的记忆消息（避免累积）
-                        RemoveOldMemoryMessages();
+                        // v1.17.0: 不再删除旧记忆消息（会破坏缓存前缀）；FormatMemoriesAsContext 只返回新条目
 
                         var memories = await SearchRelevantMemories(userMessage, ct);
                         if (memories != null && memories.Count > 0)
@@ -796,7 +801,7 @@ namespace AgentCore.Editor.Core
             // 2.5. Phase 3: 触发自动记忆（fire-and-forget，不阻塞重置流程）
             try
             {
-                SessionManager.Instance.TriggerAutoMemory(_llmClient);
+                SessionManager.Instance.TriggerAutoMemory(CompressionLLMClientFactory.CreateCompressionClient());
             }
             catch (Exception ex)
             {
@@ -827,6 +832,8 @@ namespace AgentCore.Editor.Core
 
             // 3.7 ADR-18: 清空 Skill 加载状态（skill message 会随 _messages.Clear() 一并清空）
             ResetSkillContext();
+            _toolOrderStabilizer.Reset();
+            _lastToolDefinitions = null;
 
             // 4. 不再通过 EmitEvent 发送 ConversationReset 事件。
             // EmitEvent 使用 EditorApplication.delayCall 延迟执行，会导致 ClearMessages()

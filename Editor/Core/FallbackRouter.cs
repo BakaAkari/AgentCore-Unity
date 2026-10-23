@@ -108,6 +108,13 @@ namespace AgentCore.Editor.Core
                 }
             }
 
+            // v1.17.0: 主 profile 失败后依次尝试 fallback 链
+            var (fbOk, fbResult, fbError) = await TryFallbackChainAsync(
+                () => client.ChatCompletionStreamAsync(messages, onChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride),
+                onStatusUpdate);
+            if (fbOk) return fbResult;
+            lastException = fbError ?? lastException;
+
             // 所有重试都失败了（或遇到不可重试错误）
             throw new Exception(
                 $"LLM request failed after {actualAttempts} attempt{(actualAttempts > 1 ? "s" : "")}. Last error: {lastException?.Message}",
@@ -179,9 +186,63 @@ namespace AgentCore.Editor.Core
                 }
             }
 
+            // v1.17.0: 主 profile 失败后依次尝试 fallback 链
+            var (fbOk, fbResult, fbError) = await TryFallbackChainAsync(async () =>
+            {
+                var response = await client.ChatCompletionAsync(messages, tools, ct);
+                var msg = response?.GetMessage();
+                if (msg == null || string.IsNullOrEmpty(msg.Content))
+                    throw new InvalidOperationException("LLM returned empty content.");
+                return response;
+            }, onStatusUpdate);
+            if (fbOk) return fbResult;
+            lastException = fbError ?? lastException;
+
             throw new Exception(
                 $"LLM request failed after {actualAttempts} attempt{(actualAttempts > 1 ? "s" : "")}. Last error: {lastException?.Message}",
                 lastException);
+        }
+
+        /// <summary>
+        /// 依次在 fallback profile 作用域内执行一次调用（v1.17.0）。
+        /// fallback 链来自当前 profile 的 <see cref="ProviderProfile.fallbackProfileIds"/>；每个备用 profile 只尝试一次
+        /// （主 profile 已经历完整重试），通过 <see cref="ActiveModelConfig.UseProfile"/> 临时切换连接参数，
+        /// 不修改全局 active profile。取消异常直接上抛。
+        /// </summary>
+        private async Task<(bool ok, T result, Exception error)> TryFallbackChainAsync<T>(
+            Func<Task<T>> call, Action<string> onStatusUpdate)
+        {
+            List<ProviderProfile> chain;
+            try { chain = AgentCoreProviderProfiles.instance.GetFallbackChain(ActiveModelConfig.ActiveProfile); }
+            catch { return (false, default, null); }
+
+            Exception last = null;
+            foreach (var profile in chain)
+            {
+                var name = string.IsNullOrEmpty(profile.displayName) ? profile.modelName : profile.displayName;
+                onStatusUpdate?.Invoke($"Falling back to {name}...");
+                AgentCoreLog.Info($"[AgentCore] Falling back to profile '{name}' ({profile.modelName})");
+                try
+                {
+                    using (ActiveModelConfig.UseProfile(profile))
+                    {
+                        var result = await call();
+                        LastError = null;
+                        return (true, result, null);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    LastError = ex.Message;
+                    AgentCoreLog.Warning($"[AgentCore] Fallback profile '{name}' failed: {ex.Message}");
+                }
+            }
+            return (false, default, last);
         }
 
         /// <summary>
@@ -203,6 +264,10 @@ namespace AgentCore.Editor.Core
                 // 匹配 "timeout" —— 该异常消息描述的是空闲时长，未必含这个词，类型判断更可靠)。
                 case TimeoutException _:
                     return true;
+
+                // v1.17.0: Anthropic 流中途 error 事件——过载/限流/服务端错误可重试，请求错误不可重试
+                case AgentCore.Editor.LLM.Anthropic.AnthropicApiException apiEx:
+                    return apiEx.ErrorType is "overloaded_error" or "api_error" or "rate_limit_error" or "timeout_error";
 
                 // HttpRequestException 需要进一步检查内容
                 case HttpRequestException httpEx:
@@ -257,8 +322,8 @@ namespace AgentCore.Editor.Core
             if (message.Contains("connection") && (message.Contains("refused") || message.Contains("reset")))
                 return true;
 
-            // 服务端错误 (5xx) 和限流 (429) -> 可重试
-            if (message.Contains("502") || message.Contains("503") || message.Contains("504") || message.Contains("429"))
+            // 服务端错误 (5xx) 和限流 (429) -> 可重试；529 = Anthropic overloaded
+            if (message.Contains("500") || message.Contains("502") || message.Contains("503") || message.Contains("504") || message.Contains("429") || message.Contains("529"))
                 return true;
 
             // 客户端错误 (4xx 非 429) -> 不可重试
