@@ -544,7 +544,10 @@ namespace AgentCore.Editor.UI
                 AsyncHelper.RunAsync(
                     async () =>
                     {
-                        await _agentLoop.InitializeAsync();
+                        var loop = _agentLoop;
+                        await loop.InitializeAsync();
+                        // 初始化期间窗口被关闭 / AgentLoop 被替换：旧初始化的续体不再操作 UI
+                        if (this == null || !ReferenceEquals(loop, _agentLoop) || !loop.IsInitialized) return;
                         AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] ChatWindow initialized successfully.");
                         // await 续体回到主线程后执行会话恢复等 UI 依赖操作
                         OnAgentLoopInitialized();

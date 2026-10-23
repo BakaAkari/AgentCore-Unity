@@ -52,7 +52,9 @@ namespace AgentCore.Editor.Core
         private void DisposeSkillContext()
         {
             LoadSkillTool.OnSkillMutation -= HandleSkillMutation;
-            LoadSkillTool.SetScopeState(null);
+            // 只有自己仍是静态状态持有者时才清空（新 AgentLoop 可能已注入自己的状态）
+            if (ReferenceEquals(s_scopeStateOwner, this))
+                LoadSkillTool.SetScopeState(null);
         }
 
         /// <summary>

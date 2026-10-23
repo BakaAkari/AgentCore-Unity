@@ -20,6 +20,9 @@ namespace AgentCore.Editor.Core
         /// </summary>
         private void OnBeforeAssemblyReload()
         {
+            // 已 Dispose 的实例不应再收到回调（Dispose 已退订），兜底防止旧实例覆盖新实例保存的状态
+            if (_disposed) return;
+
             // DIAG (2026-08-04, 8分钟卡死排查用，一次性诊断日志，非永久遥测):
             // 记录 Domain Reload 触发的确切时刻与当时的 Agent 状态。若下次复现长时间卡死，
             // 对比这一行与下面 OnAfterAssemblyReload 的 RESUMED 行的时间差 = Reload 本身耗时；
