@@ -56,6 +56,32 @@ namespace AgentCore.Editor.LLM
         [JsonIgnore]
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
+        /// <summary>
+        /// Anthropic 原生 thinking / redacted_thinking 块（v1.17.0，仅 assistant）。
+        /// 带 signature 的块需原样回放，否则工具循环中的推理连续性丢失（且部分账户直接 400）。
+        /// 本地持久化，不直接序列化到 OpenAI 协议。
+        /// </summary>
+        [JsonIgnore]
+        public List<ReasoningBlock> ReasoningBlocks { get; set; }
+
+        /// <summary>
+        /// OpenAI 兼容协议返回的 <c>reasoning_content</c> 全文（v1.17.0，仅 assistant）。
+        /// DeepSeek 思考模式 + 工具调用时必须在后续请求中回传。
+        /// </summary>
+        [JsonIgnore]
+        public string ReasoningContent { get; set; }
+
+        /// <summary>
+        /// 消息种类（v1.17.0）。<see cref="MessageKind.OperatorNote"/> 表示会话中途插入的系统提示，
+        /// Anthropic 协议下渲染为 user 消息内的 &lt;system-reminder&gt; 块，不打断缓存前缀。
+        /// </summary>
+        [JsonIgnore]
+        public MessageKind Kind { get; set; }
+
+        /// <summary>产生该 assistant 消息的调用用量（v1.17.0，可空，不持久化）。</summary>
+        [JsonIgnore]
+        public LlmUsage Usage { get; set; }
+
         // 工厂方法
         public static ChatMessage System(string content) => new() { Role = "system", Content = content };
         public static ChatMessage User(string content) => new() { Role = "user", Content = content };
@@ -63,6 +89,35 @@ namespace AgentCore.Editor.LLM
             new() { Role = "assistant", Content = content, ToolCalls = toolCalls };
         public static ChatMessage Tool(string toolCallId, string content) =>
             new() { Role = "tool", ToolCallId = toolCallId, Content = content };
+    }
+
+    /// <summary>消息种类（v1.17.0）。</summary>
+    public enum MessageKind
+    {
+        Normal,
+        OperatorNote,
+
+        /// <summary>
+        /// 会话中途启用延迟声明的工具（v1.17.0）。内容为 <c>Tools now available: a, b</c>，
+        /// 见 <see cref="ToolChanges"/>。
+        /// </summary>
+        ToolChange
+    }
+
+    /// <summary>
+    /// Anthropic 原生推理块（v1.17.0）。<see cref="Type"/> 为 <c>thinking</c> 或 <c>redacted_thinking</c>。
+    /// </summary>
+    [Serializable]
+    public class ReasoningBlock
+    {
+        [JsonProperty("type")] public string Type { get; set; } = "thinking";
+        [JsonProperty("thinking", NullValueHandling = NullValueHandling.Ignore)] public string Thinking { get; set; }
+        [JsonProperty("signature", NullValueHandling = NullValueHandling.Ignore)] public string Signature { get; set; }
+        [JsonProperty("data", NullValueHandling = NullValueHandling.Ignore)] public string Data { get; set; }
+
+        /// <summary>是否可回放（thinking 需 signature，redacted 需 data）。</summary>
+        [JsonIgnore]
+        public bool IsReplayable => Type == "redacted_thinking" ? !string.IsNullOrEmpty(Data) : !string.IsNullOrEmpty(Signature);
     }
 
     // ==================== 工具定义模型 ====================
@@ -78,6 +133,13 @@ namespace AgentCore.Editor.LLM
 
         [JsonProperty("function")]
         public FunctionDefinition Function { get; set; }
+
+        /// <summary>
+        /// 延迟声明（v1.17.0）：始终出现在声明集合中，但只有被 <see cref="MessageKind.ToolChange"/> 启用后才可用。
+        /// 见 <see cref="ToolChanges"/>。
+        /// </summary>
+        [JsonIgnore]
+        public bool DeferLoading { get; set; }
     }
 
     /// <summary>
@@ -157,6 +219,10 @@ namespace AgentCore.Editor.LLM
         [JsonProperty("usage")]
         public Usage Usage { get; set; }
 
+        /// <summary>归一化用量（v1.17.0，客户端填充；不参与 JSON）。</summary>
+        [JsonIgnore]
+        public LlmUsage NormalizedUsage { get; set; }
+
         /// <summary>
         /// 获取第一个 choice 的消息。
         /// </summary>
@@ -223,6 +289,10 @@ namespace AgentCore.Editor.LLM
 
         [JsonProperty("choices")]
         public List<ChunkChoice> Choices { get; set; }
+
+        /// <summary>最后一个 chunk 携带的 usage（需请求 stream_options.include_usage）。</summary>
+        [JsonProperty("usage", NullValueHandling = NullValueHandling.Ignore)]
+        public JObject Usage { get; set; }
     }
 
     [Serializable]
@@ -270,7 +340,9 @@ namespace AgentCore.Editor.LLM
         /// <summary>流结束</summary>
         Done,
         /// <summary>解析错误</summary>
-        Error
+        Error,
+        /// <summary>用量上报（v1.17.0，通常在 Done 之前）</summary>
+        Usage
     }
 
     /// <summary>
@@ -295,6 +367,9 @@ namespace AgentCore.Editor.LLM
         /// <summary>错误信息（Type == Error 时有值）</summary>
         public string Error { get; set; }
 
+        /// <summary>归一化用量（Type == Usage 时有值）</summary>
+        public LlmUsage Usage { get; set; }
+
         // 工厂方法
         public static StreamChunk Token(string content) =>
             new() { Type = StreamChunkType.ContentToken, Content = content };
@@ -310,5 +385,8 @@ namespace AgentCore.Editor.LLM
 
         public static StreamChunk ParseError(string error) =>
             new() { Type = StreamChunkType.Error, Error = error };
+
+        public static StreamChunk UsageReport(LlmUsage usage) =>
+            new() { Type = StreamChunkType.Usage, Usage = usage };
     }
 }

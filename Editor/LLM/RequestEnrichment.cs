@@ -142,7 +142,7 @@ namespace AgentCore.Editor.LLM
         /// - 数组整体替换（用户意图优先）
         /// - 标量值覆盖（用户意图优先）
         /// </summary>
-        private static void MergeExtraBody(JObject body, string extraJson)
+        internal static void MergeExtraBody(JObject body, string extraJson)
         {
             try
             {
@@ -164,7 +164,7 @@ namespace AgentCore.Editor.LLM
         /// 递归移除 JObject 中所有值为 JTokenType.Null 的属性。
         /// 某些 LLM API（如 Ollama）对 null 字段敏感，返回 400 错误。
         /// </summary>
-        private static void RemoveNullProperties(JObject obj)
+        internal static void RemoveNullProperties(JObject obj)
         {
             var propertiesToRemove = new System.Collections.Generic.List<string>();
 

@@ -27,7 +27,16 @@ namespace AgentCore.Editor.LLM
         {
             if (chunkJson == null) return string.Empty;
 
-            var delta = chunkJson["choices"]?[0]?["delta"] as JObject;
+            return ExtractFromObject(chunkJson["choices"]?[0]?["delta"] as JObject);
+        }
+
+        /// <summary>
+        /// Extracts reasoning text from a delta or a full (non-streaming) message object (v1.17.0).
+        /// </summary>
+        /// <param name="delta">A <c>choices[i].delta</c> or <c>choices[i].message</c> object.</param>
+        /// <returns>Combined structured reasoning text, or empty string when absent.</returns>
+        public static string ExtractFromObject(JObject delta)
+        {
             if (delta == null) return string.Empty;
 
             var parts = new List<string>();

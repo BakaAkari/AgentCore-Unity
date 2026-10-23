@@ -89,6 +89,16 @@ namespace AgentCore.Editor.LLM
                     return ProviderGroup.OpenAINative;
             }
 
+            // v1.17.0: 注册表优先。只有 budget_tokens 旧形态的 Claude 才发 thinking.budget_tokens；
+            // 4.6+ 的 Claude 发 budget_tokens 会 400，经 OpenAI 兼容网关时改走 reasoning.effort（由网关翻译）。
+            var registered = ModelRegistry.Lookup(modelName);
+            if (registered.Family == ModelFamily.Anthropic)
+            {
+                return registered.Thinking == ThinkingMode.BudgetTokens
+                    ? ProviderGroup.AnthropicNative
+                    : ProviderGroup.OpenRouterCompatible;
+            }
+
             foreach (var prefix in AnthropicNativePrefixes)
             {
                 if (modelName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
