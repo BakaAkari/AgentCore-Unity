@@ -55,6 +55,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private VisualElement _messageContainer;
         private VisualElement _syncStatusBanner;
         private Label _syncStatusLabel;
+        private Label _syncStatusTimeLabel;
         private Button _checkRemoteButton;
         private Button _updateRemoteButton;
 
@@ -234,6 +235,13 @@ namespace AgentCore.Editor.Components.VCS.UI
             _syncStatusLabel = new Label("Remote status has not been checked.");
             _syncStatusLabel.AddToClassList("vcs-sync-banner-label");
             _syncStatusBanner.Add(_syncStatusLabel);
+
+            // 最近一次远端检查时间；每 30 秒刷新一次 "N min ago"（只读内存时间戳，不触发检查）
+            _syncStatusTimeLabel = new Label(VcsRemoteStatusMonitor.FormatLastChecked());
+            _syncStatusTimeLabel.AddToClassList("vcs-sync-banner-label");
+            _syncStatusTimeLabel.style.opacity = 0.7f;
+            _syncStatusBanner.Add(_syncStatusTimeLabel);
+            _syncStatusTimeLabel.schedule.Execute(UpdateSyncStatusTimeLabel).Every(30000);
 
             var buttonRow = new VisualElement();
             buttonRow.AddToClassList("vcs-sync-banner-actions");
@@ -427,11 +435,13 @@ namespace AgentCore.Editor.Components.VCS.UI
                 var branchTask = _adapter.GetBranchInfoAsync(ct);
                 var statusTask = _adapter.GetStatusAsync(ct);
                 var logTask = _adapter.GetLogAsync(GetCommitQueryCount(), ct);
-                var syncStatusTask = VcsSettings.CheckRemoteStatusOnRefresh
-                    ? VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, ct)
-                    : Task.FromResult(VcsRemoteStatusMonitor.LastStatus);
 
-                await Task.WhenAll(branchTask, statusTask, logTask, syncStatusTask);
+                // 远端检查（fetch）不在刷新路径上：由 VcsRemoteStatusMonitor 定时 / 手动在后台执行，
+                // 这里只显示上次结果；开关开启时也只是排队一次后台检查，不等待。
+                if (VcsSettings.CheckRemoteStatusOnRefresh)
+                    VcsRemoteStatusMonitor.RequestCheck();
+
+                await Task.WhenAll(branchTask, statusTask, logTask);
 
                 if (ct.IsCancellationRequested)
                     return;
@@ -461,7 +471,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 var commits = await logTask;
                 UpdateCommitList(commits);
 
-                UpdateSyncStatusBanner(await syncStatusTask);
+                UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
             }
             catch (OperationCanceledException)
             {
@@ -1728,9 +1738,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             _checkRemoteButton.SetEnabled(false);
             try
             {
-                UpdateSyncStatusBanner(new VcsSyncStatus { Success = true, Summary = "Checking remote status..." });
-                var status = await VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, CancellationToken.None);
-                UpdateSyncStatusBanner(status);
+                if (_syncStatusTimeLabel != null)
+                    _syncStatusTimeLabel.text = "Checking remote...";
+                // 检查在线程池执行，这里只是等待结果，不阻塞编辑器
+                await VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, CancellationToken.None);
+                UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
             }
             finally
             {
@@ -1947,7 +1959,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (_syncStatusBanner == null || _syncStatusLabel == null)
                 return;
 
-            if (status == null)
+            // 适配器就绪后横幅始终可见，保证 Check Remote 按钮与 "上次检查时间" 随时可用
+            if (_adapter == null)
             {
                 _syncStatusBanner.style.display = DisplayStyle.None;
                 return;
@@ -1957,6 +1970,17 @@ namespace AgentCore.Editor.Components.VCS.UI
             _syncStatusBanner.RemoveFromClassList("has-remote-changes");
             _syncStatusBanner.RemoveFromClassList("is-clean");
             _syncStatusBanner.RemoveFromClassList("has-error");
+            UpdateSyncStatusTimeLabel();
+
+            if (status == null)
+            {
+                _syncStatusLabel.text = VcsRemoteStatusMonitor.LastError is string checkError && !string.IsNullOrEmpty(checkError)
+                    ? $"Remote check failed: {checkError}"
+                    : "Remote status has not been checked yet. Click Check Remote to fetch now.";
+                // 未检查过时不禁用 Update：用户想更新就直接执行
+                _updateRemoteButton?.SetEnabled(true);
+                return;
+            }
 
             if (!status.Success)
             {
@@ -1978,6 +2002,17 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _syncStatusLabel.text = status.Summary ?? "Working copy is up to date.";
                 _updateRemoteButton?.SetEnabled(false);
             }
+
+            // 最近一次检查失败但保留了上次成功结果：附上失败原因
+            var lastError = VcsRemoteStatusMonitor.LastError;
+            if (!string.IsNullOrEmpty(lastError))
+                _syncStatusLabel.text += $"\n(Latest check failed: {lastError})";
+        }
+
+        private void UpdateSyncStatusTimeLabel()
+        {
+            if (_syncStatusTimeLabel != null)
+                _syncStatusTimeLabel.text = VcsRemoteStatusMonitor.FormatLastChecked();
         }
 
         private string GetStateBadge(VcsFileState state)

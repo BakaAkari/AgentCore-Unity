@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.VCS.Config;
@@ -10,13 +11,29 @@ namespace AgentCore.Editor.Components.VCS.Tools
 {
     /// <summary>
     /// Monitors remote VCS update status and exposes it to VCS UI surfaces.
+    /// <para>
+    /// 远端检查（git fetch / svn status -u / p4 sync -n）只在两种情况下运行：
+    /// 定时器（<see cref="VcsSettings.RemoteStatusCheckIntervalMinutes"/>）和手动触发（Check Remote / get_sync_status）。
+    /// 面板刷新不再触发 fetch。检查在线程池执行，主线程只接收结果。
+    /// 最近一次检查 / 成功时间与结果摘要写入 SessionState，域重载后不丢失、也不会立刻重新 fetch。
+    /// </para>
     /// </summary>
     [InitializeOnLoad]
     public static class VcsRemoteStatusMonitor
     {
+        private const string SessionKeyPrefix = "AgentCore.VCS.RemoteStatus.";
+        private const string LastCheckedKey = SessionKeyPrefix + "LastCheckedUtc";
+        private const string LastSuccessKey = SessionKeyPrefix + "LastSuccessUtc";
+        private const string LastStatusKey = SessionKeyPrefix + "LastStatus";
+
+        /// <summary>会话内首次检查的延迟：避开编辑器启动 / 域重载高峰。</summary>
+        private static readonly TimeSpan InitialCheckDelay = TimeSpan.FromMinutes(1);
+
         private static readonly object _lock = new object();
         private static VcsSyncStatus _lastStatus;
-        private static DateTime _lastCheckedUtc = DateTime.UtcNow;
+        private static DateTime _lastCheckedUtc;
+        private static DateTime? _lastSuccessUtc;
+        private static DateTime _nextCheckUtc;
 
         // v1.12.0-alpha.6 (#6): bool → volatile int + Interlocked.CompareExchange，
         // 消除 "检查判定 vs 设置为真" 之间的竞态（两个并发调用都能通过 IsChecking 判定后重复运行）。
@@ -28,7 +45,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private static CancellationTokenSource _cts;
 
         /// <summary>
-        /// Occurs when remote status changes or a check completes.
+        /// Occurs when remote status changes or a check completes (always raised on the main thread).
         /// </summary>
         public static event Action<VcsSyncStatus> StatusChanged;
 
@@ -42,6 +59,34 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 lock (_lock)
                 {
                     return _lastStatus;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 最近一次远端检查完成的时间（UTC，成功或失败均计）；本会话从未检查过时为 null。
+        /// </summary>
+        public static DateTime? LastCheckedUtc
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _lastCheckedUtc == DateTime.MinValue ? (DateTime?)null : _lastCheckedUtc;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 最近一次成功获取远端状态（即成功 fetch）的时间（UTC）；从未成功时为 null。
+        /// </summary>
+        public static DateTime? LastFetchUtc
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _lastSuccessUtc;
                 }
             }
         }
@@ -63,22 +108,69 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         static VcsRemoteStatusMonitor()
         {
+            RestoreFromSession();
             EditorApplication.update += OnEditorUpdate;
         }
 
         /// <summary>
-        /// Requests an immediate remote status check.
+        /// Requests an immediate remote status check (runs in the background, does not wait).
         /// </summary>
         public static void RequestCheck()
         {
-            _ = CheckRemoteStatusAsync(false);
+            _ = CheckRemoteStatusAsync(true);
+        }
+
+        /// <summary>
+        /// 格式化最近检查时间，供 UI 显示，例如 "Last checked 14:05 (3 min ago)"。
+        /// </summary>
+        public static string FormatLastChecked()
+        {
+            if (IsChecking)
+                return "Checking remote...";
+
+            var lastChecked = LastCheckedUtc;
+            if (!lastChecked.HasValue)
+                return "Remote not checked yet";
+
+            var text = "Last checked " + FormatTime(lastChecked.Value);
+            var lastFetch = LastFetchUtc;
+            if (lastFetch.HasValue && lastFetch.Value < lastChecked.Value)
+                text += " · last successful " + FormatTime(lastFetch.Value);
+            else if (!lastFetch.HasValue)
+                text += " · never succeeded";
+            return text;
+        }
+
+        private static string FormatTime(DateTime utc)
+        {
+            var local = utc.ToLocalTime();
+            var ago = DateTime.UtcNow - utc;
+            string agoText;
+            if (ago.TotalMinutes < 1)
+                agoText = "just now";
+            else if (ago.TotalHours < 1)
+                agoText = $"{(int)ago.TotalMinutes} min ago";
+            else if (ago.TotalDays < 1)
+                agoText = $"{(int)ago.TotalHours} h ago";
+            else
+                agoText = $"{(int)ago.TotalDays} d ago";
+
+            var clock = local.Date == DateTime.Now.Date
+                ? local.ToString("HH:mm", CultureInfo.InvariantCulture)
+                : local.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
+            return $"{clock} ({agoText})";
         }
 
         /// <summary>
         /// Checks remote status and returns the latest result.
         /// </summary>
+        /// <param name="force">true = 立即检查（手动触发）；false = 仅在定时间隔到期时检查。</param>
         public static async Task<VcsSyncStatus> CheckRemoteStatusAsync(bool force, CancellationToken ct = default)
         {
+            // 先判定定时间隔，再抢运行权（旧实现先抢运行权再判定，导致定时检查永远被自己的 flag 拦下）
+            if (!force && !IsPeriodicCheckDue())
+                return LastStatus;
+
             // #6: 原子判定 "空闲→运行中"。若旧值非 0 说明已有检查在跑，直接返回。
             if (Interlocked.CompareExchange(ref _isCheckingFlag, 1, 0) != 0)
                 return LastStatus;
@@ -86,12 +178,15 @@ namespace AgentCore.Editor.Components.VCS.Tools
             // 到这里说明本调用拿到了独占运行权，出错也要还回去（finally）。
             try
             {
-                if (!force && !ShouldRunPeriodicCheck())
-                    return LastStatus;
+                // 无论本次结果如何，都推迟下一次定时检查，避免失败时每帧重试
+                lock (_lock)
+                    _nextCheckUtc = DateTime.UtcNow + TimeSpan.FromMinutes(VcsSettings.RemoteStatusCheckIntervalMinutes);
 
-                var adapter = CreateAdapter();
+                NotifyStatusChanged(LastStatus); // 让 UI 显示 "Checking remote..."
+
+                var adapter = await CreateAdapterAsync().ConfigureAwait(false);
                 if (adapter == null)
-                    return null;
+                    return LastStatus;
 
                 _lastError = null;
 
@@ -107,17 +202,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 try
                 {
-                    var status = await adapter.GetSyncStatusAsync(newCts.Token);
-                    lock (_lock)
-                    {
-                        _lastStatus = status;
-                        _lastCheckedUtc = DateTime.UtcNow;
-                    }
-
-                    if (status != null && !status.Success)
-                        _lastError = status.ErrorMessage;
-
-                    NotifyStatusChanged(status);
+                    // fetch / svn status -u 可能耗时数十秒，整体放到线程池，主线程不参与任何一步
+                    var token = newCts.Token;
+                    var status = await Task.Run(() => adapter.GetSyncStatusAsync(token), token).ConfigureAwait(false);
+                    RecordStatus(status);
                     return status;
                 }
                 catch (OperationCanceledException)
@@ -127,7 +215,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 catch (Exception ex)
                 {
                     _lastError = ex.Message;
+                    lock (_lock)
+                        _lastCheckedUtc = DateTime.UtcNow;
                     AgentCoreLog.Warning($"[Version Control] Remote status check failed: {ex.Message}");
+                    NotifyStatusChanged(LastStatus);
                     return LastStatus;
                 }
             }
@@ -139,11 +230,40 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         /// <summary>
+        /// 记录一次由外部（例如 get_sync_status 工具）取得的远端状态，更新时间戳与 UI。
+        /// </summary>
+        public static void RecordStatus(VcsSyncStatus status)
+        {
+            if (status == null)
+                return;
+
+            var now = DateTime.UtcNow;
+            lock (_lock)
+            {
+                _lastCheckedUtc = now;
+                if (status.Success)
+                {
+                    // 失败时保留上一次成功的结果（含"远端有更新"的告警），只更新错误信息
+                    _lastStatus = status;
+                    _lastSuccessUtc = now;
+                }
+                else if (_lastStatus == null || !_lastStatus.Success)
+                {
+                    _lastStatus = status;
+                }
+                _nextCheckUtc = now + TimeSpan.FromMinutes(VcsSettings.RemoteStatusCheckIntervalMinutes);
+            }
+
+            _lastError = status.Success ? null : status.ErrorMessage;
+            NotifyStatusChanged(status.Success ? status : LastStatus);
+        }
+
+        /// <summary>
         /// Runs a user-confirmed sync/update operation and refreshes remote status afterwards.
         /// </summary>
         public static async Task<VcsOperationResult> SyncAsync(CancellationToken ct = default)
         {
-            var adapter = CreateAdapter();
+            var adapter = await CreateAdapterAsync();
             if (adapter == null)
             {
                 return new VcsOperationResult
@@ -179,49 +299,173 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         private static void OnEditorUpdate()
         {
-            if (!ShouldRunPeriodicCheck())
+            // 每帧只比较时间戳，不做任何 VCS 探测
+            if (!IsPeriodicCheckDue())
+                return;
+
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                 return;
 
             _ = CheckRemoteStatusAsync(false);
         }
 
-        private static bool ShouldRunPeriodicCheck()
+        private static bool IsPeriodicCheckDue()
         {
             // #6: 用 Volatile.Read 而不是直接读 int 字段，确保跨线程可见性。
             if (Volatile.Read(ref _isCheckingFlag) != 0 || Volatile.Read(ref _isSyncingFlag) != 0)
                 return false;
 
-            var interval = TimeSpan.FromMinutes(VcsSettings.RemoteStatusCheckIntervalMinutes);
-            return DateTime.UtcNow - _lastCheckedUtc >= interval;
+            lock (_lock)
+                return DateTime.UtcNow >= _nextCheckUtc;
         }
 
-        private static IVcsAdapter CreateAdapter()
+        private static async Task<IVcsAdapter> CreateAdapterAsync()
         {
             var vcsType = VcsDetector.DetectVcs();
             if (vcsType == VcsType.None)
                 return null;
 
+            // 命令可用性在后台探测（会话内缓存），不在主线程启动子进程
+            if (!await VcsDetector.EnsureCommandAvailableAsync(vcsType).ConfigureAwait(false))
+            {
+                _lastError = VcsDetector.GetCommandProbeError(vcsType) ?? $"{vcsType} command-line tool is not available.";
+                return null;
+            }
+
             var rootPath = VcsDetector.GetVcsRootPath();
-            IVcsAdapter adapter = vcsType switch
+            return vcsType switch
             {
                 VcsType.Svn => new SvnAdapter(rootPath),
                 VcsType.Perforce => new PerforceAdapter(rootPath),
                 VcsType.Git => new GitAdapter(rootPath),
                 _ => null
             };
-
-            if (adapter == null || !adapter.IsAvailable())
-                return null;
-
-            return adapter;
         }
 
         private static void NotifyStatusChanged(VcsSyncStatus status)
         {
+            // delayCall 在主线程执行：顺带把状态写入 SessionState（Unity API 只能在主线程调用）
             EditorApplication.delayCall += () =>
             {
+                PersistToSession();
                 StatusChanged?.Invoke(status);
             };
+        }
+
+        // ── SessionState 持久化 ──
+
+        /// <summary>
+        /// 可序列化的状态快照（JsonUtility 不支持属性，单独定义字段）。只保存 UI / 角标需要的摘要信息。
+        /// </summary>
+        [Serializable]
+        private class StatusSnapshot
+        {
+            public bool Success;
+            public string ErrorMessage;
+            public bool HasRemoteChanges;
+            public bool HasLocalChanges;
+            public bool HasConflicts;
+            public int RemoteChangeCount;
+            public int LocalChangeCount;
+            public int BehindCount;
+            public int AheadCount;
+            public string Summary;
+        }
+
+        private static void RestoreFromSession()
+        {
+            var lastChecked = ReadUtc(LastCheckedKey);
+            _lastCheckedUtc = lastChecked ?? DateTime.MinValue;
+            _lastSuccessUtc = ReadUtc(LastSuccessKey);
+
+            var json = SessionState.GetString(LastStatusKey, string.Empty);
+            if (!string.IsNullOrEmpty(json))
+            {
+                try
+                {
+                    var s = JsonUtility.FromJson<StatusSnapshot>(json);
+                    if (s != null)
+                    {
+                        _lastStatus = new VcsSyncStatus
+                        {
+                            Success = s.Success,
+                            ErrorMessage = s.ErrorMessage,
+                            HasRemoteChanges = s.HasRemoteChanges,
+                            HasLocalChanges = s.HasLocalChanges,
+                            HasConflicts = s.HasConflicts,
+                            RemoteChangeCount = s.RemoteChangeCount,
+                            LocalChangeCount = s.LocalChangeCount,
+                            BehindCount = s.BehindCount,
+                            AheadCount = s.AheadCount,
+                            Summary = s.Summary
+                        };
+                    }
+                }
+                catch
+                {
+                    // 快照损坏时忽略，等待下一次检查
+                }
+            }
+
+            var interval = TimeSpan.FromMinutes(VcsSettings.RemoteStatusCheckIntervalMinutes);
+            var now = DateTime.UtcNow;
+            // 域重载不重置计时：按上次检查时间续算；本会话从未检查过则在启动 1 分钟后做第一次检查
+            _nextCheckUtc = lastChecked.HasValue
+                ? lastChecked.Value + interval
+                : now + InitialCheckDelay;
+        }
+
+        private static void PersistToSession()
+        {
+            VcsSyncStatus status;
+            DateTime lastChecked;
+            DateTime? lastSuccess;
+            lock (_lock)
+            {
+                status = _lastStatus;
+                lastChecked = _lastCheckedUtc;
+                lastSuccess = _lastSuccessUtc;
+            }
+
+            WriteUtc(LastCheckedKey, lastChecked == DateTime.MinValue ? (DateTime?)null : lastChecked);
+            WriteUtc(LastSuccessKey, lastSuccess);
+
+            if (status == null)
+            {
+                SessionState.EraseString(LastStatusKey);
+                return;
+            }
+
+            SessionState.SetString(LastStatusKey, JsonUtility.ToJson(new StatusSnapshot
+            {
+                Success = status.Success,
+                ErrorMessage = status.ErrorMessage,
+                HasRemoteChanges = status.HasRemoteChanges,
+                HasLocalChanges = status.HasLocalChanges,
+                HasConflicts = status.HasConflicts,
+                RemoteChangeCount = status.RemoteChangeCount,
+                LocalChangeCount = status.LocalChangeCount,
+                BehindCount = status.BehindCount,
+                AheadCount = status.AheadCount,
+                Summary = status.Summary
+            }));
+        }
+
+        private static DateTime? ReadUtc(string key)
+        {
+            var raw = SessionState.GetString(key, string.Empty);
+            if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks)
+                && ticks > 0 && ticks <= DateTime.MaxValue.Ticks)
+                return new DateTime(ticks, DateTimeKind.Utc);
+            return null;
+        }
+
+        private static void WriteUtc(string key, DateTime? value)
+        {
+            if (value.HasValue)
+                SessionState.SetString(key, value.Value.Ticks.ToString(CultureInfo.InvariantCulture));
+            else
+                SessionState.EraseString(key);
         }
     }
 }

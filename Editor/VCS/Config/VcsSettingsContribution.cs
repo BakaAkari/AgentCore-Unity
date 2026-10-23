@@ -60,10 +60,22 @@ namespace AgentCore.Editor.Components.VCS.Config
                     EditorGUILayout.HelpBox(probeError, MessageType.Warning);
             }
 
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Remote status", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Last check", VcsRemoteStatusMonitor.FormatLastChecked());
+            EditorGUILayout.LabelField("Automatic check", $"Every {VcsSettings.RemoteStatusCheckIntervalMinutes} min (background)");
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button(new GUIContent("Check Remote Now", "Fetch remote status in the background (git fetch / svn status -u / p4 sync -n).")))
+            {
+                VcsRemoteStatusMonitor.RequestCheck();
+            }
+
             if (GUILayout.Button(new GUIContent("Re-detect", "Clear the cached detection result and check the VCS type and command-line tool again (runs in the background).")))
             {
                 _ = VcsDetector.Refresh();
             }
+            EditorGUILayout.EndHorizontal();
         }
     }
 }

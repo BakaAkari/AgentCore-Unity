@@ -451,7 +451,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (adapter == null)
                 return ToolResponse.Fail(AdapterUnavailableMessage);
 
-            var result = await adapter.GetSyncStatusAsync(ct);
+            // fetch 等网络操作放到线程池执行，不占用主线程；结果同步给 VcsRemoteStatusMonitor，面板 / 角标与"上次检查时间"随之更新
+            var result = await Task.Run(() => adapter.GetSyncStatusAsync(ct), ct);
+            VcsRemoteStatusMonitor.RecordStatus(result);
             if (!result.Success)
                 return ToolResponse.Fail($"Failed to get sync status: {result.ErrorMessage}");
 
