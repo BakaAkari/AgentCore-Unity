@@ -296,7 +296,7 @@ namespace AgentCore.Editor.UI
                 else
                 {
                     _reasoningLevelSelector = new AgentCore.Editor.UI.Components.ReasoningLevelSelector();
-                    // v1.16.0: 思考强度(auto)下拉放在 send 下方一排、attach(+) 的右侧（input-ai-selector-slot）;
+                    // v1.17.0: 思考强度胶囊放在左列上排、attach(+) 的右侧（input-ai-selector-slot），模型胶囊在其正下方;
                     // 兜底：若 slot 不存在则退回插到 input-buttons 行首。
                     var aiSlot = inputButtons.Q<VisualElement>("input-ai-selector-slot");
                     if (aiSlot != null)
@@ -304,6 +304,19 @@ namespace AgentCore.Editor.UI
                     else
                         inputButtons.Insert(0, _reasoningLevelSelector);
                 }
+
+                // v1.17.0: 模型切换胶囊放在左列下排（思考强度正下方），不必进设置页即可换模型 / profile
+                var modelSelector = inputButtons.Q<AgentCore.Editor.UI.Components.ModelSelector>();
+                if (modelSelector == null)
+                {
+                    modelSelector = new AgentCore.Editor.UI.Components.ModelSelector();
+                    var modelSlot = inputButtons.Q<VisualElement>("input-model-slot");
+                    if (modelSlot != null)
+                        modelSlot.Add(modelSelector);
+                    else
+                        inputButtons.Insert(0, modelSelector);
+                }
+                modelSelector.IsBusy = () => _agentLoop != null && _agentLoop.CurrentState != AgentState.Idle;
             }
 
             // 3.5 查询 Hub 导航与面板 UI 元素引用
