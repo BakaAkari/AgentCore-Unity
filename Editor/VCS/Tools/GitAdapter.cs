@@ -16,6 +16,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
     {
         private readonly string _workingDirectory;
 
+        /// <summary>工作区状态查询参数（porcelain v2，带分支头，列出所有未跟踪文件）。</summary>
+        internal static readonly IReadOnlyList<string> StatusArguments = new[]
+        {
+            "--no-optional-locks", "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"
+        };
+
         public VcsType VcsType => VcsType.Git;
 
         public GitAdapter(string workingDirectory)
@@ -36,8 +42,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", new List<string> { "status", "--porcelain" }, _workingDirectory, ct: ct);
+                // --no-optional-locks：只读查询不去刷新 index（不抢 index.lock，避免与用户同时运行的 git 冲突）
+                // -z：NUL 分隔且路径不加引号，非 ASCII / 空格 / 换行路径原样输出（UTF-8）
+                var cmdResult = await VcsCommandExecutor.ExecuteRawAsync(
+                    "git", StatusArguments, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -46,9 +54,14 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
+                var parsed = PorcelainV2Parser.Parse(cmdResult.Output);
                 result.RawOutput = cmdResult.Output;
-                result.Files = ParseGitStatus(cmdResult.Output);
+                result.Files = parsed.Files.Where(f => f.State != VcsFileState.Ignored).ToList();
+                result.Truncated = cmdResult.OutputTruncated || parsed.HasIncompleteRecord;
                 result.Success = true;
+
+                if (result.Truncated)
+                    AgentCoreLog.Warning($"[Version Control] git status output was truncated; showing {result.Files.Count} entries only. Consider ignoring large untracked folders.");
             }
             catch (Exception ex)
             {
@@ -709,50 +722,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ===== 解析方法 =====
 
-        private List<VcsFileStatus> ParseGitStatus(string output)
-        {
-            var files = new List<VcsFileStatus>();
-
-            if (string.IsNullOrEmpty(output))
-                return files;
-
-            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var line in lines)
-            {
-                if (line.Length < 3)
-                    continue;
-
-                var statusCode = line.Substring(0, 2);
-                var filePath = line.Substring(3);
-
-                var state = statusCode switch
-                {
-                    "??" => VcsFileState.Untracked,
-                    "!!" => VcsFileState.Ignored,
-                    "M " or " M" or "MM" => VcsFileState.Modified,
-                    "A " or " A" or "AM" => VcsFileState.Added,
-                    "D " or " D" => VcsFileState.Deleted,
-                    "R " or " R" => VcsFileState.Renamed,
-                    "C " or " C" => VcsFileState.Copied,
-                    "UU" or "AA" or "DD" => VcsFileState.Conflicted,
-                    _ => VcsFileState.Modified
-                };
-
-                if (state == VcsFileState.Ignored)
-                    continue;
-
-                files.Add(new VcsFileStatus
-                {
-                    FilePath = filePath,
-                    State = state,
-                    StateDescription = GetStateDescription(state)
-                });
-            }
-
-            return files;
-        }
-
         private List<string> ParseGitBranches(string output)
         {
             var branches = new List<string>();
@@ -905,23 +874,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 else if (line.StartsWith("    ") && string.IsNullOrEmpty(result.Message))
                     result.Message = line.Trim();
             }
-        }
-
-        private string GetStateDescription(VcsFileState state)
-        {
-            return state switch
-            {
-                VcsFileState.Modified => "Modified",
-                VcsFileState.Added => "Added",
-                VcsFileState.Deleted => "Deleted",
-                VcsFileState.Renamed => "Renamed",
-                VcsFileState.Copied => "Copied",
-                VcsFileState.Untracked => "Untracked",
-                VcsFileState.Ignored => "Ignored",
-                VcsFileState.Conflicted => "Conflicted",
-                VcsFileState.Missing => "Missing",
-                _ => "Unmodified"
-            };
         }
     }
 }
