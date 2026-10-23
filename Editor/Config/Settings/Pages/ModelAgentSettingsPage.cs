@@ -144,6 +144,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                             store.UpdateProfile(profileId, x => x.modelName = models[0]);
                         }
                         context.State.StringValues[AvailableModelsKeyPrefix + profileId] = string.Join("\n", models);
+                        ProviderModelCatalog.Set(profileId, models);
                         context.State.SetStatus(FetchStatusKeyPrefix + profileId,
                             $"[OK] Auto-selected '{models[0]}' from {models.Count} models",
                             SettingsStatusLevel.Success);
@@ -748,6 +749,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     {
                         context.State.StringValues[AvailableModelsKeyPrefix + profileId] =
                             string.Join("\n", models ?? new List<string>());
+                        ProviderModelCatalog.Set(profileId, models ?? new List<string>());
                         context.State.SetStatus(
                             statusKey,
                             (models != null && models.Count > 0) ? $"[OK] Found {models.Count} models" : "[OK] No models returned",
