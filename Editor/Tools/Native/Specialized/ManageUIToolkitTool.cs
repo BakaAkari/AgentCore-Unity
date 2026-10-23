@@ -40,6 +40,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         // create_editor_window_template / create_custom_element_template 写 .cs 文件 (触发编译);
         // create_uxml/uss 等写 UI 资产文件; configure_ui_document 改 Scene
         Capabilities = ToolCapability.ReadProject | ToolCapability.WriteProjectFiles | ToolCapability.ModifyAssets | ToolCapability.ModifyScene | ToolCapability.ModifyScripts,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "query_element", "list_elements", "get_uxml_content", "get_uss_content", "list_ui_documents", "validate_uxml", "list_assets" })]
     public class ManageUIToolkitTool : IAgentTool
     {

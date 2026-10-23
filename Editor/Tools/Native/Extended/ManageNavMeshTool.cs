@@ -32,6 +32,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RiskLevel = ToolRiskLevel.Medium,
         // bake 生成 NavMesh 资产, clear 删除已烘焙的 NavMesh 数据
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_settings" })]
     public class ManageNavMeshTool : IAgentTool
     {

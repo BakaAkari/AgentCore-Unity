@@ -37,6 +37,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         RiskLevel = ToolRiskLevel.High,
         // set_settings / configure_collision 写 DynamicsManager (项目设置); add_* 改 Scene 对象
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyProjectSettings,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_settings", "raycast", "overlap_test", "list_scene_physics_stats", "get_collision_matrix" })]
     public class ManagePhysicsTool : IAgentTool
     {

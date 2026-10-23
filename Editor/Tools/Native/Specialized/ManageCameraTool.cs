@@ -42,6 +42,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         RiskLevel = ToolRiskLevel.Medium,
         // create_render_texture 创建 RT 资产; render_to_texture 写 PNG 文件到工程
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.WriteProjectFiles,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         // *_scene_view / frame_selected 只移动编辑器 SceneView 视角, 不改动场景数据
         ReadOnlyActions = new[] { "get_info", "list_cameras", "get_scene_view", "set_scene_view", "orbit_scene_view", "pan_scene_view", "dolly_scene_view", "frame_selected" })]
     public class ManageCameraTool : IAgentTool

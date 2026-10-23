@@ -28,6 +28,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
         Visibility = ToolVisibility.OnDemand,
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyProjectSettings,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         // simulate_key 仅返回指引文本, 不模拟任何输入
         ReadOnlyActions = new[] { "list_axes", "get_axis", "simulate_key" })]
     public class ManageInputTool : IAgentTool

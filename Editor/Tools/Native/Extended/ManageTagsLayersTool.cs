@@ -32,6 +32,8 @@ namespace AgentCore.Editor.Tools.Native.Extended
         RiskLevel = ToolRiskLevel.High,
         // add/remove_tag, set_layer, add_sorting_layer 写 ProjectSettings/TagManager.asset; set_object_* 改 Scene 对象
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyProjectSettings | ToolCapability.ModifyScene,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "list_tags", "list_layers", "list_sorting_layers" })]
     public class ManageTagsLayersTool : IAgentTool
     {

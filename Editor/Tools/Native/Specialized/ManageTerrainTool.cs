@@ -34,6 +34,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         RiskLevel = ToolRiskLevel.Medium,
         // create / add_layer 创建 TerrainData / TerrainLayer 资产; 其余写 action 修改 TerrainData 资产
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_info", "get_height" })]
     public class ManageTerrainTool : IAgentTool
     {

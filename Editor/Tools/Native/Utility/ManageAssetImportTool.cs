@@ -32,6 +32,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
         RiskLevel = ToolRiskLevel.Medium,
         // reimport / reimport_batch 触发重新导入; set_labels / set_bundle 写资产 .meta
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_importer", "get_labels", "get_dependencies", "get_import_log", "find_by_importer" })]
     public class ManageAssetImportTool : IAgentTool
     {

@@ -30,6 +30,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         // play/stop 仅控制 AudioSource 播放状态 (不落盘、不改序列化数据)
         ReadOnlyActions = new[] { "get_info", "list", "get_settings", "play", "stop" })]
     public class ManageAudioTool : IAgentTool

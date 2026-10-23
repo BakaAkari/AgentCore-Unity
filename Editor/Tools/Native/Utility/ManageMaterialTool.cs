@@ -35,6 +35,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
         RiskLevel = ToolRiskLevel.Medium,
         // assign 改 Renderer (Scene); 其余写 action 改 / 创建材质资产
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets | ToolCapability.ModifyScene,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_info", "list_properties", "get_keywords", "find_by_shader", "list_materials", "get_shader_info" })]
     public class ManageMaterialTool : IAgentTool
     {

@@ -34,6 +34,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "check_available", "get_info", "get_vertices", "get_faces" })]
     public class ManageProBuilderTool : IAgentTool
     {

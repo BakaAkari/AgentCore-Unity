@@ -25,7 +25,9 @@ namespace AgentCore.Editor.Tools.Vision
         RequiresMainThread = true,
         RiskLevel = ToolRiskLevel.Medium,
         // analyze 把截图发送到远端视觉模型; capture 写 PNG (默认 Library, output_path 可指向 Assets)
-        Capabilities = ToolCapability.ReadProject | ToolCapability.NetworkAccess | ToolCapability.WriteProjectFiles)]
+        Capabilities = ToolCapability.ReadProject | ToolCapability.NetworkAccess | ToolCapability.WriteProjectFiles,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" })]
     public class VisionAnalyzeTool : IAgentTool
     {
         public ToolMetadata Metadata => new ToolMetadata(

@@ -32,6 +32,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         RiskLevel = ToolRiskLevel.Medium,
         // bake 生成光照贴图资产; bake(mode=clear) 删除已烘焙光照数据与 GI 磁盘缓存
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_info", "list", "get_lightmap_settings" })]
     public class ManageLightingTool : IAgentTool
     {

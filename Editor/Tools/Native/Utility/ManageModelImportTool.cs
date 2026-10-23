@@ -33,6 +33,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
         RiskLevel = ToolRiskLevel.Medium,
         // set_* 修改 ModelImporter 设置并 SaveAndReimport
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_settings", "find_assets", "get_mesh_info", "get_materials_info", "get_animations_info", "get_rig_info" })]
     public class ManageModelImportTool : IAgentTool
     {

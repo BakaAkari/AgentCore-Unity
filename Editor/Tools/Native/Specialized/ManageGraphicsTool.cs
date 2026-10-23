@@ -39,6 +39,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         RiskLevel = ToolRiskLevel.High,
         // set_quality_level 写 QualitySettings (项目设置); set_render_settings 改场景 RenderSettings; volume_set 改 VolumeProfile 资产
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.ModifyProjectSettings,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_render_settings", "get_quality_settings", "volume_list", "volume_get" })]
     public class ManageGraphicsTool : IAgentTool
     {

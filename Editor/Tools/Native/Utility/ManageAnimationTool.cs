@@ -34,6 +34,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
         RiskLevel = ToolRiskLevel.Medium,
         // set_parameter 改 AnimatorController 资产; set_layer_weight 改 Animator 运行时状态; create_animation_clip 创建资产
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "list_clips", "get_clip_info", "list_parameters", "get_controller_info", "list_animator_states", "get_layers" })]
     public class ManageAnimationTool : IAgentTool
     {

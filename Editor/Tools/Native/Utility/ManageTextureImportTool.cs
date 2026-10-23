@@ -35,6 +35,8 @@ namespace AgentCore.Editor.Tools.Native.Utility
         RiskLevel = ToolRiskLevel.Medium,
         // set_* 修改 TextureImporter 设置并 SaveAndReimport
         Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets,
+        // 风险标注只用于确认流程，不改变 Play Mode 行为：本工具不受 Play Mode 写拦截（与标注前一致）
+        PlaymodeRuntimeSafeActions = new[] { "*" },
         ReadOnlyActions = new[] { "get_settings", "find_assets", "get_info", "get_platform_settings", "find_by_size" })]
     public class ManageTextureImportTool : IAgentTool
     {
