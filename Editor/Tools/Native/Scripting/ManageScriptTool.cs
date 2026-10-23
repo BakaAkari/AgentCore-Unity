@@ -260,7 +260,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
             }
 
             var isNew = !File.Exists(fullPath);
-            File.WriteAllText(fullPath, content);
+            AtomicFile.WriteAllText(fullPath, content);
 
             // Bug 1 修复 (2026-08-04): 此前紧跟一次无参 AssetDatabase.Refresh()，
             // 会触发全项目资源扫描（日志实证：仅改7个文件却触发122s CompileScripts +
@@ -303,7 +303,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
                     $"Unknown template: '{template}'. Valid templates: monobehaviour, scriptableobject, editor, editorwindow, custom_editor, plain");
 
             ToolHelpers.EnsureDirectoryExists(fullPath);
-            File.WriteAllText(fullPath, content);
+            AtomicFile.WriteAllText(fullPath, content);
 
             // Bug 1 修复 (2026-08-04): 同 HandleWrite —— 去掉多余的全项目 Refresh()，
             // 只保留必需的单文件 ForceUpdate 导入。
@@ -650,7 +650,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
             var newContent = content.Substring(0, insertIndex) + sb.ToString() + content.Substring(insertIndex);
 
-            File.WriteAllText(fullPath, newContent);
+            AtomicFile.WriteAllText(fullPath, newContent);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
 
             return ToolResponse.OkWithData(new JObject
@@ -721,7 +721,7 @@ namespace AgentCore.Editor.Tools.Native.Scripting
 
             var newContent = content.Substring(0, afterBrace) + sb.ToString() + content.Substring(afterBrace);
 
-            File.WriteAllText(fullPath, newContent);
+            AtomicFile.WriteAllText(fullPath, newContent);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
 
             return ToolResponse.OkWithData(new JObject

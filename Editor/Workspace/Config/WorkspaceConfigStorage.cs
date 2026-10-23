@@ -66,7 +66,7 @@ namespace AgentCore.Editor.Workspace.Config
                     Directory.CreateDirectory(dir);
 
                 var json = JsonHelper.Serialize(config, pretty: true);
-                File.WriteAllText(path, json, System.Text.Encoding.UTF8);
+                AtomicFile.WriteAllText(path, json, System.Text.Encoding.UTF8);
                 return true;
             }
             catch (Exception ex)

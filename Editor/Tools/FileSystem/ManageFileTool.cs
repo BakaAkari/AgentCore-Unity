@@ -385,7 +385,7 @@ namespace AgentCore.Editor.Tools.FileSystem
                 Directory.CreateDirectory(dir);
             }
 
-            File.WriteAllText(fullPath, content, encoding);
+            AgentCore.Editor.Utils.AtomicFile.WriteAllText(fullPath, content, encoding);
 
             var lineCount = content.Split('\n').Length;
             var data = new JObject

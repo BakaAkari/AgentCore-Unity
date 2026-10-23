@@ -159,7 +159,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     Directory.CreateDirectory(directory);
                 }
 
-                File.WriteAllText(path, JsonHelper.Serialize(snapshot, pretty: true));
+                AtomicFile.WriteAllText(path, JsonHelper.Serialize(snapshot, pretty: true));
             }
             catch (Exception ex)
             {

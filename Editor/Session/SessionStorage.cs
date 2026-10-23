@@ -75,7 +75,7 @@ namespace AgentCore.Editor.Session
 
                 var filePath = Path.Combine(directory, $"{session.Id}.json");
                 var json = JsonConvert.SerializeObject(session, JsonSettings);
-                File.WriteAllText(filePath, json);
+                AtomicFile.WriteAllText(filePath, json);
 
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session saved: {session.Id} ({session.Title})");
             }

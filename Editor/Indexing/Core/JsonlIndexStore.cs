@@ -595,7 +595,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 sb.AppendLine(JsonConvert.SerializeObject(item, Formatting.None));
             }
-            File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+            AgentCore.Editor.Utils.AtomicFile.WriteAllText(path, sb.ToString(), Encoding.UTF8);
         }
 
         private Dictionary<string, Dictionary<string, string>> LoadMetadata()
@@ -641,7 +641,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     }, Formatting.None));
                 }
             }
-            File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+            AgentCore.Editor.Utils.AtomicFile.WriteAllText(path, sb.ToString(), Encoding.UTF8);
         }
 
         private sealed class MetadataEntry

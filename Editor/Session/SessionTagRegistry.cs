@@ -84,7 +84,7 @@ namespace AgentCore.Editor.Session
                 if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
                 var file = new TagRegistryFile { Tags = tags ?? new List<TagMetadata>() };
                 var json = JsonConvert.SerializeObject(file, Formatting.Indented);
-                File.WriteAllText(path, json);
+                AtomicFile.WriteAllText(path, json);
             }
             catch (Exception ex)
             {
