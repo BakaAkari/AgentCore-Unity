@@ -440,10 +440,22 @@ namespace AgentCore.Editor.UI
                 InitializeAttachments(chatArea, inputArea);
             }
 
+            // 6.9 恢复 Domain Reload 前的输入草稿与待发送图
+            RestoreInputDraftAndAttachment();
+
             // 7. 创建并初始化 AgentLoop（#10：Bootstrap 上下文异步加载，窗口首次打开不再阻塞主线程）。
             //    会话恢复 / 挂起提问恢复 / 会话列表刷新移入初始化续体（OnAgentLoopInitialized），
             //    保证它们在 _agentLoop 就绪之后、且在主线程执行。
             InitializeAgentLoop();
+        }
+
+        /// <summary>
+        /// 窗口禁用（Domain Reload 前 / 关闭前）：保存输入草稿，释放窗口创建的 HideAndDontSave 纹理。
+        /// 消息气泡的纹理由各自的 DetachFromPanelEvent 释放。
+        /// </summary>
+        private void OnDisable()
+        {
+            SaveInputDraftAndReleaseTextures();
         }
 
         /// <summary>
@@ -453,6 +465,10 @@ namespace AgentCore.Editor.UI
         private void OnDestroy()
         {
             ReleasePendingAttachTexture();
+            // 窗口真正关闭（非 Domain Reload）：待发送图随窗口一起丢弃，下次打开不再恢复
+            _pendingAttachImageDataUrl = null;
+            _pendingAttachName = null;
+            PersistPendingAttachment();
 
             // Phase 3: 窗口关闭时强制保存当前会话
             if (_agentLoop != null)

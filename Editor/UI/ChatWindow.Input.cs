@@ -11,6 +11,46 @@ namespace AgentCore.Editor.UI
         /// <summary>待发送的用户图 data URL（+ 菜单上传/截图或拖拽后暂存，见 ChatWindow.Attachments.cs；OnSendClicked 时并入本轮发送并清空）。</summary>
         private string _pendingAttachImageDataUrl;
 
+        /// <summary>
+        /// 输入框草稿。EditorWindow 的 [SerializeField] 字段在 Domain Reload 前后由 Unity 自动保存/恢复，
+        /// 编译触发重载时用户正在输入的内容不会丢失。随输入实时同步，OnDisable 时再兜底同步一次。
+        /// </summary>
+        [SerializeField] private string _inputDraft;
+
+        #region 草稿持久化
+
+        /// <summary>
+        /// CreateGUI 时调用：恢复输入框草稿与待发送图，并开始跟踪输入变化。
+        /// </summary>
+        private void RestoreInputDraftAndAttachment()
+        {
+            if (_inputField != null)
+            {
+                if (!string.IsNullOrEmpty(_inputDraft) && string.IsNullOrEmpty(_inputField.value))
+                {
+                    var draft = _inputDraft;
+                    _inputField.value = draft;
+                    _inputField.schedule.Execute(() => SetInputCursor(draft.Length));
+                }
+                _inputField.RegisterValueChangedCallback(evt => _inputDraft = evt.newValue);
+            }
+
+            RestorePendingAttachment();
+        }
+
+        /// <summary>
+        /// OnDisable 时调用（Domain Reload / 窗口关闭）：同步草稿，并释放预览纹理
+        /// （HideAndDontSave 纹理不随域重载销毁，托管引用丢失后会泄漏；待发送图的 data URL 已在 SessionState 中）。
+        /// </summary>
+        private void SaveInputDraftAndReleaseTextures()
+        {
+            if (_inputField != null)
+                _inputDraft = _inputField.value;
+            ReleasePendingAttachTexture();
+        }
+
+        #endregion
+
         #region 用户操作
 
         /// <summary>

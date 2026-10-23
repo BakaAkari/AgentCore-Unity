@@ -29,6 +29,11 @@ namespace AgentCore.Editor.UI
         /// <summary>待发送图的显示名（文件名或"Game 视图截图 hh:mm:ss"）。</summary>
         private string _pendingAttachName;
 
+        // 待发送图跨 Domain Reload 保留：data URL 可达数 MB，放 SessionState（只活到编辑器关闭），
+        // 不放 [SerializeField]，避免写进窗口布局文件。纹理本身不跨重载，CreateGUI 时按 data URL 重新解码。
+        private const string PendingAttachDataUrlKey = "AgentCore.ChatWindow.PendingAttach.DataUrl";
+        private const string PendingAttachNameKey = "AgentCore.ChatWindow.PendingAttach.Name";
+
         /// <summary>创建预览条（插在 input-area 正上方）并为输入区注册图片拖拽。</summary>
         private void InitializeAttachments(VisualElement chatArea, VisualElement inputArea)
         {
@@ -172,6 +177,7 @@ namespace AgentCore.Editor.UI
             _pendingAttachTexture = texture;
             _pendingAttachImageDataUrl = "data:image/png;base64," + Convert.ToBase64String(png);
             _pendingAttachName = displayName;
+            PersistPendingAttachment();
             RefreshAttachmentUI();
             _inputField?.Focus();
         }
@@ -181,8 +187,65 @@ namespace AgentCore.Editor.UI
         {
             _pendingAttachImageDataUrl = null;
             _pendingAttachName = null;
+            PersistPendingAttachment();
             ReleasePendingAttachTexture();
             RefreshAttachmentUI();
+        }
+
+        /// <summary>把当前待发送图写入 SessionState（无图时擦除），供 Domain Reload 后恢复。</summary>
+        private void PersistPendingAttachment()
+        {
+            if (string.IsNullOrEmpty(_pendingAttachImageDataUrl))
+            {
+                SessionState.EraseString(PendingAttachDataUrlKey);
+                SessionState.EraseString(PendingAttachNameKey);
+                return;
+            }
+            SessionState.SetString(PendingAttachDataUrlKey, _pendingAttachImageDataUrl);
+            SessionState.SetString(PendingAttachNameKey, _pendingAttachName ?? string.Empty);
+        }
+
+        /// <summary>
+        /// CreateGUI 时恢复 Domain Reload 前的待发送图：重新解码 data URL 生成预览纹理。
+        /// 已有待发送图（本次窗口生命周期内新附加的）时不覆盖。
+        /// </summary>
+        private void RestorePendingAttachment()
+        {
+            if (!string.IsNullOrEmpty(_pendingAttachImageDataUrl)) return;
+
+            var dataUrl = SessionState.GetString(PendingAttachDataUrlKey, string.Empty);
+            if (string.IsNullOrEmpty(dataUrl)) return;
+
+            _pendingAttachImageDataUrl = dataUrl;
+            _pendingAttachName = SessionState.GetString(PendingAttachNameKey, string.Empty);
+            EnsurePendingAttachTexture();
+            RefreshAttachmentUI();
+        }
+
+        /// <summary>
+        /// 有待发送图但没有预览纹理时（Domain Reload / OnDisable 释放后），按 data URL 重新解码。
+        /// 解码失败只影响预览，不影响发送（发送用的是 data URL）。
+        /// </summary>
+        private void EnsurePendingAttachTexture()
+        {
+            if (_pendingAttachTexture != null || string.IsNullOrEmpty(_pendingAttachImageDataUrl)) return;
+            try
+            {
+                var comma = _pendingAttachImageDataUrl.IndexOf(',');
+                if (comma < 0) return;
+                var bytes = Convert.FromBase64String(_pendingAttachImageDataUrl.Substring(comma + 1));
+                var texture = new Texture2D(2, 2) { hideFlags = HideFlags.HideAndDontSave };
+                if (!texture.LoadImage(bytes))
+                {
+                    UnityEngine.Object.DestroyImmediate(texture);
+                    return;
+                }
+                _pendingAttachTexture = texture;
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Restore pending attachment preview failed: {ex.Message}");
+            }
         }
 
         private void ReleasePendingAttachTexture()
