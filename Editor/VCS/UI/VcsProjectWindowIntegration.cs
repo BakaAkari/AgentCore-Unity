@@ -110,26 +110,35 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         private static bool TryLaunchExternalTool(VcsType vcsType, string operation, string targetPath, string rootPath, out string reason)
         {
+            // TortoiseProc 用自己的 /key:"value" 解析规则（不支持 \" 转义），由 launcher 统一构造并校验；
+            // git / p4v 走标准 argv 规则，用 VcsArgs.Join 转义路径。
+            string tortoiseArgs = null;
+            if (vcsType == VcsType.Svn
+                && !VcsExternalToolLauncher.TryBuildTortoiseArgs(operation, targetPath, out tortoiseArgs, out reason))
+            {
+                return false;
+            }
+
             var (fileName, arguments) = vcsType switch
             {
-                VcsType.Svn => ("TortoiseProc.exe", $"/command:{operation} /path:\"{targetPath}\""),
+                VcsType.Svn => ("TortoiseProc.exe", tortoiseArgs),
                 VcsType.Git => operation switch
                 {
                     "commit" => ("git", $"gui"),
                     "update" => ("git", $"pull"),
                     "log" => ("git", $"log --oneline -20"),
                     "diff" => ("git", $"difftool"),
-                    "revert" => ("git", $"checkout -- \"{targetPath}\""),
+                    "revert" => ("git", VcsArgs.Join(new[] { "checkout", "--", targetPath })),
                     "cleanup" => ("git", "gc --auto"),
                     _ => (null, null)
                 },
                 VcsType.Perforce => operation switch
                 {
-                    "commit" => ("p4v", $"-cmd \"submit\" \"{rootPath}\""),
-                    "update" => ("p4v", $"-cmd \"sync //...\" \"{rootPath}\""),
-                    "log" => ("p4v", $"-cmd \"history\" \"{targetPath}\""),
-                    "diff" => ("p4v", $"-cmd \"diff\" \"{targetPath}\""),
-                    "revert" => ("p4v", $"-cmd \"revert\" \"{targetPath}\""),
+                    "commit" => ("p4v", VcsArgs.Join(new[] { "-cmd", "submit", rootPath })),
+                    "update" => ("p4v", VcsArgs.Join(new[] { "-cmd", "sync //...", rootPath })),
+                    "log" => ("p4v", VcsArgs.Join(new[] { "-cmd", "history", targetPath })),
+                    "diff" => ("p4v", VcsArgs.Join(new[] { "-cmd", "diff", targetPath })),
+                    "revert" => ("p4v", VcsArgs.Join(new[] { "-cmd", "revert", targetPath })),
                     "cleanup" => ("p4v", null),
                     _ => (null, null)
                 },

@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEngine;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -35,19 +34,100 @@ namespace AgentCore.Editor.Components.VCS.Tools
             int timeoutSeconds = DefaultTimeoutSeconds,
             CancellationToken ct = default)
         {
-            return ExecuteAsync(command, VcsArgs.Join(arguments), workingDirectory, timeoutSeconds, ct);
+            return ExecuteCoreAsync(command, VcsArgs.Join(arguments), workingDirectory, timeoutSeconds, false, ct);
+        }
+
+        /// <summary>
+        /// 执行命令并原样捕获 stdout（不按行拆分、不改写换行）。用于 <c>-z</c> 之类以 NUL 分隔的输出：
+        /// 按行读取会把路径里的 \r / \n 当成行尾并替换成 Environment.NewLine，破坏记录边界。
+        /// stdout 截断时 <see cref="CommandResult.OutputTruncated"/> 为 true，且不追加任何提示文字。
+        /// </summary>
+        public static Task<CommandResult> ExecuteRawAsync(
+            string command,
+            IEnumerable<string> arguments,
+            string workingDirectory,
+            int timeoutSeconds = DefaultTimeoutSeconds,
+            CancellationToken ct = default)
+        {
+            return ExecuteCoreAsync(command, VcsArgs.Join(arguments), workingDirectory, timeoutSeconds, true, ct);
+        }
+
+        /// <summary>
+        /// 对一批路径执行同一命令：路径按 <see cref="VcsArgs.ChunkPaths"/> 拆成多组，每组一次调用，
+        /// 保证单次命令行不超过 Windows 32K 上限。任一组失败即停止（不吞错误），
+        /// 失败信息注明是第几组；已成功的组输出保留在 Output 中。
+        /// </summary>
+        /// <param name="prefixArgs">路径之前的固定参数（如 <c>add --</c>）。</param>
+        /// <param name="paths">路径列表，调用方负责做好 SvnPathArg 之类的转换。</param>
+        public static async Task<CommandResult> ExecuteChunkedAsync(
+            string command,
+            IReadOnlyList<string> prefixArgs,
+            IReadOnlyList<string> paths,
+            string workingDirectory,
+            int timeoutSeconds = DefaultTimeoutSeconds,
+            CancellationToken ct = default)
+        {
+            var chunks = VcsArgs.ChunkPaths(command, prefixArgs, paths);
+            if (chunks.Count <= 1)
+            {
+                var single = new List<string>(prefixArgs ?? Array.Empty<string>());
+                if (chunks.Count == 1)
+                    single.AddRange(chunks[0]);
+                return await ExecuteAsync(command, single, workingDirectory, timeoutSeconds, ct);
+            }
+
+            var output = new StringBuilder();
+            var error = new StringBuilder();
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                var args = new List<string>(prefixArgs ?? Array.Empty<string>());
+                args.AddRange(chunks[i]);
+                var part = await ExecuteAsync(command, args, workingDirectory, timeoutSeconds, ct);
+
+                if (!string.IsNullOrEmpty(part.Output))
+                    output.Append(part.Output);
+                if (!string.IsNullOrEmpty(part.Error))
+                    error.Append(part.Error);
+
+                if (!part.Success)
+                {
+                    part.Output = output.ToString();
+                    part.Error = error.ToString();
+                    part.ErrorMessage = $"[batch {i + 1}/{chunks.Count}, {chunks[i].Count} path(s); earlier batches already applied] {part.ErrorMessage}";
+                    return part;
+                }
+            }
+
+            return new CommandResult
+            {
+                Success = true,
+                ExitCode = 0,
+                Output = output.ToString(),
+                Error = error.ToString()
+            };
         }
 
         /// <summary>
         /// 执行命令并返回结果。<paramref name="arguments"/> 是已转义的完整命令行；
         /// 含外部输入（路径、分支名、提交信息等）时请改用参数列表重载。
         /// </summary>
-        public static async Task<CommandResult> ExecuteAsync(
+        public static Task<CommandResult> ExecuteAsync(
             string command,
             string arguments,
             string workingDirectory,
             int timeoutSeconds = DefaultTimeoutSeconds,
             CancellationToken ct = default)
+        {
+            return ExecuteCoreAsync(command, arguments, workingDirectory, timeoutSeconds, false, ct);
+        }
+
+        private static async Task<CommandResult> ExecuteCoreAsync(
+            string command,
+            string arguments,
+            string workingDirectory,
+            int timeoutSeconds,
+            bool rawStdout,
+            CancellationToken ct)
         {
             var result = new CommandResult();
             var outputBuilder = new StringBuilder();
@@ -77,7 +157,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 };
                 ApplyNonInteractiveEnvironment(process.StartInfo);
 
-                process.OutputDataReceived += (sender, e) => AppendCapped(outputBuilder, e.Data);
+                if (!rawStdout)
+                    process.OutputDataReceived += (sender, e) => AppendCapped(outputBuilder, e.Data);
                 process.ErrorDataReceived += (sender, e) => AppendCapped(errorBuilder, e.Data);
 
                 // 先挂 Exited 再 Start，避免进程秒退时错过事件
@@ -85,7 +166,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 process.Exited += (sender, e) => exited.TrySetResult(true);
 
                 process.Start();
-                process.BeginOutputReadLine();
+                Task rawReadTask = null;
+                if (rawStdout)
+                    rawReadTask = ReadRawCappedAsync(process.StandardOutput, outputBuilder, truncated => result.OutputTruncated = truncated);
+                else
+                    process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
 
                 // 关闭 stdin：任何读取输入的提示（密码、确认）立即读到 EOF 失败，而不是挂到超时
@@ -104,18 +189,20 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     result.Success = false;
                     result.ErrorMessage = $"Command timed out after {timeoutSeconds} seconds";
                     result.ExitCode = -1;
-                    result.Output = outputBuilder.ToString();
-                    result.Error = errorBuilder.ToString();
+                    result.Output = Snapshot(outputBuilder);
+                    result.Error = Snapshot(errorBuilder);
                     return result;
                 }
 
                 // 进程已退出；无参 WaitForExit 等待异步读取把剩余输出刷完（.NET 文档要求）
                 await Task.Run(() => process.WaitForExit());
+                if (rawReadTask != null)
+                    await rawReadTask;
 
                 result.ExitCode = process.ExitCode;
                 result.Success = process.ExitCode == 0;
-                result.Output = outputBuilder.ToString();
-                result.Error = errorBuilder.ToString();
+                result.Output = Snapshot(outputBuilder);
+                result.Error = Snapshot(errorBuilder);
 
                 if (!result.Success && string.IsNullOrEmpty(result.ErrorMessage))
                 {
@@ -140,6 +227,49 @@ namespace AgentCore.Editor.Components.VCS.Tools
             result.ErrorMessage = "Command was cancelled";
             result.ExitCode = -1;
             return result;
+        }
+
+        private static string Snapshot(StringBuilder builder)
+        {
+            lock (builder)
+                return builder.ToString();
+        }
+
+        /// <summary>
+        /// 原样读取 stdout（保留 NUL / \r / \n），超出上限后继续读取并丢弃，避免子进程因管道写满而卡住。
+        /// </summary>
+        private static async Task ReadRawCappedAsync(System.IO.StreamReader reader, StringBuilder builder, Action<bool> setTruncated)
+        {
+            var buffer = new char[8192];
+            try
+            {
+                int read;
+                while ((read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+                {
+                    lock (builder)
+                    {
+                        var room = MaxCapturedChars - builder.Length;
+                        if (room <= 0)
+                        {
+                            setTruncated(true);
+                            continue;
+                        }
+                        if (read > room)
+                        {
+                            builder.Append(buffer, 0, room);
+                            setTruncated(true);
+                        }
+                        else
+                        {
+                            builder.Append(buffer, 0, read);
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 进程被杀 / 管道关闭：保留已读到的内容
+            }
         }
 
         private static void AppendCapped(StringBuilder builder, string line)
@@ -191,7 +321,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return;
             }
 
-            if (Application.platform == RuntimePlatform.WindowsEditor)
+            if (VcsArgs.IsWindows)
             {
                 try
                 {
@@ -221,11 +351,64 @@ namespace AgentCore.Editor.Components.VCS.Tools
     /// </summary>
     public static class VcsArgs
     {
+        /// <summary>
+        /// 单次命令行（程序名 + 参数）的字符预算。Windows CreateProcess 上限 32767，
+        /// 留出余量给程序完整路径与转义膨胀。
+        /// </summary>
+        public const int MaxCommandLineChars = 30000;
+
+        /// <summary>
+        /// 当前是否 Windows。用 Environment 判断而非 Application.platform：
+        /// 后者是 Unity API，后台线程（探测 / 远端检查）里调用不安全。
+        /// </summary>
+        public static readonly bool IsWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
+
+        /// <summary>
+        /// 把路径列表拆成多组，使每组 "command + prefixArgs + 该组路径" 转义后的命令行长度不超过
+        /// <paramref name="maxChars"/>。顺序保持不变；单个路径本身超长时独占一组（交给子进程报错，而不是丢弃）。
+        /// 路径为空时返回空列表。
+        /// </summary>
+        public static List<List<string>> ChunkPaths(
+            string command,
+            IReadOnlyList<string> prefixArgs,
+            IReadOnlyList<string> paths,
+            int maxChars = MaxCommandLineChars)
+        {
+            var chunks = new List<List<string>>();
+            if (paths == null || paths.Count == 0)
+                return chunks;
+
+            var baseLength = (command ?? string.Empty).Length + 3 + Join(prefixArgs).Length;
+            var current = new List<string>();
+            var currentLength = baseLength;
+
+            foreach (var path in paths)
+            {
+                if (path == null)
+                    continue;
+
+                var argLength = (IsWindows ? QuoteWindows(path) : QuotePosix(path)).Length + 1;
+                if (current.Count > 0 && currentLength + argLength > maxChars)
+                {
+                    chunks.Add(current);
+                    current = new List<string>();
+                    currentLength = baseLength;
+                }
+
+                current.Add(path);
+                currentLength += argLength;
+            }
+
+            if (current.Count > 0)
+                chunks.Add(current);
+            return chunks;
+        }
+
         public static string Join(IEnumerable<string> args)
         {
             if (args == null)
                 return string.Empty;
-            bool windows = Application.platform == RuntimePlatform.WindowsEditor;
+            bool windows = IsWindows;
             var sb = new StringBuilder();
             foreach (var arg in args)
             {
@@ -333,5 +516,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
         public string Output { get; set; }
         public string Error { get; set; }
         public string ErrorMessage { get; set; }
+
+        /// <summary>stdout 超过捕获上限被截断（仅 <see cref="VcsCommandExecutor.ExecuteRawAsync"/> 设置）。</summary>
+        public bool OutputTruncated { get; set; }
     }
 }

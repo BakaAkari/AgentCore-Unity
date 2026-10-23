@@ -50,8 +50,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
 
                 result.RawOutput = cmdResult.Output;
-                result.Files = ParseSvnStatusXml(cmdResult.Output);
+                var parsed = SvnStatusXmlParser.Parse(cmdResult.Output);
+                result.Files = parsed.Files;
                 result.Success = true;
+                // 输出超过上限被截断 / XML 不完整：保留已解析的条目，同时明确标记，不静默当作"没有变更"
+                result.Truncated = cmdResult.OutputTruncated || parsed.IsIncomplete;
+                if (result.Truncated)
+                    AgentCoreLog.Warning($"[Version Control] SVN status output incomplete ({result.Files.Count} entries parsed): {parsed.Error ?? "output truncated"}");
             }
             catch (Exception ex)
             {
@@ -244,8 +249,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var statusTask = GetStatusAsync(ct);
+                // -u --xml：远端更新看 repos-status，避免解析文本列（旧实现会把版本号当成路径的一部分）
                 var remoteTask = VcsCommandExecutor.ExecuteAsync(
-                    "svn", new List<string> { "status", "-u", "-q", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "svn", new List<string> { "status", "-u", "-q", "--xml", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
 
                 await Task.WhenAll(statusTask, remoteTask);
 
@@ -263,7 +269,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.RawOutput = remoteStatus.Output;
                 result.HasLocalChanges = localStatus.Success && localStatus.Files.Count > 0;
                 result.LocalChangeCount = localStatus.Success ? localStatus.Files.Count : 0;
-                result.RemoteChangedFiles = ParseSvnRemoteChangedFiles(remoteStatus.Output);
+                var remoteParsed = SvnStatusXmlParser.Parse(remoteStatus.Output);
+                result.RemoteChangedFiles = remoteParsed.RemoteChangedFiles;
                 result.RemoteChangeCount = result.RemoteChangedFiles.Count;
                 result.HasRemoteChanges = result.RemoteChangeCount > 0;
                 result.HasConflicts = localStatus.Success && localStatus.Files.Any(f => f.State == VcsFileState.Conflicted);
@@ -273,6 +280,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.Summary = result.HasRemoteChanges
                     ? $"Remote has {result.RemoteChangeCount} pending update(s)."
                     : "Working copy is up to date with remote.";
+                if (remoteParsed.IsIncomplete || remoteStatus.OutputTruncated)
+                    result.Summary += " (remote status output was incomplete; the list may be partial)";
             }
             catch (Exception ex)
             {
@@ -350,6 +359,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 result.LogLines.Add($"Preparing {filePaths.Count} SVN path(s) for commit.");
 
+                // 先分类，再按 add / delete 分批执行：大量文件时不再每个文件启动一个 svn 进程
+                var toDelete = new List<(string original, string abs)>();
+                var toAdd = new List<(string original, string abs)>();
                 foreach (var filePath in filePaths)
                 {
                     // 将传入路径解析为绝对路径，再规范化后查找状态
@@ -371,37 +383,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     }
 
                     // 使用绝对路径执行命令，避免工作目录不一致导致路径解析错误
-                    var arguments = shouldDelete
-                        ? new List<string> { "delete", "--force", "--non-interactive", SvnPathArg(absPath) }
-                        : new List<string> { "add", "--parents", "--force", "--non-interactive", SvnPathArg(absPath) };
-                    var commandLine = $"svn {VcsArgs.Join(arguments)}";
-
-                    if (string.IsNullOrEmpty(result.CommandLine))
-                        result.CommandLine = commandLine;
-
-                    result.LogLines.Add($"Run: {commandLine}");
-
-                    var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                        "svn", arguments, _workingDirectory, ct: ct);
-
-                    var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
-                        .Where(s => !string.IsNullOrWhiteSpace(s)));
-
-                    if (!string.IsNullOrWhiteSpace(commandOutput))
-                        allOutput.Add($"$ {commandLine}\n{commandOutput.Trim()}");
-                    else
-                        allOutput.Add($"$ {commandLine}");
-
-                    if (cmdResult.Success)
-                    {
-                        affectedFiles.Add(filePath);
-                        result.LogLines.Add($"Success: {filePath} ({(shouldDelete ? "scheduled delete" : "scheduled add")})");
-                    }
-                    else
-                    {
-                        result.LogLines.Add($"Failed: {filePath} - {cmdResult.ErrorMessage}");
-                    }
+                    (shouldDelete ? toDelete : toAdd).Add((filePath, absPath));
                 }
+
+                await ScheduleBatchAsync(new[] { "delete", "--force", "--non-interactive" }, toDelete, "scheduled delete", result, allOutput, affectedFiles, ct);
+                await ScheduleBatchAsync(new[] { "add", "--parents", "--force", "--non-interactive" }, toAdd, "scheduled add", result, allOutput, affectedFiles, ct);
 
                 result.Success = affectedFiles.Count > 0;
                 result.Message = $"Prepared {affectedFiles.Count} of {filePaths.Count} file(s) for SVN commit.";
@@ -507,6 +493,97 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return result;
         }
 
+        /// <summary>
+        /// 分批执行 svn add / delete：每批一个进程（命令行不超过上限）；
+        /// 某批失败时对该批逐个文件重试，保证一个坏路径不会连累同批其他文件，且每个失败都写入日志。
+        /// </summary>
+        private async Task ScheduleBatchAsync(
+            IReadOnlyList<string> prefix,
+            List<(string original, string abs)> items,
+            string successLabel,
+            VcsOperationResult result,
+            List<string> allOutput,
+            List<string> affectedFiles,
+            CancellationToken ct)
+        {
+            if (items.Count == 0)
+                return;
+
+            var byArg = new Dictionary<string, (string original, string abs)>(StringComparer.Ordinal);
+            var args = new List<string>(items.Count);
+            foreach (var item in items)
+            {
+                var arg = SvnPathArg(item.abs);
+                byArg[arg] = item;
+                args.Add(arg);
+            }
+
+            foreach (var chunk in VcsArgs.ChunkPaths("svn", prefix, args))
+            {
+                var arguments = new List<string>(prefix);
+                arguments.AddRange(chunk);
+                var cmdResult = await RunScheduleCommandAsync(arguments, result, allOutput, ct);
+
+                if (cmdResult.Success)
+                {
+                    foreach (var arg in chunk)
+                    {
+                        affectedFiles.Add(byArg[arg].original);
+                        result.LogLines.Add($"Success: {byArg[arg].original} ({successLabel})");
+                    }
+                    continue;
+                }
+
+                if (chunk.Count == 1)
+                {
+                    result.LogLines.Add($"Failed: {byArg[chunk[0]].original} - {cmdResult.ErrorMessage}");
+                    continue;
+                }
+
+                // 整批失败：逐个重试，定位具体失败的文件
+                result.LogLines.Add($"Batch of {chunk.Count} path(s) failed, retrying one by one: {cmdResult.ErrorMessage}");
+                foreach (var arg in chunk)
+                {
+                    var single = new List<string>(prefix) { arg };
+                    var singleResult = await RunScheduleCommandAsync(single, result, allOutput, ct);
+                    if (singleResult.Success)
+                    {
+                        affectedFiles.Add(byArg[arg].original);
+                        result.LogLines.Add($"Success: {byArg[arg].original} ({successLabel})");
+                    }
+                    else
+                    {
+                        result.LogLines.Add($"Failed: {byArg[arg].original} - {singleResult.ErrorMessage}");
+                    }
+                }
+            }
+        }
+
+        private async Task<CommandResult> RunScheduleCommandAsync(
+            List<string> arguments, VcsOperationResult result, List<string> allOutput, CancellationToken ct)
+        {
+            var commandLine = $"svn {VcsArgs.Join(arguments)}";
+            if (string.IsNullOrEmpty(result.CommandLine))
+                result.CommandLine = commandLine;
+
+            // 批量命令行可能很长，日志里只记录路径数量
+            var pathCount = arguments.Count(a => !a.StartsWith("-", StringComparison.Ordinal)) - 1;
+            result.LogLines.Add(pathCount > 1 ? $"Run: svn {arguments[0]} ({pathCount} paths)" : $"Run: {commandLine}");
+
+            var cmdResult = await VcsCommandExecutor.ExecuteAsync(
+                "svn", arguments, _workingDirectory, ct: ct);
+
+            var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+
+            if (!string.IsNullOrWhiteSpace(commandOutput))
+                allOutput.Add($"$ {commandLine}\n{commandOutput.Trim()}");
+            else
+                allOutput.Add($"$ {commandLine}");
+
+            return cmdResult;
+        }
+
         public async Task<VcsOperationResult> RevertFilesAsync(List<string> filePaths, CancellationToken ct = default)
         {
             var result = new VcsOperationResult();
@@ -520,10 +597,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                var args = new List<string> { "revert", "--non-interactive" };
-                args.AddRange(filePaths.Select(SvnPathArg));
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", args, _workingDirectory, ct: ct);
+                // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                var cmdResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                    "svn", new[] { "revert", "--non-interactive" }, filePaths.Select(SvnPathArg).ToList(), _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -582,55 +658,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         // ===== 解析方法 =====
-
-        private List<VcsFileStatus> ParseSvnStatusXml(string xmlOutput)
-        {
-            var files = new List<VcsFileStatus>();
-
-            try
-            {
-                var doc = XDocument.Parse(xmlOutput);
-                var entries = doc.Descendants("entry");
-
-                foreach (var entry in entries)
-                {
-                    var path = entry.Attribute("path")?.Value;
-                    var wcStatus = entry.Element("wc-status");
-                    var item = wcStatus?.Attribute("item")?.Value;
-
-                    if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(item))
-                        continue;
-
-                    var state = item switch
-                    {
-                        "modified" => VcsFileState.Modified,
-                        "added" => VcsFileState.Added,
-                        "deleted" => VcsFileState.Deleted,
-                        "unversioned" => VcsFileState.Untracked,
-                        "ignored" => VcsFileState.Ignored,
-                        "conflicted" => VcsFileState.Conflicted,
-                        "missing" => VcsFileState.Missing,
-                        _ => VcsFileState.Unmodified
-                    };
-
-                    if (state == VcsFileState.Unmodified || state == VcsFileState.Ignored)
-                        continue;
-
-                    files.Add(new VcsFileStatus
-                    {
-                        FilePath = path,
-                        State = state,
-                        StateDescription = GetStateDescription(state)
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Warning($"Failed to parse SVN status XML: {ex.Message}");
-            }
-
-            return files;
-        }
 
         private void ParseSvnInfo(string xmlOutput, VcsBranchInfo result)
         {
@@ -716,32 +743,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 AgentCoreLog.Warning($"Failed to parse SVN remote info: {ex.Message}");
             }
-        }
-
-        private List<string> ParseSvnRemoteChangedFiles(string output)
-        {
-            var files = new List<string>();
-
-            if (string.IsNullOrEmpty(output))
-                return files;
-
-            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines)
-            {
-                if (!line.Contains("*"))
-                    continue;
-
-                var trimmed = line.Trim();
-                var starIndex = trimmed.IndexOf('*');
-                if (starIndex < 0)
-                    continue;
-
-                var filePath = trimmed.Substring(starIndex + 1).Trim();
-                if (!string.IsNullOrEmpty(filePath))
-                    files.Add(filePath);
-            }
-
-            return files;
         }
 
         private List<string> ParseSvnUpdateConflicts(string output)
@@ -911,23 +912,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 normalized = normalized.ToLowerInvariant();
 
             return normalized;
-        }
-
-        private string GetStateDescription(VcsFileState state)
-        {
-            return state switch
-            {
-                VcsFileState.Modified => "Modified",
-                VcsFileState.Added => "Added",
-                VcsFileState.Deleted => "Deleted",
-                VcsFileState.Renamed => "Renamed",
-                VcsFileState.Copied => "Copied",
-                VcsFileState.Untracked => "Unversioned",
-                VcsFileState.Ignored => "Ignored",
-                VcsFileState.Conflicted => "Conflicted",
-                VcsFileState.Missing => "Missing",
-                _ => "Normal"
-            };
         }
     }
 }

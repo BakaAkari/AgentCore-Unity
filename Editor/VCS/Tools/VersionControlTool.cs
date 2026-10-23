@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.VCS.Config;
@@ -203,34 +204,51 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ===== Phase 1: 只读查询处理器 =====
 
-        private Task<ToolResponse> HandleDetectVcs(CancellationToken ct)
+        private async Task<ToolResponse> HandleDetectVcs(CancellationToken ct)
         {
             try
             {
+                // detect_vcs 是显式检测：未检测到 VCS 或命令曾探测失败时重新检测（例如刚安装了 git），
+                // 否则复用会话缓存。命令探测在后台线程执行，不阻塞主线程。
                 var vcsType = VcsDetector.DetectVcs();
+                bool isAvailable;
+                if (vcsType == VcsType.None
+                    || VcsDetector.GetCommandAvailability(vcsType) == VcsCommandAvailability.Unavailable)
+                {
+                    isAvailable = await VcsDetector.Refresh();
+                    vcsType = VcsDetector.DetectVcs();
+                }
+                else
+                {
+                    isAvailable = await VcsDetector.EnsureCommandAvailableAsync(vcsType);
+                }
+
                 var rootPath = VcsDetector.GetVcsRootPath();
 
                 if (vcsType == VcsType.None)
                 {
-                    return Task.FromResult(ToolResponse.Fail("No version control system detected in the current project."));
+                    return ToolResponse.Fail("No version control system detected in the current project.");
                 }
 
-                var adapter = CreateAdapter(vcsType);
-                var isAvailable = adapter?.IsAvailable() ?? false;
+                var probeError = isAvailable ? null : VcsDetector.GetCommandProbeError(vcsType);
 
                 var data = new
                 {
                     vcs_type = vcsType.ToString(),
                     root_path = rootPath,
                     command_available = isAvailable,
+                    command_error = probeError,
                     priority_order = "SVN > Perforce > Git"
                 };
 
-                return Task.FromResult(ToolResponse.OkWithData(data, $"Detected {vcsType} at {rootPath}. Command available: {isAvailable}"));
+                var message = $"Detected {vcsType} at {rootPath}. Command available: {isAvailable}";
+                if (!string.IsNullOrEmpty(probeError))
+                    message += $" ({probeError})";
+                return ToolResponse.OkWithData(data, message);
             }
             catch (Exception ex)
             {
-                return Task.FromResult(ToolResponse.Fail($"Failed to detect VCS: {ex.Message}"));
+                return ToolResponse.Fail($"Failed to detect VCS: {ex.Message}");
             }
         }
 
@@ -238,7 +256,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.GetStatusAsync(ct);
 
@@ -265,7 +283,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.GetBranchInfoAsync(ct);
 
@@ -288,7 +306,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var maxCount = ToolHelpers.GetOptionalInt(parameters, "max_count", VcsSettings.MaxCommitEntries);
             if (maxCount > 100) maxCount = 100;
@@ -317,7 +335,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             if (string.IsNullOrEmpty(filePath))
@@ -352,7 +370,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             var diff = await adapter.GetDiffAsync(filePath, ct);
@@ -393,7 +411,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.GetRemoteInfoAsync(ct);
 
@@ -414,7 +432,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var tags = await adapter.GetTagsAsync(ct);
 
@@ -432,9 +450,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
-            var result = await adapter.GetSyncStatusAsync(ct);
+            // fetch 等网络操作放到线程池执行，不占用主线程；结果同步给 VcsRemoteStatusMonitor，面板 / 角标与"上次检查时间"随之更新
+            var result = await Task.Run(() => adapter.GetSyncStatusAsync(ct), ct);
+            VcsRemoteStatusMonitor.RecordStatus(result);
             if (!result.Success)
                 return ToolResponse.Fail($"Failed to get sync status: {result.ErrorMessage}");
 
@@ -460,7 +480,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             if (string.IsNullOrEmpty(filePath))
@@ -503,7 +523,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var revision = ToolHelpers.GetOptionalString(parameters, "revision");
             if (string.IsNullOrEmpty(revision))
@@ -562,7 +582,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not PerforceAdapter p4Adapter)
                 return ToolResponse.Fail("get_client_info is only available for Perforce. Current VCS: " + adapter.VcsType);
@@ -591,7 +611,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not PerforceAdapter p4Adapter)
                 return ToolResponse.Fail("get_changelist is only available for Perforce. Current VCS: " + adapter.VcsType);
@@ -621,7 +641,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not SvnAdapter svnAdapter)
                 return ToolResponse.Fail("get_info is only available for SVN. Current VCS: " + adapter.VcsType);
@@ -665,7 +685,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                 return ToolResponse.Fail("Cleanup is blocked while Unity is compiling or importing assets. Please wait until Unity is idle.");
@@ -683,7 +703,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
 
@@ -707,7 +727,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
 
@@ -731,7 +751,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var message = ToolHelpers.GetOptionalString(parameters, "message");
             if (string.IsNullOrEmpty(message))
@@ -750,7 +770,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var message = ToolHelpers.GetOptionalString(parameters, "message");
             if (string.IsNullOrEmpty(message))
@@ -772,7 +792,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("create_branch is only available for Git. Current VCS: " + adapter.VcsType);
@@ -800,7 +820,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("switch_branch is only available for Git. Current VCS: " + adapter.VcsType);
@@ -828,7 +848,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("stash is only available for Git. Current VCS: " + adapter.VcsType);
@@ -852,7 +872,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             if (adapter is not GitAdapter gitAdapter)
                 return ToolResponse.Fail("stash_pop is only available for Git. Current VCS: " + adapter.VcsType);
@@ -875,7 +895,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
             if (filePaths == null || filePaths.Count == 0)
@@ -901,7 +921,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
             if (filePaths == null || filePaths.Count == 0)
@@ -919,7 +939,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePath = ToolHelpers.GetOptionalString(parameters, "file_path");
             var explicitPattern = ToolHelpers.GetOptionalString(parameters, "ignore_pattern");
@@ -938,7 +958,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var filePaths = GetFilePathsList(parameters);
             if (filePaths == null || filePaths.Count == 0)
@@ -956,7 +976,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             var adapter = GetAdapter();
             if (adapter == null)
-                return ToolResponse.Fail("No version control system detected or command not available.");
+                return ToolResponse.Fail(AdapterUnavailableMessage);
 
             var result = await adapter.SyncAsync(ct);
 
@@ -972,6 +992,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         // ===== 辅助方法 =====
+
+        /// <summary>
+        /// GetAdapter 返回 null 时的统一错误信息。命令可用性是会话级缓存，提示 LLM 可用 detect_vcs 重新检测。
+        /// </summary>
+        private const string AdapterUnavailableMessage =
+            "No version control system detected or command not available. Run action 'detect_vcs' to re-check (e.g. after installing the VCS CLI).";
 
         private IVcsAdapter GetAdapter()
         {
@@ -1118,14 +1144,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    var gitArgs = new List<string> { "commit", "-m", commitMessage, "--" };
-                    gitArgs.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, timeoutSeconds: 120, ct: ct);
+                    commandResult = await ExecuteGitCommitFilesAsync(rootPath, commitMessage, filePaths, ct);
                     break;
                 case VcsType.Svn:
-                    var svnArgs = new List<string> { "commit", "--non-interactive", "-m", commitMessage };
-                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, timeoutSeconds: 120, ct: ct);
+                    commandResult = await ExecuteSvnCommitFilesAsync(rootPath, commitMessage, filePaths, ct);
                     break;
                 case VcsType.Perforce:
                     return OperationFailure("commit_files is not supported for Perforce because p4 submit scope depends on changelist state. Use submit for the active changelist.");
@@ -1136,6 +1158,94 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return OperationFromCommand(commandResult, $"Committed {filePaths.Count} file(s).", filePaths);
         }
 
+        /// <summary>
+        /// git commit 指定文件。提交必须是一次原子操作，不能分批：
+        /// 命令行放得下时直接传路径；超过上限时改用 <c>--pathspec-from-file</c>（NUL 分隔 UTF-8 临时文件，需 git 2.25+）。
+        /// </summary>
+        private static async Task<CommandResult> ExecuteGitCommitFilesAsync(string rootPath, string commitMessage, List<string> filePaths, CancellationToken ct)
+        {
+            var prefix = new List<string> { "commit", "-m", commitMessage, "--" };
+            if (VcsArgs.ChunkPaths("git", prefix, filePaths).Count <= 1)
+            {
+                var gitArgs = new List<string>(prefix);
+                gitArgs.AddRange(filePaths);
+                return await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, timeoutSeconds: 120, ct: ct);
+            }
+
+            var pathFile = Path.Combine(Path.GetTempPath(), $"agentcore-commit-{Guid.NewGuid():N}.pathspec");
+            try
+            {
+                File.WriteAllText(pathFile, string.Join("\0", filePaths) + "\0", new UTF8Encoding(false));
+                var args = new List<string> { "commit", "-m", commitMessage, "--pathspec-from-file=" + pathFile, "--pathspec-file-nul" };
+                return await VcsCommandExecutor.ExecuteAsync("git", args, rootPath, timeoutSeconds: 120, ct: ct);
+            }
+            finally
+            {
+                TryDeleteFile(pathFile);
+            }
+        }
+
+        /// <summary>
+        /// svn commit 指定文件，尽量保持原子：
+        /// 命令行放得下时直接传路径；超过上限且路径全为 ASCII 时用 <c>--targets</c> 文件一次提交；
+        /// 含非 ASCII 路径时（svn 在 Windows 上按系统本地代码页读取 targets 文件，可能误读）退化为分批提交，
+        /// 并在结果中明确标注为多次提交。
+        /// </summary>
+        private static async Task<CommandResult> ExecuteSvnCommitFilesAsync(string rootPath, string commitMessage, List<string> filePaths, CancellationToken ct)
+        {
+            var prefix = new List<string> { "commit", "--non-interactive", "-m", commitMessage };
+            var svnPaths = filePaths.Select(SvnAdapter.SvnPathArg).ToList();
+            if (VcsArgs.ChunkPaths("svn", prefix, svnPaths).Count <= 1)
+            {
+                var svnArgs = new List<string>(prefix);
+                svnArgs.AddRange(svnPaths);
+                return await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, timeoutSeconds: 120, ct: ct);
+            }
+
+            if (svnPaths.All(IsAscii))
+            {
+                var targetsFile = Path.Combine(Path.GetTempPath(), $"agentcore-commit-{Guid.NewGuid():N}.targets");
+                try
+                {
+                    File.WriteAllText(targetsFile, string.Join("\n", svnPaths) + "\n", new UTF8Encoding(false));
+                    var args = new List<string>(prefix) { "--targets", targetsFile };
+                    return await VcsCommandExecutor.ExecuteAsync("svn", args, rootPath, timeoutSeconds: 300, ct: ct);
+                }
+                finally
+                {
+                    TryDeleteFile(targetsFile);
+                }
+            }
+
+            var chunked = await VcsCommandExecutor.ExecuteChunkedAsync("svn", prefix, svnPaths, rootPath, timeoutSeconds: 120, ct: ct);
+            var note = $"[Note] {filePaths.Count} paths exceed the command-line limit and contain non-ASCII characters; committed in several batches (multiple revisions) with the same message.";
+            chunked.Output = string.IsNullOrEmpty(chunked.Output) ? note : note + "\n" + chunked.Output;
+            return chunked;
+        }
+
+        private static bool IsAscii(string value)
+        {
+            foreach (var c in value)
+            {
+                if (c > 0x7F)
+                    return false;
+            }
+            return true;
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch
+            {
+                // 临时文件删除失败不影响结果
+            }
+        }
+
         private async Task<VcsOperationResult> ExecuteResolveFilesAsync(IVcsAdapter adapter, List<string> filePaths, CancellationToken ct)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
@@ -1144,19 +1254,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    var gitArgs = new List<string> { "add", "--" };
-                    gitArgs.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, ct: ct);
+                    // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("git", new[] { "add", "--" }, filePaths, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    var svnArgs = new List<string> { "resolve", "--accept", "working", "--non-interactive" };
-                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                        "svn", new[] { "resolve", "--accept", "working", "--non-interactive" },
+                        filePaths.Select(SvnAdapter.SvnPathArg).ToList(), rootPath, ct: ct);
                     break;
                 case VcsType.Perforce:
-                    var p4Args = new List<string> { "resolve", "-am" };
-                    p4Args.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", p4Args, rootPath, timeoutSeconds: 60, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("p4", new[] { "resolve", "-am" }, filePaths, rootPath, timeoutSeconds: 60, ct: ct);
                     break;
                 default:
                     return OperationFailure($"resolve_files is not supported for {adapter.VcsType}.");
@@ -1191,19 +1298,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    var gitArgs = new List<string> { "rm", "--" };
-                    gitArgs.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, ct: ct);
+                    // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("git", new[] { "rm", "--" }, filePaths, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    var svnArgs = new List<string> { "delete", "--force", "--non-interactive" };
-                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                        "svn", new[] { "delete", "--force", "--non-interactive" },
+                        filePaths.Select(SvnAdapter.SvnPathArg).ToList(), rootPath, ct: ct);
                     break;
                 case VcsType.Perforce:
-                    var p4Args = new List<string> { "delete" };
-                    p4Args.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", p4Args, rootPath, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("p4", new[] { "delete" }, filePaths, rootPath, ct: ct);
                     break;
                 default:
                     return OperationFailure($"remove_files is not supported for {adapter.VcsType}.");

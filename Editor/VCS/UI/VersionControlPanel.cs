@@ -47,12 +47,16 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Button _loadOlderCommitsButton;
         private Button _collapseCommitsButton;
         private Button _refreshButton;
+        private int _detectVersion;
+        private bool _isDisposed;
+        private string _lastExternalToolError;
         private Button _cleanupButton;
         private Button _refreshCommitsButton;
         private Button _viewDiffButton;
         private VisualElement _messageContainer;
         private VisualElement _syncStatusBanner;
         private Label _syncStatusLabel;
+        private Label _syncStatusTimeLabel;
         private Button _checkRemoteButton;
         private Button _updateRemoteButton;
 
@@ -233,6 +237,13 @@ namespace AgentCore.Editor.Components.VCS.UI
             _syncStatusLabel.AddToClassList("vcs-sync-banner-label");
             _syncStatusBanner.Add(_syncStatusLabel);
 
+            // 最近一次远端检查时间；每 30 秒刷新一次 "N min ago"（只读内存时间戳，不触发检查）
+            _syncStatusTimeLabel = new Label(VcsRemoteStatusMonitor.FormatLastChecked());
+            _syncStatusTimeLabel.AddToClassList("vcs-sync-banner-label");
+            _syncStatusTimeLabel.style.opacity = 0.7f;
+            _syncStatusBanner.Add(_syncStatusTimeLabel);
+            _syncStatusTimeLabel.schedule.Execute(UpdateSyncStatusTimeLabel).Every(30000);
+
             var buttonRow = new VisualElement();
             buttonRow.AddToClassList("vcs-sync-banner-actions");
 
@@ -265,33 +276,67 @@ namespace AgentCore.Editor.Components.VCS.UI
             return section;
         }
 
-        private void DetectAndInitialize()
+        /// <summary>
+        /// 检测 VCS 并初始化适配器。类型检测走会话缓存（SessionState），命令可用性探测在后台线程执行，
+        /// 主线程只 await，不等待子进程。
+        /// </summary>
+        /// <param name="forceRedetect">显式刷新：清空检测缓存后重新检测（用于未就绪状态下点击 Refresh）。</param>
+        private async void DetectAndInitialize(bool forceRedetect = false)
         {
-            _currentVcsType = VcsDetector.DetectVcs();
+            var version = ++_detectVersion;
+            _adapter = null;
+
+            bool available;
+            if (forceRedetect)
+            {
+                _vcsTypeLabel.text = "Detecting...";
+                available = await VcsDetector.Refresh();
+                _currentVcsType = VcsDetector.DetectVcs();
+            }
+            else
+            {
+                _currentVcsType = VcsDetector.DetectVcs();
+                if (_currentVcsType == VcsType.None)
+                {
+                    available = false;
+                }
+                else
+                {
+                    _vcsTypeLabel.text = $"Type: {_currentVcsType} (checking command...)";
+                    available = await VcsDetector.EnsureCommandAvailableAsync(_currentVcsType);
+                }
+            }
+
+            // 窗口在等待期间关闭或又发起了新的检测
+            if (version != _detectVersion || _isDisposed)
+                return;
+
+            // Refresh 始终保持可用：未检测到 VCS / 命令不可用时点击即重新检测
+            _refreshButton.SetEnabled(true);
 
             if (_currentVcsType == VcsType.None)
             {
                 _vcsTypeLabel.text = "No VCS detected";
-                ShowMessage("No version control system detected in this project.", true);
-                _refreshButton.SetEnabled(false);
+                ShowMessage("No version control system detected in this project. Click Refresh to detect again.", true);
                 _cleanupButton.SetEnabled(false);
                 return;
             }
 
             var rootPath = VcsDetector.GetVcsRootPath();
-            _adapter = CreateAdapter(_currentVcsType, rootPath);
+            var adapter = CreateAdapter(_currentVcsType, rootPath);
 
-            if (_adapter == null || !_adapter.IsAvailable())
+            if (adapter == null || !available)
             {
+                var probeError = VcsDetector.GetCommandProbeError(_currentVcsType);
                 _vcsTypeLabel.text = $"{_currentVcsType} (command not available)";
-                ShowMessage($"{_currentVcsType} detected but command-line tool is not available. Please install {_currentVcsType} CLI.", true);
-                _refreshButton.SetEnabled(false);
+                ShowMessage($"{_currentVcsType} detected but command-line tool is not available. Please install {_currentVcsType} CLI, then click Refresh."
+                            + (string.IsNullOrEmpty(probeError) ? string.Empty : $"\n{probeError}"), true);
                 _cleanupButton.SetEnabled(false);
                 return;
             }
 
+            _adapter = adapter;
             _vcsTypeLabel.text = $"Type: {_currentVcsType}";
-            _refreshButton.SetEnabled(true);
             _cleanupButton.SetEnabled(true);
 
             _ = RefreshAllData();
@@ -301,7 +346,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             if (_adapter == null || _currentVcsType == VcsType.None)
             {
-                DetectAndInitialize();
+                DetectAndInitialize(forceRedetect: true);
                 return;
             }
 
@@ -391,11 +436,13 @@ namespace AgentCore.Editor.Components.VCS.UI
                 var branchTask = _adapter.GetBranchInfoAsync(ct);
                 var statusTask = _adapter.GetStatusAsync(ct);
                 var logTask = _adapter.GetLogAsync(GetCommitQueryCount(), ct);
-                var syncStatusTask = VcsSettings.CheckRemoteStatusOnRefresh
-                    ? VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, ct)
-                    : Task.FromResult(VcsRemoteStatusMonitor.LastStatus);
 
-                await Task.WhenAll(branchTask, statusTask, logTask, syncStatusTask);
+                // 远端检查（fetch）不在刷新路径上：由 VcsRemoteStatusMonitor 定时 / 手动在后台执行，
+                // 这里只显示上次结果；开关开启时也只是排队一次后台检查，不等待。
+                if (VcsSettings.CheckRemoteStatusOnRefresh)
+                    VcsRemoteStatusMonitor.RequestCheck();
+
+                await Task.WhenAll(branchTask, statusTask, logTask);
 
                 if (ct.IsCancellationRequested)
                     return;
@@ -425,7 +472,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 var commits = await logTask;
                 UpdateCommitList(commits);
 
-                UpdateSyncStatusBanner(await syncStatusTask);
+                UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
             }
             catch (OperationCanceledException)
             {
@@ -1399,11 +1446,17 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:commit /path:\"{rootPath}\" /logmsg:\"{EscapeExternalArgument(message)}\"", rootPath, "TortoiseSVN commit window");
+                    // 提交信息写入 /logmsgfile，避免引号 / 换行破坏 TortoiseProc 的参数解析
+                    if (!VcsExternalToolLauncher.TryBuildTortoiseLogMessageArg(message, out var logMessageArg, out var logMessageError))
+                    {
+                        _lastExternalToolError = logMessageError;
+                        return false;
+                    }
+                    return TryStartTortoise("commit", new[] { rootPath }, rootPath, "TortoiseSVN commit window", logMessageArg);
                 case VcsType.Git:
                     return TryStartExternalProcess("git", "gui", rootPath, "Git GUI commit window");
                 case VcsType.Perforce:
-                    return TryStartExternalProcess("p4v", $"-cmd submit \"{rootPath}\"", rootPath, "P4V submit window");
+                    return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "submit", rootPath }), rootPath, "P4V submit window");
                 default:
                     return false;
             }
@@ -1415,11 +1468,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:update /path:\"{rootPath}\"", rootPath, "TortoiseSVN update window");
+                    return TryStartTortoise("update", new[] { rootPath }, rootPath, "TortoiseSVN update window");
                 case VcsType.Git:
                     return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
                 case VcsType.Perforce:
-                    return TryStartExternalProcess("p4v", $"-cmd sync \"{rootPath}\"", rootPath, "P4V sync window");
+                    return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "sync", rootPath }), rootPath, "P4V sync window");
                 default:
                     return false;
             }
@@ -1431,11 +1484,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:cleanup /path:\"{rootPath}\"", rootPath, "TortoiseSVN cleanup options dialog");
+                    return TryStartTortoise("cleanup", new[] { rootPath }, rootPath, "TortoiseSVN cleanup options dialog");
                 case VcsType.Git:
                     return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
                 case VcsType.Perforce:
-                    return TryStartExternalProcess("p4v", $"-cmd reconcile \"{rootPath}\"", rootPath, "P4V reconcile window");
+                    return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "reconcile", rootPath }), rootPath, "P4V reconcile window");
                 default:
                     return false;
             }
@@ -1462,19 +1515,37 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
             catch (Exception ex)
             {
+                _lastExternalToolError = ex.Message;
                 AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open {displayName}. Command: {fileName} {arguments}. Error: {ex.Message}");
                 return false;
             }
         }
 
-        private string EscapeExternalArgument(string value)
+        /// <summary>
+        /// 启动 TortoiseProc。参数由 <see cref="VcsExternalToolLauncher"/> 构造：路径含双引号时给出明确原因，
+        /// 多路径走 /pathfile。失败原因记录在 <see cref="_lastExternalToolError"/>，由 ShowExternalToolUnavailable 显示。
+        /// </summary>
+        private bool TryStartTortoise(string command, IReadOnlyList<string> paths, string rootPath, string displayName, string extraArguments = null)
         {
-            return (value ?? string.Empty).Replace("\"", "\\\"");
+            if (!VcsExternalToolLauncher.TryBuildTortoiseArgs(command, paths, out var arguments, out var error))
+            {
+                _lastExternalToolError = error;
+                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Cannot open {displayName}: {error}");
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(extraArguments))
+                arguments += " " + extraArguments;
+
+            return TryStartExternalProcess("TortoiseProc.exe", arguments, rootPath, displayName);
         }
 
         private void ShowExternalToolUnavailable(string operation)
         {
-            ShowMessage($"{operation} requires an external {_currentVcsType} client. Please install or configure the corresponding desktop VCS tool.", true);
+            var detail = _lastExternalToolError;
+            _lastExternalToolError = null;
+            ShowMessage($"{operation} requires an external {_currentVcsType} client. Please install or configure the corresponding desktop VCS tool."
+                        + (string.IsNullOrEmpty(detail) ? string.Empty : $"\n{detail}"), true);
         }
 
         // ===== 文件级外部工具调用方法 =====
@@ -1489,7 +1560,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:diff /path:\"{targetPath}\"", rootPath, "TortoiseSVN diff window");
+                    return TryStartTortoise("diff", new[] { targetPath }, rootPath, "TortoiseSVN diff window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false; // Git GUI 和 P4V 不支持单文件 diff 窗口
@@ -1506,7 +1577,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:log /path:\"{absolutePath}\"", rootPath, "TortoiseSVN log window");
+                    return TryStartTortoise("log", new[] { absolutePath }, rootPath, "TortoiseSVN log window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1523,7 +1594,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:add /path:\"{absolutePath}\"", rootPath, "TortoiseSVN add dialog");
+                    return TryStartTortoise("add", new[] { absolutePath }, rootPath, "TortoiseSVN add dialog");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1548,7 +1619,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 case VcsType.Svn:
                     fileName = "TortoiseProc.exe";
-                    arguments = $"/command:add /path:\"{absolutePath}\"";
+                    if (!VcsExternalToolLauncher.TryBuildTortoiseArgs("add", absolutePath, out arguments, out var argsError))
+                    {
+                        _lastExternalToolError = argsError;
+                        return false;
+                    }
                     break;
                 default:
                     return false;
@@ -1603,7 +1678,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:revert /path:\"{absolutePath}\"", rootPath, "TortoiseSVN revert dialog");
+                    return TryStartTortoise("revert", new[] { absolutePath }, rootPath, "TortoiseSVN revert dialog");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1620,7 +1695,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:remove /path:\"{absolutePath}\"", rootPath, "TortoiseSVN remove dialog");
+                    return TryStartTortoise("remove", new[] { absolutePath }, rootPath, "TortoiseSVN remove dialog");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1637,10 +1712,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe",
-                        $"/command:commit /path:\"{absolutePath}\"",
-                        rootPath,
-                        "TortoiseSVN commit window");
+                    return TryStartTortoise("commit", new[] { absolutePath }, rootPath, "TortoiseSVN commit window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1666,10 +1738,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe",
-                        $"/command:commit /path:\"{string.Join("*", absolutePaths)}\"",
-                        rootPath,
-                        "TortoiseSVN commit window");
+                    // 多个文件通过 /pathfile 传递，不受命令行长度限制
+                    return TryStartTortoise("commit", absolutePaths, rootPath, "TortoiseSVN commit window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1692,9 +1762,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             _checkRemoteButton.SetEnabled(false);
             try
             {
-                UpdateSyncStatusBanner(new VcsSyncStatus { Success = true, Summary = "Checking remote status..." });
-                var status = await VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, CancellationToken.None);
-                UpdateSyncStatusBanner(status);
+                if (_syncStatusTimeLabel != null)
+                    _syncStatusTimeLabel.text = "Checking remote...";
+                // 检查在线程池执行，这里只是等待结果，不阻塞编辑器
+                await VcsRemoteStatusMonitor.CheckRemoteStatusAsync(true, CancellationToken.None);
+                UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
             }
             finally
             {
@@ -1911,7 +1983,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (_syncStatusBanner == null || _syncStatusLabel == null)
                 return;
 
-            if (status == null)
+            // 适配器就绪后横幅始终可见，保证 Check Remote 按钮与 "上次检查时间" 随时可用
+            if (_adapter == null)
             {
                 _syncStatusBanner.style.display = DisplayStyle.None;
                 return;
@@ -1921,6 +1994,17 @@ namespace AgentCore.Editor.Components.VCS.UI
             _syncStatusBanner.RemoveFromClassList("has-remote-changes");
             _syncStatusBanner.RemoveFromClassList("is-clean");
             _syncStatusBanner.RemoveFromClassList("has-error");
+            UpdateSyncStatusTimeLabel();
+
+            if (status == null)
+            {
+                _syncStatusLabel.text = VcsRemoteStatusMonitor.LastError is string checkError && !string.IsNullOrEmpty(checkError)
+                    ? $"Remote check failed: {checkError}"
+                    : "Remote status has not been checked yet. Click Check Remote to fetch now.";
+                // 未检查过时不禁用 Update：用户想更新就直接执行
+                _updateRemoteButton?.SetEnabled(true);
+                return;
+            }
 
             if (!status.Success)
             {
@@ -1942,6 +2026,17 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _syncStatusLabel.text = status.Summary ?? "Working copy is up to date.";
                 _updateRemoteButton?.SetEnabled(false);
             }
+
+            // 最近一次检查失败但保留了上次成功结果：附上失败原因
+            var lastError = VcsRemoteStatusMonitor.LastError;
+            if (!string.IsNullOrEmpty(lastError))
+                _syncStatusLabel.text += $"\n(Latest check failed: {lastError})";
+        }
+
+        private void UpdateSyncStatusTimeLabel()
+        {
+            if (_syncStatusTimeLabel != null)
+                _syncStatusTimeLabel.text = VcsRemoteStatusMonitor.FormatLastChecked();
         }
 
         private string GetStateBadge(VcsFileState state)
@@ -2006,6 +2101,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         public void Dispose()
         {
+            _isDisposed = true;
             _isPanelActive = false;
             EditorApplication.update -= OnEditorUpdatePollCommits;
             VcsRemoteStatusMonitor.StatusChanged -= UpdateSyncStatusBanner;

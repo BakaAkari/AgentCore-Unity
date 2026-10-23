@@ -33,8 +33,12 @@ namespace AgentCore.Editor.Components.VCS.Config
 
         // ── Internal constants (no user-facing settings) ──
 
-        /// <summary>Whether refresh operations should also check remote update status.</summary>
-        public const bool CheckRemoteStatusOnRefresh = true;
+        /// <summary>
+        /// Whether refresh operations should also check remote update status.
+        /// 默认关闭：远端检查（git fetch 等）只由定时器 / Check Remote 触发，刷新不再等待网络。
+        /// 开启时也只是在后台排队一次检查，不阻塞刷新。
+        /// </summary>
+        public const bool CheckRemoteStatusOnRefresh = false;
 
         /// <summary>The interval in minutes for periodic remote status checks.</summary>
         public const int RemoteStatusCheckIntervalMinutes = 15;

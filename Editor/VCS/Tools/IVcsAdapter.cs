@@ -108,6 +108,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
         public string ErrorMessage { get; set; }
         public List<VcsFileStatus> Files { get; set; } = new List<VcsFileStatus>();
         public string RawOutput { get; set; }
+
+        /// <summary>输出过大被截断，Files 可能不完整。</summary>
+        public bool Truncated { get; set; }
     }
 
     /// <summary>
@@ -118,6 +121,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
         public string FilePath { get; set; }
         public VcsFileState State { get; set; }
         public string StateDescription { get; set; }
+
+        /// <summary>重命名 / 复制前的原路径（Git porcelain v2 的 origPath），其他情况为 null。</summary>
+        public string OriginalPath { get; set; }
+
+        /// <summary>VCS 原始状态码（如 Git 的 XY），可能为 null。</summary>
+        public string StatusCode { get; set; }
     }
 
     /// <summary>

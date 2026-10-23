@@ -1,5 +1,7 @@
+using AgentCore.Editor.Components.VCS.Tools;
 using AgentCore.Editor.Extensions;
 using UnityEditor;
+using UnityEngine;
 
 namespace AgentCore.Editor.Components.VCS.Config
 {
@@ -26,6 +28,54 @@ namespace AgentCore.Editor.Components.VCS.Config
                 VcsSettings.AutoRefreshOnOpen = autoRefreshOnOpen;
                 VcsSettings.MaxCommitEntries = maxCommitEntries;
             }
+
+            DrawDetectionGUI();
+        }
+
+        /// <summary>
+        /// 显示会话缓存的检测结果（只读缓存，不在重绘时探测），并提供显式重新检测入口。
+        /// </summary>
+        private static void DrawDetectionGUI()
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Detection", EditorStyles.boldLabel);
+
+            var vcsType = VcsDetector.DetectVcs();
+            EditorGUILayout.LabelField("Detected VCS", vcsType == VcsType.None ? "None" : vcsType.ToString());
+            if (vcsType != VcsType.None)
+            {
+                EditorGUILayout.LabelField("Root", VcsDetector.GetVcsRootPath() ?? string.Empty);
+
+                var availability = VcsDetector.GetCommandAvailability(vcsType);
+                var availabilityText = availability switch
+                {
+                    VcsCommandAvailability.Available => "Available",
+                    VcsCommandAvailability.Unavailable => "Not available",
+                    _ => "Not checked yet"
+                };
+                EditorGUILayout.LabelField("Command-line tool", availabilityText);
+
+                var probeError = VcsDetector.GetCommandProbeError(vcsType);
+                if (availability == VcsCommandAvailability.Unavailable && !string.IsNullOrEmpty(probeError))
+                    EditorGUILayout.HelpBox(probeError, MessageType.Warning);
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Remote status", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Last check", VcsRemoteStatusMonitor.FormatLastChecked());
+            EditorGUILayout.LabelField("Automatic check", $"Every {VcsSettings.RemoteStatusCheckIntervalMinutes} min (background)");
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button(new GUIContent("Check Remote Now", "Fetch remote status in the background (git fetch / svn status -u / p4 sync -n).")))
+            {
+                VcsRemoteStatusMonitor.RequestCheck();
+            }
+
+            if (GUILayout.Button(new GUIContent("Re-detect", "Clear the cached detection result and check the VCS type and command-line tool again (runs in the background).")))
+            {
+                _ = VcsDetector.Refresh();
+            }
+            EditorGUILayout.EndHorizontal();
         }
     }
 }
