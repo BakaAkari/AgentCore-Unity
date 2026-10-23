@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+using UnityEngine.TestTools;
 using NUnit.Framework;
 using Newtonsoft.Json.Linq;
 using AgentCore.Editor.Utils;
@@ -59,6 +61,7 @@ namespace AgentCore.Tests.Editor.Utils
         [Test]
         public void Deserialize_InvalidJson_ReturnsDefault()
         {
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex(@"\[AgentCore\] JSON deserialize error:"));
             var result = JsonHelper.Deserialize<TestData>("not valid json {{{");
 
             Assert.IsNull(result);
@@ -96,6 +99,7 @@ namespace AgentCore.Tests.Editor.Utils
         [Test]
         public void ParseObject_InvalidJson_ReturnsNull()
         {
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex(@"\[AgentCore\] JSON parse error:"));
             var result = JsonHelper.ParseObject("not json");
 
             Assert.IsNull(result);
@@ -120,6 +124,7 @@ namespace AgentCore.Tests.Editor.Utils
         [Test]
         public void ParseObject_ArrayJson_ReturnsNull()
         {
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex(@"\[AgentCore\] JSON parse error:"));
             // JObject.Parse on an array should fail
             var result = JsonHelper.ParseObject("[1,2,3]");
 
@@ -143,6 +148,7 @@ namespace AgentCore.Tests.Editor.Utils
         [Test]
         public void ParseArray_InvalidJson_ReturnsNull()
         {
+            LogAssert.Expect(UnityEngine.LogType.Error, new Regex(@"\[AgentCore\] JSON array parse error:"));
             var result = JsonHelper.ParseArray("not json");
 
             Assert.IsNull(result);
