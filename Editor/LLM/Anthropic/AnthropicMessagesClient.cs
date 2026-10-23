@@ -237,7 +237,7 @@ namespace AgentCore.Editor.LLM.Anthropic
 
     /// <summary>
     /// Anthropic SSE 读取器：解析 <c>data:</c> 行为 JSON 事件（事件类型取自 data 内 <c>type</c> 字段，
-    /// 不依赖 <c>event:</c> 行）。复用 <see cref="StreamingResponseParser"/> 的空闲超时看门狗与主线程让步预算。
+    /// 不依赖 <c>event:</c> 行）。复用 <see cref="StreamIdleWatchdog"/> 空闲看门狗与 <see cref="StreamingResponseParser"/> 的主线程让步预算。
     /// </summary>
     internal static class AnthropicSseReader
     {
@@ -246,6 +246,7 @@ namespace AgentCore.Editor.LLM.Anthropic
         public static async Task ReadAsync(Stream stream, Action<JObject> onEvent, CancellationToken ct)
         {
             using var reader = new StreamReader(stream);
+            using var watchdog = new StreamIdleWatchdog(stream, ct);
             var yieldTimer = System.Diagnostics.Stopwatch.StartNew();
 
             while (!ct.IsCancellationRequested)
@@ -253,9 +254,9 @@ namespace AgentCore.Editor.LLM.Anthropic
                 string line;
                 try
                 {
-                    line = await StreamingResponseParser.ReadLineWithIdleTimeoutAsync(reader, stream, ct);
+                    line = await watchdog.ReadLineAsync(reader);
                 }
-                catch (Exception) when (ct.IsCancellationRequested)
+                catch (Exception ex) when (ct.IsCancellationRequested && !(ex is OperationCanceledException))
                 {
                     throw new OperationCanceledException(ct);
                 }
