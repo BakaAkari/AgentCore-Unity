@@ -83,7 +83,18 @@ namespace AgentCore.Editor.Extensions
         /// <param name="enabled">Whether VCS should be enabled.</param>
         public static void SetVcsEnabled(bool enabled)
         {
-            SetDefine(VcsDefine, enabled);
+            SetDefine(VcsDefine, enabled, userInitiated: true);
+        }
+
+        /// <summary>
+        /// 自动默认启用 VCS（首次加载 / 域重载路径使用）。
+        /// 与 <see cref="SetVcsEnabled"/> 一样写入 define 并请求编译，但不调用
+        /// <c>AssetDatabase.SaveAssets()</c>、不强制 Refresh——启动阶段不应顺带保存用户项目里其它未保存的资产。
+        /// define 已存在的分组完全不写。
+        /// </summary>
+        internal static void EnableVcsByDefault()
+        {
+            SetDefine(VcsDefine, true, userInitiated: false);
         }
 
         /// <summary>
@@ -101,7 +112,7 @@ namespace AgentCore.Editor.Extensions
         /// <param name="enabled">Whether Code Indexing should be enabled.</param>
         public static void SetIndexingEnabled(bool enabled)
         {
-            SetDefine(IndexingDefine, enabled);
+            SetDefine(IndexingDefine, enabled, userInitiated: true);
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -143,7 +154,8 @@ namespace AgentCore.Editor.Extensions
                 }
 
                 // VCS is not enabled yet AND user has not disabled it → apply default.
-                SetVcsEnabled(true);
+                // 走自动路径：只在 define 缺失的分组写入，不调用 AssetDatabase.SaveAssets()。
+                EnableVcsByDefault();
 
                 // Verify the write succeeded before marking the project as "checked".
                 // If PlayerSettings.SetScriptingDefineSymbolsForGroup silently failed (rare but
@@ -227,7 +239,29 @@ namespace AgentCore.Editor.Extensions
             return defines.Contains(define);
         }
 
-        private static void SetDefine(string define, bool enabled)
+        /// <summary>
+        /// 在 define 列表字符串中加入 / 移除一个符号，保持其余符号原有顺序。
+        /// 已是目标状态时原样返回 <paramref name="raw"/>（调用方据此判断是否需要写入）。
+        /// </summary>
+        internal static string ApplyDefine(string raw, string define, bool enabled)
+        {
+            raw ??= string.Empty;
+            var items = raw.Split(';')
+                .Select(value => value.Trim())
+                .Where(value => !string.IsNullOrEmpty(value))
+                .ToList();
+
+            if (items.Contains(define) == enabled)
+                return raw;
+
+            if (enabled)
+                items.Add(define);
+            else
+                items.RemoveAll(value => value == define);
+            return string.Join(";", items);
+        }
+
+        private static void SetDefine(string define, bool enabled, bool userInitiated)
         {
             bool anyChanged = false;
 
@@ -236,14 +270,26 @@ namespace AgentCore.Editor.Extensions
                 if (!IsValidBuildTargetGroup(group))
                     continue;
 
-                var defines = GetDefines(group);
-                bool changed = enabled ? defines.Add(define) : defines.Remove(define);
-                if (!changed)
+                // 先比较再写：已是目标状态的分组不调用 SetScriptingDefineSymbols，
+                // 避免无意义地标脏 ProjectSettings、或因 HashSet 重排其它 define 的顺序。
+                string raw;
+                try
+                {
+                    raw = ScriptingDefineHelper.GetDefines(group) ?? string.Empty;
+                }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"[AgentCore] Failed to read scripting defines for build target group {group}: {ex.Message}");
+                    continue;
+                }
+
+                var updated = ApplyDefine(raw, define, enabled);
+                if (string.Equals(updated, raw, StringComparison.Ordinal))
                     continue;
 
                 try
                 {
-                    ScriptingDefineHelper.SetDefines(group, string.Join(";", defines));
+                    ScriptingDefineHelper.SetDefines(group, updated);
                     anyChanged = true;
                 }
                 catch (Exception ex)
@@ -274,6 +320,10 @@ namespace AgentCore.Editor.Extensions
             //   2. Refresh — 让 AssetDatabase 重新扫描（部分场景下需要）
             //   3. RequestScriptCompilation — 现在管线能读到最新 defines，会真正触发编译
             //   4. Registry.Refresh — 让扩展注册表基于新状态刷新（不影响编译）
+            //
+            // 自动默认启用路径（首次加载 / 域重载，userInitiated=false）跳过 SaveAssets 与 Refresh：
+            // SaveAssets 会把用户项目里所有未保存的资产一并写盘，启动阶段不应有这种副作用；
+            // SaveSettings 已足够让编译管线读到新 define。
             try
             {
                 // PlayerSettings.SaveSettings() 存在于 Unity 2020.1+；用反射调用以兼容更旧版本。
@@ -288,17 +338,21 @@ namespace AgentCore.Editor.Extensions
                 AgentCoreLog.Warning($"[AgentCore] PlayerSettings.SaveSettings() invocation failed: {ex.Message} (continuing with AssetDatabase.SaveAssets fallback)");
             }
 
-            try
+            if (userInitiated)
             {
-                // 通用兜底：SaveAssets 会 flush 所有 dirty 的 ScriptableObject / ProjectSettings 到磁盘。
-                AssetDatabase.SaveAssets();
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Warning($"[AgentCore] AssetDatabase.SaveAssets() failed after define change: {ex.Message}");
+                try
+                {
+                    // 通用兜底：SaveAssets 会 flush 所有 dirty 的 ScriptableObject / ProjectSettings 到磁盘。
+                    AssetDatabase.SaveAssets();
+                }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"[AgentCore] AssetDatabase.SaveAssets() failed after define change: {ex.Message}");
+                }
+
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             }
 
-            AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             CompilationPipeline.RequestScriptCompilation();
             AgentCoreExtensionRegistry.Refresh();
         }
