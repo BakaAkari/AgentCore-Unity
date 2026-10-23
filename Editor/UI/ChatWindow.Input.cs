@@ -28,8 +28,14 @@ namespace AgentCore.Editor.UI
 
             // ask_user 自由文本答案拦截：Agent 正等待用户"自己描述"的回答时，
             // 这条输入应作为 ask_user 的答案回传，而非当成新一轮消息发送。
-            if (_awaitingFreeTextAnswer)
+            if (_askUserActive)
             {
+                if (hasImage)
+                {
+                    // ResumeFromUserInput 只回传文本，附图会被静默丢弃 → 明确拒绝，保留输入与附图
+                    UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("askUser.imageNotSupported", "回答 AI 的提问时暂不支持附图，请先移除图片"), true);
+                    return;
+                }
                 if (TryConsumeFreeTextAnswer(text))
                 {
                     _inputField.value = "";

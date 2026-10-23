@@ -171,6 +171,18 @@ namespace AgentCore.Editor.UI
                     SetCancelVisible(false);
                     // Idle 表示本轮已彻底结束（正常/取消/错误），清理 pending 保险
                     DismissPendingIndicator();
+                    // loop 侧已放弃 ask_user（取消/重置）时，收起残留的提问面板
+                    if (_askUserActive && (_agentLoop == null || !_agentLoop.IsWaitingForUserInput))
+                        FinishUserQuery();
+                    break;
+
+                case AgentState.WaitingForUserInput:
+                    // ask_user 挂起：loop 已干净结束，等待用户点选项或直接在输入框作答。
+                    // 发送按钮必须可用（自由文本答案走 OnSendClicked），Esc 放弃提问。
+                    UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.waitingUserDecision", "AI 正在等待你的决定..."), isError: false, isActive: false);
+                    SetSendEnabled(true);
+                    SetCancelVisible(false);
+                    DismissPendingIndicator();
                     break;
 
                 case AgentState.Thinking:

@@ -472,6 +472,10 @@ namespace AgentCore.Editor.UI
                 _autoTitleController?.Stop();
                 _autoTitleController = null;
 
+                // 必须在 Dispose/置空前执行：两者都要回调 _agentLoop（放弃 ask_user / 拒绝挂起确认）
+                ClearPendingToolConfirmations();
+                ClearPendingUserQuery();
+
                 _agentLoop.OnAgentEvent -= HandleAgentEvent;
                 _agentLoop.OnUserQueryRaised -= HandleUserQueryRaised;
                 _agentLoop.Dispose(); // P1-1 fix: 调用 Dispose() 释放 ConsoleErrorCapture、CompilationWatcher 等资源
@@ -499,8 +503,6 @@ namespace AgentCore.Editor.UI
             _messageListManager?.DetachScrollView();
             _messageListManager = null;
 
-            ClearPendingToolConfirmations();
-            ClearPendingUserQuery();
             DisposeToolbarStatusContributions();
             DisposeHubPanels();
 

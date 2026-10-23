@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using AgentCore.Editor.Core;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine.UIElements;
@@ -205,12 +206,12 @@ namespace AgentCore.Editor.UI
         }
 
         /// <summary>
-        /// 由 OnSendClicked 在 _awaitingFreeTextAnswer=true 时调用：把输入文本作为答案唤醒 loop，
+        /// 由 OnSendClicked 在提问挂起时调用（无需先点「我自己描述」）：把输入文本作为答案唤醒 loop，
         /// 拦截正常的 SendMessageAsync 流程。返回 true 表示已消费该输入。
         /// </summary>
         private bool TryConsumeFreeTextAnswer(string text)
         {
-            if (!_awaitingFreeTextAnswer || !_askUserActive)
+            if (!_askUserActive)
             {
                 return false;
             }
@@ -244,6 +245,18 @@ namespace AgentCore.Editor.UI
 
             _askUserPanel.Clear();
             _askUserPanel.style.display = DisplayStyle.None;
+        }
+
+        /// <summary>
+        /// 会话切换 / 新建前调用：ask_user 挂起不算"忙"，放弃提问并回到 Idle，避免用户被困在提问里。
+        /// </summary>
+        private void AbandonUserQueryForSessionChange()
+        {
+            if (_agentLoop != null && _agentLoop.CurrentState == AgentState.WaitingForUserInput)
+            {
+                ClearPendingUserQuery();
+                _agentLoop.Cancel();
+            }
         }
 
         /// <summary>

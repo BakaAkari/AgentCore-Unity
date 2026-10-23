@@ -414,6 +414,8 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
+            AbandonUserQueryForSessionChange();
+
             // 如果 Agent 正忙，不允许切换
             if (_agentLoop.CurrentState != AgentState.Idle)
             {
@@ -537,6 +539,8 @@ namespace AgentCore.Editor.UI
         private void OnNewSessionClicked()
         {
             if (_agentLoop == null) return;
+
+            AbandonUserQueryForSessionChange();
 
             if (_agentLoop.CurrentState != AgentState.Idle)
             {

@@ -768,6 +768,9 @@ namespace AgentCore.Editor.Core
                 _currentCts.Cancel();
             }
 
+            // ask_user 挂起时取消 = 放弃提问；否则挂起 id 残留会让下一轮 loop 结束时误判仍在等待
+            AbandonPendingUserInput();
+
             if (CurrentState != AgentState.Idle)
             {
                 SetState(AgentState.Idle);
