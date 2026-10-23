@@ -223,6 +223,15 @@ namespace AgentCore.Editor.UI
                 _toolConfirmationPanel.Add(description);
             }
 
+            if (request.TriggeredByRule != null)
+            {
+                var ruleNotice = new Label(string.Format(
+                    AgentCore.Editor.L10n.Loc.Tr("toolConfirmation.askRule", "由权限规则要求确认：{0}"),
+                    request.TriggeredByRule.Describe()));
+                ruleNotice.AddToClassList("tool-confirmation-description");
+                _toolConfirmationPanel.Add(ruleNotice);
+            }
+
             AddConfirmationList("Why confirmation is required", request.Reasons);
             AddConfirmationMap("Parameters", request.ParameterSummary);
             AddConfirmationList("Targets", request.Targets);
@@ -256,6 +265,28 @@ namespace AgentCore.Editor.UI
                 trustLowMed.AddToClassList("tool-confirmation-button");
                 trustLowMed.AddToClassList("tool-confirmation-button--trust");
                 buttons.Add(trustLowMed);
+            }
+
+            // P2: "始终允许" —— 新建一条用户 allow 规则并批准本次。
+            // ask 规则触发时不提供（ask 优先于 allow，新建 allow 不会生效）；batch_execute 外壳不参与规则匹配，也不提供。
+            if (request.TriggeredByRule == null
+                && !string.Equals(request.ToolName, "batch_execute", StringComparison.OrdinalIgnoreCase))
+            {
+                var matcherText = string.IsNullOrEmpty(request.Action)
+                    ? request.ToolName
+                    : request.ToolName + "." + request.Action;
+                var alwaysAllow = new Button(() => ResolvePendingToolConfirmationWithAllowRule(pending))
+                {
+                    text = string.Format(AgentCore.Editor.L10n.Loc.Tr("toolConfirmation.alwaysAllow", "始终允许 {0}"), matcherText)
+                };
+                alwaysAllow.tooltip = string.Format(
+                    AgentCore.Editor.L10n.Loc.Tr(
+                        "toolConfirmation.alwaysAllowTooltip",
+                        "新建一条用户 allow 规则（{0}），以后不再询问；可在 Project Settings > AgentCore > Permissions 中修改或删除"),
+                    PermissionRulesStore.UserRelativePath);
+                alwaysAllow.AddToClassList("tool-confirmation-button");
+                alwaysAllow.AddToClassList("tool-confirmation-button--trust");
+                buttons.Add(alwaysAllow);
             }
 
             if (IsScopeAllowed(request, ToolConfirmationTrustScope.SessionAll))
@@ -358,6 +389,35 @@ namespace AgentCore.Editor.UI
             CompletePendingToolConfirmation(pending, true, updateUi: true);
         }
 
+        /// <summary>
+        /// 用户点击"始终允许"：为该工具（及 action）新建一条用户 allow 规则，并批准当前请求。
+        /// 规则写入失败时仍批准本次（用户已显式点击），只记录警告。
+        /// </summary>
+        private void ResolvePendingToolConfirmationWithAllowRule(PendingToolConfirmation pending)
+        {
+            var request = pending?.Request;
+            if (request != null)
+            {
+                try
+                {
+                    PermissionRulesStore.Default.AddRule(PermissionRuleScope.User, new PermissionRule
+                    {
+                        effect = PermissionRule.EffectToString(PermissionRuleEffect.Allow),
+                        tool = request.ToolName,
+                        action = string.IsNullOrEmpty(request.Action) ? null : request.Action,
+                        note = "Added from confirmation dialog",
+                        enabled = true
+                    });
+                }
+                catch (Exception ex)
+                {
+                    AgentCore.Editor.Utils.AgentCoreLog.Warning($"[AgentCore] Failed to save allow rule for '{request.ToolName}': {ex.Message}");
+                }
+            }
+
+            CompletePendingToolConfirmation(pending, true, updateUi: true);
+        }
+
         private void ScheduleResolvePendingToolConfirmation(PendingToolConfirmation pending, bool approved)
         {
             if (pending == null)
@@ -432,61 +492,20 @@ namespace AgentCore.Editor.UI
         }
 
         /// <summary>
-        /// 判定当前请求是否已被本会话某个已激活的 scope 直通。
+        /// 本会话是否处于 YOLO（供 dispatcher 跳过 deny 规则）。可能在非主线程被调用，只做只读查询。
         /// </summary>
-        private bool IsToolConfirmationTrusted(ToolConfirmationRequest request)
+        private bool IsSessionYoloActive()
         {
-            if (request == null || _sessionTrustScopes.Count == 0)
-            {
-                return false;
-            }
-
-            // YOLO: 完全不审查，所有工具直通
-            if (_sessionTrustScopes.Contains(ToolConfirmationTrustScope.SessionAll))
-            {
-                return true;
-            }
-
-            // Low-Med: 仅 ReadOnly/Low/Medium 且不含副作用能力位的工具直通。
-            // v1.7.16：仅看 ToolRisk 不够——大量工具漏标 RiskLevel（默认 Medium），
-            // 若只按等级放行，会把"删文件/改脚本/装包/VCS 写/网络"等标称 Medium 的写工具
-            // 静默放过。故追加能力位闸门：含 SideEffectCapabilityMask 的一律不被 Low/Med 信任放行，
-            // 与 ToolRiskPolicy 的确认判据保持一致（用户想全放行应显式选 YOLO）。
-            if (_sessionTrustScopes.Contains(ToolConfirmationTrustScope.SessionLowMediumRisk)
-                && IsScopeAllowed(request, ToolConfirmationTrustScope.SessionLowMediumRisk)
-                && IsLowOrMediumRisk(request.Risk.ToolRisk)
-                && (request.Risk.Capabilities & SideEffectCapabilityMask) == 0)
-            {
-                return true;
-            }
-
-            return false;
+            var scopes = _sessionTrustScopes;
+            return scopes != null && scopes.Contains(ToolConfirmationTrustScope.SessionAll);
         }
 
         /// <summary>
-        /// 有副作用的能力位掩码（与 <see cref="AgentCore.Editor.Tools.Safety.ToolRiskPolicy"/>
-        /// 的 ConfirmationCapabilityMask 保持一致）。含这些能力的工具即便标称 Low/Medium，
-        /// 也不会被 Trust Low/Med 信任放行，须显式 YOLO。
+        /// 判定当前请求是否已被本会话某个已激活的 scope 直通（逻辑见 <see cref="ToolConfirmationTrust"/>）。
         /// </summary>
-        private const ToolCapability SideEffectCapabilityMask =
-            ToolCapability.WriteProjectFiles |
-            ToolCapability.DeleteProjectFiles |
-            ToolCapability.ModifyScene |
-            ToolCapability.ModifyAssets |
-            ToolCapability.ModifyScripts |
-            ToolCapability.ExecuteCode |
-            ToolCapability.InstallPackages |
-            ToolCapability.BuildPlayer |
-            ToolCapability.NetworkAccess |
-            ToolCapability.VersionControlWrite |
-            ToolCapability.ModifyProjectSettings |
-            ToolCapability.ModifyAgentConfig;
-
-        private static bool IsLowOrMediumRisk(ToolRiskLevel level)
+        private bool IsToolConfirmationTrusted(ToolConfirmationRequest request)
         {
-            return level == ToolRiskLevel.ReadOnly
-                || level == ToolRiskLevel.Low
-                || level == ToolRiskLevel.Medium;
+            return ToolConfirmationTrust.IsTrusted(request, _sessionTrustScopes);
         }
 
         /// <summary>
@@ -494,20 +513,7 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private static bool IsScopeAllowed(ToolConfirmationRequest request, ToolConfirmationTrustScope scope)
         {
-            if (request?.AllowedTrustScopes == null)
-            {
-                return false;
-            }
-
-            foreach (var s in request.AllowedTrustScopes)
-            {
-                if (s == scope)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return ToolConfirmationTrust.IsScopeAllowed(request, scope);
         }
 
         private static string BuildRiskText(ToolConfirmationRequest request)

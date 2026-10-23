@@ -139,6 +139,47 @@ namespace AgentCore.Editor.Tools.Safety
             return Resolve(parameters, metadata, out _);
         }
 
+        /// <summary>
+        /// 提取参数中所有路径类参数的原始字符串值（数组取全部字符串元素），不区分工具是否具备写能力。
+        /// 供权限规则的路径 glob 匹配使用（P2）；与风险解析不同，读操作的路径同样参与匹配。
+        /// </summary>
+        public static List<string> ExtractPathCandidates(JObject parameters)
+        {
+            var result = new List<string>();
+            if (parameters == null || !parameters.HasValues)
+                return result;
+
+            foreach (var property in parameters.Properties())
+            {
+                if (!PathParameterNames.Contains(property.Name))
+                    continue;
+
+                var token = property.Value;
+                if (token == null)
+                    continue;
+
+                if (token.Type == JTokenType.String)
+                {
+                    var s = token.Value<string>();
+                    if (!string.IsNullOrWhiteSpace(s))
+                        result.Add(s);
+                }
+                else if (token.Type == JTokenType.Array)
+                {
+                    foreach (var item in (JArray)token)
+                    {
+                        if (item.Type != JTokenType.String)
+                            continue;
+                        var s = item.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(s))
+                            result.Add(s);
+                    }
+                }
+            }
+
+            return result;
+        }
+
         // ------------------------------------------------------------------
         // 内部辅助
         // ------------------------------------------------------------------

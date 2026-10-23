@@ -152,6 +152,12 @@ namespace AgentCore.Editor.Tools
         /// </summary>
         private readonly IToolConfirmationProvider _confirmationProvider;
 
+        /// <summary>
+        /// 用户可配置的 allow / ask / deny 权限规则来源（P2）。
+        /// 未注入时使用 <see cref="PermissionRulesStore.Default"/>；无规则时决策与此前完全一致。
+        /// </summary>
+        private readonly IPermissionRuleSource _ruleSource;
+
         #endregion
 
         #region 构造函数
@@ -163,11 +169,18 @@ namespace AgentCore.Editor.Tools
         /// <param name="confirmationProvider">
         /// 用户确认提供器。传 null 为 fail-safe 模式（RequireConfirmation 时自动拒绝）。
         /// </param>
+        /// <param name="ruleSource">
+        /// 权限规则来源（P2）。传 null 使用项目 / 用户规则文件（<see cref="PermissionRulesStore.Default"/>）。
+        /// </param>
         /// <exception cref="ArgumentNullException">registry 为 null 时抛出</exception>
-        public ToolCallDispatcher(ToolRegistry registry, IToolConfirmationProvider confirmationProvider = null)
+        public ToolCallDispatcher(
+            ToolRegistry registry,
+            IToolConfirmationProvider confirmationProvider = null,
+            IPermissionRuleSource ruleSource = null)
         {
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _confirmationProvider = confirmationProvider;
+            _ruleSource = ruleSource;
         }
 
         #endregion
@@ -315,6 +328,18 @@ namespace AgentCore.Editor.Tools
                         paramSummary,
                         pathTargets,
                         touchesProtected);
+
+                    // P2 权限规则：deny > ask > allow；YOLO 下 deny 不生效。无规则时原样返回。
+                    var ruleMatch = EvaluatePermissionRules(toolName, action, parameters);
+                    decision = ToolRiskPolicy.ApplyPermissionRule(
+                        decision,
+                        ruleMatch,
+                        ruleMatch.HasMatch && IsYoloActive(),
+                        tool.Metadata,
+                        toolName,
+                        action,
+                        paramSummary,
+                        pathTargets);
                 }
 
                 switch (decision.Outcome)
@@ -796,6 +821,8 @@ namespace AgentCore.Editor.Tools
             var caps = batchMetadata.Capabilities;
             var worstPath = WorkspaceOperationRisk.Safe;
             HashSet<ToolConfirmationTrustScope> scopes = null;
+            PermissionRuleMatch askRuleMatch = null;
+            bool? yoloActive = null;
 
             for (int i = 0; i < operations.Count; i++)
             {
@@ -846,14 +873,34 @@ namespace AgentCore.Editor.Tools
                 }
 
                 var subPathRisk = ToolPathRiskResolver.Resolve(subArgs, subTool.Metadata, out var subTargets, out var subProtected);
+                var subSummary = BuildParameterSummary(subArgs);
                 var subDecision = ToolRiskPolicy.Evaluate(
                     subTool.Metadata,
                     subPathRisk,
                     subToolName,
                     subAction,
-                    BuildParameterSummary(subArgs),
+                    subSummary,
                     subTargets,
                     subProtected);
+
+                // P2 权限规则逐子操作生效（batch_execute 外壳本身不参与匹配）
+                var subRuleMatch = EvaluatePermissionRules(subToolName, subAction, subArgs);
+                if (subRuleMatch.HasMatch)
+                {
+                    if (yoloActive == null)
+                        yoloActive = IsYoloActive();
+                    subDecision = ToolRiskPolicy.ApplyPermissionRule(
+                        subDecision,
+                        subRuleMatch,
+                        yoloActive.Value,
+                        subTool.Metadata,
+                        subToolName,
+                        subAction,
+                        subSummary,
+                        subTargets);
+                    if (subRuleMatch.Effect == PermissionRuleEffect.Ask && askRuleMatch == null)
+                        askRuleMatch = subRuleMatch;
+                }
 
                 if (subDecision.IsBlocked)
                 {
@@ -900,9 +947,63 @@ namespace AgentCore.Editor.Tools
                 reasons: confirmReasons,
                 parameterSummary: summary,
                 targets: targets,
-                allowedTrustScopes: new List<ToolConfirmationTrustScope>(scopes ?? new HashSet<ToolConfirmationTrustScope>()));
+                allowedTrustScopes: new List<ToolConfirmationTrustScope>(scopes ?? new HashSet<ToolConfirmationTrustScope>()),
+                triggeredByRule: askRuleMatch);
 
             return ToolPolicyDecision.RequireConfirmation(risk, request, confirmReasons);
+        }
+
+        /// <summary>
+        /// 按当前规则来源评估一次调用（工具名 + action + 参数中的路径）。
+        /// 无规则或读取失败返回 <see cref="PermissionRuleMatch.None"/>——绝不因规则配置问题拦截。
+        /// </summary>
+        private PermissionRuleMatch EvaluatePermissionRules(string toolName, string action, JObject parameters)
+        {
+            try
+            {
+                var rules = (_ruleSource ?? PermissionRulesStore.Default).GetActiveRules();
+                if (rules == null || rules.Count == 0)
+                    return PermissionRuleMatch.None;
+
+                var raw = ToolPathRiskResolver.ExtractPathCandidates(parameters);
+                List<string> paths = null;
+                if (raw.Count > 0)
+                {
+                    string projectRoot = null;
+                    try
+                    {
+                        projectRoot = SafePath.ProjectRoot;
+                    }
+                    catch
+                    {
+                        // 拿不到项目根（非主线程等）：只做斜杠 / 段规范化后匹配
+                    }
+
+                    paths = new List<string>(raw.Count);
+                    foreach (var p in raw)
+                    {
+                        var normalized = PermissionRuleMatcher.NormalizePath(p, projectRoot);
+                        if (normalized != null)
+                            paths.Add(normalized);
+                    }
+                }
+
+                return PermissionRuleMatcher.Evaluate(rules, toolName, action, paths);
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"{LogPrefix}Permission rule evaluation failed for '{toolName}': {ex.Message}. Rules ignored for this call.");
+                return PermissionRuleMatch.None;
+            }
+        }
+
+        /// <summary>
+        /// 当前会话是否处于 YOLO。YOLO 状态由 UI 层（ChatWindow 会话信任）持有，
+        /// 经确认提供者的 <see cref="IToolSessionTrustState"/> 暴露；未实现时视为非 YOLO。
+        /// </summary>
+        private bool IsYoloActive()
+        {
+            return _confirmationProvider is IToolSessionTrustState trust && trust.IsYoloActive;
         }
 
         private static string JoinReasons(IReadOnlyList<string> reasons)
