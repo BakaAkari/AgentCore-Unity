@@ -68,6 +68,50 @@ namespace AgentCore.Editor.Config.Settings
             return "[OK] Connected";
         }
 
+        /// <summary>v1.17.0: Discover models using the profile protocol and authentication.</summary>
+        public async Task<List<string>> FetchModelsAsync(ProviderProfile profile, string apiKey, CancellationToken ct = default)
+        {
+            using var request = BuildModelsRequest(profile, apiKey);
+            using var response = await HttpClientFactory.GetClient().SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            return ParseModels(await response.Content.ReadAsStringAsync());
+        }
+
+        /// <summary>v1.17.0: Checks model-list connectivity, not generation capability.</summary>
+        public async Task<string> TestConnectionAsync(ProviderProfile profile, string apiKey, CancellationToken ct = default)
+        {
+            try
+            {
+                var verified = await AgentCore.Editor.LLM.GatewayDiscovery.ResolveAsync(profile, apiKey, ct, force: true);
+                return verified.cacheMetricsKnown
+                    ? (verified.cacheHitObserved ? "settings.model.connection.hit" : "settings.model.connection.miss")
+                    : "settings.model.connection.unknown";
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                AgentCore.Editor.LLM.GatewayDiscovery.ObserveFailure(profile);
+                throw;
+            }
+        }
+
+        internal static HttpRequestMessage BuildModelsRequest(ProviderProfile profile, string apiKey)
+        {
+            if (profile == null || string.IsNullOrWhiteSpace(profile.endpoint))
+                throw new InvalidOperationException("LLM endpoint is empty.");
+            bool anthropic = ActiveModelConfig.ResolveApiFormat(profile) == ApiFormats.Anthropic;
+            var endpoint = profile.endpoint.Trim().TrimEnd('/');
+            var url = anthropic
+                ? AgentCore.Editor.LLM.Anthropic.AnthropicMessagesClient.BuildMessagesUrl(endpoint)
+                : endpoint + "/models";
+            if (anthropic) url = url.Substring(0, url.Length - "messages".Length) + "models";
+            var headers = AgentCore.Editor.LLM.OpenAIChatTransporter.BuildAuthHeaders(apiKey,
+                ActiveModelConfig.ResolveAuthScheme(profile) == AuthSchemes.XApiKey);
+            if (anthropic) headers["anthropic-version"] = AgentCore.Editor.LLM.Anthropic.AnthropicMessagesClient.ApiVersion;
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            foreach (var header in headers) request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            return request;
+        }
+
         private static List<string> ParseModels(string json)
         {
             var models = new List<string>();

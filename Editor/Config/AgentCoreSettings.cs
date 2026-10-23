@@ -492,11 +492,7 @@ namespace AgentCore.Editor.Config
         /// 解决：max_tokens = maxTokens (content) + reasoningMaxTokens (reasoning 预算)
         /// </summary>
         public int GetEffectiveMaxTokens()
-        {
-            if (enableReasoningOutput && reasoningMaxTokens > 0)
-                return maxTokens + reasoningMaxTokens;
-            return maxTokens;
-        }
+            => GetEffectiveMaxTokens(ActiveModelConfig.MaxTokens);
 
         /// <summary>
         /// v1.6.5+: 计算指定 content 预算下的 effective max_tokens。
@@ -504,10 +500,15 @@ namespace AgentCore.Editor.Config
         /// reasoning 预算仍从 settings.reasoningMaxTokens 获取。
         /// </summary>
         /// <param name="contentMaxTokens">content 部分的 token 预算</param>
+        /// <remarks>
+        /// v1.17.0 fix: 改为读取 <see cref="ActiveModelConfig"/>（profile 覆盖 → 全局默认），
+        /// 此前直接读全局字段，profile 上设置的 maxTokens / reasoning 预算被静默忽略。
+        /// </remarks>
         public int GetEffectiveMaxTokens(int contentMaxTokens)
         {
-            if (enableReasoningOutput && reasoningMaxTokens > 0)
-                return contentMaxTokens + reasoningMaxTokens;
+            int reasoningBudget = ActiveModelConfig.ReasoningMaxTokens;
+            if (ActiveModelConfig.EnableReasoningOutput && reasoningBudget > 0)
+                return contentMaxTokens + reasoningBudget;
             return contentMaxTokens;
         }
     }
