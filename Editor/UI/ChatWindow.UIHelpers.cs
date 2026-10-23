@@ -52,6 +52,7 @@ namespace AgentCore.Editor.UI
 
         /// <summary>
         /// 设置取消按钮的显示/隐藏状态。
+        /// 停止按钮与 send 按钮占同一位置：运行中 send 隐藏、■ 停止按钮顶替，结束后换回。
         /// </summary>
         /// <param name="visible">是否显示</param>
         private void SetCancelVisible(bool visible)
@@ -59,6 +60,10 @@ namespace AgentCore.Editor.UI
             if (_cancelButton != null)
             {
                 _cancelButton.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+            if (_sendButton != null)
+            {
+                _sendButton.style.display = visible ? DisplayStyle.None : DisplayStyle.Flex;
             }
         }
 

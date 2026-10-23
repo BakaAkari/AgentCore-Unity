@@ -475,7 +475,7 @@
 
 /* 输入区右侧布局（v1.17.0）：
    左列两行——上排 + 与思考强度胶囊，下排模型胶囊（两行同宽对齐）；
-   右侧 send 占两行高度（24 + 4 + 24 = 52px），运行中 cancel 以同高窄按钮出现在 send 左侧。 */
+   右侧 send 占两行高度（24 + 4 + 24 = 52px），运行中 send 隐藏，cancel（■ 停止）以同尺寸按钮顶替在同一位置。 */
 #input-buttons {
     flex-direction: row;
     flex-shrink: 0;
@@ -552,13 +552,13 @@
 }
 
 #cancel-button {
-    width: 28px;
+    width: 64px; /* 与 send-button 同宽，运行中原位替换 send */
     font-size: 14px; /* ■ 方块符号尺寸 */
     background-color: #c84a4a;
     border-radius: 8px;
     border-width: 0;
     color: #ffffff;
-    margin: 0 4px 0 0; /* 与 send-button 的间距 */
+    margin: 0;
     padding: 0;
     display: none;
 }
