@@ -38,11 +38,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // p4 opened - 显示已打开的文件
                 var openedResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "opened", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "opened" }, _workingDirectory, ct: ct);
 
                 // p4 diff -sa - 显示已修改但未打开的文件
                 var diffResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "diff -sa", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "diff", "-sa" }, _workingDirectory, ct: ct);
 
                 result.RawOutput = $"=== Opened Files ===\n{openedResult.Output}\n\n=== Modified Files ===\n{diffResult.Output}";
                 result.Files = ParsePerforceStatus(openedResult.Output, diffResult.Output);
@@ -65,7 +65,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // 获取当前客户端信息
                 var clientResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "client -o", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "client", "-o" }, _workingDirectory, ct: ct);
 
                 if (!clientResult.Success)
                 {
@@ -76,7 +76,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 // 获取当前变更列表
                 var changesResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "changes -m 1 #have", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "changes", "-m", "1", "#have" }, _workingDirectory, ct: ct);
 
                 ParsePerforceInfo(clientResult.Output, changesResult.Output, result);
                 result.Success = true;
@@ -97,7 +97,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", $"changes -m {maxCount} -l", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "changes", "-m", maxCount.ToString(), "-l" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                     return commits;
@@ -116,7 +116,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             try
             {
-                var args = string.IsNullOrEmpty(filePath) ? "diff -du" : $"diff -du \"{filePath}\"";
+                var args = new List<string> { "diff", "-du" };
+                if (!string.IsNullOrEmpty(filePath))
+                    args.Add(filePath);
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
                     "p4", args, _workingDirectory, ct: ct);
 
@@ -135,7 +137,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "info", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "info" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -165,7 +167,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // Perforce 使用 labels 而不是 tags
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "labels", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "labels" }, _workingDirectory, ct: ct);
 
                 if (cmdResult.Success && !string.IsNullOrEmpty(cmdResult.Output))
                 {
@@ -195,7 +197,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 // p4 annotate -c 显示每行的 changelist 号
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", $"annotate -c \"{filePath}\"", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "annotate", "-c", filePath }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -225,7 +227,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 var statusTask = GetStatusAsync(ct);
                 var previewTask = VcsCommandExecutor.ExecuteAsync(
-                    "p4", "sync -n", _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "p4", new List<string> { "sync", "-n" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
 
                 await Task.WhenAll(statusTask, previewTask);
 
@@ -272,7 +274,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "client -o", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "client", "-o" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -307,7 +309,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 {
                     // 获取默认 pending changelist
                     var pendingResult = await VcsCommandExecutor.ExecuteAsync(
-                        "p4", "changes -s pending -c $P4CLIENT -m 1", _workingDirectory, ct: ct);
+                        "p4", new List<string> { "changes", "-s", "pending", "-c", "$P4CLIENT", "-m", "1" }, _workingDirectory, ct: ct);
 
                     if (pendingResult.Success && !string.IsNullOrEmpty(pendingResult.Output))
                     {
@@ -324,8 +326,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     }
                 }
 
+                // changeNumber 可能来自调用方，拒绝以 '-' 开头的值，防止被当成 p4 选项
+                if (!VcsArgs.IsSafeRef(changeNumber, out var refError))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = refError;
+                    return result;
+                }
+
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", $"describe -s {changeNumber}", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "describe", "-s", changeNumber }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -370,7 +380,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 {
                     // 先尝试 edit（已存在的文件），失败则尝试 add（新文件）
                     var editResult = await VcsCommandExecutor.ExecuteAsync(
-                        "p4", $"edit \"{filePath}\"", _workingDirectory, ct: ct);
+                        "p4", new List<string> { "edit", filePath }, _workingDirectory, ct: ct);
 
                     if (editResult.Success)
                     {
@@ -380,7 +390,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     else
                     {
                         var addResult = await VcsCommandExecutor.ExecuteAsync(
-                            "p4", $"add \"{filePath}\"", _workingDirectory, ct: ct);
+                            "p4", new List<string> { "add", filePath }, _workingDirectory, ct: ct);
 
                         if (addResult.Success)
                         {
@@ -427,10 +437,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                // p4 submit -d "message"
-                var escapedMessage = message.Replace("\"", "\\\"");
+                // p4 submit -d <message>：描述作为单个 argv 传入，由 VcsArgs 负责转义
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", $"submit -d \"{escapedMessage}\"", _workingDirectory, ct: ct);
+                    "p4", new List<string> { "submit", "-d", message }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -465,9 +474,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                var files = string.Join(" ", filePaths.Select(f => $"\"{f}\""));
+                var args = new List<string> { "revert" };
+                args.AddRange(filePaths);
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", $"revert {files}", _workingDirectory, ct: ct);
+                    "p4", args, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -497,7 +507,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", "sync", _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "p4", new List<string> { "sync" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
 
                 if (!cmdResult.Success)
                 {

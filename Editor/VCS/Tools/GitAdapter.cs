@@ -37,7 +37,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "status --porcelain", _workingDirectory, ct: ct);
+                    "git", new List<string> { "status", "--porcelain" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -67,7 +67,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // 获取当前分支
                 var branchResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "branch --show-current", _workingDirectory, ct: ct);
+                    "git", new List<string> { "branch", "--show-current" }, _workingDirectory, ct: ct);
 
                 if (!branchResult.Success)
                 {
@@ -80,7 +80,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 // 获取当前提交 hash
                 var revResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "rev-parse HEAD", _workingDirectory, ct: ct);
+                    "git", new List<string> { "rev-parse", "HEAD" }, _workingDirectory, ct: ct);
 
                 if (revResult.Success)
                 {
@@ -89,7 +89,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 // 获取所有分支
                 var allBranchesResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "branch -a", _workingDirectory, ct: ct);
+                    "git", new List<string> { "branch", "-a" }, _workingDirectory, ct: ct);
 
                 if (allBranchesResult.Success)
                 {
@@ -116,7 +116,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 var format = "--pretty=format:%H%n%an%n%ad%n%s%n---END---";
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"log -{maxCount} {format} --date=iso", _workingDirectory, ct: ct);
+                    "git", new List<string> { "log", $"-{maxCount}", format, "--date=iso" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                     return commits;
@@ -135,7 +135,12 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             try
             {
-                var args = string.IsNullOrEmpty(filePath) ? "diff HEAD" : $"diff HEAD -- \"{filePath}\"";
+                var args = new List<string> { "diff", "HEAD" };
+                if (!string.IsNullOrEmpty(filePath))
+                {
+                    args.Add("--");
+                    args.Add(filePath);
+                }
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
                     "git", args, _workingDirectory, ct: ct);
 
@@ -154,7 +159,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "remote -v", _workingDirectory, ct: ct);
+                    "git", new List<string> { "remote", "-v" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -183,7 +188,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "tag -l", _workingDirectory, ct: ct);
+                    "git", new List<string> { "tag", "-l" }, _workingDirectory, ct: ct);
 
                 if (cmdResult.Success && !string.IsNullOrEmpty(cmdResult.Output))
                 {
@@ -215,7 +220,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
 
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"blame --porcelain \"{filePath}\"", _workingDirectory, ct: ct);
+                    "git", new List<string> { "blame", "--porcelain", "--", filePath }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -245,7 +250,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 var statusTask = GetStatusAsync(ct);
                 var fetchTask = VcsCommandExecutor.ExecuteAsync(
-                    "git", "fetch --quiet", _workingDirectory, timeoutSeconds: 60, ct: ct);
+                    "git", new List<string> { "fetch", "--quiet" }, _workingDirectory, timeoutSeconds: 60, ct: ct);
 
                 await Task.WhenAll(statusTask, fetchTask);
 
@@ -259,7 +264,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
 
                 var revListResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "rev-list --left-right --count HEAD...@{upstream}", _workingDirectory, timeoutSeconds: 30, ct: ct);
+                    "git", new List<string> { "rev-list", "--left-right", "--count", "HEAD...@{upstream}" }, _workingDirectory, timeoutSeconds: 30, ct: ct);
 
                 result.Success = true;
                 result.RawOutput = string.Join("\n", new[] { fetchResult.Output, revListResult.Output });
@@ -313,9 +318,17 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
+                // revision 来自调用方，拒绝以 '-' 开头的值，防止被当成 git 选项（如 --output=）
+                if (!VcsArgs.IsSafeRef(revision, out var refError))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = refError;
+                    return result;
+                }
+
                 // 获取提交信息
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"show --stat --format=fuller \"{revision}\"", _workingDirectory, ct: ct);
+                    "git", new List<string> { "show", "--stat", "--format=fuller", "--end-of-options", revision }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -329,7 +342,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 // 获取变更文件列表
                 var filesResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"diff-tree --no-commit-id --name-only -r \"{revision}\"", _workingDirectory, ct: ct);
+                    "git", new List<string> { "diff-tree", "--no-commit-id", "--name-only", "-r", "--end-of-options", revision }, _workingDirectory, ct: ct);
 
                 if (filesResult.Success && !string.IsNullOrEmpty(filesResult.Output))
                 {
@@ -359,12 +372,14 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                var files = filePaths != null && filePaths.Count > 0
-                    ? string.Join(" ", filePaths.Select(f => $"\"{f}\""))
-                    : ".";
+                var args = new List<string> { "add", "--" };
+                if (filePaths != null && filePaths.Count > 0)
+                    args.AddRange(filePaths);
+                else
+                    args.Add(".");
 
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"add {files}", _workingDirectory, ct: ct);
+                    "git", args, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -395,12 +410,14 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                var files = filePaths != null && filePaths.Count > 0
-                    ? string.Join(" ", filePaths.Select(f => $"\"{f}\""))
-                    : ".";
+                var args = new List<string> { "reset", "HEAD", "--" };
+                if (filePaths != null && filePaths.Count > 0)
+                    args.AddRange(filePaths);
+                else
+                    args.Add(".");
 
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"reset HEAD {files}", _workingDirectory, ct: ct);
+                    "git", args, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -438,10 +455,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                // 转义消息中的双引号
-                var escapedMessage = message.Replace("\"", "\\\"");
+                // 提交信息作为单个 argv 传入（可含引号、换行），由 VcsArgs 负责转义
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"commit -m \"{escapedMessage}\"", _workingDirectory, ct: ct);
+                    "git", new List<string> { "commit", "-m", message }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -476,9 +492,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                var files = string.Join(" ", filePaths.Select(f => $"\"{f}\""));
+                var args = new List<string> { "checkout", "--" };
+                args.AddRange(filePaths);
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"checkout -- {files}", _workingDirectory, ct: ct);
+                    "git", args, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -508,7 +525,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "pull", _workingDirectory, timeoutSeconds: 60, ct: ct);
+                    "git", new List<string> { "pull" }, _workingDirectory, timeoutSeconds: 60, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -546,8 +563,15 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
+                if (!VcsArgs.IsSafeRef(branchName, out var refError))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = refError;
+                    return result;
+                }
+
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"branch \"{branchName}\"", _workingDirectory, ct: ct);
+                    "git", new List<string> { "branch", branchName }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -585,8 +609,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
+                if (!VcsArgs.IsSafeRef(branchName, out var refError))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = refError;
+                    return result;
+                }
+
+                // 末尾的 "--" 强制把参数解释为分支而非文件路径（否则同名文件会被 checkout 覆盖）
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", $"checkout \"{branchName}\"", _workingDirectory, ct: ct);
+                    "git", new List<string> { "checkout", branchName, "--" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -617,7 +649,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                var args = string.IsNullOrEmpty(message) ? "stash" : $"stash push -m \"{message}\"";
+                var args = string.IsNullOrEmpty(message)
+                    ? new List<string> { "stash" }
+                    : new List<string> { "stash", "push", "-m", message };
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
                     "git", args, _workingDirectory, ct: ct);
 
@@ -651,7 +685,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", "stash pop", _workingDirectory, ct: ct);
+                    "git", new List<string> { "stash", "pop" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {

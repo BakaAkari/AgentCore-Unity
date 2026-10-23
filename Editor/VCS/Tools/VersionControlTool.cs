@@ -1074,11 +1074,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    return await VcsCommandExecutor.ExecuteAsync("git", $"log -{maxCount} --follow -- {Quote(filePath)}", VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
+                    return await VcsCommandExecutor.ExecuteAsync("git", new List<string> { "log", $"-{maxCount}", "--follow", "--", filePath }, VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
                 case VcsType.Svn:
-                    return await VcsCommandExecutor.ExecuteAsync("svn", $"log -l {maxCount} {Quote(filePath)}", VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
+                    return await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "log", "-l", maxCount.ToString(), "--non-interactive", SvnAdapter.SvnPathArg(filePath) }, VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
                 case VcsType.Perforce:
-                    return await VcsCommandExecutor.ExecuteAsync("p4", $"filelog -m {maxCount} {Quote(filePath)}", VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
+                    return await VcsCommandExecutor.ExecuteAsync("p4", new List<string> { "filelog", "-m", maxCount.ToString(), filePath }, VcsDetector.GetVcsRootPath(), timeoutSeconds: 60, ct: ct);
                 default:
                     return CommandFailure($"get_file_log is not supported for {adapter.VcsType}.");
             }
@@ -1093,13 +1093,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Svn:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", $"cleanup {Quote(cleanupTarget)}", rootPath, timeoutSeconds: 120, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "cleanup", "--non-interactive", SvnAdapter.SvnPathArg(cleanupTarget) }, rootPath, timeoutSeconds: 120, ct: ct);
                     break;
                 case VcsType.Git:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", "gc --auto", rootPath, timeoutSeconds: 120, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", new List<string> { "gc", "--auto" }, rootPath, timeoutSeconds: 120, ct: ct);
                     break;
                 case VcsType.Perforce:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", "reconcile -n", rootPath, timeoutSeconds: 120, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", new List<string> { "reconcile", "-n" }, rootPath, timeoutSeconds: 120, ct: ct);
                     break;
                 default:
                     return OperationFailure($"cleanup is not supported for {adapter.VcsType}.");
@@ -1111,17 +1111,21 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private async Task<VcsOperationResult> ExecuteCommitFilesAsync(IVcsAdapter adapter, string message, List<string> filePaths, CancellationToken ct)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
-            var escapedMessage = EscapeMessage(message);
-            var files = JoinQuoted(filePaths);
+            // 提交信息与每个路径都作为独立 argv 传入，由 VcsArgs 负责转义
+            var commitMessage = message ?? string.Empty;
             CommandResult commandResult;
 
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", $"commit -m {Quote(escapedMessage)} -- {files}", rootPath, timeoutSeconds: 120, ct: ct);
+                    var gitArgs = new List<string> { "commit", "-m", commitMessage, "--" };
+                    gitArgs.AddRange(filePaths);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, timeoutSeconds: 120, ct: ct);
                     break;
                 case VcsType.Svn:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", $"commit -m {Quote(escapedMessage)} {files}", rootPath, timeoutSeconds: 120, ct: ct);
+                    var svnArgs = new List<string> { "commit", "--non-interactive", "-m", commitMessage };
+                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, timeoutSeconds: 120, ct: ct);
                     break;
                 case VcsType.Perforce:
                     return OperationFailure("commit_files is not supported for Perforce because p4 submit scope depends on changelist state. Use submit for the active changelist.");
@@ -1135,19 +1139,24 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private async Task<VcsOperationResult> ExecuteResolveFilesAsync(IVcsAdapter adapter, List<string> filePaths, CancellationToken ct)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
-            var files = JoinQuoted(filePaths);
             CommandResult commandResult;
 
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", $"add {files}", rootPath, ct: ct);
+                    var gitArgs = new List<string> { "add", "--" };
+                    gitArgs.AddRange(filePaths);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", $"resolve --accept working {files}", rootPath, ct: ct);
+                    var svnArgs = new List<string> { "resolve", "--accept", "working", "--non-interactive" };
+                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, ct: ct);
                     break;
                 case VcsType.Perforce:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", $"resolve -am {files}", rootPath, timeoutSeconds: 60, ct: ct);
+                    var p4Args = new List<string> { "resolve", "-am" };
+                    p4Args.AddRange(filePaths);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", p4Args, rootPath, timeoutSeconds: 60, ct: ct);
                     break;
                 default:
                     return OperationFailure($"resolve_files is not supported for {adapter.VcsType}.");
@@ -1177,19 +1186,24 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private async Task<VcsOperationResult> ExecuteRemoveFilesAsync(IVcsAdapter adapter, List<string> filePaths, CancellationToken ct)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
-            var files = JoinQuoted(filePaths);
             CommandResult commandResult;
 
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", $"rm {files}", rootPath, ct: ct);
+                    var gitArgs = new List<string> { "rm", "--" };
+                    gitArgs.AddRange(filePaths);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", $"delete --force {files}", rootPath, ct: ct);
+                    var svnArgs = new List<string> { "delete", "--force", "--non-interactive" };
+                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, ct: ct);
                     break;
                 case VcsType.Perforce:
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", $"delete {files}", rootPath, ct: ct);
+                    var p4Args = new List<string> { "delete" };
+                    p4Args.AddRange(filePaths);
+                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", p4Args, rootPath, ct: ct);
                     break;
                 default:
                     return OperationFailure($"remove_files is not supported for {adapter.VcsType}.");
@@ -1226,7 +1240,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private async Task<VcsOperationResult> ExecuteSvnIgnoreAsync(string rootPath, string filePath, string pattern, string mode, CancellationToken ct)
         {
             var target = GetSvnIgnoreTarget(rootPath, filePath, mode);
-            var propGet = await VcsCommandExecutor.ExecuteAsync("svn", $"propget svn:ignore {Quote(target)}", rootPath, ct: ct);
+            var propGet = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "propget", "svn:ignore", "--non-interactive", SvnAdapter.SvnPathArg(target) }, rootPath, ct: ct);
             var existingPatterns = propGet.Success && !string.IsNullOrEmpty(propGet.Output)
                 ? propGet.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(line => line.Trim()).ToList()
                 : new List<string>();
@@ -1238,7 +1252,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 File.WriteAllLines(tempFile, existingPatterns);
-                var propSet = await VcsCommandExecutor.ExecuteAsync("svn", $"propset svn:ignore --file {Quote(tempFile)} {Quote(target)}", rootPath, ct: ct);
+                var propSet = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "propset", "svn:ignore", "--non-interactive", "--file", tempFile, SvnAdapter.SvnPathArg(target) }, rootPath, ct: ct);
                 return OperationFromCommand(propSet, $"Updated SVN ignore rule: {pattern}", new List<string> { target });
             }
             finally
@@ -1305,21 +1319,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 directory = Path.GetDirectoryName(directory);
 
             return string.IsNullOrEmpty(directory) ? rootPath : directory;
-        }
-
-        private static string JoinQuoted(IEnumerable<string> values)
-        {
-            return string.Join(" ", values.Select(Quote));
-        }
-
-        private static string Quote(string value)
-        {
-            return "\"" + (value ?? string.Empty).Replace("\"", "\\\"") + "\"";
-        }
-
-        private static string EscapeMessage(string value)
-        {
-            return (value ?? string.Empty).Replace("\"", "\\\"");
         }
 
         private static string Truncate(string value, int maxLength, out bool truncated)

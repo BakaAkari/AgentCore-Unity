@@ -990,12 +990,14 @@ namespace AgentCore.Editor.Components.VCS.UI
         }
 
 
-        private async Task RunFileCommandAsync(string operation, string command, string arguments, string filePath, bool refreshAfterSuccess = false)
+        private async Task RunFileCommandAsync(string operation, string command, IReadOnlyList<string> argumentList, string filePath, bool refreshAfterSuccess = false)
         {
             try
             {
+                // 每个参数作为独立 argv 传入；arguments 仅用于日志展示
+                var arguments = VcsArgs.Join(argumentList);
                 LogVcsOperation(operation, $"Running {command} {arguments}");
-                var result = await VcsCommandExecutor.ExecuteAsync(command, arguments, VcsDetector.GetVcsRootPath(), ct: CancellationToken.None);
+                var result = await VcsCommandExecutor.ExecuteAsync(command, argumentList, VcsDetector.GetVcsRootPath(), ct: CancellationToken.None);
                 var output = string.Join("\n", new[] { result.Output, result.Error }.Where(text => !string.IsNullOrWhiteSpace(text))).Trim();
 
                 if (result.Success)
@@ -1017,14 +1019,14 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
         }
 
-        private async Task<CommandResult> ExecuteSvnWithCleanupRetryAsync(string operation, string arguments, string rootPath)
+        private async Task<CommandResult> ExecuteSvnWithCleanupRetryAsync(string operation, IReadOnlyList<string> arguments, string rootPath)
         {
             var result = await VcsCommandExecutor.ExecuteAsync("svn", arguments, rootPath, ct: CancellationToken.None);
             if (!IsSvnWorkingCopyLocked(result))
                 return result;
 
             LogVcsOperation(operation, "SVN working copy is locked. Running svn cleanup and retrying once.");
-            var cleanupResult = await VcsCommandExecutor.ExecuteAsync("svn", "cleanup", rootPath, ct: CancellationToken.None);
+            var cleanupResult = await VcsCommandExecutor.ExecuteAsync("svn", new List<string> { "cleanup", "--non-interactive" }, rootPath, ct: CancellationToken.None);
             if (!cleanupResult.Success)
             {
                 AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][{operation}] SVN cleanup failed.\nCommand: svn cleanup\nError: {cleanupResult.ErrorMessage}\n{cleanupResult.Output}\n{cleanupResult.Error}");

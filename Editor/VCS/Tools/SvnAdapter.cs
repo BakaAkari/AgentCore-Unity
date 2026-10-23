@@ -40,7 +40,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // 使用 XML 输出格式便于解析，保持与 SVN 客户端默认 status 输出一致
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", "status --xml", _workingDirectory, ct: ct);
+                    "svn", new List<string> { "status", "--xml", "--non-interactive" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -70,7 +70,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // 获取当前 URL
                 var infoResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", "info --xml", _workingDirectory, ct: ct);
+                    "svn", new List<string> { "info", "--xml", "--non-interactive" }, _workingDirectory, ct: ct);
 
                 if (!infoResult.Success)
                 {
@@ -101,7 +101,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 // 不指定 revision 范围时，svn log 默认从 working copy 的 BASE revision 开始
                 // 这会导致看不到比本地 BASE 更新的远程 commit
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", $"log -r HEAD:1 --limit {maxCount} --xml", _workingDirectory,
+                    "svn", new List<string> { "log", "-r", "HEAD:1", "--limit", maxCount.ToString(), "--xml", "--non-interactive" }, _workingDirectory,
                     timeoutSeconds: 60, ct: ct);
 
                 if (!cmdResult.Success)
@@ -121,7 +121,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             try
             {
-                var args = string.IsNullOrEmpty(filePath) ? "diff" : $"diff \"{filePath}\"";
+                var args = new List<string> { "diff", "--non-interactive" };
+                if (!string.IsNullOrEmpty(filePath))
+                    args.Add(SvnPathArg(filePath));
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
                     "svn", args, _workingDirectory, ct: ct);
 
@@ -140,7 +142,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", "info --xml", _workingDirectory, ct: ct);
+                    "svn", new List<string> { "info", "--xml", "--non-interactive" }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -170,7 +172,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 // SVN 的 tags 通常在 /tags 目录下
                 var infoResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", "info --xml", _workingDirectory, ct: ct);
+                    "svn", new List<string> { "info", "--xml", "--non-interactive" }, _workingDirectory, ct: ct);
 
                 if (!infoResult.Success)
                     return tags;
@@ -181,7 +183,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 var tagsUrl = $"{repoRoot}/tags";
                 var listResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", $"list \"{tagsUrl}\"", _workingDirectory, ct: ct);
+                    "svn", new List<string> { "list", "--non-interactive", tagsUrl }, _workingDirectory, ct: ct);
 
                 if (listResult.Success && !string.IsNullOrEmpty(listResult.Output))
                 {
@@ -213,7 +215,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
 
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", $"blame \"{filePath}\"", _workingDirectory, ct: ct);
+                    "svn", new List<string> { "blame", "--non-interactive", SvnPathArg(filePath) }, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -243,7 +245,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 var statusTask = GetStatusAsync(ct);
                 var remoteTask = VcsCommandExecutor.ExecuteAsync(
-                    "svn", "status -u -q", _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "svn", new List<string> { "status", "-u", "-q", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
 
                 await Task.WhenAll(statusTask, remoteTask);
 
@@ -290,7 +292,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                var args = string.IsNullOrEmpty(target) ? "info --xml" : $"info --xml \"{target}\"";
+                var args = new List<string> { "info", "--xml", "--non-interactive" };
+                if (!string.IsNullOrEmpty(target))
+                    args.Add(SvnPathArg(target));
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
                     "svn", args, _workingDirectory, ct: ct);
 
@@ -368,9 +372,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                     // 使用绝对路径执行命令，避免工作目录不一致导致路径解析错误
                     var arguments = shouldDelete
-                        ? $"delete --force \"{absPath}\""
-                        : $"add --parents --force \"{absPath}\"";
-                    var commandLine = $"svn {arguments}";
+                        ? new List<string> { "delete", "--force", "--non-interactive", SvnPathArg(absPath) }
+                        : new List<string> { "add", "--parents", "--force", "--non-interactive", SvnPathArg(absPath) };
+                    var commandLine = $"svn {VcsArgs.Join(arguments)}";
 
                     if (string.IsNullOrEmpty(result.CommandLine))
                         result.CommandLine = commandLine;
@@ -463,9 +467,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     }
                 }
 
-                var escapedMessage = message.Replace("\"", "\\\"");
-                var arguments = $"commit -m \"{escapedMessage}\"";
-                result.CommandLine = $"svn {arguments}";
+                // 提交信息作为单个 argv 传入（可含引号、换行），由 VcsArgs 负责转义
+                var arguments = new List<string> { "commit", "--non-interactive", "-m", message };
+                result.CommandLine = $"svn {VcsArgs.Join(arguments)}";
                 result.LogLines.Add($"Run: {result.CommandLine}");
 
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
@@ -516,9 +520,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                var files = string.Join(" ", filePaths.Select(f => $"\"{f}\""));
+                var args = new List<string> { "revert", "--non-interactive" };
+                args.AddRange(filePaths.Select(SvnPathArg));
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", $"revert {files}", _workingDirectory, ct: ct);
+                    "svn", args, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -548,7 +553,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", "update --accept postpone", _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "svn", new List<string> { "update", "--accept", "postpone", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
 
                 result.RawOutput = cmdResult.Output;
                 result.ConflictedFiles = ParseSvnUpdateConflicts(cmdResult.Output);
@@ -865,6 +870,19 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// 将路径解析为绝对路径。
         /// 若 path 已是绝对路径则直接返回；否则以 basePath 为基准拼接。
         /// </summary>
+        /// <summary>
+        /// 将工作副本路径转为单个 svn 参数：以 '-' 开头的相对路径加 "./" 前缀，避免被当成选项；
+        /// 含 '@' 的路径追加 '@'，避免最后一个 '@' 之后的部分被解析为 peg revision。
+        /// </summary>
+        internal static string SvnPathArg(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return path;
+            if (path[0] == '-')
+                path = "./" + path;
+            return path.Contains("@") ? path + "@" : path;
+        }
+
         private static string ResolveAbsolutePath(string path, string basePath)
         {
             if (string.IsNullOrEmpty(path))
