@@ -156,8 +156,11 @@ namespace AgentCore.Editor.Core
         /// <summary>UI 对话轮次历史（供 UI 显示用）</summary>
         private readonly List<ConversationTurn> _conversationTurns = new List<ConversationTurn>();
 
-        /// <summary>当前操作的取消令牌源</summary>
-        private CancellationTokenSource _currentCts;
+        /// <summary>
+        /// 当前运行（同一时刻至多一个，见 <see cref="ActiveRun"/>）。被取消但尚未收尾的旧 run
+        /// 在新 run 登记后即失去当前身份，其后续写入由 <see cref="IsCurrentRun"/> 拦下。
+        /// </summary>
+        private ActiveRun _activeRun;
 
         /// <summary>是否已完成初始化</summary>
         private bool _isInitialized;
@@ -564,10 +567,9 @@ namespace AgentCore.Editor.Core
                     $"[AgentCore] Cannot send message while in {CurrentState} state. Wait for current operation to complete.");
             }
 
-            // 2. 创建取消令牌
-            _currentCts?.Dispose();
-            _currentCts = new CancellationTokenSource();
-            var ct = _currentCts.Token;
+            // 2. 登记本次运行（同步完成，早于任何 await）：已有未取消的运行则抛出，杜绝两个 loop 并发写 _messages
+            var run = BeginRun("send");
+            var ct = run.Token;
 
             // 3. 添加用户消息到历史
             // v1.16: 用户图支持。图不塞进主模型上下文（base64 是噪音，且主模型多不支持看图）；
@@ -626,6 +628,11 @@ namespace AgentCore.Editor.Core
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] Node A instruction injected (~{nodeAInstruction.Length / 3} tokens estimated).");
                 }
 
+                // 同步置忙：记忆召回是本方法第一个 await，必须在它之前离开 Idle，
+                // 否则 UI 的状态闸门在召回期间仍放行，连点发送会并发出第二个 run。
+                // （Node A 的 Continuation 判定读的是进入本方法时的状态，已在上方同步完成。）
+                SetState(AgentState.Thinking);
+
                 // 5.5 自动记忆召回：搜索与用户消息相关的记忆并注入上下文
                 if (settings.mem0Enabled && !string.IsNullOrEmpty(settings.mem0Endpoint))
                 {
@@ -659,6 +666,9 @@ namespace AgentCore.Editor.Core
                 //   随后进入 HTTP 请求 / 首轮 Cold-Start 快照阶段。
                 //   Yield 通过 UnitySynchronizationContext 回到主线程，不改变线程亲和性。
                 await System.Threading.Tasks.Task.Yield();
+
+                // 记忆召回的 catch 会吞掉取消；在往 _messages 插入首轮上下文前确认本 run 仍然有效
+                ct.ThrowIfCancellationRequested();
 
                 // §3.3 + §3.6: 会话首轮自动注入 Deferred Context + Workspace 运行时快照
                 if (IsFirstUserMessage())
@@ -706,66 +716,124 @@ namespace AgentCore.Editor.Core
                 // 7. 工具调用循环（P0-2 fix: 提取为公共方法，消除与 TriggerResumeLLMCall 的代码重复）
                 await RunToolCallLoopAsync(assistantTurn, toolDefinitions, ct);
 
-                // 8. 回到 Idle 状态
-                //   WaitingForClarification 由 HandleNodeAConclusionForFinalResponse 设置, 不覆盖
-                //   ReviewingAnswer 由 HandleFinalResponse Node B 触发设置, 由 TriggerNodeBAsync 完成时恢复, 不覆盖
-                //   WaitingForUserInput 由 RunToolCallLoopAsync 在 ask_user 挂起时设置(见 AgentLoop.Runner.cs:145),
-                //   此处必须同样排除——否则 ask_user 触发后 SendMessageAsync 从 RunToolCallLoopAsync 返回时会
-                //   立刻把刚设置的 WaitingForUserInput 覆盖回 Idle（BUG: ask_user 挂起态被瞬间抹掉，
-                //   UI 卡在等待输入的外观但 CurrentState 实际已是 Idle，导致后续状态流转/并发保护判断错误）。
-                //   用 _pendingUserInputToolCallId（真正的数据源）而非仅比较 CurrentState 更可靠：
-                //   即使 CurrentState 因其他路径已被改写，只要挂起的 ask_user 尚未被应答，就不能回 Idle。
+                // Node B 审阅 / REVISE 重生成属于本 run，等它结束再统一复位状态
+                await AwaitRunTailAsync(run);
+            }
+            catch (OperationCanceledException)
+            {
+                HandleRunCancelled(run, assistantTurn);
+            }
+            catch (Exception ex)
+            {
+                HandleRunFailed(run, assistantTurn, ex, "LLM 对话请求");
+            }
+            finally
+            {
+                // 8. 回到 Idle（WaitingForClarification / ask_user 挂起除外，见 EndRun）
+                EndRun(run);
+            }
+        }
+
+        /// <summary>
+        /// 是否有未被取消的运行（UI 据此判断忙碌，比单看 <see cref="CurrentState"/> 更早生效）。
+        /// </summary>
+        public bool IsRunActive => _activeRun != null && !_activeRun.IsCancelled;
+
+        /// <summary>当前运行的取消令牌；无运行时为 <see cref="CancellationToken.None"/>。</summary>
+        private CancellationToken CurrentRunToken => _activeRun?.Token ?? CancellationToken.None;
+
+        /// <summary>
+        /// 登记一个新运行。必须在调用方的第一个 await 之前同步调用。
+        /// 已有未取消的运行时抛出；已取消但仍在收尾的旧运行就此失去当前身份。
+        /// </summary>
+        private ActiveRun BeginRun(string label)
+        {
+            if (_activeRun != null && !_activeRun.IsCancelled)
+            {
+                throw new InvalidOperationException(
+                    $"[AgentCore] Cannot start '{label}': run '{_activeRun.Label}' is still active.");
+            }
+
+            var run = new ActiveRun(label);
+            _activeRun = run;
+            return run;
+        }
+
+        /// <summary>
+        /// 给定令牌是否属于当前运行。旧运行被取消且新运行已登记后返回 false，
+        /// 旧运行在 await 之后写 <c>_messages</c> / 改状态前必须先过这一关。
+        /// Unity 主线程有 UnitySynchronizationContext，检查与写入之间没有 await 即为原子。
+        /// </summary>
+        private bool IsCurrentRun(CancellationToken ct)
+        {
+            return _activeRun != null && _activeRun.Token == ct;
+        }
+
+        private static async Task AwaitRunTailAsync(ActiveRun run)
+        {
+            var tail = run.Tail;
+            if (tail != null)
+                await tail;
+        }
+
+        private void HandleRunCancelled(ActiveRun run, ConversationTurn assistantTurn)
+        {
+            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Run '{run.Label}' was cancelled.");
+            assistantTurn.IsStreaming = false;
+            // BUG2 fix: 取消发生在 reasoning 流式过程中时必须显式收尾 reasoning 状态，
+            // 否则 ThinkingDrawer 的计时器（250ms Every）永久悬空运行。
+            // 已被新运行取代时 reasoning 运行时字段属于新运行，不能动。
+            if (_activeRun == run)
+                CompleteReasoningIfNeeded(assistantTurn);
+        }
+
+        private void HandleRunFailed(ActiveRun run, ConversationTurn assistantTurn, Exception ex, string context)
+        {
+            AgentCoreLog.Error($"[AgentCore] Error during run '{run.Label}': {ex}");
+            assistantTurn.IsStreaming = false;
+            if (_activeRun != run)
+                return;
+
+            CompleteReasoningIfNeeded(assistantTurn);
+            // 发送结构化错误事件（携带异常类型、HTTP 状态码、堆栈等）
+            EmitEvent(AgentEvent.ErrorEvent(ex, context));
+            SetState(AgentState.Error);
+        }
+
+        /// <summary>
+        /// 运行收尾（任何路径都经过这里）。仍是当前运行时清空登记并复位状态：
+        /// WaitingForClarification（Node A 反问）和 ask_user 挂起是运行的合法终态，保留给 UI；
+        /// 其余（含 Node B / REVISE 失败后残留的 Thinking）一律回 Idle。
+        /// </summary>
+        private void EndRun(ActiveRun run)
+        {
+            if (_activeRun == run)
+            {
+                _activeRun = null;
                 if (CurrentState != AgentState.WaitingForClarification &&
-                    CurrentState != AgentState.ReviewingAnswer &&
                     string.IsNullOrEmpty(_pendingUserInputToolCallId))
                 {
                     SetState(AgentState.Idle);
                 }
             }
-            catch (OperationCanceledException)
-            {
-                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] SendMessageAsync was cancelled.");
-                assistantTurn.IsStreaming = false;
-                // BUG2 fix: 取消发生在 reasoning 流式过程中时，CompleteReasoningIfNeeded 从未被调用，
-                // 导致 ThinkingDrawer 的计时器（250ms Every）永久悬空运行，UI 表现为"思考折叠窗口
-                // 一直在读秒"。取消路径必须像正常完成路径一样，显式收尾 reasoning 状态。
-                CompleteReasoningIfNeeded(assistantTurn);
-                SetState(AgentState.Idle);
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Error($"[AgentCore] Error during SendMessageAsync: {ex}");
-                assistantTurn.IsStreaming = false;
-                // BUG2 fix: 异常中断同理，reasoning 计时器不应悬空。
-                CompleteReasoningIfNeeded(assistantTurn);
 
-                // 发送结构化错误事件（携带异常类型、HTTP 状态码、堆栈等）
-                EmitEvent(AgentEvent.ErrorEvent(ex, "LLM 对话请求"));
-
-                // 短暂进入 Error 状态后回到 Idle，确保不会卡死
-                SetState(AgentState.Error);
-                SetState(AgentState.Idle);
-            }
-            finally
-            {
-                // 确保取消令牌被释放
-                if (_currentCts != null && !_currentCts.IsCancellationRequested)
-                {
-                    // 正常完成，不需要额外操作
-                }
-            }
+            run.Done.TrySetResult(true);
         }
 
         /// <summary>
         /// 取消当前正在进行的操作。
         /// 如果没有操作在进行中，此方法不执行任何操作。
+        /// <para>
+        /// 被取消的运行保持登记直到它自己收尾，期间新的发送可以立即开始（见 <see cref="BeginRun"/>）。
+        /// </para>
         /// </summary>
         public void Cancel()
         {
-            if (_currentCts != null && !_currentCts.IsCancellationRequested)
+            var run = _activeRun;
+            if (run != null && !run.IsCancelled)
             {
-                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Cancelling current operation...");
-                _currentCts.Cancel();
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Cancelling run '{run.Label}'...");
+                run.Cancel();
             }
 
             // ask_user 挂起时取消 = 放弃提问；否则挂起 id 残留会让下一轮 loop 结束时误判仍在等待
@@ -785,8 +853,9 @@ namespace AgentCore.Editor.Core
         {
             AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Resetting conversation...");
 
-            // 1. 取消当前操作
+            // 1. 取消并注销当前操作：历史即将清空，被取消的运行不能再把结果写进新会话
             Cancel();
+            _activeRun = null;
 
             // 2. Phase 3: 保存当前会话后创建新会话
             try
@@ -918,7 +987,7 @@ namespace AgentCore.Editor.Core
                 return false;
             }
 
-            if (CurrentState != AgentState.Idle)
+            if (CurrentState != AgentState.Idle || IsRunActive)
             {
                 AgentCoreLog.Warning("[AgentCore] Cannot load session while agent is busy.");
                 return false;
@@ -939,7 +1008,9 @@ namespace AgentCore.Editor.Core
                 return false;
             }
 
-            // 恢复对话状态
+            // 恢复对话状态。注销残留的已取消运行，防止它收尾时把旧会话的工具结果写进新会话
+            if (_activeRun != null && _activeRun.IsCancelled)
+                _activeRun = null;
             _messages.Clear();
             _conversationTurns.Clear();
             _fileChangeTracker?.Clear();
@@ -1112,11 +1183,11 @@ namespace AgentCore.Editor.Core
             // ADR-18: 释放 Skill Context（解除事件订阅 + 清空 tool 引用）
             DisposeSkillContext();
 
-            // 释放取消令牌
-            if (_currentCts != null)
+            // 取消并注销当前运行
+            if (_activeRun != null)
             {
-                _currentCts.Dispose();
-                _currentCts = null;
+                _activeRun.Cancel();
+                _activeRun = null;
             }
 
             AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] AgentLoop disposed.");

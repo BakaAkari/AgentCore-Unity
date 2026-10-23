@@ -233,10 +233,10 @@ namespace AgentCore.Editor.Core
                 AgentCoreLog.Warning($"[AgentCore] beforeAssemblyReload: Failed to save session: {ex.Message}");
             }
 
-            // 8. 取消当前操作的 CancellationToken
-            if (_currentCts != null && !_currentCts.IsCancellationRequested)
+            // 8. 取消当前运行
+            if (_activeRun != null && !_activeRun.IsCancelled)
             {
-                _currentCts.Cancel();
+                _activeRun.Cancel();
                 AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] beforeAssemblyReload: Cancelled current operation.");
             }
 
@@ -613,6 +613,19 @@ namespace AgentCore.Editor.Core
             // Resume 方法可能只修复了单个 interruptedToolCallId，但 assistant 消息可能有多个 tool_calls
             SanitizeMessageHistory();
 
+            // 登记运行并同步置忙（早于任何 await），与 SendMessageAsync 同一套并发约束
+            ActiveRun run;
+            try
+            {
+                run = BeginRun("resume");
+            }
+            catch (InvalidOperationException ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] TriggerResumeLLMCall skipped: {ex.Message}");
+                return;
+            }
+            SetState(AgentState.Thinking);
+
             // 恢复调用会产生新的 LLM 回复，标记会话内容已变更
             SessionManager.Instance.MarkDirty();
 
@@ -620,10 +633,7 @@ namespace AgentCore.Editor.Core
             AsyncHelper.RunAsync(
                 async () =>
                 {
-                    // 创建取消令牌
-                    _currentCts?.Dispose();
-                    _currentCts = new CancellationTokenSource();
-                    var ct = _currentCts.Token;
+                    var ct = run.Token;
 
                     // 创建助手轮次（流式输出占位）
                     var assistantTurn = new ConversationTurn("assistant")
@@ -640,37 +650,20 @@ namespace AgentCore.Editor.Core
                         // P0-2 fix: 使用提取的公共方法，消除与 SendMessageAsync 的代码重复
                         // RunToolCallLoopAsync 内部已包含自动保存逻辑
                         await RunToolCallLoopAsync(assistantTurn, toolDefinitions, ct, " Resume");
-
-                        // ask_user 恢复状态流转 bug 修复（与 AgentLoop.cs SendMessageAsync 同源问题）：
-                        // 若本轮 resume 内又立刻触发了新的 ask_user 挂起，RunToolCallLoopAsync 已经把
-                        // CurrentState 设为 WaitingForUserInput 并 return——这里原先无条件 SetState(Idle)
-                        // 会把刚设置的等待态瞬间覆盖掉。同样需要用 _pendingUserInputToolCallId 判断，
-                        // 且要排除 WaitingForClarification / ReviewingAnswer（与 SendMessageAsync 保持一致）。
-                        if (CurrentState != AgentState.WaitingForClarification &&
-                            CurrentState != AgentState.ReviewingAnswer &&
-                            string.IsNullOrEmpty(_pendingUserInputToolCallId))
-                        {
-                            SetState(AgentState.Idle);
-                        }
+                        await AwaitRunTailAsync(run);
                     }
                     catch (OperationCanceledException)
                     {
-                        AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Resume LLM call was cancelled.");
-                        assistantTurn.IsStreaming = false;
-                        // BUG2 fix: 与 SendMessageAsync 同理，取消时必须显式收尾 reasoning 计时状态，
-                        // 否则 ThinkingDrawer 计时器悬空运行。
-                        CompleteReasoningIfNeeded(assistantTurn);
-                        SetState(AgentState.Idle);
+                        HandleRunCancelled(run, assistantTurn);
                     }
                     catch (Exception ex)
                     {
-                        AgentCoreLog.Error($"[AgentCore] Error during resume LLM call: {ex}");
-                        assistantTurn.IsStreaming = false;
-                        // BUG2 fix: 异常中断同理。
-                        CompleteReasoningIfNeeded(assistantTurn);
-                        EmitEvent(AgentEvent.ErrorEvent(ex, "Domain Reload 恢复"));
-                        SetState(AgentState.Error);
-                        SetState(AgentState.Idle);
+                        HandleRunFailed(run, assistantTurn, ex, "Domain Reload 恢复");
+                    }
+                    finally
+                    {
+                        // ask_user 挂起 / WaitingForClarification 保留，其余回 Idle（见 EndRun）
+                        EndRun(run);
                     }
                 },
                 onError: ex => AgentCoreLog.Error($"[AgentCore] TriggerResumeLLMCall error: {ex.Message}")

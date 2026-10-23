@@ -135,8 +135,11 @@ namespace AgentCore.Editor.Core
             // ask_user 挂起检测：若某个工具返回 IsAwaitingUserInput，注册挂起请求到 UI 面板，
             // 记录 pending tool_call id。Runner 检测到 _pendingUserInputToolCallId 后会截断退出循环。
             // 用户应答后由 ResumeFromUserInput 写入真实 tool_result 并唤醒。
+            // 已取消的运行不再登记新的提问：Cancel() 已放弃挂起提问，这里登记会让 UI 弹出无人接收的面板
             foreach (var result in results)
             {
+                if (ct.IsCancellationRequested)
+                    break;
                 if (result?.Result != null && result.Result.IsAwaitingUserInput)
                 {
                     var q = result.Result.AskUserQuestion ?? "";
@@ -304,6 +307,13 @@ namespace AgentCore.Editor.Core
             // Phase 2 Step 11: 构建带错误信息的 tool messages 追加到 LLM 历史
             // Phase 5: 集成工具结果压缩 — 在添加到消息历史前压缩过长的工具输出
             var toolMessages = await BuildToolMessagesWithCompressionAsync(results, consoleErrors, compilationReport, ct);
+            if (!IsCurrentRun(ct))
+            {
+                // 本运行已被取消且新运行已开始：不能把旧结果插进新运行的历史中间。
+                // 缺失的 tool_result 由请求前的历史修复补成"已中断"合成结果。
+                AgentCoreLog.Warning($"[AgentCore] Dropped {toolMessages.Count} tool result(s) from a superseded run.");
+                return;
+            }
             _messages.AddRange(toolMessages);
 
             AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Executed {results.Count} tool call(s), " +

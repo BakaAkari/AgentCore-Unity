@@ -357,7 +357,7 @@ namespace AgentCore.Editor.Core
             bool reachedRoundLimit = currentRound >= maxRounds;
             bool reachedTokenBudget = tokenBudget > 0 && accumulatedTokens >= tokenBudget;
 
-            if ((reachedRoundLimit || reachedTokenBudget) && CurrentState != AgentState.Idle)
+            if ((reachedRoundLimit || reachedTokenBudget) && !ct.IsCancellationRequested && CurrentState != AgentState.Idle)
             {
                 string limitReason = reachedTokenBudget
                     ? $"Token 预算已耗尽（已消耗 {accumulatedTokens:N0}，预算 {tokenBudget:N0}）"
@@ -500,7 +500,10 @@ namespace AgentCore.Editor.Core
                 if (nodeBShouldRun)
                 {
                     SetState(AgentState.ReviewingAnswer);
-                    _ = TriggerNodeBAsync(assistantMessage, assistantTurn, _currentSelfChallengeData);
+                    // 挂到当前 run 的尾部：run 收尾前会等它，REVISE 失败等任何路径都由 EndRun 统一复位状态
+                    var nodeBTask = TriggerNodeBAsync(assistantMessage, assistantTurn, _currentSelfChallengeData);
+                    if (_activeRun != null)
+                        _activeRun.Tail = nodeBTask;
                 }
             }
 
@@ -537,7 +540,7 @@ namespace AgentCore.Editor.Core
             {
                 var draftContent = assistantTurn?.Content ?? string.Empty;
                 var userMessage = GetLastUserMessageContent();
-                var ct = _currentCts?.Token ?? System.Threading.CancellationToken.None;
+                var ct = CurrentRunToken;
 
                 var reviewResult = await InvokeNodeBAsync(draftContent, userMessage, assistantTurn, ct, turnBoundData);
 
@@ -547,6 +550,7 @@ namespace AgentCore.Editor.Core
                 if (reviewResult.Verdict == NodeBVerdict.REVISE && reviewResult.ReviseIssues != null && reviewResult.ReviseIssues.Count > 0)
                 {
                     EmitEvent(AgentEvent.AnswerChallengeRegenerating(assistantTurn.SelfChallenge, assistantTurn.Id));
+                    ct.ThrowIfCancellationRequested();
                     await RegenerateDraftForReviseAsync(assistantMessage, assistantTurn, reviewResult.ReviseIssues, ct);
                     if (assistantTurn.SelfChallenge != null)
                         assistantTurn.SelfChallenge.DraftRegenerated = true;
@@ -559,19 +563,15 @@ namespace AgentCore.Editor.Core
                     AgentCoreLog.Warning("[AgentCore][SelfChallenge] Node B verdict = BLOCK. Verification-loop back to tool loop not implemented in v1.5.0-alpha; accepting draft with warning.");
                 }
             }
+            catch (OperationCanceledException)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore][SelfChallenge] Node B cancelled.");
+            }
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"[AgentCore][SelfChallenge] Node B invocation failed: {ex.Message}");
             }
-            finally
-            {
-                // ADR §3.4 B1: Node B 生命周期结束 → 恢复 Idle
-                //   仅当仍处于 ReviewingAnswer 时才恢复; 若期间用户已取消/进入其他状态, 不覆盖
-                if (CurrentState == AgentState.ReviewingAnswer)
-                {
-                    SetState(AgentState.Idle);
-                }
-            }
+            // ADR §3.4 B1: Node B 结束后的状态复位交给所属 run 的 EndRun（本任务是 run 的 Tail）
         }
 
         /// <summary>
@@ -604,6 +604,7 @@ namespace AgentCore.Editor.Core
                 // v1.17.0: 沿用本轮的工具定义（tools: null 会改变请求最前端的 tools 段，使整段缓存失效）；
                 // 重生成只需要文本，若模型仍发起工具调用则丢弃这些调用。
                 var newMessage = await CallLLMStreamAsync(assistantTurn, _lastToolDefinitions, ct);
+                ct.ThrowIfCancellationRequested();
                 if (newMessage?.ToolCalls != null && newMessage.ToolCalls.Count > 0)
                 {
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore][SelfChallenge] REVISE: dropping {newMessage.ToolCalls.Count} tool call(s) from regenerated draft.");
@@ -627,11 +628,11 @@ namespace AgentCore.Editor.Core
                 }
 
                 assistantTurn.IsStreaming = false;
-                SetState(AgentState.Idle);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is OperationCanceledException))
             {
                 AgentCoreLog.Error($"[AgentCore][SelfChallenge] Draft regeneration failed: {ex.Message}");
+                assistantTurn.IsStreaming = false;
             }
         }
 

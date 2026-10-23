@@ -65,8 +65,9 @@ namespace AgentCore.Editor.UI
             //   Idle → 正常新一轮
             //   WaitingForClarification → 走 Node A Continuation
             //   ReviewingAnswer → 拒绝(Node B 运行中, 需隔离本轮数据)
-            if (_agentLoop.CurrentState != AgentState.Idle &&
-                _agentLoop.CurrentState != AgentState.WaitingForClarification)
+            if (_agentLoop.IsRunActive ||
+                (_agentLoop.CurrentState != AgentState.Idle &&
+                 _agentLoop.CurrentState != AgentState.WaitingForClarification))
             {
                 AgentCoreLog.Warning($"[AgentCore] Cannot send message while agent is in {_agentLoop.CurrentState} state.");
                 return;
