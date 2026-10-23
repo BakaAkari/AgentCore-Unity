@@ -9,6 +9,7 @@ using UnityEngine.AI;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Tools.Native.Extended
 {
@@ -27,7 +28,11 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "ACTIVATE WHEN: user mentions 'navmesh', 'navigation', 'pathfinding', 'bake navmesh', 'AI agent movement'.",
         Category = "Extended",
         RequiresMainThread = true,
-        Visibility = ToolVisibility.OnDemand)]
+        Visibility = ToolVisibility.OnDemand,
+        RiskLevel = ToolRiskLevel.Medium,
+        // bake 生成 NavMesh 资产, clear 删除已烘焙的 NavMesh 数据
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
+        ReadOnlyActions = new[] { "get_settings" })]
     public class ManageNavMeshTool : IAgentTool
     {
         #region Schema

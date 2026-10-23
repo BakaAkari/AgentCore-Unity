@@ -9,6 +9,7 @@ using UnityEditor;
 using UnityEditorInternal;
 using Newtonsoft.Json.Linq;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Tools.Native.Extended
 {
@@ -27,7 +28,11 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "ACTIVATE WHEN: user mentions 'tags', 'layers', 'sorting layer', 'LayerMask', 'add tag', 'custom layer'.",
         Category = "Extended",
         RequiresMainThread = true,
-        Visibility = ToolVisibility.OnDemand)]
+        Visibility = ToolVisibility.OnDemand,
+        RiskLevel = ToolRiskLevel.High,
+        // add/remove_tag, set_layer, add_sorting_layer 写 ProjectSettings/TagManager.asset; set_object_* 改 Scene 对象
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyProjectSettings | ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "list_tags", "list_layers", "list_sorting_layers" })]
     public class ManageTagsLayersTool : IAgentTool
     {
         #region Schema

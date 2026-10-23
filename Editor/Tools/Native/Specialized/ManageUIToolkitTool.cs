@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -34,7 +35,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        RiskLevel = ToolRiskLevel.High,
+        // create_editor_window_template / create_custom_element_template 写 .cs 文件 (触发编译);
+        // create_uxml/uss 等写 UI 资产文件; configure_ui_document 改 Scene
+        Capabilities = ToolCapability.ReadProject | ToolCapability.WriteProjectFiles | ToolCapability.ModifyAssets | ToolCapability.ModifyScene | ToolCapability.ModifyScripts,
+        ReadOnlyActions = new[] { "query_element", "list_elements", "get_uxml_content", "get_uss_content", "list_ui_documents", "validate_uxml", "list_assets" })]
     public class ManageUIToolkitTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

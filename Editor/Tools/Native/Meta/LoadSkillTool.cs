@@ -40,7 +40,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Category = "Meta",
         RequiresMainThread = false,
         RiskLevel = ToolRiskLevel.Low,
-        Capabilities = ToolCapability.None,
+        Capabilities = ToolCapability.ReadProject,
         Visibility = ToolVisibility.AlwaysVisible)]
     public class LoadSkillTool : IAgentTool
     {

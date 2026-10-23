@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -30,7 +31,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "'normal map', 'platform override', 'texture memory'.",
         Category = "Utility",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // set_* 修改 TextureImporter 设置并 SaveAndReimport
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets,
+        ReadOnlyActions = new[] { "get_settings", "find_assets", "get_info", "get_platform_settings", "find_by_size" })]
     public class ManageTextureImportTool : IAgentTool
     {
         private const string ValidActions = "get_settings, set_settings, set_settings_batch, find_assets, get_info, set_type, set_platform_settings, get_platform_settings, set_sprite_settings, find_by_size";

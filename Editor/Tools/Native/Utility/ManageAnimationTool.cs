@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -29,7 +30,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "ACTIVATE WHEN: user mentions 'animation', 'animator', 'animation clip', 'state machine', 'animation parameter'.",
         Category = "Animation",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // set_parameter 改 AnimatorController 资产; set_layer_weight 改 Animator 运行时状态; create_animation_clip 创建资产
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets,
+        ReadOnlyActions = new[] { "list_clips", "get_clip_info", "list_parameters", "get_controller_info", "list_animator_states", "get_layers" })]
     public class ManageAnimationTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

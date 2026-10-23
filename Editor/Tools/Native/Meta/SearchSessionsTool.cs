@@ -37,7 +37,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
         Category = "Meta",
         RequiresMainThread = false,
         RiskLevel = ToolRiskLevel.ReadOnly,
-        Capabilities = ToolCapability.None)]
+        Capabilities = ToolCapability.ReadProject)]
     public class SearchSessionsTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

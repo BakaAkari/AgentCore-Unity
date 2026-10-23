@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -27,7 +28,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "ACTIVATE WHEN: user mentions 'reimport', 'asset labels', 'asset bundle', 'import settings', 'dependencies', 'importer'.",
         Category = "Utility",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // reimport / reimport_batch 触发重新导入; set_labels / set_bundle 写资产 .meta
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets,
+        ReadOnlyActions = new[] { "get_importer", "get_labels", "get_dependencies", "get_import_log", "find_by_importer" })]
     public class ManageAssetImportTool : IAgentTool
     {
         private const string ValidActions = "get_importer, reimport, reimport_batch, set_labels, get_labels, set_bundle, get_dependencies, get_import_log, find_by_importer";

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -30,7 +31,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "ACTIVATE WHEN: user mentions 'material', 'shader property', 'texture slot', 'render queue', 'material color', '_MainTex', '_Color'.",
         Category = "Material",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // assign 改 Renderer (Scene); 其余写 action 改 / 创建材质资产
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets | ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "get_info", "list_properties", "get_keywords", "find_by_shader", "list_materials", "get_shader_info" })]
     public class ManageMaterialTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

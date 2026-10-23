@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -31,7 +32,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'cinemachine', 'virtual camera', 'follow camera', 'camera shake', 'camera blend', 'dolly track'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // set_blend_list 会创建 CinemachineBlenderSettings 资产
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets,
+        ReadOnlyActions = new[] { "get_info", "list" })]
     public class ManageCinemachineTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

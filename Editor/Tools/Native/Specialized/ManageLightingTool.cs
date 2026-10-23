@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -27,7 +28,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'light', 'lighting', 'shadow', 'bake lightmap', 'directional light', 'point light', 'spot light'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // bake 生成光照贴图资产; bake(mode=clear) 删除已烘焙光照数据与 GI 磁盘缓存
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.DeleteProjectFiles,
+        ReadOnlyActions = new[] { "get_info", "list", "get_lightmap_settings" })]
     public class ManageLightingTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

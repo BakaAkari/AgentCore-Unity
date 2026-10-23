@@ -275,6 +275,24 @@ namespace AgentCore.Editor.Tools.Safety
                 return ToolPolicyDecision.RequireConfirmation(risk, confirmation, reasons);
             }
 
+            // 未声明任何能力位 = 未经审查的工具（外部 / MCP 工具、漏标的内置工具）：副作用未知，fail-closed。
+            // 内置工具即便只读也必须至少声明 ReadProject，才能走到下面的 action 名兜底而直通。
+            if (!isReadOnlyAction && metadata.Capabilities == ToolCapability.None)
+            {
+                reasons.Add("Tool declares no capabilities, so its side effects are unknown; explicit user approval required.");
+                var confirmation = BuildConfirmationRequest(
+                    toolName,
+                    action,
+                    risk,
+                    metadata,
+                    reasons,
+                    parameterSummary,
+                    targets,
+                    allowSessionTrust: true);
+
+                return ToolPolicyDecision.RequireConfirmation(risk, confirmation, reasons);
+            }
+
             // v1.7.16 兜底：action 名破坏性 token 匹配（保留以覆盖能力位/风险等级都漏标的工具）。
             if (RequiresDestructiveActionConfirmation(action, out var matchedToken))
             {

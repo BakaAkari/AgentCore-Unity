@@ -7,6 +7,7 @@ using AgentCore.Editor.Config;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -21,7 +22,10 @@ namespace AgentCore.Editor.Tools.Vision
         Description = "Visual perception — capture Unity Game View / SceneView / a named Camera to PNG, and optionally get the configured Vision Model's text description for self-correct. Actions: capture (screenshot to file only) / analyze (screenshot + vision description).",
         Category = "Meta",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // analyze 把截图发送到远端视觉模型; capture 写 PNG (默认 Library, output_path 可指向 Assets)
+        Capabilities = ToolCapability.ReadProject | ToolCapability.NetworkAccess | ToolCapability.WriteProjectFiles)]
     public class VisionAnalyzeTool : IAgentTool
     {
         public ToolMetadata Metadata => new ToolMetadata(

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -32,7 +33,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'physics', 'collider', 'rigidbody', 'joint', 'gravity', 'raycast', 'trigger', 'collision', 'physics debug', 'layer matrix'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.High,
+        // set_settings / configure_collision 写 DynamicsManager (项目设置); add_* 改 Scene 对象
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyProjectSettings,
+        ReadOnlyActions = new[] { "get_settings", "raycast", "overlap_test", "list_scene_physics_stats", "get_collision_matrix" })]
     public class ManagePhysicsTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEditor;
 using Newtonsoft.Json.Linq;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 
 namespace AgentCore.Editor.Tools.Native.Extended
 {
@@ -24,7 +25,11 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "ACTIVATE WHEN: user mentions 'input axis', 'input settings', 'key bindings', 'InputManager', or wants to add/modify legacy input axes.",
         Category = "Extended",
         RequiresMainThread = true,
-        Visibility = ToolVisibility.OnDemand)]
+        Visibility = ToolVisibility.OnDemand,
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyProjectSettings,
+        // simulate_key 仅返回指引文本, 不模拟任何输入
+        ReadOnlyActions = new[] { "list_axes", "get_axis", "simulate_key" })]
     public class ManageInputTool : IAgentTool
     {
         #region Schema

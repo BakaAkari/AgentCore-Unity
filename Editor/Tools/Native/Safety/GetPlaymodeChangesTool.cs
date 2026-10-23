@@ -31,7 +31,8 @@ namespace AgentCore.Editor.Tools.Native.Safety
         Category = "Safety",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
-        RiskLevel = ToolRiskLevel.Low)]
+        RiskLevel = ToolRiskLevel.Low,
+        Capabilities = ToolCapability.ReadProject)]
     public class GetPlaymodeChangesTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

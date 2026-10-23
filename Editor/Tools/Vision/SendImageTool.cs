@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using AgentCore.Editor.Tools.Vision;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -21,7 +22,10 @@ namespace AgentCore.Editor.Tools.Vision
         Description = "Send a screenshot / image into the chat as a picture displayed in the assistant bubble. Use it when the user asks you to show / send a picture of the current view (scene or game), or to display an image they uploaded. It captures the viewport (or reuses the user's attached image) and renders it as an image in the chat — it does NOT run a vision model to describe it.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Low,
+        // 截屏到 Library/AgentCore/Screenshots 并在聊天窗口展示, 不调用视觉模型、不改工程内容
+        Capabilities = ToolCapability.ReadProject)]
     public class SendImageTool : IAgentTool
     {
         public ToolMetadata Metadata => new ToolMetadata(

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -26,7 +27,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'audio', 'sound', 'AudioSource', 'volume', 'spatial audio', '3D sound'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene,
+        // play/stop 仅控制 AudioSource 播放状态 (不落盘、不改序列化数据)
+        ReadOnlyActions = new[] { "get_info", "list", "get_settings", "play", "stop" })]
     public class ManageAudioTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

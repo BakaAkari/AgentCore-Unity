@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -30,7 +31,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'probuilder', 'mesh modeling', 'create shape', 'extrude', 'bevel', 'level prototype', 'geometry editing'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene,
+        ReadOnlyActions = new[] { "check_available", "get_info", "get_vertices", "get_faces" })]
     public class ManageProBuilderTool : IAgentTool
     {
         private const string PackageRequiredMessage = "ProBuilder package/API is not available. Install 'com.unity.probuilder' via Unity Package Manager, then retry this action.";

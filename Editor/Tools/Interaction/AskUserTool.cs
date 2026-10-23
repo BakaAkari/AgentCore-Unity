@@ -34,7 +34,7 @@ namespace AgentCore.Editor.Tools.Interaction
         Category = "Interaction",
         RequiresMainThread = false,
         RiskLevel = ToolRiskLevel.Low,
-        Capabilities = ToolCapability.None,
+        Capabilities = ToolCapability.ReadProject,
         Visibility = ToolVisibility.AlwaysVisible)]
     public class AskUserTool : IAgentTool
     {

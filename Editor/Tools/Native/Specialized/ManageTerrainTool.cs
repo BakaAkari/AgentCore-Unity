@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -29,7 +30,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'terrain', 'heightmap', 'landscape', 'terrain texture', 'place trees', 'sculpt terrain'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // create / add_layer 创建 TerrainData / TerrainLayer 资产; 其余写 action 修改 TerrainData 资产
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets,
+        ReadOnlyActions = new[] { "get_info", "get_height" })]
     public class ManageTerrainTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -29,7 +30,10 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "ACTIVATE WHEN: user mentions 'shader info', 'shader properties', 'find shader', 'shader keywords', 'list shaders', 'what shaders are available'.",
         Category = "Shader",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Low,
+        Capabilities = ToolCapability.ReadProject,
+        ReadOnlyActions = new[] { "list", "get_info", "find", "list_keywords", "get_properties", "get_keywords", "find_shaders", "get_shader_info" })]
     public class ManageShaderTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

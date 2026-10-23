@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -37,7 +38,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "ACTIVATE WHEN: user mentions 'camera', 'FOV', 'render texture', 'screenshot', 'camera alignment', 'main camera', 'scene view', 'frame scene view', 'look around', 'rotate view', 'orbit', 'pan', 'zoom', '视角', '旋转镜头', '环绕', '平移'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // create_render_texture 创建 RT 资产; render_to_texture 写 PNG 文件到工程
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.WriteProjectFiles,
+        // *_scene_view / frame_selected 只移动编辑器 SceneView 视角, 不改动场景数据
+        ReadOnlyActions = new[] { "get_info", "list_cameras", "get_scene_view", "set_scene_view", "orbit_scene_view", "pan_scene_view", "dolly_scene_view", "frame_selected" })]
     public class ManageCameraTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

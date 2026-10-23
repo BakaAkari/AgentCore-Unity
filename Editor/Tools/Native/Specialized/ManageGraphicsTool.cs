@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -34,7 +35,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "'bloom', 'vignette', 'post-processing', 'color grading', 'tonemapping', 'volume', 'HDRP', 'URP', '后处理', '泛光', '暗角', '色调'.",
         Category = "Specialized",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.High,
+        // set_quality_level 写 QualitySettings (项目设置); set_render_settings 改场景 RenderSettings; volume_set 改 VolumeProfile 资产
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene | ToolCapability.ModifyAssets | ToolCapability.ModifyProjectSettings,
+        ReadOnlyActions = new[] { "get_render_settings", "get_quality_settings", "volume_list", "volume_get" })]
     public class ManageGraphicsTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

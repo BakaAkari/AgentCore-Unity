@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -31,7 +32,10 @@ namespace AgentCore.Editor.Tools.Native.Extended
                       "NOT FOR: single object positioning (use manage_gameobject set_transform); scene queries (use find_gameobjects); arbitrary geometry (use execute_code:run).",
         Category = "Extended",
         RequiresMainThread = true,
-        Visibility = ToolVisibility.OnDemand)]
+        Visibility = ToolVisibility.OnDemand,
+        RiskLevel = ToolRiskLevel.Medium,
+        // replace_objects: 批量实例化 Prefab 并销毁原 GameObject (单个 Undo 组, 可撤销)
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyScene)]
     public class SmartOperationsTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{

@@ -10,6 +10,7 @@ using AgentCore.Editor.Components.Indexing.Query;
 using AgentCore.Editor.Components.Indexing.Roots;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using AgentCore.Editor.Utils;
 
@@ -48,7 +49,12 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         Category = "Indexing",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = false,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        RiskLevel = ToolRiskLevel.Low,
+        // 写类 action (mark_stale / index_* / clear_index) 只读写 {workspaceRoot}/.agentcore/index 派生缓存,
+        // 不触达工程内容, 因此仅声明 ReadProject。
+        Capabilities = ToolCapability.ReadProject,
+        ReadOnlyActions = new[] { "status", "diagnose", "list_root_states", "resolve_workspace", "list_roots", "search_symbol", "search_text", "list_namespaces", "get_file_symbols", "get_stats", "get_dependencies", "find_usages", "get_symbol_context", "get_backend_info" })]
     public sealed class SearchCodeTool : IAgentTool
     {
         // ── Schema ──────────────────────────────────────────────────────────────

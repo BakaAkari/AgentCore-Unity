@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -28,7 +29,11 @@ namespace AgentCore.Editor.Tools.Native.Utility
                       "ACTIVATE WHEN: user mentions 'FBX import', 'model import', 'mesh compression', 'humanoid rig', 'animation clips from model', 'model scale'.",
         Category = "Utility",
         Visibility = ToolVisibility.OnDemand,
-        RequiresMainThread = true)]
+        RequiresMainThread = true,
+        RiskLevel = ToolRiskLevel.Medium,
+        // set_* 修改 ModelImporter 设置并 SaveAndReimport
+        Capabilities = ToolCapability.ReadProject | ToolCapability.ModifyAssets,
+        ReadOnlyActions = new[] { "get_settings", "find_assets", "get_mesh_info", "get_materials_info", "get_animations_info", "get_rig_info" })]
     public class ManageModelImportTool : IAgentTool
     {
         private const string ValidActions = "get_settings, set_settings, set_settings_batch, find_assets, get_mesh_info, get_materials_info, get_animations_info, set_animation_clips, get_rig_info, set_rig";
