@@ -463,6 +463,11 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 _statsContent.Add(CreateLabelRow(
                     "Last Incremental",
                     _cachedStats.LastIncrementalIndexAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")));
+
+            if (_cachedStats.LastScopeIndexAt.HasValue)
+                _statsContent.Add(CreateLabelRow(
+                    "Last Scope Rebuild",
+                    _cachedStats.LastScopeIndexAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")));
         }
 
         // ── Background status rendering ──────────────────────────────────────────

@@ -691,14 +691,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     ErrorFileCount = files.Count(f => f.HasErrors)
                 };
 
-                // 解析时间戳
-                var fullAt = GetMetadataLocked(workspaceId, "last_full_index_at");
-                if (fullAt != null && long.TryParse(fullAt, out var fullTs))
-                    stats.LastFullIndexAt = DateTimeOffset.FromUnixTimeSeconds(fullTs).UtcDateTime;
-
-                var incrAt = GetMetadataLocked(workspaceId, "last_incremental_at");
-                if (incrAt != null && long.TryParse(incrAt, out var incrTs))
-                    stats.LastIncrementalIndexAt = DateTimeOffset.FromUnixTimeSeconds(incrTs).UtcDateTime;
+                // 解析时间戳（索引器写 ISO 8601；原先只按 Unix 秒解析，导致面板 / get_stats 永远拿不到时间）
+                stats.LastFullIndexAt = IndexRunMetadata.ParseTime(GetMetadataLocked(workspaceId, CodebaseIndexer.MetaKeyLastFullIndex));
+                stats.LastIncrementalIndexAt = IndexRunMetadata.ParseTime(GetMetadataLocked(workspaceId, CodebaseIndexer.MetaKeyLastIncrementalIndex));
+                stats.LastScopeIndexAt = IndexRunMetadata.ParseTime(GetMetadataLocked(workspaceId, CodebaseIndexer.MetaKeyLastScopeIndex));
+                stats.LastIndexAt = IndexRunMetadata.ParseTime(GetMetadataLocked(workspaceId, CodebaseIndexer.MetaKeyLastIndex));
+                stats.LastIndexKind = GetMetadataLocked(workspaceId, CodebaseIndexer.MetaKeyLastIndexKind);
 
                 var durationStr = GetMetadataLocked(workspaceId, "last_full_index_duration_seconds");
                 if (durationStr != null && double.TryParse(durationStr, out var dur))

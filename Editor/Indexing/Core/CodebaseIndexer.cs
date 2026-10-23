@@ -37,6 +37,18 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <summary>元数据键：最后一次增量索引时间（UTC ISO 8601）。</summary>
         public const string MetaKeyLastIncrementalIndex = "last_incremental_at";
 
+        /// <summary>元数据键：最后一次 Scope 重建时间（UTC ISO 8601）。Scope 重建不写 last_full_index_at。</summary>
+        public const string MetaKeyLastScopeIndex = "last_scope_index_at";
+
+        /// <summary>元数据键：最后一次 Scope 重建覆盖的 Root 描述。</summary>
+        public const string MetaKeyLastScopeIndexRoots = "last_scope_index_roots";
+
+        /// <summary>元数据键：最后一次任意类型索引运行时间（全量 / 增量 / Scope，UTC ISO 8601）。</summary>
+        public const string MetaKeyLastIndex = "last_index_at";
+
+        /// <summary>元数据键：最后一次索引运行类型（full / incremental / scope）。</summary>
+        public const string MetaKeyLastIndexKind = "last_index_kind";
+
         /// <summary>元数据键：最后一次索引的版本号（用于强制重建）。</summary>
         public const string MetaKeyIndexVersion = "index_version";
 
@@ -198,8 +210,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 progress.Phase = IndexingPhase.Persisting;
                 ReportProgress(onProgress, progress);
 
-                await _store.SetMetadataAsync(workspaceId, MetaKeyLastFullIndex,
-                    DateTime.UtcNow.ToString("O"), ct);
+                await IndexRunMetadata.RecordAsync(_store, workspaceId, IndexRunKind.Full, null, DateTime.UtcNow, ct);
                 await _store.SetMetadataAsync(workspaceId, MetaKeyIndexVersion,
                     CurrentIndexVersion, ct);
 
@@ -375,8 +386,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 progress.Phase = IndexingPhase.Persisting;
                 ReportProgress(onProgress, progress);
 
-                await _store.SetMetadataAsync(workspaceId, MetaKeyLastIncrementalIndex,
-                    DateTime.UtcNow.ToString("O"), ct);
+                await IndexRunMetadata.RecordAsync(_store, workspaceId, IndexRunKind.Incremental, null, DateTime.UtcNow, ct);
 
                 // 10. 完成
                 var completed = IndexingProgress.CreateCompleted(progress);
@@ -569,8 +579,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 progress.Phase = IndexingPhase.Persisting;
                 ReportProgress(onProgress, progress);
 
-                await _store.SetMetadataAsync(workspaceId, MetaKeyLastIncrementalIndex,
-                    DateTime.UtcNow.ToString("O"), ct);
+                await IndexRunMetadata.RecordAsync(_store, workspaceId, IndexRunKind.Incremental, null, DateTime.UtcNow, ct);
 
                 // 7. 完成
                 var completed = IndexingProgress.CreateCompleted(progress);
@@ -636,6 +645,25 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
+        /// 获取全部索引时间戳（全量 / 增量 / Scope / 任意最近一次）。尚未建立索引时返回 null。
+        /// </summary>
+        public async Task<IndexTimestamps> GetIndexTimestampsAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+                if (stored == null) return null;
+                return await IndexRunMetadata.ReadAsync(_store, stored.Id, ct);
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[CodebaseIndexer] GetIndexTimestampsAsync failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 获取最后一次增量索引时间（UTC）。不存在时返回 null。
         /// </summary>
         public async Task<DateTime?> GetLastIncrementalIndexTimeAsync(CancellationToken ct = default)
@@ -659,7 +687,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <summary>
         /// 只重建指定 Root：先删除这些 Root 已有的文件 / 符号 / 依赖，再扫描并索引，
         /// 其他 Root 的数据保持不动（不会清空整个 workspace）。
-        /// <para>不写入 last_full_index_at：Scope 重建不等于全量索引。</para>
+        /// <para>不写入 last_full_index_at：Scope 重建不等于全量索引；写入 last_scope_index_at / last_index_at。</para>
         /// </summary>
         /// <param name="targetRoots">目标 Root（Id 可为 0，内部 upsert 获取真实 Id）。</param>
         /// <param name="onProgress">进度回调（可为 null）。</param>
@@ -753,11 +781,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
                         await Task.Yield();
                 }
 
-                // 5. 元数据：只记录增量时间与格式版本
+                // 5. 元数据：记录 Scope 重建时间与覆盖的 Root（及 last_index_at），不写 last_full_index_at
                 progress.Phase = IndexingPhase.Persisting;
                 ReportProgress(onProgress, progress);
-                await _store.SetMetadataAsync(workspaceId, MetaKeyLastIncrementalIndex,
-                    DateTime.UtcNow.ToString("O"), ct);
+                await IndexRunMetadata.RecordAsync(_store, workspaceId, IndexRunKind.Scope, roots, DateTime.UtcNow, ct);
 
                 var completed = IndexingProgress.CreateCompleted(progress);
                 ReportProgress(onProgress, completed);
