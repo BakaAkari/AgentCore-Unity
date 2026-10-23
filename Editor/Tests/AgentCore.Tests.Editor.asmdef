@@ -3,6 +3,7 @@
     "rootNamespace": "AgentCore.Tests.Editor",
     "references": [
         "AgentCore.Editor",
+        "AgentCore.Indexing.Editor",
         "UnityEditor.TestRunner",
         "UnityEngine.TestRunner"
     ],
