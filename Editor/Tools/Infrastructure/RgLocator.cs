@@ -454,13 +454,14 @@ namespace AgentCore.Editor.Tools.Infrastructure
                     }
                 };
                 process.Start();
+                ChildProcessJob.TryAssign(process);
                 try { process.StandardInput.Close(); } catch { /* 已退出 */ }
 
                 var stdoutTask = process.StandardOutput.ReadToEndAsync();
                 var stderrTask = process.StandardError.ReadToEndAsync();
                 if (!process.WaitForExit(ProbeTimeoutMs))
                 {
-                    try { process.Kill(); } catch { /* 已退出 */ }
+                    ChildProcessJob.KillTree(process);
                     error = $"timed out after {ProbeTimeoutMs} ms";
                     return false;
                 }

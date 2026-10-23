@@ -304,6 +304,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
                     }
                 };
                 process.Start();
+                ChildProcessJob.TryAssign(process);
             }
             catch (Exception ex) when (ex is Win32Exception || ex is InvalidOperationException || ex is System.IO.IOException)
             {
@@ -461,20 +462,11 @@ namespace AgentCore.Editor.Tools.Infrastructure
         }
 
         /// <summary>
-        /// 结束 rg 进程。rg 是单进程多线程程序，<see cref="Process.Kill()"/> 足够；
-        /// 统一的子进程树结束工具（ChildProcessJob.KillTree）合入后在此一处替换即可。
+        /// 结束 rg 进程树（Scoop shim 等包装层也一并结束）。
         /// </summary>
         private static void KillRg(Process process)
         {
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill();
-            }
-            catch
-            {
-                // 已退出 / 句柄失效
-            }
+            ChildProcessJob.KillTree(process);
         }
     }
 }
