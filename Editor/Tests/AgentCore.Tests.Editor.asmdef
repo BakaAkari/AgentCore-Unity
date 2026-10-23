@@ -4,6 +4,7 @@
     "references": [
         "AgentCore.Editor",
         "AgentCore.VCS.Editor",
+        "AgentCore.Indexing.Editor",
         "UnityEditor.TestRunner",
         "UnityEngine.TestRunner"
     ],

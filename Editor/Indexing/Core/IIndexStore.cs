@@ -152,6 +152,84 @@ namespace AgentCore.Editor.Components.Indexing.Core
     }
 
     /// <summary>
+    /// 可选能力：存储健康状态（损坏行统计 / 是否需要重建）。
+    /// 后端检测到数据损坏超过阈值时应标记 <see cref="RequiresRebuild"/>，
+    /// 而不是静默返回残缺数据。
+    /// </summary>
+    public interface IIndexHealth
+    {
+        /// <summary>加载时跳过的损坏行数（未加载时为 0）。</summary>
+        int CorruptLineCount { get; }
+
+        /// <summary>损坏超过阈值，索引需要全量重建。</summary>
+        bool RequiresRebuild { get; }
+
+        /// <summary>人类可读的健康说明（健康时为 null）。</summary>
+        string HealthMessage { get; }
+
+        /// <summary>全量重建完成后调用：清除损坏标记并整理存储。</summary>
+        Task AcknowledgeRebuildAsync(CancellationToken ct = default);
+    }
+
+    /// <summary>
+    /// 可选能力：按 Root 清除索引数据（index_scope 只重建目标 Root，不清空整个 workspace）。
+    /// 未实现该接口的后端由调用方逐文件删除。
+    /// </summary>
+    public interface IScopedIndexStore
+    {
+        /// <summary>删除指定 Root 下的全部文件、符号与依赖记录，返回删除的文件数。</summary>
+        Task<int> ClearRootIndexAsync(int workspaceId, int rootId, CancellationToken ct = default);
+    }
+
+    /// <summary>
+    /// 可选能力：返回带总数与截断信息的符号搜索结果。
+    /// </summary>
+    public interface IPagedSymbolSearch
+    {
+        /// <summary>同 <see cref="IIndexStore.SearchSymbolsAsync"/>，附带 totalMatches / truncated。</summary>
+        Task<SymbolSearchPage> SearchSymbolsPageAsync(int workspaceId, SearchQuery query, CancellationToken ct = default);
+
+        /// <summary>同 <see cref="IIndexStore.SearchSymbolsByTextAsync"/>，附带 totalMatches / truncated。</summary>
+        Task<SymbolSearchPage> SearchSymbolsByTextPageAsync(int workspaceId, string text, int maxResults, CancellationToken ct = default);
+    }
+
+    /// <summary>
+    /// 截断原因常量（返回给模型的 truncatedReason）。
+    /// </summary>
+    public static class SearchTruncation
+    {
+        /// <summary>匹配数超过 max_results / limit。</summary>
+        public const string MaxResults = "max_results";
+
+        /// <summary>整体时间预算耗尽，扫描未完成。</summary>
+        public const string Timeout = "timeout";
+
+        /// <summary>文件数 / 字节预算耗尽，扫描未完成。</summary>
+        public const string FileCap = "file_cap";
+    }
+
+    /// <summary>
+    /// 一页符号搜索结果。
+    /// </summary>
+    public sealed class SymbolSearchPage
+    {
+        /// <summary>本次返回的匹配（已排序、已按 limit 截断）。</summary>
+        public IReadOnlyList<SymbolInfo> Matches { get; set; } = Array.Empty<SymbolInfo>();
+
+        /// <summary>匹配总数；<see cref="TotalIsLowerBound"/> 为 true 时只是已扫描部分的计数。</summary>
+        public int TotalMatches { get; set; }
+
+        /// <summary>扫描未完成（超时等），TotalMatches 只是下界。</summary>
+        public bool TotalIsLowerBound { get; set; }
+
+        /// <summary>结果是否被截断。</summary>
+        public bool Truncated { get; set; }
+
+        /// <summary>截断原因（见 <see cref="SearchTruncation"/>），未截断时为 null。</summary>
+        public string TruncatedReason { get; set; }
+    }
+
+    /// <summary>
     /// 命名空间条目（用于 list_namespaces action）。
     /// </summary>
     public sealed class NamespaceEntry

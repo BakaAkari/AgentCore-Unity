@@ -61,6 +61,49 @@ namespace AgentCore.Editor.Tools.FileSystem
         private const int DefaultContextLines = 2;
 
         /// <summary>
+        /// Maximum regex pattern length accepted by search_content.
+        /// </summary>
+        private const int MaxRegexPatternLength = 512;
+
+        /// <summary>
+        /// Per-match regex timeout. A pathological pattern fails with an error instead of hanging the editor.
+        /// </summary>
+        private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(200);
+
+        /// <summary>
+        /// Overall wall-clock budget for one search_content call. When exceeded, the partial
+        /// result is returned with truncatedReason = "timeout".
+        /// </summary>
+        private static readonly TimeSpan SearchTimeBudget = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Maximum number of files scanned by one search_content call (truncatedReason = "file_cap").
+        /// </summary>
+        private const int SearchFileCap = 20000;
+
+        /// <summary>
+        /// Maximum number of bytes read by one search_content call (truncatedReason = "file_cap").
+        /// </summary>
+        private const long SearchByteBudget = 256L * 1024 * 1024;
+
+        /// <summary>
+        /// Generated / cache directories directly under the project root that are never scanned
+        /// unless they are the explicitly requested path.
+        /// </summary>
+        private static readonly HashSet<string> ExcludedProjectDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Library", "Temp", "Logs"
+        };
+
+        /// <summary>
+        /// Build output directories skipped at any depth (unless explicitly requested).
+        /// </summary>
+        private static readonly HashSet<string> ExcludedDirsAnywhere = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "obj"
+        };
+
+        /// <summary>
         /// The project root directory (parent of Assets/).
         /// </summary>
         private static readonly string ProjectRoot = Path.GetFullPath(
@@ -109,7 +152,7 @@ namespace AgentCore.Editor.Tools.FileSystem
                 },
                 ""max_results"": {
                     ""type"": ""integer"",
-                    ""description"": ""Maximum number of results for list/search (default: 100)""
+                    ""description"": ""Maximum number of results for list/search (default: 100). Library/, Temp/, Logs/ and obj/ are skipped unless they are the requested path.""
                 },
                 ""context_lines"": {
                     ""type"": ""integer"",
@@ -126,6 +169,10 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ""line_numbers"": {
                     ""type"": ""boolean"",
                     ""description"": ""Whether to include line numbers in read_file output (default: true)""
+                },
+                ""file_pattern"": {
+                    ""type"": ""string"",
+                    ""description"": ""Glob filter for files scanned by search_content, '|' separates several (e.g., '*.json|*.yaml'; default: '*')""
                 },
                 ""case_sensitive"": {
                     ""type"": ""boolean"",
@@ -174,10 +221,10 @@ namespace AgentCore.Editor.Tools.FileSystem
                         response = HandleWriteFile(parameters);
                         break;
                     case "list_directory":
-                        response = HandleListDirectory(parameters);
+                        response = HandleListDirectory(parameters, cancellationToken);
                         break;
                     case "search_content":
-                        response = HandleSearchContent(parameters);
+                        response = HandleSearchContent(parameters, cancellationToken);
                         break;
                     case "file_info":
                         response = HandleFileInfo(parameters);
@@ -199,6 +246,15 @@ namespace AgentCore.Editor.Tools.FileSystem
                             $"Unknown action: '{action}'. Valid actions: read_file, write_file, list_directory, search_content, file_info, delete, copy, move, create_directory");
                         break;
                 }
+            }
+            catch (RegexMatchTimeoutException ex)
+            {
+                // Never report a timed-out regex as "0 matches".
+                response = ToolResponse.Fail(DescribeRegexTimeout(ex.Pattern));
+            }
+            catch (OperationCanceledException)
+            {
+                response = ToolResponse.Fail("Operation cancelled; no complete result was produced.");
             }
             catch (ArgumentException ex)
             {
@@ -263,6 +319,135 @@ namespace AgentCore.Editor.Tools.FileSystem
                 return relative.Replace('\\', '/');
             }
             return absolutePath.Replace('\\', '/');
+        }
+
+        #endregion
+
+        #region Search Helpers
+
+        /// <summary>
+        /// Build a regex with a length cap, culture-invariant matching and a per-match timeout.
+        /// Throws <see cref="ArgumentException"/> with an explanation for unusable patterns.
+        /// </summary>
+        private static Regex CreateSafeRegex(string pattern, bool caseSensitive)
+        {
+            if (pattern == null)
+                throw new ArgumentException("Regex pattern is required.");
+
+            if (pattern.Length > MaxRegexPatternLength)
+                throw new ArgumentException(
+                    $"Regex pattern is {pattern.Length} chars; the limit is {MaxRegexPatternLength}. " +
+                    "Split it into several searches or use a shorter, more specific pattern.");
+
+            var options = RegexOptions.CultureInvariant;
+            if (!caseSensitive)
+                options |= RegexOptions.IgnoreCase;
+
+            try
+            {
+                return new Regex(pattern, options, RegexMatchTimeout);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException($"Invalid regex pattern: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Error text for a regex that exceeded the per-match timeout.
+        /// </summary>
+        private static string DescribeRegexTimeout(string pattern)
+        {
+            return $"regex_timeout: pattern '{pattern}' took longer than {RegexMatchTimeout.TotalMilliseconds:0} ms on a single line " +
+                   "(likely catastrophic backtracking, e.g. nested quantifiers like (a+)+). No results were returned because they would be incomplete. " +
+                   "Rewrite the pattern (anchor it, avoid nested quantifiers) or search a narrower path.";
+        }
+
+        /// <summary>
+        /// Whether a sub-directory is a generated / cache directory that scans skip by default.
+        /// </summary>
+        private static bool IsExcludedDirectory(string parentFullPath, string dirName)
+        {
+            if (ExcludedDirsAnywhere.Contains(dirName))
+                return true;
+
+            return ExcludedProjectDirs.Contains(dirName)
+                   && string.Equals(
+                       Path.GetFullPath(parentFullPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                       ProjectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Enumerate sub-directories of <paramref name="root"/> (not including the root itself),
+        /// pruning excluded / hidden directories instead of walking into them. The root is always
+        /// scanned even if it is itself an excluded directory (explicit request).
+        /// Inaccessible directories are skipped individually.
+        /// </summary>
+        private static IEnumerable<string> EnumerateDirectoriesPruned(
+            string root, bool recursive, bool includeHidden, ISet<string> excludedHits, CancellationToken ct)
+        {
+            var pending = new Stack<string>();
+            pending.Push(root);
+
+            while (pending.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var current = pending.Pop();
+
+                string[] children;
+                try
+                {
+                    children = Directory.GetDirectories(current);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                Array.Sort(children, StringComparer.OrdinalIgnoreCase);
+                var toVisit = new List<string>();
+                foreach (var child in children)
+                {
+                    var name = Path.GetFileName(child);
+                    if (IsExcludedDirectory(current, name))
+                    {
+                        excludedHits?.Add(ToRelativePath(child));
+                        continue;
+                    }
+
+                    if (!includeHidden && name.StartsWith("."))
+                        continue;
+
+                    toVisit.Add(child);
+                }
+
+                foreach (var child in toVisit)
+                    yield return child;
+
+                if (!recursive)
+                    continue;
+
+                // Push in reverse so siblings are visited in sorted order
+                for (int i = toVisit.Count - 1; i >= 0; i--)
+                    pending.Push(toVisit[i]);
+            }
+        }
+
+        /// <summary>
+        /// Files directly inside <paramref name="directory"/> matching <paramref name="pattern"/>;
+        /// an inaccessible directory yields nothing instead of aborting the whole scan.
+        /// </summary>
+        private static IEnumerable<string> SafeEnumerateFiles(string directory, string pattern)
+        {
+            try
+            {
+                return Directory.GetFiles(directory, pattern, SearchOption.TopDirectoryOnly);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return Array.Empty<string>();
+            }
         }
 
         #endregion
@@ -403,8 +588,9 @@ namespace AgentCore.Editor.Tools.FileSystem
 
         /// <summary>
         /// List files and directories with optional glob pattern filtering.
+        /// Library/, Temp/, Logs/ (project root) and obj/ (any depth) are pruned unless requested explicitly.
         /// </summary>
-        private ToolResponse HandleListDirectory(JObject parameters)
+        private ToolResponse HandleListDirectory(JObject parameters, CancellationToken ct)
         {
             var path = ToolHelpers.GetOptionalString(parameters, "path", ".");
             var fullPath = ResolveSafePath(path);
@@ -417,42 +603,40 @@ namespace AgentCore.Editor.Tools.FileSystem
             var maxResults = ToolHelpers.GetOptionalInt(parameters, "max_results", DefaultMaxResults);
             var includeHidden = ToolHelpers.GetOptionalBool(parameters, "include_hidden", false);
 
-            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-
             var entries = new JArray();
+            var excludedDirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             int totalCount = 0;
             bool truncated = false;
 
-            try
+            var dirs = EnumerateDirectoriesPruned(fullPath, recursive, includeHidden, excludedDirs, ct).ToList();
+
+            // List directories first
+            foreach (var dir in dirs)
             {
-                // List directories first
-                var dirs = Directory.GetDirectories(fullPath, "*", searchOption);
-                foreach (var dir in dirs)
+                if (totalCount >= maxResults)
                 {
-                    var dirName = Path.GetFileName(dir);
-                    if (!includeHidden && dirName.StartsWith("."))
-                        continue;
-
-                    if (totalCount >= maxResults)
-                    {
-                        truncated = true;
-                        break;
-                    }
-
-                    entries.Add(new JObject
-                    {
-                        ["name"] = dirName,
-                        ["path"] = ToRelativePath(dir),
-                        ["type"] = "directory"
-                    });
-                    totalCount++;
+                    truncated = true;
+                    break;
                 }
 
-                // Then list files matching pattern
-                if (!truncated)
+                entries.Add(new JObject
                 {
-                    var files = Directory.GetFiles(fullPath, pattern, searchOption);
-                    foreach (var file in files)
+                    ["name"] = Path.GetFileName(dir),
+                    ["path"] = ToRelativePath(dir),
+                    ["type"] = "directory"
+                });
+                totalCount++;
+            }
+
+            // Then list files matching pattern
+            if (!truncated)
+            {
+                foreach (var dir in new[] { fullPath }.Concat(dirs))
+                {
+                    if (truncated) break;
+                    ct.ThrowIfCancellationRequested();
+
+                    foreach (var file in SafeEnumerateFiles(dir, pattern))
                     {
                         var fileName = Path.GetFileName(file);
                         if (!includeHidden && fileName.StartsWith("."))
@@ -477,10 +661,6 @@ namespace AgentCore.Editor.Tools.FileSystem
                     }
                 }
             }
-            catch (UnauthorizedAccessException)
-            {
-                // Skip inaccessible directories
-            }
 
             var data = new JObject
             {
@@ -489,20 +669,29 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ["recursive"] = recursive,
                 ["count"] = totalCount,
                 ["truncated"] = truncated,
+                ["truncatedReason"] = truncated ? "max_results" : null,
+                ["excluded_dirs"] = new JArray(excludedDirs),
                 ["entries"] = entries
             };
 
             var msg = truncated
                 ? $"Listed {totalCount} entries (truncated at max_results={maxResults}) in '{path}'"
                 : $"Listed {totalCount} entries in '{path}'";
+            if (excludedDirs.Count > 0)
+                msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to list it)";
 
             return ToolResponse.OkWithData(data, msg);
         }
 
         /// <summary>
         /// Search file contents using regex pattern across the project.
+        /// <para>
+        /// Safety: the pattern is capped at 512 chars and each match has a 200 ms timeout; a timeout
+        /// is returned as an error, never as "0 matches". The scan honours cancellation per file and
+        /// stops at a time / file / byte budget, returning what it found with truncatedReason set.
+        /// </para>
         /// </summary>
-        private ToolResponse HandleSearchContent(JObject parameters)
+        private ToolResponse HandleSearchContent(JObject parameters, CancellationToken ct)
         {
             var searchPattern = ToolHelpers.GetRequiredString(parameters, "pattern");
             var path = ToolHelpers.GetOptionalString(parameters, "path", "Assets");
@@ -512,31 +701,32 @@ namespace AgentCore.Editor.Tools.FileSystem
                 return ToolResponse.Fail($"Directory not found: '{path}'");
 
             var recursive = ToolHelpers.GetOptionalBool(parameters, "recursive", true);
-            var maxResults = ToolHelpers.GetOptionalInt(parameters, "max_results", DefaultMaxResults);
-            var contextLines = ToolHelpers.GetOptionalInt(parameters, "context_lines", DefaultContextLines);
+            var maxResults = Math.Max(1, ToolHelpers.GetOptionalInt(parameters, "max_results", DefaultMaxResults));
+            var contextLines = Math.Max(0, ToolHelpers.GetOptionalInt(parameters, "context_lines", DefaultContextLines));
             var caseSensitive = ToolHelpers.GetOptionalBool(parameters, "case_sensitive", false);
             var filePattern = ToolHelpers.GetOptionalString(parameters, "file_pattern", "*");
             var includeHidden = ToolHelpers.GetOptionalBool(parameters, "include_hidden", false);
 
-            // Validate regex
+            // Validate regex (length cap + match timeout; invalid patterns explain why)
             Regex regex;
             try
             {
-                var options = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
-                options |= RegexOptions.Compiled;
-                regex = new Regex(searchPattern, options);
+                regex = CreateSafeRegex(searchPattern, caseSensitive);
             }
             catch (ArgumentException ex)
             {
-                return ToolResponse.Fail($"Invalid regex pattern: {ex.Message}");
+                return ToolResponse.Fail(ex.Message);
             }
 
-            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var matches = new JArray();
+            var excludedDirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             int matchCount = 0;
             int filesSearched = 0;
             int filesMatched = 0;
-            bool truncated = false;
+            int filesUnreadable = 0;
+            long bytesRead = 0;
+            string scanStopReason = null;
+            var budget = Stopwatch.StartNew();
 
             // Binary file extensions to skip
             var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -553,95 +743,118 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ".cubemap", ".exr", ".hdr"
             };
 
-            try
-            {
-                string[] filePatterns;
-                if (filePattern.Contains("|"))
-                    filePatterns = filePattern.Split('|');
-                else
-                    filePatterns = new[] { filePattern };
+            var filePatterns = filePattern.Split('|')
+                .Select(fp => fp.Trim())
+                .Where(fp => fp.Length > 0)
+                .DefaultIfEmpty("*")
+                .ToArray();
 
-                var allFiles = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var directories = new[] { fullPath }.Concat(recursive
+                ? EnumerateDirectoriesPruned(fullPath, true, includeHidden, excludedDirs, ct)
+                : Enumerable.Empty<string>());
+
+            foreach (var dir in directories)
+            {
+                if (scanStopReason != null) break;
+
                 foreach (var fp in filePatterns)
                 {
-                    allFiles.AddRange(Directory.GetFiles(fullPath, fp.Trim(), searchOption));
-                }
+                    if (scanStopReason != null) break;
 
-                // Deduplicate
-                allFiles = allFiles.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-
-                foreach (var file in allFiles)
-                {
-                    if (truncated) break;
-
-                    var fileName = Path.GetFileName(file);
-                    if (!includeHidden && fileName.StartsWith("."))
-                        continue;
-
-                    var ext = Path.GetExtension(file);
-                    if (binaryExtensions.Contains(ext))
-                        continue;
-
-                    // Skip very large files
-                    var fi = new FileInfo(file);
-                    if (fi.Length > MaxReadSize)
-                        continue;
-
-                    filesSearched++;
-
-                    try
+                    foreach (var file in SafeEnumerateFiles(dir, fp))
                     {
-                        var lines = File.ReadAllLines(file);
+                        ct.ThrowIfCancellationRequested();
+
+                        if (budget.Elapsed > SearchTimeBudget)
+                        {
+                            scanStopReason = "timeout";
+                            break;
+                        }
+
+                        if (filesSearched >= SearchFileCap || bytesRead >= SearchByteBudget)
+                        {
+                            scanStopReason = "file_cap";
+                            break;
+                        }
+
+                        if (!seen.Add(file))
+                            continue;
+
+                        var fileName = Path.GetFileName(file);
+                        if (!includeHidden && fileName.StartsWith("."))
+                            continue;
+
+                        var ext = Path.GetExtension(file);
+                        if (binaryExtensions.Contains(ext))
+                            continue;
+
+                        string[] lines;
+                        try
+                        {
+                            // Skip very large files
+                            var fi = new FileInfo(file);
+                            if (fi.Length > MaxReadSize)
+                                continue;
+
+                            lines = File.ReadAllLines(file);
+                            bytesRead += fi.Length;
+                        }
+                        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                        {
+                            // Locked / inaccessible file: counted, not fatal
+                            filesUnreadable++;
+                            continue;
+                        }
+
+                        filesSearched++;
                         bool fileHasMatch = false;
 
+                        // RegexMatchTimeoutException propagates on purpose: it becomes an error, not 0 results.
                         for (int i = 0; i < lines.Length; i++)
                         {
-                            if (regex.IsMatch(lines[i]))
+                            var m = regex.Match(lines[i]);
+                            if (!m.Success)
+                                continue;
+
+                            if (!fileHasMatch)
                             {
-                                if (!fileHasMatch)
-                                {
-                                    filesMatched++;
-                                    fileHasMatch = true;
-                                }
-
-                                matchCount++;
-                                if (matchCount > maxResults)
-                                {
-                                    truncated = true;
-                                    break;
-                                }
-
-                                // Build context
-                                var contextStart = Math.Max(0, i - contextLines);
-                                var contextEnd = Math.Min(lines.Length - 1, i + contextLines);
-                                var contextSb = new StringBuilder();
-                                for (int j = contextStart; j <= contextEnd; j++)
-                                {
-                                    var prefix = j == i ? ">>>" : "   ";
-                                    contextSb.AppendLine($"{prefix} {j + 1,5} | {lines[j]}");
-                                }
-
-                                matches.Add(new JObject
-                                {
-                                    ["file"] = ToRelativePath(file),
-                                    ["line"] = i + 1,
-                                    ["column"] = regex.Match(lines[i]).Index + 1,
-                                    ["match"] = regex.Match(lines[i]).Value,
-                                    ["context"] = contextSb.ToString().TrimEnd()
-                                });
+                                filesMatched++;
+                                fileHasMatch = true;
                             }
+
+                            matchCount++;
+
+                            // Past max_results: keep counting so totalMatches stays honest, but stop collecting.
+                            if (matchCount > maxResults)
+                                continue;
+
+                            // Build context
+                            var contextStart = Math.Max(0, i - contextLines);
+                            var contextEnd = Math.Min(lines.Length - 1, i + contextLines);
+                            var contextSb = new StringBuilder();
+                            for (int j = contextStart; j <= contextEnd; j++)
+                            {
+                                var prefix = j == i ? ">>>" : "   ";
+                                contextSb.AppendLine($"{prefix} {j + 1,5} | {lines[j]}");
+                            }
+
+                            matches.Add(new JObject
+                            {
+                                ["file"] = ToRelativePath(file),
+                                ["line"] = i + 1,
+                                ["column"] = m.Index + 1,
+                                ["match"] = m.Value,
+                                ["context"] = contextSb.ToString().TrimEnd()
+                            });
                         }
-                    }
-                    catch (Exception)
-                    {
-                        // Skip files that can't be read (binary, locked, etc.)
                     }
                 }
             }
-            catch (UnauthorizedAccessException)
-            {
-                // Skip inaccessible directories
-            }
+
+            var overMax = matchCount > maxResults;
+            var truncated = overMax || scanStopReason != null;
+            var truncatedReason = scanStopReason ?? (overMax ? "max_results" : null);
 
             var data = new JObject
             {
@@ -649,13 +862,26 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ["search_path"] = ToRelativePath(fullPath),
                 ["files_searched"] = filesSearched,
                 ["files_matched"] = filesMatched,
-                ["match_count"] = matchCount,
+                ["files_unreadable"] = filesUnreadable,
+                ["matches"] = matches,
+                ["totalMatches"] = matchCount,
+                ["totalIsLowerBound"] = scanStopReason != null,
                 ["truncated"] = truncated,
-                ["matches"] = matches
+                ["truncatedReason"] = truncatedReason,
+                ["excluded_dirs"] = new JArray(excludedDirs)
             };
 
-            return ToolResponse.OkWithData(data,
-                $"Found {matchCount} matches in {filesMatched} files (searched {filesSearched} files)");
+            var msg = $"Found {matchCount}{(scanStopReason != null ? "+" : "")} matching lines in {filesMatched} files (searched {filesSearched} files)";
+            if (overMax)
+                msg += $"; showing first {matches.Count} (max_results={maxResults})";
+            if (scanStopReason == "timeout")
+                msg += $"; scan stopped after {SearchTimeBudget.TotalSeconds:0}s budget, narrow path/file_pattern for complete results";
+            else if (scanStopReason == "file_cap")
+                msg += $"; scan stopped at file/byte cap ({SearchFileCap} files / {SearchByteBudget / (1024 * 1024)}MB), narrow path/file_pattern for complete results";
+            if (excludedDirs.Count > 0)
+                msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to search it)";
+
+            return ToolResponse.OkWithData(data, msg);
         }
 
         /// <summary>

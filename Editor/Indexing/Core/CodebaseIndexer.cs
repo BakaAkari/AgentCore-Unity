@@ -19,7 +19,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
     ///
     /// 线程模型：
     ///   - 文件扫描和 Roslyn 解析在后台线程执行（非主线程）。
-    ///   - IIndexStore 写操作通过 await 串行化，不需要额外锁。
+    ///   - IIndexStore 写操作由 IndexService 的单写线程串行执行。
+    ///   - 同一进程内的索引运行（全量 / 增量 / 针对性增量 / Scope）通过 s_runGate 排队，
+    ///     面板、后台服务与工具同时触发时依次执行，不会交错写同一批文件。
     ///   - 进度回调在调用线程上同步触发（调用方负责线程安全）。
     /// </summary>
     public sealed class CodebaseIndexer
@@ -46,6 +48,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private readonly IIndexStore _store;
         private readonly IndexRootResolver _rootResolver;
         private readonly long _maxFileSizeBytes;
+
+        /// <summary>进程内索引运行互斥（排队等待，不拒绝）。</summary>
+        private static readonly SemaphoreSlim s_runGate = new SemaphoreSlim(1, 1);
 
         // ── 构造函数 ─────────────────────────────────────────────────────────────
 
@@ -86,9 +91,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <param name="onProgress">进度回调（可为 null）。</param>
         /// <param name="ct">取消令牌。</param>
         /// <returns>最终进度快照。</returns>
-        public async Task<IndexingProgress> RunFullIndexAsync(
+        public Task<IndexingProgress> RunFullIndexAsync(
             Action<IndexingProgress> onProgress = null,
             CancellationToken ct = default)
+        {
+            return RunExclusiveAsync(() => RunFullIndexCoreAsync(onProgress, ct), onProgress, ct);
+        }
+
+        private async Task<IndexingProgress> RunFullIndexCoreAsync(
+            Action<IndexingProgress> onProgress,
+            CancellationToken ct)
         {
             var progress = IndexingProgress.CreateStarted(IndexingPhase.Initializing);
             ReportProgress(onProgress, progress);
@@ -191,6 +203,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 await _store.SetMetadataAsync(workspaceId, MetaKeyIndexVersion,
                     CurrentIndexVersion, ct);
 
+                // 全量重建完成：清除存储的损坏标记（如有）
+                if (_store is IIndexHealth health && health.RequiresRebuild)
+                    await health.AcknowledgeRebuildAsync(ct);
+
                 // 9. 完成
                 var completed = IndexingProgress.CreateCompleted(progress);
                 ReportProgress(onProgress, completed);
@@ -222,9 +238,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <param name="onProgress">进度回调（可为 null）。</param>
         /// <param name="ct">取消令牌。</param>
         /// <returns>最终进度快照。</returns>
-        public async Task<IndexingProgress> RunIncrementalIndexAsync(
+        public Task<IndexingProgress> RunIncrementalIndexAsync(
             Action<IndexingProgress> onProgress = null,
             CancellationToken ct = default)
+        {
+            return RunExclusiveAsync(() => RunIncrementalIndexCoreAsync(onProgress, ct), onProgress, ct);
+        }
+
+        private async Task<IndexingProgress> RunIncrementalIndexCoreAsync(
+            Action<IndexingProgress> onProgress,
+            CancellationToken ct)
         {
             var progress = IndexingProgress.CreateStarted(IndexingPhase.Initializing);
             ReportProgress(onProgress, progress);
@@ -258,7 +281,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 if (string.IsNullOrEmpty(lastFullIndex) || storedVersion != CurrentIndexVersion)
                 {
                     AgentCoreLog.Info("[CodebaseIndexer] No full index found or version mismatch, falling back to full indexing.");
-                    return await RunFullIndexAsync(onProgress, ct);
+                    return await RunFullIndexCoreAsync(onProgress, ct);
                 }
 
                 // 3. 解析 Roots
@@ -392,12 +415,24 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <param name="onProgress">进度回调（可为 null）。</param>
         /// <param name="ct">取消令牌。</param>
         /// <returns>最终进度快照。</returns>
-        public async Task<IndexingProgress> RunTargetedIncrementalAsync(
+        public Task<IndexingProgress> RunTargetedIncrementalAsync(
             IReadOnlyList<string> changedPaths,
             IReadOnlyList<string> deletedPaths,
             int yieldEveryNFiles = 5,
             Action<IndexingProgress> onProgress = null,
             CancellationToken ct = default)
+        {
+            return RunExclusiveAsync(
+                () => RunTargetedIncrementalCoreAsync(changedPaths, deletedPaths, yieldEveryNFiles, onProgress, ct),
+                onProgress, ct);
+        }
+
+        private async Task<IndexingProgress> RunTargetedIncrementalCoreAsync(
+            IReadOnlyList<string> changedPaths,
+            IReadOnlyList<string> deletedPaths,
+            int yieldEveryNFiles,
+            Action<IndexingProgress> onProgress,
+            CancellationToken ct)
         {
             var progress = IndexingProgress.CreateStarted(IndexingPhase.Initializing);
             ReportProgress(onProgress, progress);
@@ -621,7 +656,182 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
         }
 
+        /// <summary>
+        /// 只重建指定 Root：先删除这些 Root 已有的文件 / 符号 / 依赖，再扫描并索引，
+        /// 其他 Root 的数据保持不动（不会清空整个 workspace）。
+        /// <para>不写入 last_full_index_at：Scope 重建不等于全量索引。</para>
+        /// </summary>
+        /// <param name="targetRoots">目标 Root（Id 可为 0，内部 upsert 获取真实 Id）。</param>
+        /// <param name="onProgress">进度回调（可为 null）。</param>
+        /// <param name="ct">取消令牌。</param>
+        /// <returns>最终进度快照。</returns>
+        public Task<IndexingProgress> RunScopeIndexAsync(
+            IReadOnlyList<IndexRoot> targetRoots,
+            Action<IndexingProgress> onProgress = null,
+            CancellationToken ct = default)
+        {
+            return RunExclusiveAsync(() => RunScopeIndexCoreAsync(targetRoots, onProgress, ct), onProgress, ct);
+        }
+
+        private async Task<IndexingProgress> RunScopeIndexCoreAsync(
+            IReadOnlyList<IndexRoot> targetRoots,
+            Action<IndexingProgress> onProgress,
+            CancellationToken ct)
+        {
+            var progress = IndexingProgress.CreateStarted(IndexingPhase.Initializing);
+            ReportProgress(onProgress, progress);
+
+            try
+            {
+                var roots = (targetRoots ?? Array.Empty<IndexRoot>()).Where(r => r != null).ToList();
+
+                // 1. 解析 workspace
+                ct.ThrowIfCancellationRequested();
+                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var workspaceId = await _store.UpsertWorkspaceAsync(workspace, ct);
+                workspace = new IndexWorkspace
+                {
+                    Id = workspaceId,
+                    Fingerprint = workspace.Fingerprint,
+                    WorkspaceRoot = workspace.WorkspaceRoot,
+                    UnityRoot = workspace.UnityRoot,
+                    UnityRootRelativePath = workspace.UnityRootRelativePath,
+                    DisplayName = workspace.DisplayName,
+                    VcsType = workspace.VcsType,
+                    VcsRootPath = workspace.VcsRootPath,
+                    VcsUrl = workspace.VcsUrl,
+                    RepositoryRoot = workspace.RepositoryRoot,
+                    BranchId = workspace.BranchId,
+                    Revision = workspace.Revision,
+                };
+
+                // 2. 持久化目标 Root，并只清除这些 Root 的旧数据
+                foreach (var root in roots)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    root.Id = await _store.UpsertRootAsync(workspaceId, root, ct);
+                    root.WorkspaceId = workspaceId;
+                    await ClearRootAsync(workspaceId, root.Id, ct);
+                }
+
+                // 3. 扫描目标 Root
+                progress.Phase = IndexingPhase.Scanning;
+                ReportProgress(onProgress, progress);
+                var allFiles = ScanAllFiles(roots, progress, onProgress, ct);
+                progress.TotalFiles = allFiles.Count;
+
+                // 4. 索引
+                progress.Phase = IndexingPhase.FullIndexing;
+                ReportProgress(onProgress, progress);
+
+                const int yieldEveryNFiles = 10;
+                for (var i = 0; i < allFiles.Count; i++)
+                {
+                    var (root, filePath) = allFiles[i];
+                    ct.ThrowIfCancellationRequested();
+                    progress.CurrentRoot = root.RootPath;
+                    progress.CurrentFile = filePath;
+
+                    try
+                    {
+                        await IndexFileAsync(workspaceId, root, filePath, workspace, progress, ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        AgentCoreLog.Warning($"[CodebaseIndexer] Unhandled exception indexing '{filePath}': {ex.Message}");
+                        progress.ErrorFiles++;
+                    }
+
+                    progress.ProcessedFiles++;
+                    ReportProgress(onProgress, progress);
+
+                    if (i % yieldEveryNFiles == 0)
+                        await Task.Yield();
+                }
+
+                // 5. 元数据：只记录增量时间与格式版本
+                progress.Phase = IndexingPhase.Persisting;
+                ReportProgress(onProgress, progress);
+                await _store.SetMetadataAsync(workspaceId, MetaKeyLastIncrementalIndex,
+                    DateTime.UtcNow.ToString("O"), ct);
+
+                var completed = IndexingProgress.CreateCompleted(progress);
+                ReportProgress(onProgress, completed);
+                return completed;
+            }
+            catch (OperationCanceledException)
+            {
+                progress.Phase = IndexingPhase.Completed;
+                var failed = IndexingProgress.CreateFailed(progress, "Scope indexing was cancelled.");
+                ReportProgress(onProgress, failed);
+                return failed;
+            }
+            catch (Exception ex)
+            {
+                var failed = IndexingProgress.CreateFailed(progress, $"Scope indexing failed: {ex.Message}");
+                ReportProgress(onProgress, failed);
+                AgentCoreLog.Error($"[CodebaseIndexer] Scope indexing failed: {ex}");
+                return failed;
+            }
+        }
+
         // ── 私有方法 ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// 删除单个 Root 的全部索引数据。后端支持 <see cref="IScopedIndexStore"/> 时一次完成，否则逐文件删除。
+        /// </summary>
+        private async Task ClearRootAsync(int workspaceId, int rootId, CancellationToken ct)
+        {
+            if (_store is IScopedIndexStore scoped)
+            {
+                await scoped.ClearRootIndexAsync(workspaceId, rootId, ct);
+                return;
+            }
+
+            var files = await _store.GetFilesForRootAsync(rootId, ct);
+            foreach (var f in files)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (f.WorkspaceId != 0 && f.WorkspaceId != workspaceId) continue;
+                await _store.DeleteDependenciesByFileAsync(f.Id, ct);
+                await _store.DeleteSymbolsByFileAsync(f.Id, ct);
+                await _store.DeleteFileAsync(f.Id, ct);
+            }
+        }
+
+        /// <summary>
+        /// 排队获取进程内索引运行锁后执行。等待期间被取消时返回“已取消”进度而不是抛出。
+        /// </summary>
+        private static async Task<IndexingProgress> RunExclusiveAsync(
+            Func<Task<IndexingProgress>> body,
+            Action<IndexingProgress> onProgress,
+            CancellationToken ct)
+        {
+            try
+            {
+                await s_runGate.WaitAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                var cancelled = IndexingProgress.CreateFailed(
+                    IndexingProgress.CreateStarted(IndexingPhase.Initializing), "Indexing was cancelled.");
+                ReportProgress(onProgress, cancelled);
+                return cancelled;
+            }
+
+            try
+            {
+                return await body();
+            }
+            finally
+            {
+                s_runGate.Release();
+            }
+        }
 
         /// <summary>
         /// 扫描所有启用 Root 下的文件，返回 (root, filePath) 列表。

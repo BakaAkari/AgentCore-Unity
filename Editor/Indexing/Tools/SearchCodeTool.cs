@@ -263,6 +263,22 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                         break;
                 }
             }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException ex)
+            {
+                // 正则超时是错误，不能当作 0 条结果返回
+                response = ToolResponse.Fail(SafeRegex.DescribeTimeout(ex.Pattern, "search_code"));
+            }
+            catch (NotSupportedException ex)
+            {
+                // 当前后端无法回答该查询（如 JSONL 后端的依赖查询）：明确返回 unsupported
+                response = ToolResponse.Fail(ex.Message.StartsWith("unsupported", StringComparison.OrdinalIgnoreCase)
+                    ? ex.Message
+                    : $"unsupported: {ex.Message}");
+            }
+            catch (OperationCanceledException)
+            {
+                response = ToolResponse.Fail("search_code cancelled: 操作已取消，结果不完整，请重试。");
+            }
             catch (Exception ex)
             {
                 response = ToolResponse.Fail($"search_code error: {ex.Message}");
@@ -624,10 +640,18 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             var rootResolver = new IndexRootResolver();
             var allRoots = rootResolver.Resolve(workspace);
 
-            // 过滤目标 Root
-            var targetRoots = allRoots.Where(r =>
+            // 先持久化 enabled Root 拿到真实 rootId（Resolver 返回的 Id 恒为 0，不能直接按 root_id 过滤）
+            var enabledRoots = allRoots.Where(r => r.IsEnabled).ToList();
+            foreach (var r in enabledRoots)
             {
-                if (!r.IsEnabled) return false;
+                ct.ThrowIfCancellationRequested();
+                r.Id = await store.UpsertRootAsync(workspaceId, r, ct);
+                r.WorkspaceId = workspaceId;
+            }
+
+            // 过滤目标 Root
+            var targetRoots = enabledRoots.Where(r =>
+            {
                 if (rootId > 0 && r.Id != rootId) return false;
                 if (scopeType.HasValue && r.ScopeType != scopeType.Value) return false;
                 if (!string.IsNullOrEmpty(scopeName) &&
@@ -636,26 +660,48 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             }).ToList();
 
             if (targetRoots.Count == 0)
-                return ToolResponse.Fail($"未找到匹配的 Root（scope_type={scopeTypeStr}, scope_name={scopeName}, root_id={rootId}）");
+            {
+                var available = string.Join(", ", enabledRoots.Select(r => $"#{r.Id} {r.ScopeType}/{r.ScopeName}"));
+                return ToolResponse.Fail($"未找到匹配的 Root（scope_type={scopeTypeStr}, scope_name={scopeName}, root_id={rootId}）。可用 Root：{available}");
+            }
 
-            // 创建只包含目标 Root 的 Resolver
-            var filteredResolver = new IndexRootResolver(
-                new IIndexRootProvider[] { new FixedRootProvider(targetRoots) });
+            // 只删除并重建目标 Root 的数据，其他 Root 保持不变
+            var stateStore = new IndexRootStateStore(store, workspaceId);
+            foreach (var r in targetRoots)
+                await stateStore.SetStateAsync(r.Id, IndexRootState.Indexing, ct);
 
-            var indexer = new CodebaseIndexer(store, filteredResolver);
-            var progress = await indexer.RunFullIndexAsync(null, ct);
+            var indexer = new CodebaseIndexer(store);
+            var progress = await indexer.RunScopeIndexAsync(targetRoots, null, ct);
 
             if (!progress.IsSuccess)
+            {
+                foreach (var r in targetRoots)
+                {
+                    try { await stateStore.MarkFailedAsync(r.Id, progress.ErrorMessage, CancellationToken.None); }
+                    catch { /* best-effort */ }
+                }
+
                 return ToolResponse.Fail($"Scope 索引失败: {progress.ErrorMessage}");
+            }
+
+            foreach (var r in targetRoots)
+            {
+                try { await stateStore.RefreshAndMarkReadyAsync(r.Id, ct); }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"[AgentCore] search_code::index_scope failed to refresh state for root {r.Id}: {ex.Message}");
+                }
+            }
 
             return ToolResponse.OkWithData(new
             {
                 indexed_roots = targetRoots.Count,
+                root_ids = targetRoots.Select(r => r.Id).ToList(),
                 processed_files = progress.ProcessedFiles,
                 extracted_symbols = progress.ExtractedSymbols,
                 error_files = progress.ErrorFiles,
                 elapsed_seconds = Math.Round(progress.ElapsedSeconds, 2),
-            }, $"Scope 索引完成：{targetRoots.Count} 个 Root，{progress.ProcessedFiles} 个文件，{progress.ExtractedSymbols} 个符号");
+            }, $"Scope 索引完成：{targetRoots.Count} 个 Root，{progress.ProcessedFiles} 个文件，{progress.ExtractedSymbols} 个符号（其他 Root 的索引未改动）");
         }
 
         /// <summary>
@@ -740,12 +786,12 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             if (!await searcher.IsIndexAvailableAsync(ct))
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
 
-            var results = await searcher.SearchAsync(query, ct);
+            var page = await searcher.SearchPageAsync(query, ct);
 
             // 获取 workspace 信息用于结果上下文
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
 
-            var resultItems = results.Select(s => BuildSymbolResult(s, workspace)).ToList();
+            var resultItems = page.Matches.Select(s => BuildSymbolResult(s, workspace)).ToList();
 
             return ToolResponse.OkWithData(new
             {
@@ -753,9 +799,13 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 workspace_root = workspace.WorkspaceRoot,
                 branch_id = workspace.BranchId,
                 query = queryStr,
-                total = resultItems.Count,
-                results = resultItems,
-            }, $"找到 {resultItems.Count} 个符号");
+                matches = resultItems,
+                totalMatches = page.TotalMatches,
+                totalIsLowerBound = page.TotalIsLowerBound ? true : (bool?)null,
+                truncated = page.Truncated,
+                truncatedReason = page.TruncatedReason,
+                index_warning = GetIndexHealthWarning(store),
+            }, DescribePage("符号", resultItems.Count, page));
         }
 
         /// <summary>
@@ -913,16 +963,37 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             if (stored == null)
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
 
-            var results = await store.SearchSymbolsByTextAsync(stored.Id, text, limit, ct);
+            SymbolSearchPage page;
+            if (store is IPagedSymbolSearch paged)
+            {
+                page = await paged.SearchSymbolsByTextPageAsync(stored.Id, text, limit, ct);
+            }
+            else
+            {
+                var raw = await store.SearchSymbolsByTextAsync(stored.Id, text, limit + 1, ct);
+                var cut = raw.Count > limit;
+                page = new SymbolSearchPage
+                {
+                    Matches = cut ? raw.Take(limit).ToList() : raw,
+                    TotalMatches = raw.Count,
+                    TotalIsLowerBound = cut,
+                    Truncated = cut,
+                    TruncatedReason = cut ? SearchTruncation.MaxResults : null,
+                };
+            }
 
-            var resultItems = results.Select(s => BuildSymbolResult(s, workspace)).ToList();
+            var resultItems = page.Matches.Select(s => BuildSymbolResult(s, workspace)).ToList();
             return ToolResponse.OkWithData(new
             {
                 query = text,
                 backend = store.BackendType,
-                total = resultItems.Count,
-                results = resultItems,
-            }, $"全文搜索 '{text}' 找到 {resultItems.Count} 个符号");
+                matches = resultItems,
+                totalMatches = page.TotalMatches,
+                totalIsLowerBound = page.TotalIsLowerBound ? true : (bool?)null,
+                truncated = page.Truncated,
+                truncatedReason = page.TruncatedReason,
+                index_warning = GetIndexHealthWarning(store),
+            }, $"全文搜索 '{text}'：" + DescribePage("符号", resultItems.Count, page));
         }
 
         /// <summary>
@@ -1099,10 +1170,22 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
             // 获取出向依赖
             object[] depsResult = null;
+            string depsError = null;
             if (includeDeps && targetSymbol != null)
             {
-                var deps = await store.GetDependenciesAsync(stored.Id, targetSymbol.FileId, targetSymbol.Id, ct);
-                depsResult = deps.Select(d => (object)new
+                IReadOnlyList<SymbolDependency> deps;
+                try
+                {
+                    deps = await store.GetDependenciesAsync(stored.Id, targetSymbol.FileId, targetSymbol.Id, ct);
+                }
+                catch (NotSupportedException ex)
+                {
+                    // 后端不支持依赖查询：明确告知，而不是返回空列表
+                    depsError = ex.Message;
+                    deps = null;
+                }
+
+                depsResult = deps?.Select(d => (object)new
                 {
                     to_type_name = d.ToTypeName,
                     to_symbol_id = d.ToSymbolId,
@@ -1113,11 +1196,22 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
             // 获取入向引用（谁引用了这个类型）
             object[] usagesResult = null;
+            string usagesError = null;
             if (includeUsages && targetSymbol != null)
             {
                 var name = targetSymbol.Name;
-                var usages = await store.FindUsagesAsync(stored.Id, name, ct);
-                usagesResult = usages.Take(50).Select(d => (object)new
+                IReadOnlyList<SymbolDependency> usages;
+                try
+                {
+                    usages = await store.FindUsagesAsync(stored.Id, name, ct);
+                }
+                catch (NotSupportedException ex)
+                {
+                    usagesError = ex.Message;
+                    usages = null;
+                }
+
+                usagesResult = usages?.Take(50).Select(d => (object)new
                 {
                     from_file_id = d.FromFileId,
                     from_symbol_id = d.FromSymbolId,
@@ -1133,9 +1227,14 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 file_symbols = fileSymbols,
                 dependencies_count = depsResult?.Length ?? 0,
                 dependencies = depsResult,
+                dependencies_error = depsError,
                 usages_count = usagesResult?.Length ?? 0,
                 usages = usagesResult,
-            }, $"符号上下文：{targetSymbol?.FullName ?? fullName}，{depsResult?.Length ?? 0} 条依赖，{usagesResult?.Length ?? 0} 处引用");
+                usages_error = usagesError,
+            }, $"符号上下文：{targetSymbol?.FullName ?? fullName}，"
+               + (depsError != null ? "依赖查询不受当前后端支持" : $"{depsResult?.Length ?? 0} 条依赖")
+               + "，"
+               + (usagesError != null ? "引用查询不受当前后端支持" : $"{usagesResult?.Length ?? 0} 处引用"));
         }
 
         /// <summary>
@@ -1179,6 +1278,36 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         /// <summary>
         /// 将 SymbolInfo 转换为 LLM 友好的结果对象。
         /// </summary>
+        /// <summary>
+        /// 生成人类可读的结果摘要行（含截断说明）。
+        /// </summary>
+        private static string DescribePage(string noun, int shown, SymbolSearchPage page)
+        {
+            var total = page.TotalIsLowerBound ? $"至少 {page.TotalMatches}" : page.TotalMatches.ToString();
+            if (!page.Truncated)
+                return $"找到 {page.TotalMatches} 个{noun}";
+
+            switch (page.TruncatedReason)
+            {
+                case SearchTruncation.Timeout:
+                    return $"搜索超出时间预算，已扫描部分找到 {total} 个{noun}，显示 {shown} 个（truncatedReason=timeout，可缩小范围或改用更具体的查询）";
+                case SearchTruncation.FileCap:
+                    return $"扫描达到文件/字节上限，找到 {total} 个{noun}，显示 {shown} 个（truncatedReason=file_cap）";
+                default:
+                    return $"找到 {total} 个{noun}，显示前 {shown} 个（truncatedReason=max_results，可增大 limit 或增加过滤条件）";
+            }
+        }
+
+        /// <summary>
+        /// 索引健康警告（存储有损坏行 / 需要重建时返回说明，健康时为 null）。
+        /// </summary>
+        private static string GetIndexHealthWarning(IIndexStore store)
+        {
+            if (store is IIndexHealth health && (health.RequiresRebuild || health.CorruptLineCount > 0))
+                return health.HealthMessage ?? $"索引存储有 {health.CorruptLineCount} 行损坏，结果可能不完整。";
+            return null;
+        }
+
         private static object BuildSymbolResult(SymbolInfo s, IndexWorkspace workspace)
         {
             // 计算相对于 WorkspaceRoot 的路径
@@ -1410,27 +1539,6 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             }
 
             return advice;
-        }
-
-        // ── 内部辅助类 ───────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// 固定 Root 列表的 Provider（用于 index_scope 的过滤索引）。
-        /// </summary>
-        private sealed class FixedRootProvider : IIndexRootProvider
-        {
-            private readonly IReadOnlyList<IndexRoot> _roots;
-
-            public FixedRootProvider(IReadOnlyList<IndexRoot> roots)
-            {
-                _roots = roots;
-            }
-
-            public string ProviderId => "fixed";
-            public int Priority => 0;
-
-            public IReadOnlyList<IndexRoot> DiscoverRoots(IndexWorkspace workspace)
-                => _roots;
         }
     }
 }
