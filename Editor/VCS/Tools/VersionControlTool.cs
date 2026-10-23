@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.VCS.Config;
@@ -1143,14 +1144,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    var gitArgs = new List<string> { "commit", "-m", commitMessage, "--" };
-                    gitArgs.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, timeoutSeconds: 120, ct: ct);
+                    commandResult = await ExecuteGitCommitFilesAsync(rootPath, commitMessage, filePaths, ct);
                     break;
                 case VcsType.Svn:
-                    var svnArgs = new List<string> { "commit", "--non-interactive", "-m", commitMessage };
-                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, timeoutSeconds: 120, ct: ct);
+                    commandResult = await ExecuteSvnCommitFilesAsync(rootPath, commitMessage, filePaths, ct);
                     break;
                 case VcsType.Perforce:
                     return OperationFailure("commit_files is not supported for Perforce because p4 submit scope depends on changelist state. Use submit for the active changelist.");
@@ -1161,6 +1158,94 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return OperationFromCommand(commandResult, $"Committed {filePaths.Count} file(s).", filePaths);
         }
 
+        /// <summary>
+        /// git commit 指定文件。提交必须是一次原子操作，不能分批：
+        /// 命令行放得下时直接传路径；超过上限时改用 <c>--pathspec-from-file</c>（NUL 分隔 UTF-8 临时文件，需 git 2.25+）。
+        /// </summary>
+        private static async Task<CommandResult> ExecuteGitCommitFilesAsync(string rootPath, string commitMessage, List<string> filePaths, CancellationToken ct)
+        {
+            var prefix = new List<string> { "commit", "-m", commitMessage, "--" };
+            if (VcsArgs.ChunkPaths("git", prefix, filePaths).Count <= 1)
+            {
+                var gitArgs = new List<string>(prefix);
+                gitArgs.AddRange(filePaths);
+                return await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, timeoutSeconds: 120, ct: ct);
+            }
+
+            var pathFile = Path.Combine(Path.GetTempPath(), $"agentcore-commit-{Guid.NewGuid():N}.pathspec");
+            try
+            {
+                File.WriteAllText(pathFile, string.Join("\0", filePaths) + "\0", new UTF8Encoding(false));
+                var args = new List<string> { "commit", "-m", commitMessage, "--pathspec-from-file=" + pathFile, "--pathspec-file-nul" };
+                return await VcsCommandExecutor.ExecuteAsync("git", args, rootPath, timeoutSeconds: 120, ct: ct);
+            }
+            finally
+            {
+                TryDeleteFile(pathFile);
+            }
+        }
+
+        /// <summary>
+        /// svn commit 指定文件，尽量保持原子：
+        /// 命令行放得下时直接传路径；超过上限且路径全为 ASCII 时用 <c>--targets</c> 文件一次提交；
+        /// 含非 ASCII 路径时（svn 在 Windows 上按系统本地代码页读取 targets 文件，可能误读）退化为分批提交，
+        /// 并在结果中明确标注为多次提交。
+        /// </summary>
+        private static async Task<CommandResult> ExecuteSvnCommitFilesAsync(string rootPath, string commitMessage, List<string> filePaths, CancellationToken ct)
+        {
+            var prefix = new List<string> { "commit", "--non-interactive", "-m", commitMessage };
+            var svnPaths = filePaths.Select(SvnAdapter.SvnPathArg).ToList();
+            if (VcsArgs.ChunkPaths("svn", prefix, svnPaths).Count <= 1)
+            {
+                var svnArgs = new List<string>(prefix);
+                svnArgs.AddRange(svnPaths);
+                return await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, timeoutSeconds: 120, ct: ct);
+            }
+
+            if (svnPaths.All(IsAscii))
+            {
+                var targetsFile = Path.Combine(Path.GetTempPath(), $"agentcore-commit-{Guid.NewGuid():N}.targets");
+                try
+                {
+                    File.WriteAllText(targetsFile, string.Join("\n", svnPaths) + "\n", new UTF8Encoding(false));
+                    var args = new List<string>(prefix) { "--targets", targetsFile };
+                    return await VcsCommandExecutor.ExecuteAsync("svn", args, rootPath, timeoutSeconds: 300, ct: ct);
+                }
+                finally
+                {
+                    TryDeleteFile(targetsFile);
+                }
+            }
+
+            var chunked = await VcsCommandExecutor.ExecuteChunkedAsync("svn", prefix, svnPaths, rootPath, timeoutSeconds: 120, ct: ct);
+            var note = $"[Note] {filePaths.Count} paths exceed the command-line limit and contain non-ASCII characters; committed in several batches (multiple revisions) with the same message.";
+            chunked.Output = string.IsNullOrEmpty(chunked.Output) ? note : note + "\n" + chunked.Output;
+            return chunked;
+        }
+
+        private static bool IsAscii(string value)
+        {
+            foreach (var c in value)
+            {
+                if (c > 0x7F)
+                    return false;
+            }
+            return true;
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch
+            {
+                // 临时文件删除失败不影响结果
+            }
+        }
+
         private async Task<VcsOperationResult> ExecuteResolveFilesAsync(IVcsAdapter adapter, List<string> filePaths, CancellationToken ct)
         {
             var rootPath = VcsDetector.GetVcsRootPath();
@@ -1169,19 +1254,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    var gitArgs = new List<string> { "add", "--" };
-                    gitArgs.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, ct: ct);
+                    // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("git", new[] { "add", "--" }, filePaths, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    var svnArgs = new List<string> { "resolve", "--accept", "working", "--non-interactive" };
-                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                        "svn", new[] { "resolve", "--accept", "working", "--non-interactive" },
+                        filePaths.Select(SvnAdapter.SvnPathArg).ToList(), rootPath, ct: ct);
                     break;
                 case VcsType.Perforce:
-                    var p4Args = new List<string> { "resolve", "-am" };
-                    p4Args.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", p4Args, rootPath, timeoutSeconds: 60, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("p4", new[] { "resolve", "-am" }, filePaths, rootPath, timeoutSeconds: 60, ct: ct);
                     break;
                 default:
                     return OperationFailure($"resolve_files is not supported for {adapter.VcsType}.");
@@ -1216,19 +1298,16 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (adapter.VcsType)
             {
                 case VcsType.Git:
-                    var gitArgs = new List<string> { "rm", "--" };
-                    gitArgs.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("git", gitArgs, rootPath, ct: ct);
+                    // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("git", new[] { "rm", "--" }, filePaths, rootPath, ct: ct);
                     break;
                 case VcsType.Svn:
-                    var svnArgs = new List<string> { "delete", "--force", "--non-interactive" };
-                    svnArgs.AddRange(filePaths.Select(SvnAdapter.SvnPathArg));
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("svn", svnArgs, rootPath, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                        "svn", new[] { "delete", "--force", "--non-interactive" },
+                        filePaths.Select(SvnAdapter.SvnPathArg).ToList(), rootPath, ct: ct);
                     break;
                 case VcsType.Perforce:
-                    var p4Args = new List<string> { "delete" };
-                    p4Args.AddRange(filePaths);
-                    commandResult = await VcsCommandExecutor.ExecuteAsync("p4", p4Args, rootPath, ct: ct);
+                    commandResult = await VcsCommandExecutor.ExecuteChunkedAsync("p4", new[] { "delete" }, filePaths, rootPath, ct: ct);
                     break;
                 default:
                     return OperationFailure($"remove_files is not supported for {adapter.VcsType}.");

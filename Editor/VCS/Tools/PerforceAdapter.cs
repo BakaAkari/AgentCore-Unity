@@ -474,10 +474,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                var args = new List<string> { "revert" };
-                args.AddRange(filePaths);
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "p4", args, _workingDirectory, ct: ct);
+                // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                var cmdResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                    "p4", new[] { "revert" }, filePaths, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {

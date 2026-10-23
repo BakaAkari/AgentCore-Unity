@@ -350,6 +350,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 result.LogLines.Add($"Preparing {filePaths.Count} SVN path(s) for commit.");
 
+                // 先分类，再按 add / delete 分批执行：大量文件时不再每个文件启动一个 svn 进程
+                var toDelete = new List<(string original, string abs)>();
+                var toAdd = new List<(string original, string abs)>();
                 foreach (var filePath in filePaths)
                 {
                     // 将传入路径解析为绝对路径，再规范化后查找状态
@@ -371,37 +374,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     }
 
                     // 使用绝对路径执行命令，避免工作目录不一致导致路径解析错误
-                    var arguments = shouldDelete
-                        ? new List<string> { "delete", "--force", "--non-interactive", SvnPathArg(absPath) }
-                        : new List<string> { "add", "--parents", "--force", "--non-interactive", SvnPathArg(absPath) };
-                    var commandLine = $"svn {VcsArgs.Join(arguments)}";
-
-                    if (string.IsNullOrEmpty(result.CommandLine))
-                        result.CommandLine = commandLine;
-
-                    result.LogLines.Add($"Run: {commandLine}");
-
-                    var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                        "svn", arguments, _workingDirectory, ct: ct);
-
-                    var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
-                        .Where(s => !string.IsNullOrWhiteSpace(s)));
-
-                    if (!string.IsNullOrWhiteSpace(commandOutput))
-                        allOutput.Add($"$ {commandLine}\n{commandOutput.Trim()}");
-                    else
-                        allOutput.Add($"$ {commandLine}");
-
-                    if (cmdResult.Success)
-                    {
-                        affectedFiles.Add(filePath);
-                        result.LogLines.Add($"Success: {filePath} ({(shouldDelete ? "scheduled delete" : "scheduled add")})");
-                    }
-                    else
-                    {
-                        result.LogLines.Add($"Failed: {filePath} - {cmdResult.ErrorMessage}");
-                    }
+                    (shouldDelete ? toDelete : toAdd).Add((filePath, absPath));
                 }
+
+                await ScheduleBatchAsync(new[] { "delete", "--force", "--non-interactive" }, toDelete, "scheduled delete", result, allOutput, affectedFiles, ct);
+                await ScheduleBatchAsync(new[] { "add", "--parents", "--force", "--non-interactive" }, toAdd, "scheduled add", result, allOutput, affectedFiles, ct);
 
                 result.Success = affectedFiles.Count > 0;
                 result.Message = $"Prepared {affectedFiles.Count} of {filePaths.Count} file(s) for SVN commit.";
@@ -507,6 +484,97 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return result;
         }
 
+        /// <summary>
+        /// 分批执行 svn add / delete：每批一个进程（命令行不超过上限）；
+        /// 某批失败时对该批逐个文件重试，保证一个坏路径不会连累同批其他文件，且每个失败都写入日志。
+        /// </summary>
+        private async Task ScheduleBatchAsync(
+            IReadOnlyList<string> prefix,
+            List<(string original, string abs)> items,
+            string successLabel,
+            VcsOperationResult result,
+            List<string> allOutput,
+            List<string> affectedFiles,
+            CancellationToken ct)
+        {
+            if (items.Count == 0)
+                return;
+
+            var byArg = new Dictionary<string, (string original, string abs)>(StringComparer.Ordinal);
+            var args = new List<string>(items.Count);
+            foreach (var item in items)
+            {
+                var arg = SvnPathArg(item.abs);
+                byArg[arg] = item;
+                args.Add(arg);
+            }
+
+            foreach (var chunk in VcsArgs.ChunkPaths("svn", prefix, args))
+            {
+                var arguments = new List<string>(prefix);
+                arguments.AddRange(chunk);
+                var cmdResult = await RunScheduleCommandAsync(arguments, result, allOutput, ct);
+
+                if (cmdResult.Success)
+                {
+                    foreach (var arg in chunk)
+                    {
+                        affectedFiles.Add(byArg[arg].original);
+                        result.LogLines.Add($"Success: {byArg[arg].original} ({successLabel})");
+                    }
+                    continue;
+                }
+
+                if (chunk.Count == 1)
+                {
+                    result.LogLines.Add($"Failed: {byArg[chunk[0]].original} - {cmdResult.ErrorMessage}");
+                    continue;
+                }
+
+                // 整批失败：逐个重试，定位具体失败的文件
+                result.LogLines.Add($"Batch of {chunk.Count} path(s) failed, retrying one by one: {cmdResult.ErrorMessage}");
+                foreach (var arg in chunk)
+                {
+                    var single = new List<string>(prefix) { arg };
+                    var singleResult = await RunScheduleCommandAsync(single, result, allOutput, ct);
+                    if (singleResult.Success)
+                    {
+                        affectedFiles.Add(byArg[arg].original);
+                        result.LogLines.Add($"Success: {byArg[arg].original} ({successLabel})");
+                    }
+                    else
+                    {
+                        result.LogLines.Add($"Failed: {byArg[arg].original} - {singleResult.ErrorMessage}");
+                    }
+                }
+            }
+        }
+
+        private async Task<CommandResult> RunScheduleCommandAsync(
+            List<string> arguments, VcsOperationResult result, List<string> allOutput, CancellationToken ct)
+        {
+            var commandLine = $"svn {VcsArgs.Join(arguments)}";
+            if (string.IsNullOrEmpty(result.CommandLine))
+                result.CommandLine = commandLine;
+
+            // 批量命令行可能很长，日志里只记录路径数量
+            var pathCount = arguments.Count(a => !a.StartsWith("-", StringComparison.Ordinal)) - 1;
+            result.LogLines.Add(pathCount > 1 ? $"Run: svn {arguments[0]} ({pathCount} paths)" : $"Run: {commandLine}");
+
+            var cmdResult = await VcsCommandExecutor.ExecuteAsync(
+                "svn", arguments, _workingDirectory, ct: ct);
+
+            var commandOutput = string.Join("\n", new[] { cmdResult.Output, cmdResult.Error }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+
+            if (!string.IsNullOrWhiteSpace(commandOutput))
+                allOutput.Add($"$ {commandLine}\n{commandOutput.Trim()}");
+            else
+                allOutput.Add($"$ {commandLine}");
+
+            return cmdResult;
+        }
+
         public async Task<VcsOperationResult> RevertFilesAsync(List<string> filePaths, CancellationToken ct = default)
         {
             var result = new VcsOperationResult();
@@ -520,10 +588,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                var args = new List<string> { "revert", "--non-interactive" };
-                args.AddRange(filePaths.Select(SvnPathArg));
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "svn", args, _workingDirectory, ct: ct);
+                // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                var cmdResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                    "svn", new[] { "revert", "--non-interactive" }, filePaths.Select(SvnPathArg).ToList(), _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {

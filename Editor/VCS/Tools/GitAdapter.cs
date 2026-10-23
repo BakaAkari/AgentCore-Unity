@@ -385,14 +385,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                var args = new List<string> { "add", "--" };
-                if (filePaths != null && filePaths.Count > 0)
-                    args.AddRange(filePaths);
-                else
-                    args.Add(".");
-
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", args, _workingDirectory, ct: ct);
+                // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                var paths = filePaths != null && filePaths.Count > 0 ? filePaths : new List<string> { "." };
+                var cmdResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                    "git", new[] { "add", "--" }, paths, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -423,14 +419,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             try
             {
-                var args = new List<string> { "reset", "HEAD", "--" };
-                if (filePaths != null && filePaths.Count > 0)
-                    args.AddRange(filePaths);
-                else
-                    args.Add(".");
-
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", args, _workingDirectory, ct: ct);
+                // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                var paths = filePaths != null && filePaths.Count > 0 ? filePaths : new List<string> { "." };
+                var cmdResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                    "git", new[] { "reset", "HEAD", "--" }, paths, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
@@ -505,10 +497,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     return result;
                 }
 
-                var args = new List<string> { "checkout", "--" };
-                args.AddRange(filePaths);
-                var cmdResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", args, _workingDirectory, ct: ct);
+                // 路径多时自动分批，避免超出 Windows 命令行长度上限
+                var cmdResult = await VcsCommandExecutor.ExecuteChunkedAsync(
+                    "git", new[] { "checkout", "--" }, filePaths, _workingDirectory, ct: ct);
 
                 if (!cmdResult.Success)
                 {
