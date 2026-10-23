@@ -1865,21 +1865,64 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (_adapter == null)
                 return;
 
-            var filesToRevert = _currentFiles?.Select(f => f.FilePath).ToList();
-            if (filesToRevert == null || filesToRevert.Count == 0)
+            // 未版本控制 / 忽略的文件 svn revert 不会处理（也不会删除）：不传给适配器，在结果消息里报告为已跳过
+            var (filesToRevert, skippedUnversioned) = PartitionRevertAll(_currentFiles);
+            if (filesToRevert.Count == 0)
             {
-                ShowMessage("No files to revert.", false);
+                ShowMessage(skippedUnversioned.Count > 0
+                    ? "No versioned changes to revert. " + DescribeSkippedUnversioned(skippedUnversioned)
+                    : "No files to revert.", false);
                 return;
             }
+
+            var dialogMessage = "This will discard ALL local changes in the working copy.\n\nThis action cannot be undone.";
+            if (skippedUnversioned.Count > 0)
+                dialogMessage += $"\n\n{skippedUnversioned.Count} unversioned file(s) will be left untouched.";
 
             await RevertFilesAsync(
                 filesToRevert,
                 "Revert All Changes?",
-                "This will discard ALL local changes in the working copy.\n\nThis action cannot be undone.",
-                "Revert All");
+                dialogMessage,
+                "Revert All",
+                skippedUnversioned);
         }
 
-        private async Task RevertFilesAsync(List<string> filesToRevert, string title, string message, string okButton)
+        /// <summary>
+        /// Revert All 的文件划分：未版本控制（Untracked）与忽略（Ignored）的文件不参与还原，单独列为跳过；
+        /// 其余（含 Renamed / Copied、Missing、Conflicted）都交给 svn revert。纯函数，供测试。
+        /// </summary>
+        public static (List<string> revertable, List<string> skippedUnversioned) PartitionRevertAll(IEnumerable<VcsFileStatus> files)
+        {
+            var revertable = new List<string>();
+            var skipped = new List<string>();
+            if (files == null)
+                return (revertable, skipped);
+
+            foreach (var file in files)
+            {
+                if (file == null || string.IsNullOrEmpty(file.FilePath))
+                    continue;
+                if (file.State == VcsFileState.Untracked || file.State == VcsFileState.Ignored)
+                    skipped.Add(file.FilePath);
+                else
+                    revertable.Add(file.FilePath);
+            }
+            return (revertable, skipped);
+        }
+
+        /// <summary>结果消息中的"已跳过未版本控制文件"说明，最多列出前 5 个路径。</summary>
+        public static string DescribeSkippedUnversioned(IReadOnlyList<string> skipped)
+        {
+            if (skipped == null || skipped.Count == 0)
+                return string.Empty;
+            const int maxListed = 5;
+            var listed = string.Join(", ", skipped.Take(maxListed));
+            var more = skipped.Count > maxListed ? $" and {skipped.Count - maxListed} more" : string.Empty;
+            return $"Skipped {skipped.Count} unversioned file(s) (revert does not touch or delete them): {listed}{more}.";
+        }
+
+        private async Task RevertFilesAsync(List<string> filesToRevert, string title, string message, string okButton,
+            IReadOnlyList<string> skippedUnversioned = null)
         {
             if (_adapter == null)
                 return;
@@ -1899,14 +1942,30 @@ namespace AgentCore.Editor.Components.VCS.UI
                 LogVcsOperation("Revert", $"Reverting {filesToRevert.Count} file(s).");
                 var result = await _adapter.RevertFilesAsync(filesToRevert, CancellationToken.None);
                 LogVcsResult("Revert", result);
+                // 适配器自身跳过的（例如状态刷新后才变成未版本控制的文件）也并入跳过说明
+                var skipped = new List<string>(skippedUnversioned ?? Array.Empty<string>());
+                if (result.SkippedFiles != null)
+                {
+                    foreach (var path in result.SkippedFiles.Keys)
+                    {
+                        if (!skipped.Contains(path, StringComparer.OrdinalIgnoreCase))
+                            skipped.Add(path);
+                    }
+                }
+                var skippedNote = skipped.Count > 0 ? "\n" + DescribeSkippedUnversioned(skipped) : string.Empty;
+
                 if (result.Success)
                 {
-                    ShowMessage($"Reverted {filesToRevert.Count} file(s) successfully.", false);
+                    var revertedCount = Math.Max(0, filesToRevert.Count - (result.SkippedFiles?.Count ?? 0) - (result.FailedFiles?.Count ?? 0));
+                    var failedNote = (result.FailedFiles?.Count ?? 0) > 0
+                        ? $"\nFailed: {string.Join(", ", result.FailedFiles.Select(kv => $"{kv.Key} ({kv.Value})"))}"
+                        : string.Empty;
+                    ShowMessage($"Reverted {revertedCount} file(s) successfully.{skippedNote}{failedNote}", failedNote.Length > 0);
                     await RefreshAllData();
                 }
                 else
                 {
-                    ShowMessage($"Revert failed: {GetOperationFailureMessage(result)}", true);
+                    ShowMessage($"Revert failed: {GetOperationFailureMessage(result)}{skippedNote}", true);
                 }
             }
             catch (Exception ex)
