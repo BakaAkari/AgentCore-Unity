@@ -61,8 +61,8 @@ namespace AgentCore.Editor.LLM
             {
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw new HttpRequestException(
-                        $"LLM API error: HTTP {(int)response.StatusCode} {response.ReasonPhrase}\n{responseBody}");
+                    // 带状态码与 Retry-After，供 FallbackRouter 退避
+                    throw LlmHttpException.FromResponse(response, responseBody);
                 }
 
                 var result = JsonHelper.Deserialize<ChatCompletionResponse>(responseBody);
@@ -192,8 +192,7 @@ namespace AgentCore.Editor.LLM
                 else
                 {
                     // 未匹配到任何学习模式的 400 直接抛出（真错误 - 消息格式错、apiKey 错等）
-                    throw new HttpRequestException(
-                        $"LLM API error: HTTP 400 {response.ReasonPhrase}\n{errorBody}");
+                    throw LlmHttpException.FromResponse(response, errorBody);
                 }
             }
 
@@ -202,8 +201,7 @@ namespace AgentCore.Editor.LLM
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorBody = await response.Content.ReadAsStringAsync();
-                    throw new HttpRequestException(
-                        $"LLM API error: HTTP {(int)response.StatusCode} {response.ReasonPhrase}\n{errorBody}");
+                    throw LlmHttpException.FromResponse(response, errorBody);
                 }
 
                 // 读取 SSE 流

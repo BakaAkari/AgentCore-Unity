@@ -84,7 +84,7 @@ namespace AgentCore.Editor.LLM.Anthropic
         }
 
         /// <summary>
-        /// 发送请求；对 400 做一次性恢复重试。返回成功响应（调用方 Dispose），失败抛 <see cref="HttpRequestException"/>。
+        /// 发送请求；对 400 做一次性恢复重试。返回成功响应（调用方 Dispose），失败抛 <see cref="LlmHttpException"/>。
         /// </summary>
         private static async Task<HttpResponseMessage> SendWithRecoveryAsync(
             List<ChatMessage> messages, List<ToolDefinition> tools, bool stream,
@@ -107,7 +107,8 @@ namespace AgentCore.Editor.LLM.Anthropic
 
             var errorBody = await response.Content.ReadAsStringAsync();
             int status = (int)response.StatusCode;
-            var reason = response.ReasonPhrase;
+            // 带状态码与 Retry-After，供 FallbackRouter 退避；须在 Dispose 前读取响应头
+            var failure = LlmHttpException.FromResponse(response, errorBody);
             response.Dispose();
 
             if (status == 400)
@@ -144,13 +145,12 @@ namespace AgentCore.Editor.LLM.Anthropic
                     response = await OpenAIChatTransporter.SendJsonAsync(url, headers, RequestPruningRegistry.ApplyPruning(endpoint, model, retryJson), stream, ct);
                     if (response.IsSuccessStatusCode) return response;
                     errorBody = await response.Content.ReadAsStringAsync();
-                    status = (int)response.StatusCode;
-                    reason = response.ReasonPhrase;
+                    failure = LlmHttpException.FromResponse(response, errorBody);
                     response.Dispose();
                 }
             }
 
-            throw new HttpRequestException($"LLM API error: HTTP {status} {reason}\n{errorBody}");
+            throw failure;
         }
 
         private static AnthropicRequestOptions BuildOptions(bool stream, int? contentMaxTokens, string reasoningLevelOverride)
@@ -237,7 +237,7 @@ namespace AgentCore.Editor.LLM.Anthropic
 
     /// <summary>
     /// Anthropic SSE 读取器：解析 <c>data:</c> 行为 JSON 事件（事件类型取自 data 内 <c>type</c> 字段，
-    /// 不依赖 <c>event:</c> 行）。复用 <see cref="StreamingResponseParser"/> 的空闲超时看门狗与主线程让步预算。
+    /// 不依赖 <c>event:</c> 行）。复用 <see cref="StreamIdleWatchdog"/> 空闲看门狗与 <see cref="StreamingResponseParser"/> 的主线程让步预算。
     /// </summary>
     internal static class AnthropicSseReader
     {
@@ -246,6 +246,7 @@ namespace AgentCore.Editor.LLM.Anthropic
         public static async Task ReadAsync(Stream stream, Action<JObject> onEvent, CancellationToken ct)
         {
             using var reader = new StreamReader(stream);
+            using var watchdog = new StreamIdleWatchdog(stream, ct);
             var yieldTimer = System.Diagnostics.Stopwatch.StartNew();
 
             while (!ct.IsCancellationRequested)
@@ -253,9 +254,9 @@ namespace AgentCore.Editor.LLM.Anthropic
                 string line;
                 try
                 {
-                    line = await StreamingResponseParser.ReadLineWithIdleTimeoutAsync(reader, stream, ct);
+                    line = await watchdog.ReadLineAsync(reader);
                 }
-                catch (Exception) when (ct.IsCancellationRequested)
+                catch (Exception ex) when (ct.IsCancellationRequested && !(ex is OperationCanceledException))
                 {
                     throw new OperationCanceledException(ct);
                 }

@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,6 +28,52 @@ namespace AgentCore.Editor.LLM
     /// </summary>
     public static class OpenAIChatTransporter
     {
+        /// <summary>
+        /// 流式请求等待响应头的上限（连接 + 服务端开始响应）。沿用共享 HttpClient 的总超时取值，
+        /// 但只作用于响应头阶段；响应头到达后 body 读取由 <see cref="StreamIdleWatchdog"/> 按空闲时长保护。
+        /// </summary>
+        public static readonly TimeSpan StreamHeaderTimeout = TimeSpan.FromSeconds(HttpClientFactory.DefaultTimeoutSeconds);
+
+        private static readonly object StreamClientLock = new();
+        private static HttpClient _streamClient;
+
+        /// <summary>
+        /// 流式专用 HttpClient：不设总超时（<see cref="System.Threading.Timeout.InfiniteTimeSpan"/>）。
+        /// 共享客户端的 300s 总超时在部分运行时实现下会连同 body 读取一起计时，
+        /// 把持续输出超过 5 分钟的健康长流从中间切断；流式请求改为"响应头超时 + 空闲看门狗"两段保护。
+        /// </summary>
+        private static HttpClient GetStreamClient()
+        {
+            if (_streamClient != null) return _streamClient;
+            lock (StreamClientLock)
+            {
+                if (_streamClient != null) return _streamClient;
+                var client = new HttpClient { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                _streamClient = client;
+                return _streamClient;
+            }
+        }
+
+        /// <summary>
+        /// 以 ResponseHeadersRead 发送流式请求：只对"拿到响应头"这一段施加 <see cref="StreamHeaderTimeout"/>。
+        /// 超时抛 <see cref="TimeoutException"/>（连接阶段失败，可重试）；用户取消照常抛 <see cref="OperationCanceledException"/>。
+        /// </summary>
+        private static async Task<HttpResponseMessage> SendStreamAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            using var headerDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            headerDeadline.CancelAfter(StreamHeaderTimeout);
+            try
+            {
+                return await GetStreamClient().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headerDeadline.Token);
+            }
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"LLM stream request timed out: no response headers within {StreamHeaderTimeout.TotalSeconds:0}s.", ex);
+            }
+        }
+
         /// <summary>
         /// 发送非流式 Chat Completions 请求。
         /// </summary>
@@ -55,10 +103,9 @@ namespace AgentCore.Editor.LLM
         public static async Task<HttpResponseMessage> PostStreamAsync(
             string url, string apiKey, string jsonBody, CancellationToken ct)
         {
-            var client = HttpClientFactory.GetClient();
             using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url, apiKey);
             httpRequest.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
-            return await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+            return await SendStreamAsync(httpRequest, ct);
         }
 
         /// <summary>
@@ -73,7 +120,6 @@ namespace AgentCore.Editor.LLM
         public static async Task<HttpResponseMessage> SendJsonAsync(
             string url, IReadOnlyDictionary<string, string> headers, string jsonBody, bool stream, CancellationToken ct)
         {
-            var client = HttpClientFactory.GetClient();
             using var httpRequest = HttpClientFactory.CreateRequest(HttpMethod.Post, url);
             if (headers != null)
             {
@@ -85,8 +131,8 @@ namespace AgentCore.Editor.LLM
             }
             httpRequest.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
             return stream
-                ? await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct)
-                : await client.SendAsync(httpRequest, ct);
+                ? await SendStreamAsync(httpRequest, ct)
+                : await HttpClientFactory.GetClient().SendAsync(httpRequest, ct);
         }
 
         /// <summary>

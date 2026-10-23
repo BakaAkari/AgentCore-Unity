@@ -13,12 +13,30 @@ using Newtonsoft.Json.Linq;
 
 namespace AgentCore.Editor.LLM
 {
+    /// <summary>
+    /// 网关探测失败（探测请求超时 / 连接失败 / 服务端繁忙 / 所有格式与鉴权组合都不像生成响应）。
+    /// 只表示"探测失败"，不是用户取消；<see cref="RoutingLLMClient"/> 遇到它时按用户配置直接发送真实请求。
+    /// </summary>
+    public sealed class GatewayProbeException : Exception
+    {
+        public GatewayProbeException(string message, Exception inner = null) : base(message, inner)
+        {
+        }
+    }
+
     /// <summary>v1.17.0: Verify unknown gateways using synthetic generation, never project context.</summary>
     public static class GatewayDiscovery
     {
         private static readonly SemaphoreSlim Gate = new(1, 1);
         private static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false });
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ProviderProfile> Verified = new();
+
+        /// <summary>
+        /// 最近探测失败的连接（cacheKey → 失败时间）。冷却期内非强制解析直接报探测失败，
+        /// 避免重试 / 每轮请求都重新付出最长 60s 的探测等待。设置页"测试连接"（force）不受影响。
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> RecentProbeFailures = new();
+        private static readonly TimeSpan ProbeFailureCooldown = TimeSpan.FromMinutes(5);
 
         public static string Identity(ProviderProfile p) => p == null ? "" :
             string.Join("\n", p.endpoint?.Trim().TrimEnd('/'), p.modelName, p.apiFormat, p.authScheme, p.dialect);
@@ -61,6 +79,9 @@ namespace AgentCore.Editor.LLM
                     CopyVerification(remembered, p);
                     return p;
                 }
+                if (!force && RecentProbeFailures.TryGetValue(cacheKey, out var failedAt)
+                    && DateTime.UtcNow - failedAt < ProbeFailureCooldown)
+                    throw new GatewayProbeException("Connection probe failed recently; skipping re-probe.");
                 bool manualFormat = p.apiFormat == ApiFormats.OpenAI || p.apiFormat == ApiFormats.Anthropic;
                 bool manualAuth = p.authScheme == AuthSchemes.Bearer || p.authScheme == AuthSchemes.XApiKey;
                 bool preferAnthropic = (p.modelName ?? "").IndexOf("claude", StringComparison.OrdinalIgnoreCase) >= 0
@@ -69,8 +90,13 @@ namespace AgentCore.Editor.LLM
                     ? new[] { ApiFormats.Anthropic, ApiFormats.OpenAI } : new[] { ApiFormats.OpenAI, ApiFormats.Anthropic };
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 deadline.CancelAfter(TimeSpan.FromSeconds(60));
+                // 探测自身的超时 / 网络失败只算"探测失败"：记录后换下一个组合，绝不以 OperationCanceledException
+                // 形式上抛（否则上层会把它当成用户取消，直接结束用户的运行）。只有调用方令牌取消才是真取消。
+                Exception probeFailure = null;
+                bool deadlineHit = false;
                 foreach (var format in formats)
                 {
+                    if (deadlineHit) break;
                     var auths = manualAuth ? new[] { p.authScheme } : format == ApiFormats.Anthropic && uri.Host == "api.anthropic.com"
                         ? new[] { AuthSchemes.XApiKey, AuthSchemes.Bearer } : new[] { AuthSchemes.Bearer, AuthSchemes.XApiKey };
                     foreach (var auth in auths)
@@ -88,16 +114,31 @@ namespace AgentCore.Editor.LLM
                         request.Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json");
                         using var attempt = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
                         attempt.CancelAfter(TimeSpan.FromSeconds(15));
-                        using var response = await Client.SendAsync(request, attempt.Token);
-                        if (!response.IsSuccessStatusCode)
+                        JObject json;
+                        try
                         {
-                            int status = (int)response.StatusCode;
-                            if (status == 429 || status >= 500) throw new HttpRequestException($"Connection not verified: service returned HTTP {status}. Retry later.");
+                            using var response = await Client.SendAsync(request, attempt.Token);
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                int status = (int)response.StatusCode;
+                                if (status == 429 || status >= 500)
+                                    throw RememberFailure(cacheKey, new GatewayProbeException($"Connection not verified: service returned HTTP {status}. Retry later."));
+                                continue;
+                            }
+                            try { json = JObject.Parse(await response.Content.ReadAsStringAsync()); }
+                            catch (JsonException) { continue; }
+                        }
+                        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+                        {
+                            probeFailure = new GatewayProbeException($"Connection probe timed out ({format}/{auth}).", ex);
+                            if (deadline.IsCancellationRequested) { deadlineHit = true; break; }
                             continue;
                         }
-                        JObject json;
-                        try { json = JObject.Parse(await response.Content.ReadAsStringAsync()); }
-                        catch (JsonException) { continue; }
+                        catch (HttpRequestException ex)
+                        {
+                            probeFailure = new GatewayProbeException($"Connection probe failed ({format}/{auth}): {ex.Message}", ex);
+                            continue;
+                        }
                         if (!IsGenerationResponse(json, format)) continue;
                         p.connectionFailed = false;
                         p.verifiedConnection = identity; p.verifiedCredential = credential;
@@ -107,13 +148,23 @@ namespace AgentCore.Editor.LLM
                         p.cacheMetricsKnown = usage?.CacheMetricsKnown == true;
                         p.cacheHitObserved = usage?.CacheRead > 0;
                         Verified[cacheKey] = p;
+                        RecentProbeFailures.TryRemove(cacheKey, out _);
                         Persist(p);
                         return p;
                     }
                 }
-                throw new InvalidOperationException("Connection not verified. Check the endpoint, model and API key, or select API Format manually.");
+                ct.ThrowIfCancellationRequested();
+                throw RememberFailure(cacheKey, new GatewayProbeException(
+                    "Connection not verified. Check the endpoint, model and API key, or select API Format manually."
+                    + (probeFailure != null ? " Last probe error: " + probeFailure.Message : ""), probeFailure));
             }
             finally { Gate.Release(); }
+        }
+
+        private static GatewayProbeException RememberFailure(string cacheKey, GatewayProbeException ex)
+        {
+            RecentProbeFailures[cacheKey] = DateTime.UtcNow;
+            return ex;
         }
 
         internal static bool IsGenerationResponse(JObject body, string format) => body?["error"] == null &&

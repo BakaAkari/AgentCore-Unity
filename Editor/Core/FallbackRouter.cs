@@ -20,14 +20,31 @@ namespace AgentCore.Editor.Core
         private readonly AgentCoreSettings _settings;
 
         /// <summary>
-        /// 最大重试次数
+        /// 连接阶段失败（HTTP 429 / 5xx / 529、连接被拒或重置、等待响应头超时等）的最大重试次数。
         /// </summary>
-        public int MaxRetries { get; set; } = 2;
+        public int MaxConnectRetries { get; set; } = 4;
 
         /// <summary>
-        /// 重试间隔（毫秒）
+        /// 流中途失败（断流、空闲超时、流内 error 事件）的最大重试次数。
+        /// 只有本轮尚未向 UI 输出任何内容时才会重试，见 <see cref="ExecuteStreamWithRetryAsync"/>。
+        /// </summary>
+        public int MaxMidStreamRetries { get; set; } = 2;
+
+        /// <summary>
+        /// 指数退避的基准间隔（毫秒）：第 n 次重试等待 [base·2^(n-1)/2, base·2^(n-1)]，上限 <see cref="MaxRetryDelayMs"/>。
+        /// 服务端返回 Retry-After 时以服务端为准。
         /// </summary>
         public int RetryDelayMs { get; set; } = 1000;
+
+        /// <summary>
+        /// 指数退避单次等待上限（毫秒）。
+        /// </summary>
+        public int MaxRetryDelayMs { get; set; } = 30000;
+
+        private readonly System.Random _jitter = new System.Random();
+
+        /// <summary>测试用：替换 fallback 链来源（null = 读取当前 profile 的配置）。</summary>
+        internal Func<List<ProviderProfile>> FallbackChainOverride { get; set; }
 
         /// <summary>
         /// 上次错误信息
@@ -61,9 +78,6 @@ namespace AgentCore.Editor.Core
             Action<string> onStatusUpdate = null,
             string reasoningLevelOverride = null)
         {
-            Exception lastException = null;
-            int actualAttempts = 0;
-
             // 已有输出推给 UI（文本 / reasoning / 工具调用增量）后不再重试或切换 fallback：
             // 重放会在同一轮里重复输出，且半截工具调用可能已被 UI 展示。直接报错，由用户决定是否重发。
             bool emitted = false;
@@ -78,49 +92,13 @@ namespace AgentCore.Editor.Core
                 onChunk?.Invoke(chunk);
             };
 
-            for (int attempt = 0; attempt <= MaxRetries; attempt++)
-            {
-                actualAttempts++;
-                try
-                {
-                    if (attempt > 0)
-                    {
-                        onStatusUpdate?.Invoke($"Retry attempt {attempt}/{MaxRetries}...");
-                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Retry attempt {attempt}/{MaxRetries}");
-                        await Task.Delay(RetryDelayMs * attempt, ct); // 递增延迟
-                    }
-
-                    var result = await client.ChatCompletionStreamAsync(messages, trackedOnChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride);
-
-                    // v1.6.5+: 流式路径不做空内容重试
-                    // 原因：reasoning chunks 已通过 onChunk 发送到 UI，重试会导致重复输出
-                    // 空内容检测由 CallLLMStreamAsync 返回后处理
-                    LastError = null;
-                    return result;
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    // 用户取消，不重试
-                    throw;
-                }
-                catch (Exception rawEx)
-                {
-                    var ex = NormalizeTimeout(rawEx);
-                    lastException = ex;
-                    LastError = ex.Message;
-                    AgentCoreLog.Warning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
-
-                    if (emitted)
-                        throw PartialOutputFailure(ex);
-
-                    // 判断是否值得重试
-                    if (!IsRetryableError(ex))
-                    {
-                        AgentCoreLog.Error($"[AgentCore] Non-retryable error, giving up: {ex.Message}");
-                        break;
-                    }
-                }
-            }
+            // v1.6.5+: 流式路径不做空内容重试
+            // 原因：reasoning chunks 已通过 onChunk 发送到 UI，重试会导致重复输出
+            // 空内容检测由 CallLLMStreamAsync 返回后处理
+            var (ok, result, lastException, actualAttempts) = await RunWithRetriesAsync(
+                () => client.ChatCompletionStreamAsync(messages, trackedOnChunk, tools, ct, reasoningLevelOverride: reasoningLevelOverride),
+                () => emitted, onStatusUpdate, ct);
+            if (ok) return result;
 
             // v1.17.0: 主 profile 失败后依次尝试 fallback 链
             var (fbOk, fbResult, fbError) = await TryFallbackChainAsync(
@@ -154,50 +132,21 @@ namespace AgentCore.Editor.Core
             CancellationToken ct = default,
             Action<string> onStatusUpdate = null)
         {
-            Exception lastException = null;
-            int actualAttempts = 0;
-
-            for (int attempt = 0; attempt <= MaxRetries; attempt++)
+            var (ok, result, lastException, actualAttempts) = await RunWithRetriesAsync(async () =>
             {
-                actualAttempts++;
-                try
+                var response = await client.ChatCompletionAsync(messages, tools, ct);
+
+                // v1.6.5+: 空内容检测
+                var msg = response?.GetMessage();
+                if (msg == null || string.IsNullOrEmpty(msg.Content))
                 {
-                    if (attempt > 0)
-                    {
-                        onStatusUpdate?.Invoke($"Retry attempt {attempt}/{MaxRetries}...");
-                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Retry attempt {attempt}/{MaxRetries}");
-                        await Task.Delay(RetryDelayMs * attempt, ct);
-                    }
-
-                    var response = await client.ChatCompletionAsync(messages, tools, ct);
-
-                    // v1.6.5+: 空内容检测
-                    var msg = response?.GetMessage();
-                    if (msg == null || string.IsNullOrEmpty(msg.Content))
-                    {
-                        throw new InvalidOperationException(
-                            "LLM returned empty content (reasoning may have consumed the entire max_tokens budget).");
-                    }
-
-                    return response;
+                    throw new InvalidOperationException(
+                        "LLM returned empty content (reasoning may have consumed the entire max_tokens budget).");
                 }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception rawEx)
-                {
-                    var ex = NormalizeTimeout(rawEx);
-                    lastException = ex;
-                    LastError = ex.Message;
-                    AgentCoreLog.Warning($"[AgentCore] LLM request failed (attempt {attempt + 1}): {ex.Message}");
 
-                    if (!IsRetryableError(ex))
-                    {
-                        break;
-                    }
-                }
-            }
+                return response;
+            }, null, onStatusUpdate, ct);
+            if (ok) return result;
 
             // v1.17.0: 主 profile 失败后依次尝试 fallback 链
             var (fbOk, fbResult, fbError) = await TryFallbackChainAsync(async () =>
@@ -217,6 +166,94 @@ namespace AgentCore.Editor.Core
         }
 
         /// <summary>
+        /// 主 profile 的重试循环：指数退避 + 抖动，服务端给出 Retry-After 时按其等待。
+        /// <para>
+        /// 连接阶段失败与流中途失败分别计入 <see cref="MaxConnectRetries"/> / <see cref="MaxMidStreamRetries"/>；
+        /// 已有输出时（<paramref name="hasEmittedOutput"/>）一律不重试，抛 <see cref="PartialOutputFailure"/>。
+        /// 退避等待使用调用方令牌：用户取消会立即中断等待并按取消上抛，不会被当成失败继续重试。
+        /// </para>
+        /// </summary>
+        /// <returns>ok=true 时 result 有效；否则 error 为最后一次失败（交给 fallback 链 / 最终报错）。</returns>
+        private async Task<(bool ok, T result, Exception error, int attempts)> RunWithRetriesAsync<T>(
+            Func<Task<T>> call, Func<bool> hasEmittedOutput, Action<string> onStatusUpdate, CancellationToken ct)
+        {
+            int attempts = 0;
+            int connectRetries = 0;
+            int midStreamRetries = 0;
+
+            while (true)
+            {
+                attempts++;
+                TimeSpan delay = TimeSpan.Zero;
+                try
+                {
+                    var result = await call();
+                    LastError = null;
+                    return (true, result, null, attempts);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // 用户取消，不重试
+                    throw;
+                }
+                catch (Exception rawEx)
+                {
+                    var ex = NormalizeTimeout(rawEx);
+                    LastError = ex.Message;
+                    AgentCoreLog.Warning($"[AgentCore] LLM request failed (attempt {attempts}): {ex.Message}");
+
+                    if (hasEmittedOutput != null && hasEmittedOutput())
+                        throw PartialOutputFailure(ex);
+
+                    // 判断是否值得重试
+                    if (!IsRetryableError(ex))
+                    {
+                        AgentCoreLog.Error($"[AgentCore] Non-retryable error, giving up: {ex.Message}");
+                        return (false, default, ex, attempts);
+                    }
+
+                    // 连接阶段 / 流中途分别计预算
+                    bool midStream = LlmRetryPolicy.IsMidStreamFailure(ex);
+                    int used = midStream ? midStreamRetries : connectRetries;
+                    int budget = midStream ? MaxMidStreamRetries : MaxConnectRetries;
+                    if (used >= budget)
+                    {
+                        AgentCoreLog.Warning($"[AgentCore] {(midStream ? "Mid-stream" : "Connect")} retry budget exhausted ({budget}).");
+                        return (false, default, ex, attempts);
+                    }
+
+                    // 服务端要求等待过久：不在用户无感知的情况下长时间挂起，交给 fallback 链 / 报错
+                    var retryAfter = LlmRetryPolicy.GetRetryAfter(ex);
+                    if (retryAfter.HasValue && retryAfter.Value > LlmRetryPolicy.MaxHonouredRetryAfter)
+                    {
+                        var waitNote = $"Server asked to wait {retryAfter.Value.TotalSeconds:0}s ({LlmRetryPolicy.ShortReason(ex)}); not retrying automatically.";
+                        AgentCoreLog.Warning($"[AgentCore] {waitNote}");
+                        onStatusUpdate?.Invoke(waitNote);
+                        return (false, default, ex, attempts);
+                    }
+
+                    if (midStream) midStreamRetries++; else connectRetries++;
+                    int retryNumber = used + 1;
+                    double jitter;
+                    lock (_jitter) jitter = _jitter.NextDouble();
+                    delay = LlmRetryPolicy.ComputeDelay(retryNumber, retryAfter,
+                        TimeSpan.FromMilliseconds(Math.Max(0, RetryDelayMs)),
+                        TimeSpan.FromMilliseconds(Math.Max(0, MaxRetryDelayMs)), jitter);
+
+                    var status = $"Retry attempt {retryNumber}/{budget} in {delay.TotalSeconds:0.#}s " +
+                                 $"({LlmRetryPolicy.ShortReason(ex)}{(retryAfter.HasValue ? ", Retry-After" : "")})...";
+                    onStatusUpdate?.Invoke(status);
+                    AgentCoreLog.Info($"[AgentCore] {status}");
+                }
+
+                // 退避等待受用户取消令牌约束：取消时 Task.Delay 抛 OperationCanceledException，按用户取消上抛
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay, ct);
+                ct.ThrowIfCancellationRequested();
+            }
+        }
+
+        /// <summary>
         /// 依次在 fallback profile 作用域内执行一次调用（v1.17.0）。
         /// fallback 链来自当前 profile 的 <see cref="ProviderProfile.fallbackProfileIds"/>；每个备用 profile 只尝试一次
         /// （主 profile 已经历完整重试），通过 <see cref="ActiveModelConfig.UseProfile"/> 临时切换连接参数，
@@ -230,7 +267,7 @@ namespace AgentCore.Editor.Core
                 return (false, default, null);
 
             List<ProviderProfile> chain;
-            try { chain = AgentCoreProviderProfiles.instance.GetFallbackChain(ActiveModelConfig.ActiveProfile); }
+            try { chain = FallbackChainOverride?.Invoke() ?? AgentCoreProviderProfiles.instance.GetFallbackChain(ActiveModelConfig.ActiveProfile); }
             catch { return (false, default, null); }
 
             Exception last = null;
@@ -311,7 +348,7 @@ namespace AgentCore.Editor.Core
                 case LlmContentFilterException _:
                     return false;
 
-                // v1.13+ SSE 流空闲超时看门狗 (StreamingResponseParser.ReadLineWithIdleTimeoutAsync)
+                // v1.13+ SSE 流空闲超时看门狗 (StreamIdleWatchdog -> LlmStreamIdleTimeoutException)
                 // 抛出的 TimeoutException -> 判定为死连接，可重试 (显式类型判断，不依赖消息字符串
                 // 匹配 "timeout" —— 该异常消息描述的是空闲时长，未必含这个词，类型判断更可靠)。
                 case TimeoutException _:
@@ -321,7 +358,11 @@ namespace AgentCore.Editor.Core
                 case AgentCore.Editor.LLM.Anthropic.AnthropicApiException apiEx:
                     return apiEx.ErrorType is "overloaded_error" or "api_error" or "rate_limit_error" or "timeout_error";
 
-                // HttpRequestException 需要进一步检查内容
+                // 带状态码的 HTTP 错误：408 / 425 / 429 / 5xx（含 529）可重试，其余 4xx 不可重试
+                case LlmHttpException statusEx:
+                    return LlmRetryPolicy.IsRetryableStatus(statusEx.StatusCode);
+
+                // HttpRequestException 需要进一步检查内容（无状态码：连接被拒 / 重置 / DNS 等）
                 case HttpRequestException httpEx:
                     return IsRetryableHttpError(httpEx);
 
