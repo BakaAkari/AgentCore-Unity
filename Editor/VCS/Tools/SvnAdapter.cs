@@ -50,8 +50,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 }
 
                 result.RawOutput = cmdResult.Output;
-                result.Files = ParseSvnStatusXml(cmdResult.Output);
+                var parsed = SvnStatusXmlParser.Parse(cmdResult.Output);
+                result.Files = parsed.Files;
                 result.Success = true;
+                // 输出超过上限被截断 / XML 不完整：保留已解析的条目，同时明确标记，不静默当作"没有变更"
+                result.Truncated = cmdResult.OutputTruncated || parsed.IsIncomplete;
+                if (result.Truncated)
+                    AgentCoreLog.Warning($"[Version Control] SVN status output incomplete ({result.Files.Count} entries parsed): {parsed.Error ?? "output truncated"}");
             }
             catch (Exception ex)
             {
@@ -244,8 +249,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var statusTask = GetStatusAsync(ct);
+                // -u --xml：远端更新看 repos-status，避免解析文本列（旧实现会把版本号当成路径的一部分）
                 var remoteTask = VcsCommandExecutor.ExecuteAsync(
-                    "svn", new List<string> { "status", "-u", "-q", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
+                    "svn", new List<string> { "status", "-u", "-q", "--xml", "--non-interactive" }, _workingDirectory, timeoutSeconds: 120, ct: ct);
 
                 await Task.WhenAll(statusTask, remoteTask);
 
@@ -263,7 +269,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.RawOutput = remoteStatus.Output;
                 result.HasLocalChanges = localStatus.Success && localStatus.Files.Count > 0;
                 result.LocalChangeCount = localStatus.Success ? localStatus.Files.Count : 0;
-                result.RemoteChangedFiles = ParseSvnRemoteChangedFiles(remoteStatus.Output);
+                var remoteParsed = SvnStatusXmlParser.Parse(remoteStatus.Output);
+                result.RemoteChangedFiles = remoteParsed.RemoteChangedFiles;
                 result.RemoteChangeCount = result.RemoteChangedFiles.Count;
                 result.HasRemoteChanges = result.RemoteChangeCount > 0;
                 result.HasConflicts = localStatus.Success && localStatus.Files.Any(f => f.State == VcsFileState.Conflicted);
@@ -273,6 +280,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 result.Summary = result.HasRemoteChanges
                     ? $"Remote has {result.RemoteChangeCount} pending update(s)."
                     : "Working copy is up to date with remote.";
+                if (remoteParsed.IsIncomplete || remoteStatus.OutputTruncated)
+                    result.Summary += " (remote status output was incomplete; the list may be partial)";
             }
             catch (Exception ex)
             {
@@ -650,55 +659,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         // ===== 解析方法 =====
 
-        private List<VcsFileStatus> ParseSvnStatusXml(string xmlOutput)
-        {
-            var files = new List<VcsFileStatus>();
-
-            try
-            {
-                var doc = XDocument.Parse(xmlOutput);
-                var entries = doc.Descendants("entry");
-
-                foreach (var entry in entries)
-                {
-                    var path = entry.Attribute("path")?.Value;
-                    var wcStatus = entry.Element("wc-status");
-                    var item = wcStatus?.Attribute("item")?.Value;
-
-                    if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(item))
-                        continue;
-
-                    var state = item switch
-                    {
-                        "modified" => VcsFileState.Modified,
-                        "added" => VcsFileState.Added,
-                        "deleted" => VcsFileState.Deleted,
-                        "unversioned" => VcsFileState.Untracked,
-                        "ignored" => VcsFileState.Ignored,
-                        "conflicted" => VcsFileState.Conflicted,
-                        "missing" => VcsFileState.Missing,
-                        _ => VcsFileState.Unmodified
-                    };
-
-                    if (state == VcsFileState.Unmodified || state == VcsFileState.Ignored)
-                        continue;
-
-                    files.Add(new VcsFileStatus
-                    {
-                        FilePath = path,
-                        State = state,
-                        StateDescription = GetStateDescription(state)
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Warning($"Failed to parse SVN status XML: {ex.Message}");
-            }
-
-            return files;
-        }
-
         private void ParseSvnInfo(string xmlOutput, VcsBranchInfo result)
         {
             try
@@ -783,32 +743,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             {
                 AgentCoreLog.Warning($"Failed to parse SVN remote info: {ex.Message}");
             }
-        }
-
-        private List<string> ParseSvnRemoteChangedFiles(string output)
-        {
-            var files = new List<string>();
-
-            if (string.IsNullOrEmpty(output))
-                return files;
-
-            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines)
-            {
-                if (!line.Contains("*"))
-                    continue;
-
-                var trimmed = line.Trim();
-                var starIndex = trimmed.IndexOf('*');
-                if (starIndex < 0)
-                    continue;
-
-                var filePath = trimmed.Substring(starIndex + 1).Trim();
-                if (!string.IsNullOrEmpty(filePath))
-                    files.Add(filePath);
-            }
-
-            return files;
         }
 
         private List<string> ParseSvnUpdateConflicts(string output)
@@ -978,23 +912,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 normalized = normalized.ToLowerInvariant();
 
             return normalized;
-        }
-
-        private string GetStateDescription(VcsFileState state)
-        {
-            return state switch
-            {
-                VcsFileState.Modified => "Modified",
-                VcsFileState.Added => "Added",
-                VcsFileState.Deleted => "Deleted",
-                VcsFileState.Renamed => "Renamed",
-                VcsFileState.Copied => "Copied",
-                VcsFileState.Untracked => "Unversioned",
-                VcsFileState.Ignored => "Ignored",
-                VcsFileState.Conflicted => "Conflicted",
-                VcsFileState.Missing => "Missing",
-                _ => "Normal"
-            };
         }
     }
 }
