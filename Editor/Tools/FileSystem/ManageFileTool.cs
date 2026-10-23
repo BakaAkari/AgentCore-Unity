@@ -112,6 +112,18 @@ namespace AgentCore.Editor.Tools.FileSystem
         };
 
         /// <summary>
+        /// ripgrep path: maximum directories walked (in parallel with rg) to report nested excluded dirs
+        /// such as Assets/Foo/obj in excluded_dirs. Past the cap the list is marked incomplete.
+        /// </summary>
+        internal const int ExcludedDirScanMaxDirs = 4000;
+
+        /// <summary>
+        /// ripgrep path: wall-clock budget for the excluded-dir walk. It starts before rg, so it only adds
+        /// latency when rg finishes sooner than this.
+        /// </summary>
+        internal static readonly TimeSpan ExcludedDirScanBudget = TimeSpan.FromMilliseconds(150);
+
+        /// <summary>
         /// Lines longer than this are clipped in ripgrep results (minified / generated files).
         /// </summary>
         private const int SearchMaxLineChars = 2000;
@@ -407,6 +419,61 @@ namespace AgentCore.Editor.Tools.FileSystem
                 for (int i = toVisit.Count - 1; i >= 0; i--)
                     pending.Push(toVisit[i]);
             }
+        }
+
+        /// <summary>
+        /// Bounded walk under <paramref name="startDirs"/> that records excluded directories (obj/ at any depth,
+        /// Library/ Temp/ Logs/ under the project root) into <paramref name="excludedHits"/> without descending
+        /// into them. Hidden directories (unless <paramref name="includeHidden"/>) and .git are skipped.
+        /// Used by the ripgrep path, which prunes obj/ via a glob and therefore never reports it.
+        /// </summary>
+        /// <returns>true when the walk finished; false when it stopped at <paramref name="maxDirs"/> or <paramref name="budget"/>.</returns>
+        internal static bool CollectExcludedDirsBounded(
+            IEnumerable<string> startDirs, bool includeHidden, ISet<string> excludedHits,
+            int maxDirs, TimeSpan budget, CancellationToken ct)
+        {
+            var clock = Stopwatch.StartNew();
+            var pending = new Stack<string>();
+            foreach (var dir in startDirs)
+                pending.Push(dir);
+
+            int visited = 0;
+            while (pending.Count > 0)
+            {
+                if (ct.IsCancellationRequested || visited >= maxDirs || clock.Elapsed > budget)
+                    return false;
+
+                var current = pending.Pop();
+                visited++;
+
+                string[] children;
+                try
+                {
+                    children = Directory.GetDirectories(current);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                foreach (var child in children)
+                {
+                    var name = Path.GetFileName(child);
+                    if (IsExcludedDirectory(current, name))
+                    {
+                        excludedHits.Add(ToRelativePath(child));
+                        continue;
+                    }
+
+                    if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase)
+                        || (!includeHidden && name.StartsWith(".")))
+                        continue;
+
+                    pending.Push(child);
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -728,6 +795,15 @@ namespace AgentCore.Editor.Tools.FileSystem
         }
 
         /// <summary>
+        /// Result of the bounded excluded-dir walk on the ripgrep path.
+        /// </summary>
+        private sealed class NestedExcludedDirs
+        {
+            public readonly SortedSet<string> Dirs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            public bool Complete;
+        }
+
+        /// <summary>
         /// search_content via ripgrep. Returns null — with <paramref name="fallbackNote"/> explaining why when it
         /// matters — when the .NET scanner should answer instead; an rg-specific problem is never an error.
         /// <para>
@@ -831,12 +907,31 @@ namespace AgentCore.Editor.Tools.FileSystem
             else
             {
                 options.Paths.Add(relativeRoot);
-                foreach (var dirName in ExcludedDirsAnywhere)
+            }
+
+            // rg prunes obj/ through a glob and never reports it, so list excluded dirs at any depth (as the
+            // .NET scanner does) with a bounded walk that runs alongside rg instead of before it.
+            Task<NestedExcludedDirs> excludedWalk = null;
+            if (req.Recursive)
+            {
+                var walkRoots = isProjectRoot
+                    ? options.Paths.Select(p => Path.Combine(ProjectRoot, p)).Where(Directory.Exists).ToList()
+                    : new List<string> { req.FullPath };
+                var includeHidden = req.IncludeHidden;
+                excludedWalk = Task.Run(() =>
                 {
-                    var nested = Path.Combine(req.FullPath, dirName);
-                    if (Directory.Exists(nested))
-                        excludedDirs.Add(ToRelativePath(nested));
-                }
+                    var found = new NestedExcludedDirs();
+                    try
+                    {
+                        found.Complete = CollectExcludedDirsBounded(
+                            walkRoots, includeHidden, found.Dirs, ExcludedDirScanMaxDirs, ExcludedDirScanBudget, ct);
+                    }
+                    catch (Exception)
+                    {
+                        found.Complete = false; // best-effort listing; never fails the search
+                    }
+                    return found;
+                });
             }
 
             RgSearchResult rg;
@@ -867,6 +962,21 @@ namespace AgentCore.Editor.Tools.FileSystem
                     return null;
             }
 
+            bool excludedListComplete = true;
+            if (excludedWalk != null)
+            {
+                // The walk is bounded by its own budget; this wait only covers the part rg did not overlap.
+                if (excludedWalk.Wait(ExcludedDirScanBudget + TimeSpan.FromMilliseconds(100)))
+                {
+                    excludedDirs.UnionWith(excludedWalk.Result.Dirs);
+                    excludedListComplete = excludedWalk.Result.Complete;
+                }
+                else
+                {
+                    excludedListComplete = false;
+                }
+            }
+
             var matches = new JArray();
             foreach (var m in rg.Matches)
             {
@@ -894,6 +1004,7 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ["truncated"] = rg.Truncated,
                 ["truncatedReason"] = rg.TruncatedReason,
                 ["excluded_dirs"] = new JArray(excludedDirs),
+                ["excluded_dirs_complete"] = excludedListComplete,
                 ["engine"] = "ripgrep"
             };
 
@@ -905,6 +1016,8 @@ namespace AgentCore.Editor.Tools.FileSystem
                 msg += $"; scan stopped after {SearchTimeBudget.TotalSeconds:0}s budget, narrow path/file_pattern for complete results";
             if (excludedDirs.Count > 0)
                 msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to search it)";
+            if (!excludedListComplete)
+                msg += $"; excluded_dirs may be incomplete (listing stopped after {ExcludedDirScanMaxDirs} dirs / {ExcludedDirScanBudget.TotalMilliseconds:0} ms; obj/ is still skipped at every depth)";
 
             return ToolResponse.OkWithData(data, msg);
         }
