@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using AgentCore.Editor.Config.Settings;
 using AgentCore.Editor.Utils;
 using UnityEditor;
+using UnityEditorInternal;
 using UnityEngine;
 
 namespace AgentCore.Editor.Config
@@ -19,6 +21,17 @@ namespace AgentCore.Editor.Config
     /// <para>
     /// <c>activeProfileId</c> 为空表示"用 legacy config"（<see cref="AgentCoreSettings"/> 旧字段）。
     /// 所有解析走统一入口 <c>ActiveModelConfig</c>。
+    /// </para>
+    /// <para>
+    /// v1.18 分层存储（见 <see cref="ProviderProfilesStorage"/>）：
+    /// <list type="bullet">
+    /// <item>共享文件只含团队配置（profile 列表、团队默认 active、utility profile），且只在团队配置
+    /// 实际变化时写入——写前把序列化结果与磁盘内容比较，未变则跳过；经 <see cref="AtomicFile"/> 原子写入。</item>
+    /// <item>运行时状态（连接验证结果、API Key 哈希、缓存命中、连接失败、最近使用时间）与个人 active 选择
+    /// 存于每用户的 <c>UserSettings/AgentCore/ProviderProfilesState.json</c>。</item>
+    /// <item>迁移：旧版共享文件中的运行时字段在首次加载时迁入用户状态；共享文件本身不在加载时改写，
+    /// 下次团队配置变化保存时这些字段随之消失。</item>
+    /// </list>
     /// </para>
     /// </summary>
     [FilePath("ProjectSettings/AgentCoreProviderProfiles.asset", FilePathAttribute.Location.ProjectFolder)]
@@ -49,7 +62,10 @@ namespace AgentCore.Editor.Config
         /// <summary>已保存的 profile 列表。</summary>
         [SerializeField] private List<ProviderProfile> profiles = new();
 
-        /// <summary>当前 active profile 的 id；空 = 用 legacy config。</summary>
+        /// <summary>
+        /// 团队默认 active profile 的 id（共享）；空 = 用 legacy config。
+        /// v1.18: 个人切换写入用户状态（<see cref="ProviderProfilesUserState.activeProfileId"/>），不改此字段。
+        /// </summary>
         [SerializeField] private string activeProfileId = "";
 
         /// <summary>
@@ -58,20 +74,47 @@ namespace AgentCore.Editor.Config
         /// </summary>
         [SerializeField] private string utilityProfileId = "";
 
+        /// <summary>每用户状态（运行时字段 + 个人 active 选择），首次访问时加载并与共享数据合并。</summary>
+        [NonSerialized] private ProviderProfilesUserState _userState;
+
         /// <summary>增删改及切换 active 时触发，供 UI 订阅刷新。</summary>
         public static event Action OnProfilesChanged;
 
         /// <summary>只读 profile 列表。</summary>
-        public IReadOnlyList<ProviderProfile> Profiles => profiles;
+        public IReadOnlyList<ProviderProfile> Profiles
+        {
+            get
+            {
+                EnsureUserState();
+                return profiles;
+            }
+        }
 
-        /// <summary>当前 active profile 的 id（空 = legacy config）。</summary>
-        public string ActiveProfileId => activeProfileId;
+        /// <summary>
+        /// 当前生效的 active profile id（空 = legacy config）。
+        /// 个人选择优先；个人选择指向的 profile 已不存在时回落团队默认。
+        /// </summary>
+        public string ActiveProfileId
+        {
+            get
+            {
+                EnsureUserState();
+                var personal = _userState.activeProfileId;
+                if (personal != null && (personal.Length == 0 || FindById(personal) != null))
+                    return personal;
+                return activeProfileId ?? "";
+            }
+        }
+
+        /// <summary>团队默认 active profile id（共享文件中的值）。</summary>
+        public string TeamDefaultProfileId => activeProfileId ?? "";
 
         /// <summary>按 id 查找 profile，找不到返回 null。</summary>
         public ProviderProfile FindById(string id)
         {
             if (string.IsNullOrEmpty(id) || profiles == null)
                 return null;
+            EnsureUserState();
             foreach (var p in profiles)
             {
                 if (p != null && p.id == id)
@@ -81,10 +124,10 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
-        /// 返回 <see cref="activeProfileId"/> 对应的 profile；activeProfileId 为空或找不到返回 null（legacy 模式）。
+        /// 返回当前生效的 active profile（见 <see cref="ActiveProfileId"/>）；为空或找不到返回 null（legacy 模式）。
         /// </summary>
         public ProviderProfile GetActive()
-            => FindById(activeProfileId);
+            => FindById(ActiveProfileId);
 
         /// <summary>辅助任务 profile id（空 = 跟随 active）。</summary>
         public string UtilityProfileId => utilityProfileId;
@@ -228,6 +271,11 @@ namespace AgentCore.Editor.Config
             // R2 缓解：删 profile 必须同步清理其 apiKey，避免 EditorPrefs 键膨胀。
             SecureKeyStorage.DeleteProfileApiKey(id);
 
+            EnsureUserState();
+            _userState.profiles.Remove(id);
+            if (_userState.activeProfileId == id)
+                _userState.activeProfileId = null;
+
             if (activeProfileId == id)
                 activeProfileId = "";
             if (utilityProfileId == id)
@@ -239,12 +287,24 @@ namespace AgentCore.Editor.Config
         /// <summary>
         /// 设置 active profile。<paramref name="id"/> 为空表示回落 legacy config。
         /// 若指向一个存在的 profile，则更新其 lastUsedAtUnixMs。
+        /// <para>
+        /// v1.18: 这是个人选择，写入用户状态，不改共享文件。例外：团队默认为空或指向已删除的 profile 时，
+        /// 本次选择同时成为团队默认（新项目首次配置 / 首个 profile），保证团队成员拉取后有可用的默认。
+        /// 选择与团队默认相同时清除个人覆盖，继续跟随团队默认。
+        /// </para>
         /// </summary>
         public void SetActive(string id)
         {
-            activeProfileId = id ?? "";
+            EnsureUserState();
+            id ??= "";
 
-            var target = FindById(activeProfileId);
+            var target = FindById(id);
+            bool teamDefaultMissing = string.IsNullOrEmpty(activeProfileId) || FindById(activeProfileId) == null;
+            if (target != null && teamDefaultMissing)
+                activeProfileId = id;
+
+            _userState.activeProfileId = id == (activeProfileId ?? "") ? null : id;
+
             if (target != null)
                 target.lastUsedAtUnixMs = DateTimeOffset.Now.ToUnixTimeMilliseconds();
 
@@ -284,20 +344,140 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
-        /// 保存到 <c>ProjectSettings/AgentCoreProviderProfiles.asset</c>。
-        /// ProjectSettings 目录在 Unity 项目中恒存在，故直接 Save 并吞掉 IO 异常，
-        /// 不阻塞 Editor（参考 <see cref="AgentCoreSettings.SafeSave"/> 的健壮性动机）。
+        /// 保存：运行时状态 → 用户状态文件；团队配置 → <c>ProjectSettings/AgentCoreProviderProfiles.asset</c>。
+        /// 两者都先与磁盘内容比较，未变则不写。IO 异常只记 Warning，不阻塞 Editor
+        /// （参考 <see cref="AgentCoreSettings.SafeSave"/> 的健壮性动机）。
         /// </summary>
         internal void SafeSave()
         {
+            EnsureUserState();
+
             try
             {
-                Save(true);
+                ProviderProfilesStorage.CaptureAll(profiles, _userState);
+                SaveUserState();
+            }
+            catch (Exception ex)
+            {
+                AgentCoreLog.Warning($"[AgentCore] Saving provider profile user state failed: {ex.Message}");
+            }
+
+            try
+            {
+                SaveSharedIfChanged();
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Warning($"[AgentCore] AgentCoreProviderProfiles.Save failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 首次访问时加载用户状态并与共享数据合并（域重载后 <see cref="_userState"/> 为空，会重新加载）。
+        /// 旧版共享文件里的运行时字段迁入用户状态，只写用户状态文件，不改共享文件。
+        /// </summary>
+        private void EnsureUserState()
+        {
+            if (_userState != null)
+                return;
+
+            _userState = LoadUserState();
+            profiles ??= new List<ProviderProfile>();
+            if (ProviderProfilesStorage.MergeOnLoad(profiles, _userState))
+            {
+                try
+                {
+                    SaveUserState();
+                    AgentCoreLog.Info("[AgentCore] Migrated provider profile runtime state to " + ProviderProfilesStorage.UserStatePath);
+                }
+                catch (Exception ex)
+                {
+                    // 写失败不丢数据：运行时字段仍在内存中，下次保存再写
+                    AgentCoreLog.Warning($"[AgentCore] Saving migrated provider profile user state failed: {ex.Message}");
+                }
+            }
+        }
+
+        private static ProviderProfilesUserState LoadUserState()
+        {
+            var path = ProviderProfilesStorage.UserStatePath;
+            try
+            {
+                if (!File.Exists(path))
+                    return new ProviderProfilesUserState();
+                return ProviderProfilesUserState.FromJson(File.ReadAllText(path));
+            }
+            catch (Exception ex)
+            {
+                // 文件损坏：保留一份副本供排查，再按空状态继续（运行时状态可重新获得，团队配置不受影响）
+                AgentCoreLog.Warning($"[AgentCore] Provider profile user state '{path}' is unreadable ({ex.Message}); a copy is kept as '{path}.corrupt'.");
+                try
+                {
+                    File.Copy(path, path + ".corrupt", overwrite: true);
+                }
+                catch
+                {
+                    // 副本失败不影响继续运行
+                }
+                return new ProviderProfilesUserState();
+            }
+        }
+
+        private void SaveUserState()
+        {
+            ProviderProfilesStorage.WriteTextIfChanged(ProviderProfilesStorage.UserStatePath, _userState.ToJson());
+        }
+
+        /// <summary>
+        /// 用 Unity 自身的序列化器生成共享文件内容（与 <c>ScriptableSingleton.Save</c> 格式一致），
+        /// 序列化前临时清空运行时字段，再删去对应行，最后与磁盘内容比较、原子写入。
+        /// </summary>
+        private void SaveSharedIfChanged()
+        {
+            var path = GetFilePath();
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            var stash = new List<KeyValuePair<ProviderProfile, ProviderProfileRuntimeState>>();
+            if (profiles != null)
+            {
+                foreach (var p in profiles)
+                {
+                    if (p == null)
+                        continue;
+                    stash.Add(new KeyValuePair<ProviderProfile, ProviderProfileRuntimeState>(p, ProviderProfileRuntimeState.Capture(p)));
+                    ProviderProfileRuntimeState.Clear(p);
+                }
+            }
+
+            Directory.CreateDirectory(ProviderProfilesStorage.TempDirectory);
+            var tempPath = Path.Combine(ProviderProfilesStorage.TempDirectory,
+                "AgentCoreProviderProfiles." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".asset");
+            string yaml;
+            try
+            {
+                InternalEditorUtility.SaveToSerializedFileAndForget(new UnityEngine.Object[] { this }, tempPath, true);
+                yaml = File.ReadAllText(tempPath);
+            }
+            finally
+            {
+                foreach (var entry in stash)
+                    entry.Value.ApplyTo(entry.Key);
+                try
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                }
+                catch
+                {
+                    // 临时文件清理失败不影响结果
+                }
+            }
+
+            ProviderProfilesStorage.WriteSharedIfChanged(
+                path,
+                ProviderProfilesStorage.StripVolatileFields(yaml),
+                ProviderProfilesStorage.SharedBackupPath);
         }
     }
 }
