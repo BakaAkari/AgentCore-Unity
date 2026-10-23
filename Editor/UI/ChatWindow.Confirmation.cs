@@ -153,7 +153,7 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
-            if (IsToolConfirmationTrusted(pending.Request))
+            if (IsToolConfirmationTrusted(pending.Request) || IsToolConfirmationAllowedByRules(pending.Request))
             {
                 CompletePendingToolConfirmation(pending, true, updateUi: false);
                 return;
@@ -181,7 +181,7 @@ namespace AgentCore.Editor.UI
                 var next = _pendingToolConfirmations.Dequeue();
                 if (next != null && !next.Completion.Task.IsCompleted)
                 {
-                    if (IsToolConfirmationTrusted(next.Request))
+                    if (IsToolConfirmationTrusted(next.Request) || IsToolConfirmationAllowedByRules(next.Request))
                     {
                         CompletePendingToolConfirmation(next, true, updateUi: false);
                         continue;
@@ -392,6 +392,7 @@ namespace AgentCore.Editor.UI
         /// <summary>
         /// 用户点击"始终允许"：为该工具（及 action）新建一条用户 allow 规则，并批准当前请求。
         /// 规则写入失败时仍批准本次（用户已显式点击），只记录警告。
+        /// 规则写入成功后重新评估排队中的确认，新规则现在放行的一并自动批准（见 <see cref="ApproveQueuedConfirmationsAllowedByRules"/>）。
         /// </summary>
         private void ResolvePendingToolConfirmationWithAllowRule(PendingToolConfirmation pending)
         {
@@ -408,6 +409,7 @@ namespace AgentCore.Editor.UI
                         note = "Added from confirmation dialog",
                         enabled = true
                     });
+                    ApproveQueuedConfirmationsAllowedByRules();
                 }
                 catch (Exception ex)
                 {
@@ -416,6 +418,61 @@ namespace AgentCore.Editor.UI
             }
 
             CompletePendingToolConfirmation(pending, true, updateUi: true);
+        }
+
+        /// <summary>
+        /// 规则变化后（"始终允许"新建 allow 规则）重新评估排队中的确认：用与 Dispatcher 相同的匹配器
+        /// （<see cref="ToolConfirmationTrust.IsAllowedByPermissionRules"/>）判定，现在被 allow 放行的直接批准并移出队列；
+        /// 仍被 ask / deny 规则覆盖、或由 ask 规则触发的保持原状等待用户。当前正在显示的确认由调用方处理。
+        /// </summary>
+        private void ApproveQueuedConfirmationsAllowedByRules()
+        {
+            if (_pendingToolConfirmations.Count == 0)
+            {
+                return;
+            }
+
+            IReadOnlyList<ScopedPermissionRule> rules;
+            try
+            {
+                rules = PermissionRulesStore.Default.GetActiveRules();
+            }
+            catch (Exception ex)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Warning($"[AgentCore] Re-evaluating queued confirmations failed: {ex.Message}");
+                return;
+            }
+
+            var remaining = new List<PendingToolConfirmation>(_pendingToolConfirmations.Count);
+            var approved = 0;
+            while (_pendingToolConfirmations.Count > 0)
+            {
+                var queued = _pendingToolConfirmations.Dequeue();
+                if (queued == null || queued.Completion.Task.IsCompleted)
+                {
+                    CleanupPendingToolConfirmation(queued);
+                    continue;
+                }
+
+                if (ToolConfirmationTrust.IsAllowedByPermissionRules(queued.Request, rules))
+                {
+                    CompletePendingToolConfirmation(queued, true, updateUi: false);
+                    approved++;
+                    continue;
+                }
+
+                remaining.Add(queued);
+            }
+
+            foreach (var queued in remaining)
+            {
+                _pendingToolConfirmations.Enqueue(queued);
+            }
+
+            if (approved > 0)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Auto-approved {approved} queued confirmation(s) covered by the new allow rule.");
+            }
         }
 
         private void ScheduleResolvePendingToolConfirmation(PendingToolConfirmation pending, bool approved)
@@ -506,6 +563,23 @@ namespace AgentCore.Editor.UI
         private bool IsToolConfirmationTrusted(ToolConfirmationRequest request)
         {
             return ToolConfirmationTrust.IsTrusted(request, _sessionTrustScopes);
+        }
+
+        /// <summary>
+        /// 按当前权限规则重新判定请求是否已被 allow 放行（请求生成后用户才点了"始终允许"的情况）。
+        /// 规则读取失败视为未放行——只是照常等待用户，不拦截。仅在主线程调用。
+        /// </summary>
+        private static bool IsToolConfirmationAllowedByRules(ToolConfirmationRequest request)
+        {
+            try
+            {
+                return ToolConfirmationTrust.IsAllowedByPermissionRules(request, PermissionRulesStore.Default.GetActiveRules());
+            }
+            catch (Exception ex)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Warning($"[AgentCore] Permission rule re-check failed: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>

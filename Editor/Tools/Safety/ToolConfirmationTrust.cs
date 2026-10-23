@@ -54,6 +54,28 @@ namespace AgentCore.Editor.Tools.Safety
                 && (request.Risk.Capabilities & SideEffectCapabilityMask) == 0;
         }
 
+        /// <summary>
+        /// 用当前权限规则重新评估一个待确认请求：规则（deny &gt; ask &gt; allow，与 Dispatcher 同一
+        /// <see cref="PermissionRuleMatcher.Evaluate"/>、同一工具名 / action / 规则路径）最终命中 allow 时返回 true。
+        /// <para>
+        /// 用于"始终允许"新建 allow 规则后自动批准排队中的同类确认。以下情况返回 false（保持等待用户）：
+        /// ask 规则触发的确认（只接受显式点击或 YOLO）；batch_execute 外壳（规则按子操作匹配）；
+        /// 仍有 deny / ask 规则覆盖；没有任何 allow 规则命中。
+        /// </para>
+        /// </summary>
+        public static bool IsAllowedByPermissionRules(ToolConfirmationRequest request, IReadOnlyList<ScopedPermissionRule> rules)
+        {
+            if (request == null || rules == null || rules.Count == 0)
+                return false;
+            if (request.TriggeredByRule != null)
+                return false;
+            if (string.Equals(request.ToolName, "batch_execute", System.StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var match = PermissionRuleMatcher.Evaluate(rules, request.ToolName, request.Action, request.RulePaths);
+            return match != null && match.HasMatch && match.Effect == PermissionRuleEffect.Allow;
+        }
+
         /// <summary>判定某个 scope 是否被 request 允许提供（由 tool 层通过 AllowedTrustScopes 决定）。</summary>
         public static bool IsScopeAllowed(ToolConfirmationRequest request, ToolConfirmationTrustScope scope)
         {
