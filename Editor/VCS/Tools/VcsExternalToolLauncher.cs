@@ -1,4 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using UnityEngine;
 using AgentCore.Editor.Utils;
 
@@ -44,9 +47,11 @@ namespace AgentCore.Editor.Components.VCS.Tools
             switch (vcsType)
             {
                 case VcsType.Svn:
+                    if (!TryBuildTortoiseArgs("update", rootPath, out var tortoiseArgs, out reason))
+                        return false;
                     return TryStartProcess(
                         "TortoiseProc.exe",
-                        $"/command:update /path:\"{rootPath}\"",
+                        tortoiseArgs,
                         rootPath,
                         "TortoiseSVN update window",
                         out reason);
@@ -64,7 +69,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 case VcsType.Perforce:
                     return TryStartProcess(
                         "p4v",
-                        $"-cmd \"sync //...\" \"{rootPath}\"",
+                        VcsArgs.Join(new[] { "-cmd", "sync //...", rootPath }),
                         rootPath,
                         "P4V sync window",
                         out reason);
@@ -73,6 +78,128 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     reason = $"External update window is not supported for {vcsType}.";
                     return false;
             }
+        }
+
+        // ── TortoiseProc 参数构造 ──
+        // TortoiseProc 用自己的解析器处理 /key:"value"：值一直取到下一个双引号为止，不支持 \" 转义。
+        // 因此：路径里出现 " 时直接报错（Windows 路径本就不允许 "）；提交信息走 /logmsgfile；多路径走 /pathfile。
+
+        /// <summary>
+        /// 构造 <c>/command:{command} /path:"{path}"</c>。路径含双引号时返回 false 并给出原因。
+        /// </summary>
+        public static bool TryBuildTortoiseArgs(string command, string path, out string arguments, out string error)
+        {
+            arguments = null;
+            if (!TryQuoteTortoiseValue(path, out var quotedPath, out error))
+                return false;
+
+            arguments = $"/command:{command} /path:{quotedPath}";
+            return true;
+        }
+
+        /// <summary>
+        /// 构造对多个路径执行的 TortoiseProc 参数：只有一个路径时用 /path，多个路径时写入 /pathfile 临时文件
+        /// （UTF-16LE、换行分隔，TortoiseProc 读取后由 /deletepathfile 自动删除），不受命令行长度限制，也不依赖 '*' 分隔。
+        /// </summary>
+        public static bool TryBuildTortoiseArgs(string command, IReadOnlyList<string> paths, out string arguments, out string error)
+        {
+            arguments = null;
+            if (paths == null || paths.Count == 0)
+            {
+                error = "No path specified.";
+                return false;
+            }
+            if (paths.Count == 1)
+                return TryBuildTortoiseArgs(command, paths[0], out arguments, out error);
+
+            try
+            {
+                var pathFile = CreateTempFile("paths", ".txt");
+                File.WriteAllText(pathFile, string.Join("\n", paths), new UnicodeEncoding(false, false));
+                if (!TryQuoteTortoiseValue(pathFile, out var quotedFile, out error))
+                    return false;
+
+                arguments = $"/command:{command} /pathfile:{quotedFile} /deletepathfile";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Failed to write TortoiseSVN path list file: {ex.Message}";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 把提交信息写入临时文件，返回 <c>/logmsgfile:"..."</c> 参数。信息可含引号、换行等任意字符。
+        /// 消息为空时返回空字符串（不传该参数）。
+        /// </summary>
+        public static bool TryBuildTortoiseLogMessageArg(string message, out string argument, out string error)
+        {
+            argument = string.Empty;
+            error = null;
+            if (string.IsNullOrEmpty(message))
+                return true;
+
+            try
+            {
+                var file = CreateTempFile("logmsg", ".txt");
+                File.WriteAllText(file, message, new UTF8Encoding(false));
+                if (!TryQuoteTortoiseValue(file, out var quotedFile, out error))
+                    return false;
+
+                argument = $"/logmsgfile:{quotedFile}";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Failed to write TortoiseSVN log message file: {ex.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryQuoteTortoiseValue(string value, out string quoted, out string error)
+        {
+            quoted = null;
+            if (string.IsNullOrEmpty(value))
+            {
+                error = "Path is empty.";
+                return false;
+            }
+            if (value.IndexOf('"') >= 0)
+            {
+                error = $"Path contains a double quote and cannot be passed to TortoiseProc: {value}";
+                return false;
+            }
+
+            error = null;
+            quoted = "\"" + value + "\"";
+            return true;
+        }
+
+        /// <summary>
+        /// 在 %TEMP%/AgentCore/VCS 下创建临时文件；顺带清理一天前遗留的文件
+        /// （logmsgfile 没有自动删除选项，外部工具读取时机不确定，不能在启动后立即删除）。
+        /// </summary>
+        private static string CreateTempFile(string prefix, string extension)
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "AgentCore", "VCS");
+            Directory.CreateDirectory(dir);
+
+            try
+            {
+                var cutoff = DateTime.UtcNow.AddDays(-1);
+                foreach (var old in Directory.GetFiles(dir))
+                {
+                    if (File.GetLastWriteTimeUtc(old) < cutoff)
+                        File.Delete(old);
+                }
+            }
+            catch
+            {
+                // 清理失败不影响本次启动
+            }
+
+            return Path.Combine(dir, $"{prefix}-{Guid.NewGuid():N}{extension}");
         }
 
         /// <summary>

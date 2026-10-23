@@ -49,6 +49,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private Button _refreshButton;
         private int _detectVersion;
         private bool _isDisposed;
+        private string _lastExternalToolError;
         private Button _cleanupButton;
         private Button _refreshCommitsButton;
         private Button _viewDiffButton;
@@ -1445,11 +1446,17 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:commit /path:\"{rootPath}\" /logmsg:\"{EscapeExternalArgument(message)}\"", rootPath, "TortoiseSVN commit window");
+                    // 提交信息写入 /logmsgfile，避免引号 / 换行破坏 TortoiseProc 的参数解析
+                    if (!VcsExternalToolLauncher.TryBuildTortoiseLogMessageArg(message, out var logMessageArg, out var logMessageError))
+                    {
+                        _lastExternalToolError = logMessageError;
+                        return false;
+                    }
+                    return TryStartTortoise("commit", new[] { rootPath }, rootPath, "TortoiseSVN commit window", logMessageArg);
                 case VcsType.Git:
                     return TryStartExternalProcess("git", "gui", rootPath, "Git GUI commit window");
                 case VcsType.Perforce:
-                    return TryStartExternalProcess("p4v", $"-cmd submit \"{rootPath}\"", rootPath, "P4V submit window");
+                    return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "submit", rootPath }), rootPath, "P4V submit window");
                 default:
                     return false;
             }
@@ -1461,11 +1468,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:update /path:\"{rootPath}\"", rootPath, "TortoiseSVN update window");
+                    return TryStartTortoise("update", new[] { rootPath }, rootPath, "TortoiseSVN update window");
                 case VcsType.Git:
                     return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
                 case VcsType.Perforce:
-                    return TryStartExternalProcess("p4v", $"-cmd sync \"{rootPath}\"", rootPath, "P4V sync window");
+                    return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "sync", rootPath }), rootPath, "P4V sync window");
                 default:
                     return false;
             }
@@ -1477,11 +1484,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:cleanup /path:\"{rootPath}\"", rootPath, "TortoiseSVN cleanup options dialog");
+                    return TryStartTortoise("cleanup", new[] { rootPath }, rootPath, "TortoiseSVN cleanup options dialog");
                 case VcsType.Git:
                     return TryStartExternalProcess("git", "gui", rootPath, "Git GUI window");
                 case VcsType.Perforce:
-                    return TryStartExternalProcess("p4v", $"-cmd reconcile \"{rootPath}\"", rootPath, "P4V reconcile window");
+                    return TryStartExternalProcess("p4v", VcsArgs.Join(new[] { "-cmd", "reconcile", rootPath }), rootPath, "P4V reconcile window");
                 default:
                     return false;
             }
@@ -1508,19 +1515,37 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
             catch (Exception ex)
             {
+                _lastExternalToolError = ex.Message;
                 AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Failed to open {displayName}. Command: {fileName} {arguments}. Error: {ex.Message}");
                 return false;
             }
         }
 
-        private string EscapeExternalArgument(string value)
+        /// <summary>
+        /// 启动 TortoiseProc。参数由 <see cref="VcsExternalToolLauncher"/> 构造：路径含双引号时给出明确原因，
+        /// 多路径走 /pathfile。失败原因记录在 <see cref="_lastExternalToolError"/>，由 ShowExternalToolUnavailable 显示。
+        /// </summary>
+        private bool TryStartTortoise(string command, IReadOnlyList<string> paths, string rootPath, string displayName, string extraArguments = null)
         {
-            return (value ?? string.Empty).Replace("\"", "\\\"");
+            if (!VcsExternalToolLauncher.TryBuildTortoiseArgs(command, paths, out var arguments, out var error))
+            {
+                _lastExternalToolError = error;
+                AgentCoreLog.Warning($"[Version Control][{_currentVcsType}][Open External Tool] Cannot open {displayName}: {error}");
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(extraArguments))
+                arguments += " " + extraArguments;
+
+            return TryStartExternalProcess("TortoiseProc.exe", arguments, rootPath, displayName);
         }
 
         private void ShowExternalToolUnavailable(string operation)
         {
-            ShowMessage($"{operation} requires an external {_currentVcsType} client. Please install or configure the corresponding desktop VCS tool.", true);
+            var detail = _lastExternalToolError;
+            _lastExternalToolError = null;
+            ShowMessage($"{operation} requires an external {_currentVcsType} client. Please install or configure the corresponding desktop VCS tool."
+                        + (string.IsNullOrEmpty(detail) ? string.Empty : $"\n{detail}"), true);
         }
 
         // ===== 文件级外部工具调用方法 =====
@@ -1535,7 +1560,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:diff /path:\"{targetPath}\"", rootPath, "TortoiseSVN diff window");
+                    return TryStartTortoise("diff", new[] { targetPath }, rootPath, "TortoiseSVN diff window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false; // Git GUI 和 P4V 不支持单文件 diff 窗口
@@ -1552,7 +1577,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:log /path:\"{absolutePath}\"", rootPath, "TortoiseSVN log window");
+                    return TryStartTortoise("log", new[] { absolutePath }, rootPath, "TortoiseSVN log window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1569,7 +1594,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:add /path:\"{absolutePath}\"", rootPath, "TortoiseSVN add dialog");
+                    return TryStartTortoise("add", new[] { absolutePath }, rootPath, "TortoiseSVN add dialog");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1594,7 +1619,11 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 case VcsType.Svn:
                     fileName = "TortoiseProc.exe";
-                    arguments = $"/command:add /path:\"{absolutePath}\"";
+                    if (!VcsExternalToolLauncher.TryBuildTortoiseArgs("add", absolutePath, out arguments, out var argsError))
+                    {
+                        _lastExternalToolError = argsError;
+                        return false;
+                    }
                     break;
                 default:
                     return false;
@@ -1649,7 +1678,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:revert /path:\"{absolutePath}\"", rootPath, "TortoiseSVN revert dialog");
+                    return TryStartTortoise("revert", new[] { absolutePath }, rootPath, "TortoiseSVN revert dialog");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1666,7 +1695,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe", $"/command:remove /path:\"{absolutePath}\"", rootPath, "TortoiseSVN remove dialog");
+                    return TryStartTortoise("remove", new[] { absolutePath }, rootPath, "TortoiseSVN remove dialog");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1683,10 +1712,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe",
-                        $"/command:commit /path:\"{absolutePath}\"",
-                        rootPath,
-                        "TortoiseSVN commit window");
+                    return TryStartTortoise("commit", new[] { absolutePath }, rootPath, "TortoiseSVN commit window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
@@ -1712,10 +1738,8 @@ namespace AgentCore.Editor.Components.VCS.UI
             switch (_currentVcsType)
             {
                 case VcsType.Svn:
-                    return TryStartExternalProcess("TortoiseProc.exe",
-                        $"/command:commit /path:\"{string.Join("*", absolutePaths)}\"",
-                        rootPath,
-                        "TortoiseSVN commit window");
+                    // 多个文件通过 /pathfile 传递，不受命令行长度限制
+                    return TryStartTortoise("commit", absolutePaths, rootPath, "TortoiseSVN commit window");
                 case VcsType.Git:
                 case VcsType.Perforce:
                     return false;
