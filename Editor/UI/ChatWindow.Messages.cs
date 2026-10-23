@@ -644,11 +644,9 @@ namespace AgentCore.Editor.UI
                         foreach (var tc in turn.ToolCalls)
                         {
                             var card = new ToolCallCard(tc.ToolName, tc.Arguments);
-                            var status = tc.Success ? ToolCallStatus.Completed : ToolCallStatus.Failed;
-                            var statusText = tc.Success
-                                ? $"完成 ({tc.ExecutionTimeMs:F0}ms)"
-                                : "失败";
-                            card.SetStatus(status, statusText);
+                            // 部分成功单独显示；旧会话未持久化 IsPartial 时按结果前缀识别
+                            var status = ToolCallCard.ResolveFinalStatus(tc.Success, tc.IsPartial, tc.Result);
+                            card.SetStatus(status, ToolCallCard.FormatFinalStatusText(status, tc.ExecutionTimeMs));
 
                             if (!string.IsNullOrEmpty(tc.Result))
                             {

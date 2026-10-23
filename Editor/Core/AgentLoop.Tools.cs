@@ -256,6 +256,7 @@ namespace AgentCore.Editor.Core
                 );
 
                 callInfo.Success = result.Result.Success;
+                callInfo.IsPartial = result.Result.Success && result.Result.IsPartial;
                 callInfo.ExecutionTimeMs = result.ExecutionTimeMs;
                 callInfo.EndTime = DateTime.UtcNow;
                 callInfo.Result = enhancedContent;
@@ -293,7 +294,8 @@ namespace AgentCore.Editor.Core
                         contentForLLM,
                         result.ExecutionTimeMs,
                         assistantTurn.Id,
-                        result.ToolCall.Id
+                        result.ToolCall.Id,
+                        isPartial: result.Result.IsPartial
                     ));
                 }
                 else

@@ -315,6 +315,12 @@ namespace AgentCore.Editor.Core
         public int ConsecutiveSilentRounds { get; }
 
         /// <summary>
+        /// 工具结果是否为部分成功（<see cref="AgentEventType.ToolCallCompleted"/> 时有值，
+        /// 对应 <c>ToolResult.IsPartial</c>）。UI 据此显示"部分完成"而非成功样式。
+        /// </summary>
+        public bool IsPartial { get; }
+
+        /// <summary>
         /// 私有构造函数，强制使用工厂方法创建实例。
         /// </summary>
         private AgentEvent(
@@ -339,7 +345,8 @@ namespace AgentCore.Editor.Core
             string turnId = null,
             int progressCharCount = 0,
             double progressElapsedMs = 0,
-            int consecutiveSilentRounds = 0)
+            int consecutiveSilentRounds = 0,
+            bool isPartial = false)
         {
             Type = type;
             State = state;
@@ -363,6 +370,7 @@ namespace AgentCore.Editor.Core
             ProgressCharCount = progressCharCount;
             ProgressElapsedMs = progressElapsedMs;
             ConsecutiveSilentRounds = consecutiveSilentRounds;
+            IsPartial = isPartial;
         }
 
         #region Phase 1 工厂方法
@@ -543,8 +551,9 @@ namespace AgentCore.Editor.Core
         /// <param name="result">工具执行结果</param>
         /// <param name="executionTimeMs">执行耗时（毫秒）</param>
         /// <param name="messageId">关联的消息 ID</param>
+        /// <param name="isPartial">是否为部分成功（<c>ToolResult.IsPartial</c>）</param>
         /// <returns>工具调用完成事件</returns>
-        public static AgentEvent ToolCallCompleted(string toolName, string result, double executionTimeMs, string messageId = null, string toolCallId = null)
+        public static AgentEvent ToolCallCompleted(string toolName, string result, double executionTimeMs, string messageId = null, string toolCallId = null, bool isPartial = false)
         {
             return new AgentEvent(
                 AgentEventType.ToolCallCompleted,
@@ -552,7 +561,8 @@ namespace AgentCore.Editor.Core
                 toolCallId: toolCallId,
                 toolResult: result,
                 executionTimeMs: executionTimeMs,
-                messageId: messageId
+                messageId: messageId,
+                isPartial: isPartial
             );
         }
 
@@ -776,6 +786,12 @@ namespace AgentCore.Editor.Core
         /// <summary>执行是否成功（可变，执行后填充）</summary>
         public bool Success { get; set; }
 
+        /// <summary>
+        /// 是否为部分成功（可变，执行后填充）。此时 <see cref="Success"/> 仍为 true，
+        /// UI 据此显示"部分完成"而非成功样式。
+        /// </summary>
+        public bool IsPartial { get; set; }
+
         /// <summary>执行耗时（毫秒，可变，执行后填充）</summary>
         public double ExecutionTimeMs { get; set; }
 
@@ -803,7 +819,7 @@ namespace AgentCore.Editor.Core
         /// <inheritdoc />
         public override string ToString()
         {
-            var status = EndTime.HasValue ? (Success ? "OK" : "FAIL") : "PENDING";
+            var status = EndTime.HasValue ? (!Success ? "FAIL" : (IsPartial ? "PARTIAL" : "OK")) : "PENDING";
             return $"ToolCallInfo[{ToolName}] {status} ({ExecutionTimeMs:F1}ms)";
         }
     }

@@ -530,6 +530,7 @@ namespace AgentCore.Editor.Session
                         Arguments = tc.Arguments,
                         Result = tc.Result,
                         Success = tc.Success,
+                        IsPartial = tc.IsPartial,
                         ExecutionTimeMs = tc.ExecutionTimeMs
                     });
                 }
@@ -570,6 +571,7 @@ namespace AgentCore.Editor.Session
                     {
                         Result = tc.Result,
                         Success = tc.Success,
+                        IsPartial = tc.IsPartial,
                         ExecutionTimeMs = tc.ExecutionTimeMs,
                         EndTime = DateTime.UtcNow // 标记为已完成
                     };
@@ -606,6 +608,13 @@ namespace AgentCore.Editor.Session
         /// <summary>执行是否成功</summary>
         [JsonProperty("success")]
         public bool Success { get; set; }
+
+        /// <summary>
+        /// 是否为部分成功（Success 为 true 时才有意义）。默认 false 时不写出，旧会话文件无此字段即视为 false。
+        /// 部分成功的 Result 文本以 ToolResult.PartialPrefix 开头，Result 变化已覆盖会话写入指纹，无需单独比较。
+        /// </summary>
+        [JsonProperty("partial", DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool IsPartial { get; set; }
 
         /// <summary>执行耗时（毫秒）</summary>
         [JsonProperty("execution_time_ms")]

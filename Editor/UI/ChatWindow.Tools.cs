@@ -182,6 +182,7 @@ namespace AgentCore.Editor.UI
 
         /// <summary>
         /// 处理工具调用完成事件：更新对应的 ToolCallCard 为完成状态。
+        /// 部分成功（<see cref="AgentEvent.IsPartial"/>）显示为"部分完成"警告样式，不按成功绿显示。
         /// </summary>
         /// <param name="evt">工具调用完成事件</param>
         private void HandleToolCallCompleted(AgentEvent evt)
@@ -191,10 +192,8 @@ namespace AgentCore.Editor.UI
 
             if (key != null && _activeToolCards.TryGetValue(key, out var card))
             {
-                var completedText = evt.ExecutionTimeMs > 0
-                    ? AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.completedWithTime", "完成 ({0})", $"{evt.ExecutionTimeMs:F0}ms")
-                    : AgentCore.Editor.L10n.Loc.Tr("chat.tool.status.completed", "完成");
-                card.SetStatus(ToolCallStatus.Completed, completedText);
+                var finalStatus = ToolCallCard.ResolveFinalStatus(success: true, evt.IsPartial, evt.ToolResult);
+                card.SetStatus(finalStatus, ToolCallCard.FormatFinalStatusText(finalStatus, evt.ExecutionTimeMs));
 
                 if (!string.IsNullOrEmpty(evt.ToolResult))
                 {

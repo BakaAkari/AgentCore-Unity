@@ -69,6 +69,7 @@ namespace AgentCore.Editor.UI.Components
         private int _totalCalls;
         private int _completedCalls;
         private int _failedCalls;
+        private int _partialCalls;
         private int _runningCalls;
         private int _currentRound;
         private int _maxRounds;
@@ -386,6 +387,9 @@ namespace AgentCore.Editor.UI.Components
                 case ToolCallStatus.Failed:
                     _failedCalls++;
                     break;
+                case ToolCallStatus.Partial:
+                    _partialCalls++;
+                    break;
             }
         }
 
@@ -397,6 +401,7 @@ namespace AgentCore.Editor.UI.Components
             _totalCalls = _cards.Count;
             _completedCalls = 0;
             _failedCalls = 0;
+            _partialCalls = 0;
             _runningCalls = 0;
 
             foreach (var card in _cards)
@@ -411,6 +416,9 @@ namespace AgentCore.Editor.UI.Components
                         break;
                     case ToolCallStatus.Failed:
                         _failedCalls++;
+                        break;
+                    case ToolCallStatus.Partial:
+                        _partialCalls++;
                         break;
                 }
             }
@@ -446,6 +454,10 @@ namespace AgentCore.Editor.UI.Components
                     statParts.Add(AgentCore.Editor.L10n.Loc.Tr(
                         "toolCallGroup.stats.n", "{0} 成功", _completedCalls));
 
+                if (_partialCalls > 0)
+                    statParts.Add(AgentCore.Editor.L10n.Loc.Tr(
+                        "toolCallGroup.stats.partial", "{0} 部分完成", _partialCalls));
+
                 if (_failedCalls > 0)
                     statParts.Add(AgentCore.Editor.L10n.Loc.Tr(
                         "toolCallGroup.stats.f", "{0} 失败", _failedCalls));
@@ -459,7 +471,7 @@ namespace AgentCore.Editor.UI.Components
                         : AgentCore.Editor.L10n.Loc.Tr("toolCallGroup.stats.rNamed", "{0} 执行中: {1}", _runningCalls, runningToolName));
                 }
 
-                var pending = _totalCalls - _completedCalls - _failedCalls - _runningCalls;
+                var pending = _totalCalls - _completedCalls - _failedCalls - _partialCalls - _runningCalls;
                 if (pending > 0)
                     statParts.Add(AgentCore.Editor.L10n.Loc.Tr(
                         "toolCallGroup.stats.pending", "{0} 等待", pending));
@@ -539,6 +551,10 @@ namespace AgentCore.Editor.UI.Components
             else if (_failedCalls > 0)
             {
                 accentColor = AccentRed; // 有失败 - 红色
+            }
+            else if (_partialCalls > 0)
+            {
+                accentColor = UI.AgentCoreColors.Warning; // 有部分完成 - 警告黄（非完全成功，不显示绿色）
             }
             else if (_completedCalls > 0 && _completedCalls == _totalCalls)
             {
