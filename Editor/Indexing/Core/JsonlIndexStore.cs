@@ -123,20 +123,38 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         // ── 诊断属性（测试 / 面板） ──────────────────────────────────────────────
 
+        // 诊断属性先确保已加载：否则在首次读写之前访问会得到“健康 / 第 0 代”的假象。
+
         /// <summary>当前代编号（0 表示尚未写过新格式）。</summary>
-        public int Generation { get { lock (_gate) return _generation; } }
+        public int Generation { get { EnsureLoadedForDiagnostics(); lock (_gate) return _generation; } }
 
         /// <summary>当前操作日志中的操作条数。</summary>
-        public int PendingOpCount { get { lock (_gate) return _opCount; } }
+        public int PendingOpCount { get { EnsureLoadedForDiagnostics(); lock (_gate) return _opCount; } }
 
         /// <inheritdoc/>
-        public int CorruptLineCount { get { lock (_gate) return _corruptLines; } }
+        public int CorruptLineCount { get { EnsureLoadedForDiagnostics(); lock (_gate) return _corruptLines; } }
 
         /// <inheritdoc/>
-        public bool RequiresRebuild { get { lock (_gate) return _requiresRebuild; } }
+        public bool RequiresRebuild { get { EnsureLoadedForDiagnostics(); lock (_gate) return _requiresRebuild; } }
 
         /// <inheritdoc/>
-        public string HealthMessage { get { lock (_gate) return _healthMessage; } }
+        public string HealthMessage { get { EnsureLoadedForDiagnostics(); lock (_gate) return _healthMessage; } }
+
+        private void EnsureLoadedForDiagnostics()
+        {
+            try
+            {
+                EnsureLoaded();
+            }
+            catch (ObjectDisposedException)
+            {
+                // 已释放：返回最后已知状态
+            }
+            catch (Exception ex)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Warning($"[JsonlIndexStore] Loading index for diagnostics failed: {ex.Message}");
+            }
+        }
 
         // ── 初始化 ─────────────────────────────────────────────────────────────
 
