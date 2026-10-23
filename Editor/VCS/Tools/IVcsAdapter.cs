@@ -152,7 +152,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// <summary>锁的注释（svn lock -m）；没有锁或没有注释时为 null</summary>
         public string LockComment { get; set; }
 
-        /// <summary>文件设置了 svn:needs-lock（只对已修改的文件检测）。</summary>
+        /// <summary>文件设置了 svn:needs-lock（只对已修改、未持有锁的文件检测；见 SvnAdapter.AnnotateNeedsLock）。</summary>
         public bool NeedsLock { get; set; }
 
         /// <summary>SVN：该路径被 switch 到了与父目录不同的 URL（svn status 第 5 列 S）。</summary>
@@ -254,8 +254,20 @@ namespace AgentCore.Editor.Components.VCS.Tools
         public List<string> RemoteChangedFiles { get; set; } = new List<string>();
         public List<string> ConflictedFiles { get; set; } = new List<string>();
 
-        /// <summary>SVN：被他人锁定（O）或本地锁已失效（T/B）的文件，-u 时才能拿到。</summary>
+        /// <summary>
+        /// SVN：仓库中所有带锁的文件（<see cref="VcsFileStatus.LockState"/>：K 本人 / O 他人 / T 被抢 / B 已失效），
+        /// 含锁持有者与注释。O / T / B 只有远端检查（svn status -u）才能拿到。
+        /// </summary>
         public List<VcsFileStatus> LockedFiles { get; set; } = new List<VcsFileStatus>();
+
+        /// <summary>SVN：本次检查对比的仓库 HEAD 版本号（svn status -u 的 against revision）；未知时为 null。</summary>
+        public string RemoteRevision { get; set; }
+
+        /// <summary>
+        /// <see cref="LockedFiles"/> / <see cref="RemoteChangedFiles"/> / <see cref="ConflictedFiles"/> 中相对路径的基准目录
+        /// （适配器的工作目录，SVN 为工作副本根）；未知时为 null。
+        /// </summary>
+        public string PathBase { get; set; }
         public string Summary { get; set; }
         public string RawOutput { get; set; }
     }

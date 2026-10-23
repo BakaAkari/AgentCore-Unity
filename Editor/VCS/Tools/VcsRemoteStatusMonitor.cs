@@ -410,7 +410,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
         // ── SessionState 持久化 ──
 
         /// <summary>
-        /// 可序列化的状态快照（JsonUtility 不支持属性，单独定义字段）。只保存 UI / 角标需要的摘要信息。
+        /// 可序列化的状态快照（JsonUtility 不支持属性，单独定义字段）。保存 UI 需要的摘要，
+        /// 以及角标需要的锁快照（O / T / B 只有远端检查才拿得到）与 HEAD 版本号，域重载后角标与"有新提交"判定不丢失。
         /// </summary>
         [Serializable]
         private class StatusSnapshot
@@ -425,42 +426,114 @@ namespace AgentCore.Editor.Components.VCS.Tools
             public int BehindCount;
             public int AheadCount;
             public string Summary;
+            public string RemoteRevision;
+            public string PathBase;
+            public LockEntry[] Locks;
         }
+
+        [Serializable]
+        private class LockEntry
+        {
+            public string Path;
+            public string State;
+            public string Owner;
+            public string Comment;
+        }
+
+        /// <summary>序列化为 SessionState 中保存的 JSON（含锁快照与 HEAD 版本号）。纯函数，可在测试中验证往返。</summary>
+        public static string ToSnapshotJson(VcsSyncStatus status)
+        {
+            if (status == null)
+                return null;
+            var locks = new System.Collections.Generic.List<LockEntry>();
+            if (status.LockedFiles != null)
+            {
+                foreach (var file in status.LockedFiles)
+                {
+                    if (file == null || string.IsNullOrEmpty(file.FilePath) || string.IsNullOrEmpty(file.LockState))
+                        continue;
+                    locks.Add(new LockEntry { Path = file.FilePath, State = file.LockState, Owner = file.LockOwner, Comment = file.LockComment });
+                }
+            }
+
+            return JsonUtility.ToJson(new StatusSnapshot
+            {
+                Success = status.Success,
+                ErrorMessage = status.ErrorMessage,
+                HasRemoteChanges = status.HasRemoteChanges,
+                HasLocalChanges = status.HasLocalChanges,
+                HasConflicts = status.HasConflicts,
+                RemoteChangeCount = status.RemoteChangeCount,
+                LocalChangeCount = status.LocalChangeCount,
+                BehindCount = status.BehindCount,
+                AheadCount = status.AheadCount,
+                Summary = status.Summary,
+                RemoteRevision = status.RemoteRevision,
+                PathBase = status.PathBase,
+                Locks = locks.ToArray()
+            });
+        }
+
+        /// <summary>从 <see cref="ToSnapshotJson"/> 的 JSON 还原；JSON 为空或损坏时返回 null。</summary>
+        public static VcsSyncStatus FromSnapshotJson(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return null;
+            try
+            {
+                var s = JsonUtility.FromJson<StatusSnapshot>(json);
+                if (s == null)
+                    return null;
+                var status = new VcsSyncStatus
+                {
+                    Success = s.Success,
+                    ErrorMessage = NullIfEmpty(s.ErrorMessage),
+                    HasRemoteChanges = s.HasRemoteChanges,
+                    HasLocalChanges = s.HasLocalChanges,
+                    HasConflicts = s.HasConflicts,
+                    RemoteChangeCount = s.RemoteChangeCount,
+                    LocalChangeCount = s.LocalChangeCount,
+                    BehindCount = s.BehindCount,
+                    AheadCount = s.AheadCount,
+                    Summary = NullIfEmpty(s.Summary),
+                    RemoteRevision = NullIfEmpty(s.RemoteRevision),
+                    PathBase = NullIfEmpty(s.PathBase)
+                };
+                if (s.Locks != null)
+                {
+                    foreach (var entry in s.Locks)
+                    {
+                        if (entry == null || string.IsNullOrEmpty(entry.Path) || string.IsNullOrEmpty(entry.State))
+                            continue;
+                        status.LockedFiles.Add(new VcsFileStatus
+                        {
+                            FilePath = entry.Path,
+                            State = VcsFileState.Unmodified,
+                            StateDescription = SvnStatusXmlParser.DescribeLock(entry.State, NullIfEmpty(entry.Owner)),
+                            LockState = entry.State,
+                            LockOwner = NullIfEmpty(entry.Owner),
+                            LockComment = NullIfEmpty(entry.Comment)
+                        });
+                    }
+                }
+                return status;
+            }
+            catch
+            {
+                // 快照损坏时忽略，等待下一次检查
+                return null;
+            }
+        }
+
+        // JsonUtility 把 null 字符串写成 ""
+        private static string NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
 
         private static void RestoreFromSession()
         {
             var lastChecked = ReadUtc(LastCheckedKey);
             _lastCheckedUtc = lastChecked ?? DateTime.MinValue;
             _lastSuccessUtc = ReadUtc(LastSuccessKey);
-
-            var json = SessionState.GetString(LastStatusKey, string.Empty);
-            if (!string.IsNullOrEmpty(json))
-            {
-                try
-                {
-                    var s = JsonUtility.FromJson<StatusSnapshot>(json);
-                    if (s != null)
-                    {
-                        _lastStatus = new VcsSyncStatus
-                        {
-                            Success = s.Success,
-                            ErrorMessage = s.ErrorMessage,
-                            HasRemoteChanges = s.HasRemoteChanges,
-                            HasLocalChanges = s.HasLocalChanges,
-                            HasConflicts = s.HasConflicts,
-                            RemoteChangeCount = s.RemoteChangeCount,
-                            LocalChangeCount = s.LocalChangeCount,
-                            BehindCount = s.BehindCount,
-                            AheadCount = s.AheadCount,
-                            Summary = s.Summary
-                        };
-                    }
-                }
-                catch
-                {
-                    // 快照损坏时忽略，等待下一次检查
-                }
-            }
+            _lastStatus = FromSnapshotJson(SessionState.GetString(LastStatusKey, string.Empty));
 
             var interval = TimeSpan.FromMinutes(VcsSettings.RemoteStatusCheckIntervalMinutes);
             var now = DateTime.UtcNow;
@@ -470,6 +543,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 : now + InitialCheckDelay;
         }
 
+        /// <summary>写入 SessionState。只在主线程调用（由 NotifyStatusChanged 的 delayCall 触发）。</summary>
         private static void PersistToSession()
         {
             VcsSyncStatus status;
@@ -491,19 +565,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return;
             }
 
-            SessionState.SetString(LastStatusKey, JsonUtility.ToJson(new StatusSnapshot
-            {
-                Success = status.Success,
-                ErrorMessage = status.ErrorMessage,
-                HasRemoteChanges = status.HasRemoteChanges,
-                HasLocalChanges = status.HasLocalChanges,
-                HasConflicts = status.HasConflicts,
-                RemoteChangeCount = status.RemoteChangeCount,
-                LocalChangeCount = status.LocalChangeCount,
-                BehindCount = status.BehindCount,
-                AheadCount = status.AheadCount,
-                Summary = status.Summary
-            }));
+            SessionState.SetString(LastStatusKey, ToSnapshotJson(status));
         }
 
         private static DateTime? ReadUtc(string key)
