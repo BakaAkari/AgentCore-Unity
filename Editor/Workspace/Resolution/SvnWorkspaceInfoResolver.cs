@@ -71,7 +71,15 @@ namespace AgentCore.Editor.Workspace.Resolution
                 using (var p = Process.Start(psi))
                 {
                     if (p == null) return false;
-                    p.WaitForExit(3000);
+                    ChildProcessJob.TryAssign(p);
+                    // 输出重定向了但不关心内容：异步读空，避免管道写满卡住子进程
+                    p.StandardOutput.ReadToEndAsync();
+                    p.StandardError.ReadToEndAsync();
+                    if (!p.WaitForExit(3000))
+                    {
+                        ChildProcessJob.KillTree(p);
+                        return false;
+                    }
                     return p.ExitCode == 0;
                 }
             }
@@ -86,9 +94,16 @@ namespace AgentCore.Editor.Workspace.Resolution
                 using (var p = Process.Start(psi))
                 {
                     if (p == null) return null;
-                    var output = p.StandardOutput.ReadToEnd();
-                    p.WaitForExit(CommandTimeoutMs);
-                    return p.ExitCode == 0 ? output : null;
+                    ChildProcessJob.TryAssign(p);
+                    // 同步 ReadToEnd 会一直等到进程退出，超时形同虚设；改为异步读取 + 超时后结束整棵进程树
+                    var outputTask = p.StandardOutput.ReadToEndAsync();
+                    p.StandardError.ReadToEndAsync();
+                    if (!p.WaitForExit(CommandTimeoutMs) || !outputTask.Wait(CommandTimeoutMs))
+                    {
+                        ChildProcessJob.KillTree(p);
+                        return null;
+                    }
+                    return p.ExitCode == 0 ? outputTask.Result : null;
                 }
             }
             catch { return null; }

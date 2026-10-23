@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.VCS.Tools
 {
@@ -166,6 +167,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 process.Exited += (sender, e) => exited.TrySetResult(true);
 
                 process.Start();
+                // 加入进程级 Job：编辑器退出 / 崩溃时连带结束 git/svn/p4 及其派生的 ssh、credential helper
+                ChildProcessJob.TryAssign(process);
                 Task rawReadTask = null;
                 if (rawStdout)
                     rawReadTask = ReadRawCappedAsync(process.StandardOutput, outputBuilder, truncated => result.OutputTruncated = truncated);
@@ -182,7 +185,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
                 if (completed != exited.Task)
                 {
-                    KillProcessTree(process);
+                    ChildProcessJob.KillTree(process);
                     if (completed == cancelTask)
                         return Cancelled(result);
 
@@ -303,45 +306,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             env["GIT_ASKPASS"] = "";
             env["SSH_ASKPASS"] = "";
             // 不覆盖 GIT_SSH_COMMAND：会顶掉用户 core.sshCommand 里的密钥配置；ssh 无终端 + stdin 已关闭时提示会直接失败
-        }
-
-        /// <summary>
-        /// 结束进程及其子进程。Unity 的 Mono <see cref="Process.Kill()"/> 只结束父进程，
-        /// Windows 上用 taskkill /T 收掉整棵树。
-        /// </summary>
-        private static void KillProcessTree(Process process)
-        {
-            try
-            {
-                if (process.HasExited)
-                    return;
-            }
-            catch
-            {
-                return;
-            }
-
-            if (VcsArgs.IsWindows)
-            {
-                try
-                {
-                    using var killer = Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "taskkill",
-                        Arguments = $"/T /F /PID {process.Id}",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    });
-                    if (killer != null && killer.WaitForExit(5000))
-                        return;
-                }
-                catch
-                {
-                    // 回退到只结束父进程
-                }
-            }
-
-            try { process.Kill(); } catch { /* 已退出 */ }
         }
     }
 
