@@ -45,10 +45,24 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             _cachedContext = WorkspaceContextService.GetCurrent();
             _refreshError = null;
+            WorkspaceContextService.ContextChanged -= OnWorkspaceContextChanged;
+            WorkspaceContextService.ContextChanged += OnWorkspaceContextChanged;
         }
 
         /// <inheritdoc />
-        public void OnDeactivate(AgentCoreSettingsContext context) { }
+        public void OnDeactivate(AgentCoreSettingsContext context)
+        {
+            WorkspaceContextService.ContextChanged -= OnWorkspaceContextChanged;
+        }
+
+        // 后台 svn info 完成后缓存被替换：页面正在显示上下文时跟进新快照并重绘
+        private void OnWorkspaceContextChanged()
+        {
+            if (_cachedContext == null)
+                return;
+            _cachedContext = WorkspaceContextService.PeekCached() ?? _cachedContext;
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+        }
 
         /// <inheritdoc />
         public void Draw(AgentCoreSettingsContext context)
@@ -83,6 +97,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 // Status
                 var statusLevel = ctx.IsValid ? SettingsStatusLevel.Success : SettingsStatusLevel.Error;
                 context.Ui.DrawStatusLabel($"Status: {ctx.Status}", statusLevel, miniLabel: true);
+
+                if (WorkspaceContextService.IsProbing)
+                    context.Ui.DrawStatusLabel("Querying svn info in background...", SettingsStatusLevel.Loading, miniLabel: true);
 
                 if (!string.IsNullOrEmpty(ctx.ErrorMessage))
                 {

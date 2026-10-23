@@ -85,13 +85,22 @@ namespace AgentCore.Editor.Utils
             if (process == null)
                 return;
 
+            bool rootExited;
             try
             {
-                if (process.HasExited)
-                    return;
+                rootExited = process.HasExited;
             }
             catch
             {
+                return;
+            }
+
+            if (rootExited)
+            {
+                // 根进程已退出，但它派生的子进程（例如仍占着 stdout 管道的 ssh 隧道）可能还活着：
+                // 按父 PID + 启动时间窗口找回这些孤儿并结束它们的进程树。
+                // 不能 TerminateJobObject：Job 是进程级共享的，会误杀其他正在运行的子进程。
+                KillOrphanedChildren(process);
                 return;
             }
 
@@ -135,6 +144,88 @@ namespace AgentCore.Editor.Utils
 
             foreach (var pid in descendants)
                 KillPidIfAlive(pid);
+        }
+
+        /// <summary>
+        /// 根进程已退出时结束它遗留的后代进程树。尽力而为，从不抛异常。
+        /// </summary>
+        private static void KillOrphanedChildren(Process process)
+        {
+            int rootPid;
+            try { rootPid = process.Id; }
+            catch { return; }
+
+            DateTime? rootStart = null;
+            try { rootStart = process.StartTime; }
+            catch { /* 运行时不支持退出后读取：只用退出时间做上界 */ }
+
+            DateTime rootExit;
+            try { rootExit = process.ExitTime; }
+            catch { rootExit = DateTime.Now; }
+
+            var orphans = GetOrphanedDescendantPids(rootPid, rootStart, rootExit);
+            if (orphans.Count == 0)
+                return;
+
+            if (IsWindows)
+            {
+                // 逐个直接子进程 taskkill /T，连带其后代
+                foreach (var pid in orphans)
+                    RunHelper("taskkill", $"/T /F /PID {pid}");
+            }
+
+            foreach (var pid in orphans)
+                KillPidIfAlive(pid);
+        }
+
+        /// <summary>
+        /// 找出已退出根进程（<paramref name="rootPid"/>）遗留的后代进程 PID（直接子进程在前，随后是它们的后代）。
+        /// <para>
+        /// 直接子进程的判定：记录的父 PID 等于 <paramref name="rootPid"/>，且启动时间落在根进程的
+        /// [启动时间, 退出时间] 窗口内。真正的子进程必然在根进程退出前创建；根 PID 被复用后，
+        /// 新进程派生的子进程都晚于退出时间，会被过滤掉。
+        /// </para>
+        /// <para>
+        /// 仅 Windows 可用：macOS / Linux 上父进程退出后孤儿会被 init / subreaper 收养，父 PID 信息丢失，返回空列表。
+        /// </para>
+        /// </summary>
+        internal static List<int> GetOrphanedDescendantPids(int rootPid, DateTime? rootStart, DateTime rootExit)
+        {
+            var result = new List<int>();
+            if (!IsWindows)
+                return result;
+
+            try
+            {
+                var childrenOf = SnapshotChildrenMapWindows();
+                if (childrenOf == null || !childrenOf.TryGetValue(rootPid, out var children))
+                    return result;
+
+                // 允许 1 秒时钟误差（StartTime / ExitTime 精度与来源不同）
+                var tolerance = TimeSpan.FromSeconds(1);
+                var startTimes = new Dictionary<int, DateTime?>();
+                var direct = new List<int>();
+                foreach (var child in children)
+                {
+                    var childStart = GetStartTime(child, startTimes);
+                    if (!childStart.HasValue)
+                        continue; // 无法确认身份时宁可不杀
+                    if (childStart.Value > rootExit + tolerance)
+                        continue;
+                    if (rootStart.HasValue && childStart.Value < rootStart.Value - tolerance)
+                        continue;
+                    direct.Add(child);
+                }
+
+                result.AddRange(direct);
+                foreach (var child in direct)
+                    CollectDescendantsFromMap(child, childrenOf, startTimes, result);
+            }
+            catch
+            {
+                // 尽力而为
+            }
+            return result;
         }
 
         /// <summary>
@@ -204,16 +295,25 @@ namespace AgentCore.Editor.Utils
 
         private static void CollectDescendantsWindows(int rootPid, List<int> result)
         {
+            var childrenOf = SnapshotChildrenMapWindows();
+            if (childrenOf == null)
+                return;
+            CollectDescendantsFromMap(rootPid, childrenOf, new Dictionary<int, DateTime?>(), result);
+        }
+
+        /// <summary>用 ToolHelp 快照建立 父 PID → 子 PID 列表 映射；失败返回 null。</summary>
+        private static Dictionary<int, List<int>> SnapshotChildrenMapWindows()
+        {
             var parentOf = new Dictionary<int, int>();
             var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if (snapshot == IntPtr.Zero || snapshot == InvalidHandleValue)
-                return;
+                return null;
 
             try
             {
                 var entry = new PROCESSENTRY32W { dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32W)) };
                 if (!Process32FirstW(snapshot, ref entry))
-                    return;
+                    return null;
                 do
                 {
                     parentOf[(int)entry.th32ProcessID] = (int)entry.th32ParentProcessID;
@@ -233,9 +333,16 @@ namespace AgentCore.Editor.Utils
                     childrenOf[pair.Value] = list = new List<int>();
                 list.Add(pair.Key);
             }
+            return childrenOf;
+        }
 
-            var startTimes = new Dictionary<int, DateTime?>();
-            var visited = new HashSet<int> { rootPid };
+        private static void CollectDescendantsFromMap(
+            int rootPid,
+            Dictionary<int, List<int>> childrenOf,
+            Dictionary<int, DateTime?> startTimes,
+            List<int> result)
+        {
+            var visited = new HashSet<int>(result) { rootPid };
             var queue = new Queue<int>();
             queue.Enqueue(rootPid);
             while (queue.Count > 0)

@@ -2,22 +2,39 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
-using UnityEngine;
 using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Workspace.Resolution
 {
     /// <summary>
     /// 解析 SVN 工作副本元数据。
-    /// 优先使用 `svn info` 命令行解析；命令不可用时降级返回部分信息。
-    /// 不阻塞 Unity Editor 主线程（超时保护）。
+    /// <list type="bullet">
+    /// <item><see cref="ResolveFast"/>：只做 .svn 目录探测（纯文件系统），可在主线程调用。</item>
+    /// <item><see cref="Resolve"/>：运行 `svn --version` + `svn info`（最长约 8 秒），
+    ///       <b>不要在主线程调用</b>；由 WorkspaceContextService 在后台探测。命令不可用时降级返回部分信息。</item>
+    /// </list>
+    /// 不依赖 Unity API，可在任意线程使用。
     /// </summary>
     public static class SvnWorkspaceInfoResolver
     {
         private const int CommandTimeoutMs = 5000;
 
         /// <summary>
-        /// 解析指定路径的 SVN 工作副本信息。
+        /// 快速解析：只向上查找 .svn 目录确定工作副本根，不启动 svn 子进程。
+        /// URL / RepositoryRoot / BranchId / Revision 为空，<see cref="WorkspaceVcsInfo.IsCommandAvailable"/> 为 false（未探测）。
+        /// </summary>
+        public static WorkspaceVcsInfo ResolveFast(string path)
+        {
+            var info = new WorkspaceVcsInfo { Type = WorkspaceVcsType.Svn };
+            info.RootPath = FindSvnRootByDotSvn(path);
+            info.IsWorkingCopy = !string.IsNullOrEmpty(info.RootPath);
+            if (!info.IsWorkingCopy)
+                info.ErrorMessage = "No .svn directory found";
+            return info;
+        }
+
+        /// <summary>
+        /// 解析指定路径的 SVN 工作副本信息（会启动 svn 子进程并同步等待，只在后台线程调用）。
         /// </summary>
         /// <param name="path">要查询的目录路径（通常为 UnityRoot 或其父目录）。</param>
         /// <returns>填充好的 WorkspaceVcsInfo；命令失败时返回降级结果。</returns>

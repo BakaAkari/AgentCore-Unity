@@ -79,6 +79,52 @@ namespace AgentCore.Tests.Editor.Utils
         }
 
         [Test]
+        public void KillTree_RootExitedButChildAlive_KillsOrphanedChild()
+        {
+            if (!ChildProcessJob.IsWindows)
+                Assert.Ignore("父进程退出后 Unix 孤儿被 init 收养，父 PID 丢失，仅 Windows 可找回");
+
+            // cmd 以 start /b 派生 ping 后立即退出，ping 继承 stdout 管道继续运行（模拟占着管道的 ssh 隧道）
+            var info = new ProcessStartInfo("cmd.exe", "/c start \"\" /b ping -n 30 127.0.0.1")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true
+            };
+            var root = Process.Start(info);
+            Assert.IsNotNull(root);
+            root.StandardOutput.ReadToEndAsync();
+            _started.Add(root);
+            ChildProcessJob.TryAssign(root);
+
+            Assert.IsTrue(root.WaitForExit(10000), "root cmd did not exit");
+
+            DateTime? rootStart = null;
+            try { rootStart = root.StartTime; } catch { /* 运行时不支持 */ }
+            var orphans = WaitForOrphans(root.Id, rootStart, root.ExitTime, TimeSpan.FromSeconds(5));
+            Assert.IsNotEmpty(orphans, "orphaned ping not found");
+
+            ChildProcessJob.KillTree(root);
+
+            foreach (var pid in orphans)
+                Assert.IsTrue(WaitForPidExit(pid, TimeSpan.FromSeconds(5)), $"orphaned descendant {pid} still running");
+        }
+
+        [Test]
+        public void GetOrphanedDescendantPids_ChildStartedAfterRootExit_IsIgnored()
+        {
+            if (!ChildProcessJob.IsWindows)
+                Assert.Ignore("仅 Windows");
+
+            // 以当前进程作为“根”，但把退出时间设在很久以前：它现存的子进程都晚于该时间启动，
+            // 相当于 PID 被复用后的新进程派生的子进程，必须被过滤掉
+            var self = Process.GetCurrentProcess().Id;
+            var child = StartTree(quick: false);
+            var orphans = ChildProcessJob.GetOrphanedDescendantPids(self, null, DateTime.Now - TimeSpan.FromDays(1));
+            CollectionAssert.DoesNotContain(orphans, child.Id);
+        }
+
+        [Test]
         public void GetDescendantPids_UnknownPid_ReturnsEmpty()
         {
             // PID 0 在 Windows 是 Idle、在 Unix 是 swapper/调度器；用一个不太可能存在的大 PID
@@ -113,6 +159,18 @@ namespace AgentCore.Tests.Editor.Utils
             while (true)
             {
                 var list = ChildProcessJob.GetDescendantPids(pid);
+                if (list.Count > 0 || DateTime.UtcNow > deadline)
+                    return list;
+                Thread.Sleep(100);
+            }
+        }
+
+        private static List<int> WaitForOrphans(int pid, DateTime? start, DateTime exit, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (true)
+            {
+                var list = ChildProcessJob.GetOrphanedDescendantPids(pid, start, exit);
                 if (list.Count > 0 || DateTime.UtcNow > deadline)
                     return list;
                 Thread.Sleep(100);

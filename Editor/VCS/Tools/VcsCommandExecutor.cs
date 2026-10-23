@@ -137,6 +137,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (ct.IsCancellationRequested)
                 return Cancelled(result);
 
+            arguments = VcsArgs.ApplyGlobalOptions(command, arguments);
+
             try
             {
                 using var process = new Process
@@ -343,6 +345,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return chunks;
 
             var baseLength = (command ?? string.Empty).Length + 3 + Join(prefixArgs).Length;
+            if (IsGitCommand(command))
+                baseLength += Join(GitGlobalOptions).Length + 1;
             var current = new List<string>();
             var currentLength = baseLength;
 
@@ -366,6 +370,43 @@ namespace AgentCore.Editor.Components.VCS.Tools
             if (current.Count > 0)
                 chunks.Add(current);
             return chunks;
+        }
+
+        /// <summary>
+        /// 所有 git 调用都带上的全局选项（必须位于子命令之前）。
+        /// <c>core.quotepath=off</c>：不带 <c>-z</c> 的命令（diff / show / log / blame 等）默认会把非 ASCII
+        /// 路径输出成 C 风格转义（<c>"\346\226\207..."</c>），关闭后按 UTF-8 原样输出，
+        /// 解析与展示都能拿到真实文件名。
+        /// </summary>
+        public static readonly IReadOnlyList<string> GitGlobalOptions = new[] { "-c", "core.quotepath=off" };
+
+        /// <summary>
+        /// <paramref name="command"/> 是 git（含完整路径 / .exe 后缀）时，在已转义的命令行前加上
+        /// <see cref="GitGlobalOptions"/>；其他命令原样返回。
+        /// </summary>
+        public static string ApplyGlobalOptions(string command, string arguments)
+        {
+            if (!IsGitCommand(command))
+                return arguments;
+
+            var prefix = Join(GitGlobalOptions);
+            return string.IsNullOrEmpty(arguments) ? prefix : prefix + " " + arguments;
+        }
+
+        /// <summary>命令是否为 git（<c>git</c>、<c>git.exe</c>、<c>C:\...\git.exe</c>）。</summary>
+        public static bool IsGitCommand(string command)
+        {
+            if (string.IsNullOrEmpty(command))
+                return false;
+            try
+            {
+                var name = System.IO.Path.GetFileNameWithoutExtension(command.Trim().Trim('"'));
+                return string.Equals(name, "git", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
         }
 
         public static string Join(IEnumerable<string> args) => ProcessArgs.Join(args);

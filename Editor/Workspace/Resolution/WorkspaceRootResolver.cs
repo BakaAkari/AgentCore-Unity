@@ -23,8 +23,21 @@ namespace AgentCore.Editor.Workspace.Resolution
         ///   status        — 解析状态；
         ///   vcsInfo       — SVN 元数据（可能为降级状态）。
         /// </returns>
+        /// <remarks>会同步运行 svn info（阻塞），不要在主线程调用；主线程请使用带 svnInfo 参数的重载。</remarks>
         public static (string workspaceRoot, WorkspaceResolutionStatus status, WorkspaceVcsInfo vcsInfo)
             Resolve(string unityRoot)
+        {
+            if (string.IsNullOrEmpty(unityRoot))
+                return Resolve(unityRoot, null);
+            return Resolve(unityRoot, SvnWorkspaceInfoResolver.Resolve(unityRoot));
+        }
+
+        /// <summary>
+        /// 用已取得的 SVN 信息（<see cref="SvnWorkspaceInfoResolver.ResolveFast"/> 或后台 svn info 结果）
+        /// 解析 WorkspaceRoot。不启动子进程，可在主线程调用。
+        /// </summary>
+        public static (string workspaceRoot, WorkspaceResolutionStatus status, WorkspaceVcsInfo vcsInfo)
+            Resolve(string unityRoot, WorkspaceVcsInfo svnInfo)
         {
             if (string.IsNullOrEmpty(unityRoot))
             {
@@ -36,7 +49,7 @@ namespace AgentCore.Editor.Workspace.Resolution
             //   若未来需要企业用户手动覆盖, 通过环境变量 AGENTCORE_WORKSPACE_ROOT 传递
 
             // 优先级 1: SVN 解析(svn info 或 .svn 探测)
-            var svnInfo = SvnWorkspaceInfoResolver.Resolve(unityRoot);
+            svnInfo = svnInfo ?? new WorkspaceVcsInfo { Type = WorkspaceVcsType.Svn };
 
             if (!string.IsNullOrEmpty(svnInfo.RootPath))
             {
