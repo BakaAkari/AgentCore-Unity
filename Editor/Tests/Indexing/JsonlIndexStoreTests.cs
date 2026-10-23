@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using AgentCore.Editor.Components.Indexing.Core;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Components.Indexing.Query;
+using AgentCore.Tests.Editor.Utils;
 using NUnit.Framework;
 
 namespace AgentCore.Tests.Editor.Indexing

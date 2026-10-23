@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
+using AgentCore.Editor.Utils;
 using Newtonsoft.Json.Linq;
 
 namespace AgentCore.Editor.Tools.FileSystem
@@ -59,16 +60,6 @@ namespace AgentCore.Editor.Tools.FileSystem
         /// Maximum number of context lines shown around each search match.
         /// </summary>
         private const int DefaultContextLines = 2;
-
-        /// <summary>
-        /// Maximum regex pattern length accepted by search_content.
-        /// </summary>
-        private const int MaxRegexPatternLength = 512;
-
-        /// <summary>
-        /// Per-match regex timeout. A pathological pattern fails with an error instead of hanging the editor.
-        /// </summary>
-        private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(200);
 
         /// <summary>
         /// Overall wall-clock budget for one search_content call. When exceeded, the partial
@@ -272,7 +263,7 @@ namespace AgentCore.Editor.Tools.FileSystem
             catch (RegexMatchTimeoutException ex)
             {
                 // Never report a timed-out regex as "0 matches".
-                response = ToolResponse.Fail(DescribeRegexTimeout(ex.Pattern));
+                response = ToolResponse.Fail(SafeRegex.DescribeTimeout(ex.Pattern, "manage_file search_content"));
             }
             catch (OperationCanceledException)
             {
@@ -346,44 +337,6 @@ namespace AgentCore.Editor.Tools.FileSystem
         #endregion
 
         #region Search Helpers
-
-        /// <summary>
-        /// Build a regex with a length cap, culture-invariant matching and a per-match timeout.
-        /// Throws <see cref="ArgumentException"/> with an explanation for unusable patterns.
-        /// </summary>
-        private static Regex CreateSafeRegex(string pattern, bool caseSensitive)
-        {
-            if (pattern == null)
-                throw new ArgumentException("Regex pattern is required.");
-
-            if (pattern.Length > MaxRegexPatternLength)
-                throw new ArgumentException(
-                    $"Regex pattern is {pattern.Length} chars; the limit is {MaxRegexPatternLength}. " +
-                    "Split it into several searches or use a shorter, more specific pattern.");
-
-            var options = RegexOptions.CultureInvariant;
-            if (!caseSensitive)
-                options |= RegexOptions.IgnoreCase;
-
-            try
-            {
-                return new Regex(pattern, options, RegexMatchTimeout);
-            }
-            catch (ArgumentException ex)
-            {
-                throw new ArgumentException($"Invalid regex pattern: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Error text for a regex that exceeded the per-match timeout.
-        /// </summary>
-        private static string DescribeRegexTimeout(string pattern)
-        {
-            return $"regex_timeout: pattern '{pattern}' took longer than {RegexMatchTimeout.TotalMilliseconds:0} ms on a single line " +
-                   "(likely catastrophic backtracking, e.g. nested quantifiers like (a+)+). No results were returned because they would be incomplete. " +
-                   "Rewrite the pattern (anchor it, avoid nested quantifiers) or search a narrower path.";
-        }
 
         /// <summary>
         /// Whether a sub-directory is a generated / cache directory that scans skip by default.
@@ -959,7 +912,7 @@ namespace AgentCore.Editor.Tools.FileSystem
         /// <summary>
         /// search_content via the built-in .NET scanner.
         /// <para>
-        /// Safety: the pattern is capped at 512 chars and each match has a 200 ms timeout; a timeout
+        /// Safety: <see cref="SafeRegex"/> caps the pattern length and gives each match a timeout; a timeout
         /// is returned as an error, never as "0 matches". The scan honours cancellation per file and
         /// stops at a time / file / byte budget, returning what it found with truncatedReason set.
         /// </para>
@@ -974,11 +927,11 @@ namespace AgentCore.Editor.Tools.FileSystem
             var caseSensitive = req.CaseSensitive;
             var includeHidden = req.IncludeHidden;
 
-            // Validate regex (length cap + match timeout; invalid patterns explain why)
+            // Validate regex (shared SafeRegex: length cap + match timeout; invalid patterns explain why)
             Regex regex;
             try
             {
-                regex = CreateSafeRegex(searchPattern, caseSensitive);
+                regex = SafeRegex.Create(searchPattern, ignoreCase: !caseSensitive);
             }
             catch (ArgumentException ex)
             {

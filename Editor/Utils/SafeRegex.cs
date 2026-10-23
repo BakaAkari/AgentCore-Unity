@@ -1,10 +1,10 @@
 using System;
 using System.Text.RegularExpressions;
 
-namespace AgentCore.Editor.Components.Indexing.Core
+namespace AgentCore.Editor.Utils
 {
     /// <summary>
-    /// 带超时与长度上限的正则构造工具。
+    /// 带超时与长度上限的正则构造工具（manage_file search_content 的 .NET 回退、search_code 的正则查询共用）。
     /// <para>
     /// Mono 运行时没有 <c>RegexOptions.NonBacktracking</c>，灾难性回溯只能靠匹配超时兜底。
     /// 超时以 <see cref="RegexMatchTimeoutException"/> 抛出，调用方必须把它作为错误返回给模型，
@@ -20,7 +20,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(200);
 
         /// <summary>
-        /// 构造正则。模式过长或语法无效时抛出 <see cref="ArgumentException"/>，消息可直接返回给模型。
+        /// 构造正则（CultureInvariant，可选 IgnoreCase，单次匹配 <see cref="MatchTimeout"/> 超时）。
+        /// 模式为空、过长或语法无效时抛出 <see cref="ArgumentException"/>，消息可直接返回给模型。
         /// </summary>
         public static Regex Create(string pattern, bool ignoreCase)
         {
@@ -46,13 +47,14 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 生成正则超时的错误说明（返回给模型）。
+        /// 生成正则超时的错误说明（返回给模型）。<paramref name="where"/> 为调用位置（如 "search_code"），可为空。
         /// </summary>
         public static string DescribeTimeout(string pattern, string where)
         {
             var location = string.IsNullOrEmpty(where) ? string.Empty : $"（位置：{where}）";
             return $"regex_timeout: 正则 '{pattern}' 单次匹配超过 {MatchTimeout.TotalMilliseconds:F0}ms{location}，" +
-                   "很可能存在灾难性回溯（如嵌套量词 (a+)+）。请简化模式后重试；本次搜索结果不可信，未返回部分结果。";
+                   "很可能存在灾难性回溯（如嵌套量词 (a+)+）。请简化模式（加锚点、避免嵌套量词）或缩小搜索范围后重试；" +
+                   "本次搜索结果不可信，未返回部分结果。";
         }
     }
 }

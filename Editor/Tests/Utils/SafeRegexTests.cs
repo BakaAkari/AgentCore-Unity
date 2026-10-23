@@ -1,10 +1,9 @@
-#if AGENTCORE_INDEXING
 using System;
 using System.Text.RegularExpressions;
-using AgentCore.Editor.Components.Indexing.Core;
+using AgentCore.Editor.Utils;
 using NUnit.Framework;
 
-namespace AgentCore.Tests.Editor.Indexing
+namespace AgentCore.Tests.Editor.Utils
 {
     /// <summary>
     /// SafeRegex 长度上限、无效模式与匹配超时的单元测试。
@@ -32,6 +31,21 @@ namespace AgentCore.Tests.Editor.Indexing
             var pattern = new string('a', SafeRegex.MaxPatternLength);
 
             Assert.DoesNotThrow(() => SafeRegex.Create(pattern, ignoreCase: false));
+        }
+
+        [Test]
+        public void Create_NullPattern_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() => SafeRegex.Create(null, ignoreCase: false));
+        }
+
+        [Test]
+        public void Create_CaseSensitive_DoesNotSetIgnoreCase()
+        {
+            var rx = SafeRegex.Create("abc", ignoreCase: false);
+
+            Assert.IsTrue((rx.Options & RegexOptions.IgnoreCase) == 0);
+            Assert.IsFalse(rx.IsMatch("ABC"));
         }
 
         [Test]
@@ -68,4 +82,3 @@ namespace AgentCore.Tests.Editor.Indexing
         }
     }
 }
-#endif

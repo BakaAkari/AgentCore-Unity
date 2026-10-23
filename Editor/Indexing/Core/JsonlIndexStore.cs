@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Components.Indexing.Query;
+using AgentCore.Editor.Utils;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
