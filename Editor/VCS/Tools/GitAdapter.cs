@@ -354,16 +354,13 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 ParseGitShow(cmdResult.Output, result);
 
                 // 获取变更文件列表
-                var filesResult = await VcsCommandExecutor.ExecuteAsync(
-                    "git", new List<string> { "diff-tree", "--no-commit-id", "--name-only", "-r", "--end-of-options", revision }, _workingDirectory, ct: ct);
+                // -z：NUL 分隔且路径不加引号（中文 / 空格 / 引号原样输出）；原样捕获，不能按行拆分或 Trim
+                var filesResult = await VcsCommandExecutor.ExecuteRawAsync(
+                    "git", new List<string> { "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--end-of-options", revision }, _workingDirectory, ct: ct);
 
                 if (filesResult.Success && !string.IsNullOrEmpty(filesResult.Output))
                 {
-                    result.ChangedFiles = filesResult.Output
-                        .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(f => f.Trim())
-                        .Where(f => !string.IsNullOrEmpty(f))
-                        .ToList();
+                    result.ChangedFiles = GitOutputParser.ParseNulSeparatedPaths(filesResult.Output);
                 }
 
                 result.Success = true;
