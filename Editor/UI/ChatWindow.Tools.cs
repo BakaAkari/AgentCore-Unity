@@ -153,6 +153,45 @@ namespace AgentCore.Editor.UI
         }
 
         /// <summary>
+        /// 是否正在显示 LLM 自动重试提示。首个流式 token 到达（重试已成功）或状态切换时撤下。
+        /// </summary>
+        private bool _llmRetryNoticeActive;
+
+        /// <summary>
+        /// 处理 LLM 自动重试 / 切换备用 profile 的进度提示（<see cref="AgentEventType.LlmRetryNotice"/>）。
+        /// <para>
+        /// 与 <see cref="HandleLargeTaskRecoveryTriggered"/> 相同：只在状态行给一条非报错性质的提示，
+        /// 不新建错误气泡——重试成功后不会残留红色错误卡片；重试全部失败时由最终的 Error 事件报告。
+        /// </para>
+        /// </summary>
+        private void HandleLlmRetryNotice(AgentEvent evt)
+        {
+            _llmRetryNoticeActive = true;
+            UpdateStatusLabel(FormatLlmRetryNotice(evt.Content), isError: false, isActive: true);
+            UpdatePendingIndicatorAction(AgentCore.Editor.L10n.Loc.Tr("chat.pending.retrying", "重试请求"));
+        }
+
+        /// <summary>
+        /// 重试成功后（首个流式 token 到达）撤下重试提示，恢复"回复中"状态。
+        /// </summary>
+        private void ClearLlmRetryNoticeIfAny()
+        {
+            if (!_llmRetryNoticeActive) return;
+            _llmRetryNoticeActive = false;
+            UpdateStatusLabel(AgentCore.Editor.L10n.Loc.Tr("chat.status.streaming", "回复中..."));
+            if (_agentLoop != null)
+                SyncPendingIndicatorFromState(_agentLoop.CurrentState);
+        }
+
+        /// <summary>重试提示的状态行文本（状态原文来自 FallbackRouter，为英文诊断信息）。</summary>
+        internal static string FormatLlmRetryNotice(string status)
+        {
+            return string.IsNullOrWhiteSpace(status)
+                ? AgentCore.Editor.L10n.Loc.Tr("chat.status.llmRetrying", "LLM 请求失败，正在自动重试...")
+                : AgentCore.Editor.L10n.Loc.Tr("chat.status.llmRetryingDetail", "LLM 请求失败，正在自动重试：{0}", status.Trim());
+        }
+
+        /// <summary>
         /// 处理"大任务假完成自动恢复重试后仍然失败"事件（v1.14.9）。
         /// <para>
         /// 此时已经是第二次空手而归（reasoning 耗尽预算两次，零工具调用零文字），

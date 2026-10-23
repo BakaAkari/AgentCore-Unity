@@ -199,7 +199,16 @@ namespace AgentCore.Editor.Core
         /// 不再第三次静默循环，UI 侧据此展示一条用户可见的失败气泡（带重试按钮），
         /// 明确告知"规划阶段连续两次未能产出方案"，引导用户拆分/收束需求或重新描述任务。
         /// </summary>
-        LargeTaskRecoveryFailed
+        LargeTaskRecoveryFailed,
+
+        /// <summary>
+        /// LLM 请求失败后正在自动重试 / 切换备用 profile 的进度提示（<see cref="FallbackRouter"/> 的 onStatusUpdate）。
+        /// <para>
+        /// 这是信息性状态而非错误：重试成功后本轮正常继续，UI 不应留下错误卡片；
+        /// 重试全部失败时由最终的 <see cref="Error"/> 事件单独报告。<see cref="AgentEvent.Content"/> 为状态文本。
+        /// </para>
+        /// </summary>
+        LlmRetryNotice
     }
 
     #endregion
@@ -512,6 +521,15 @@ namespace AgentCore.Editor.Core
                 AgentEventType.LargeTaskRecoveryTriggered,
                 messageId: messageId
             );
+        }
+
+        /// <summary>
+        /// 创建 LLM 自动重试进度提示事件（信息性，非错误）。
+        /// </summary>
+        /// <param name="status">重试状态文本（例如 "Retry attempt 1/3 in 2s (timeout)..."）。</param>
+        public static AgentEvent LlmRetryNotice(string status)
+        {
+            return new AgentEvent(AgentEventType.LlmRetryNotice, content: status ?? string.Empty);
         }
 
         /// <summary>
