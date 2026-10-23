@@ -369,7 +369,8 @@ namespace AgentCore.Editor.Config
             {
                 if (!OptionalComponentManager.IsVcsEnabled())
                 {
-                    OptionalComponentManager.SetVcsEnabled(true);
+                    // 迁移路径属于自动默认启用：不触发 AssetDatabase.SaveAssets()（见 OptionalComponentManager.EnableVcsByDefault）。
+                    OptionalComponentManager.EnableVcsByDefault();
                     AgentCoreLog.Info("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
                 }
                 settings.SafeSave(true);
