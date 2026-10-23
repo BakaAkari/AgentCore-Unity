@@ -118,52 +118,86 @@ namespace AgentCore.Editor.Tools.Native.Extended
             if (prefab == null)
                 return ToolResponse.Fail($"Prefab not found at path: {prefabPath}");
 
-            var gameObjects = ResolveGameObjects(namesStr);
-            if (gameObjects.Count == 0)
-                return ToolResponse.Fail("No GameObjects found matching the provided names.");
+            var targets = ResolveGameObjects(namesStr);
+            if (targets.All(t => t.GameObject == null))
+                return ToolResponse.Fail($"No GameObjects found matching the provided names: {string.Join(", ", targets.Select(t => t.Name))}");
 
             Undo.SetCurrentGroupName("Replace Objects with Prefab");
             int undoGroup = Undo.GetCurrentGroup();
 
             int replaced = 0;
             var replacedNames = new List<string>();
+            // 逐个名字记录结果：找不到 / 重复 / 实例化失败 / 异常都如实列出，不再整体报成功
+            var items = new List<ToolItemResult>();
+            var seen = new HashSet<GameObject>();
 
-            foreach (var go in gameObjects)
+            foreach (var (requestedName, go) in targets)
             {
-                var pos = go.transform.position;
-                var rot = go.transform.rotation;
-                var scale = go.transform.localScale;
-                var parent = go.transform.parent;
-                int siblingIndex = go.transform.GetSiblingIndex();
+                if (go == null)
+                {
+                    items.Add(ToolItemResult.Failed(requestedName, "GameObject not found"));
+                    continue;
+                }
+                if (!seen.Add(go))
+                {
+                    items.Add(ToolItemResult.Failed(requestedName, "resolves to the same GameObject as an earlier name; already replaced"));
+                    continue;
+                }
 
-                // Instantiate prefab
-                var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-                if (instance == null) continue;
+                // 必须在销毁原物体之前取名字：销毁后访问 go.name 会抛 MissingReferenceException
+                var originalName = go.name;
+                GameObject instance = null;
+                try
+                {
+                    var pos = go.transform.position;
+                    var rot = go.transform.rotation;
+                    var scale = go.transform.localScale;
+                    var parent = go.transform.parent;
+                    int siblingIndex = go.transform.GetSiblingIndex();
 
-                Undo.RegisterCreatedObjectUndo(instance, "Create Prefab Instance");
+                    // Instantiate prefab
+                    instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                    if (instance == null)
+                    {
+                        items.Add(ToolItemResult.Failed(requestedName, "PrefabUtility.InstantiatePrefab returned null; original left unchanged"));
+                        continue;
+                    }
 
-                instance.transform.position = pos;
-                instance.transform.rotation = rot;
-                instance.transform.localScale = scale;
-                if (parent != null)
-                    instance.transform.SetParent(parent);
-                instance.transform.SetSiblingIndex(siblingIndex);
+                    Undo.RegisterCreatedObjectUndo(instance, "Create Prefab Instance");
 
-                // Destroy original
-                Undo.DestroyObjectImmediate(go);
+                    instance.transform.position = pos;
+                    instance.transform.rotation = rot;
+                    instance.transform.localScale = scale;
+                    if (parent != null)
+                        instance.transform.SetParent(parent);
+                    instance.transform.SetSiblingIndex(siblingIndex);
 
-                replaced++;
-                replacedNames.Add(go.name);
+                    // Destroy original
+                    Undo.DestroyObjectImmediate(go);
+
+                    replaced++;
+                    replacedNames.Add(originalName);
+                    items.Add(ToolItemResult.Succeeded(requestedName, new { instance = instance.name }));
+                }
+                catch (Exception ex)
+                {
+                    // 记录失败并继续处理其余对象；若实例已创建而原物体仍在，如实说明
+                    var leftover = instance != null && go != null
+                        ? $" A prefab instance '{instance.name}' was already created and the original still exists (undo with Ctrl+Z or delete manually)."
+                        : string.Empty;
+                    items.Add(ToolItemResult.Failed(requestedName, ex.Message + leftover));
+                }
             }
 
             Undo.CollapseUndoOperations(undoGroup);
 
-            return ToolResponse.OkWithData(new
+            var data = new
             {
                 replacedCount = replaced,
                 prefabPath,
                 replacedObjects = replacedNames.ToArray()
-            }, $"Replaced {replaced} objects with prefab '{prefabPath}'");
+            };
+            return ToolResponse.FromItems($"Replaced {replaced} of {targets.Count} objects with prefab '{prefabPath}'", items, data);
         }
 
         #endregion
@@ -172,21 +206,18 @@ namespace AgentCore.Editor.Tools.Native.Extended
 
         /// <summary>
         /// Resolve a comma-separated list of names to GameObjects.
+        /// 保留每个请求的名字，找不到时 GameObject 为 null，便于逐项回报。
         /// </summary>
-        private List<GameObject> ResolveGameObjects(string namesStr)
+        private List<(string Name, GameObject GameObject)> ResolveGameObjects(string namesStr)
         {
             var names = namesStr.Split(',')
                 .Select(n => n.Trim())
                 .Where(n => !string.IsNullOrEmpty(n))
                 .ToArray();
 
-            var result = new List<GameObject>();
+            var result = new List<(string Name, GameObject GameObject)>();
             foreach (var name in names)
-            {
-                var go = ToolHelpers.FindGameObject(name);
-                if (go != null)
-                    result.Add(go);
-            }
+                result.Add((name, ToolHelpers.FindGameObject(name)));
             return result;
         }
         #endregion

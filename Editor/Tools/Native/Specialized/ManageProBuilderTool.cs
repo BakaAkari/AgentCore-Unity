@@ -177,6 +177,11 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             RefreshProBuilderMesh(component);
             EditorUtility.SetDirty(go);
 
+            // 校验：生成的网格必须有顶点，否则物体虽已创建但形状实际为空
+            var created = TakeSnapshot(go, component);
+            if (created.Positions == 0 && created.MeshVertices == 0)
+                return ToolResponse.Fail($"Created GameObject '{name}' but the generated ProBuilder {shape} has no vertices (empty mesh). The empty GameObject was left in the scene.");
+
             return ToolResponse.OkWithData(SerializeMeshInfo(go, component), $"Created ProBuilder {shape} '{name}'.");
         }
 
@@ -200,6 +205,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             ToolHelpers.RecordUndo(renderer, "Set ProBuilder Material");
             renderer.sharedMaterial = material;
             EditorUtility.SetDirty(renderer);
+            if (renderer.sharedMaterial != material)
+                return ToolResponse.Fail($"Assigned material '{materialPath}' to '{result.GameObject.name}', but the renderer still reports '{(renderer.sharedMaterial != null ? renderer.sharedMaterial.name : "null")}'.");
             return ToolResponse.Ok($"Assigned material '{materialPath}' to '{result.GameObject.name}'.");
         }
 
@@ -211,8 +218,24 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             if (mesh == null) return ToolResponse.Fail($"'{result.GameObject.name}' has no editable MeshFilter mesh.");
 
             var newPivot = parameters["position"] != null ? ToolHelpers.ParseVector3(parameters["position"]) : mesh.bounds.center + result.GameObject.transform.position;
+            var worldCenterBefore = result.GameObject.transform.TransformPoint(mesh.bounds.center);
             SetPivotPreserveGeometry(result.GameObject, mesh, newPivot);
             RefreshProBuilderMesh(result.Component);
+
+            // 校验：pivot 应移到目标位置，且几何体在世界空间中保持不动。
+            // ProBuilder 的 ToMesh() 会按自身 positions 重建网格，可能覆盖上面对 Unity Mesh 顶点的平移。
+            var meshAfter = GetMesh(result.GameObject);
+            var pivotError = Vector3.Distance(result.GameObject.transform.position, newPivot);
+            var geometryShift = meshAfter != null
+                ? Vector3.Distance(result.GameObject.transform.TransformPoint(meshAfter.bounds.center), worldCenterBefore)
+                : 0f;
+            if (pivotError > VerifyTolerance || geometryShift > VerifyTolerance)
+            {
+                return ToolResponse.Fail(
+                    $"center_pivot on '{result.GameObject.name}' did not take effect as intended: pivot is {pivotError:F4} away from {newPivot}, " +
+                    $"and the geometry moved {geometryShift:F4} units in world space (expected 0). " +
+                    "ProBuilder likely rebuilt the mesh from its own vertex positions, discarding the compensation. The transform change was kept; use Undo to revert.");
+            }
             return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component), $"Set pivot for '{result.GameObject.name}' to {newPivot}.");
         }
 
@@ -224,6 +247,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             if (mesh == null) return ToolResponse.Fail($"'{result.GameObject.name}' has no MeshFilter mesh to flip.");
 
             ToolHelpers.RecordUndo(mesh, "Flip ProBuilder Normals");
+            var flipBefore = TakeSnapshot(result.GameObject, result.Component);
             var triangles = mesh.triangles;
             for (var i = 0; i < triangles.Length; i += 3)
             {
@@ -235,7 +259,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             EditorUtility.SetDirty(mesh);
-            return ToolResponse.Ok($"Flipped normals on '{result.GameObject.name}'.");
+            var flipAfter = TakeSnapshot(result.GameObject, result.Component);
+            if (flipBefore.MeshIndices > 0 && flipAfter.TrianglesHash == flipBefore.TrianglesHash)
+                return ToolResponse.Fail($"Flip normals on '{result.GameObject.name}' did not change the mesh triangles.");
+            return ToolResponse.Ok($"Flipped normals on '{result.GameObject.name}' (edited the Unity mesh directly; a later ProBuilder rebuild of this object may regenerate it from ProBuilder data).");
         }
 
         private ToolResponse HandleSubdivide(JObject parameters)
@@ -257,10 +284,13 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     try
                     {
                         ToolHelpers.RecordUndo(result.Component, "Subdivide ProBuilder Mesh");
+                        var before = TakeSnapshot(result.GameObject, result.Component);
                         method.Invoke(null, new object[] { result.Component });
                         RefreshProBuilderMesh(result.Component);
                         EditorUtility.SetDirty(result.Component);
-                        return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+                        return VerifyEdit("subdivide", result.GameObject, result.Component, before,
+                            after => after.Faces > before.Faces || after.Positions > before.Positions,
+                            "face or vertex count to increase",
                             $"Subdivided '{result.GameObject.name}'.");
                     }
                     catch (Exception ex)
@@ -276,10 +306,14 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 return ToolResponse.Fail($"'{result.GameObject.name}' has no MeshFilter mesh to subdivide.");
 
             ToolHelpers.RecordUndo(mesh, "Subdivide Mesh");
+            var fallbackBefore = TakeSnapshot(result.GameObject, result.Component);
             SubdivideMeshFallback(mesh);
             RefreshProBuilderMesh(result.Component);
             EditorUtility.SetDirty(mesh);
-            return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+            // 回退路径直接改 Unity Mesh，RefreshProBuilderMesh 可能按 ProBuilder 数据重建而把修改覆盖掉
+            return VerifyEdit("subdivide (fallback)", result.GameObject, result.Component, fallbackBefore,
+                after => after.MeshIndices > fallbackBefore.MeshIndices,
+                "Unity mesh triangle count to increase (the fallback edit may have been overwritten by ProBuilder's mesh rebuild)",
                 $"Subdivided '{result.GameObject.name}' using fallback method (each triangle split into 4).");
         }
 
@@ -331,6 +365,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     if (method != null)
                     {
                         ToolHelpers.RecordUndo(result.Component, "Extrude ProBuilder Faces");
+                        var before = TakeSnapshot(result.GameObject, result.Component);
                         // Create typed array
                         var typedFaces = Array.CreateInstance(_faceType, faces.Length);
                         for (int i = 0; i < faces.Length; i++) typedFaces.SetValue(faces[i], i);
@@ -338,7 +373,9 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                         method.Invoke(null, new object[] { result.Component, typedFaces, distance });
                         RefreshProBuilderMesh(result.Component);
                         EditorUtility.SetDirty(result.Component);
-                        return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+                        return VerifyEdit("extrude_faces", result.GameObject, result.Component, before,
+                            after => after.Faces > before.Faces || after.Positions > before.Positions,
+                            "face or vertex count to increase",
                             $"Extruded {faces.Length} face(s) by {distance} on '{result.GameObject.name}'.");
                     }
                 }
@@ -385,13 +422,16 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     if (method != null)
                     {
                         ToolHelpers.RecordUndo(result.Component, "Delete ProBuilder Faces");
+                        var before = TakeSnapshot(result.GameObject, result.Component);
                         var typedFaces = Array.CreateInstance(_faceType, faces.Length);
                         for (int i = 0; i < faces.Length; i++) typedFaces.SetValue(faces[i], i);
 
                         method.Invoke(null, new object[] { result.Component, typedFaces });
                         RefreshProBuilderMesh(result.Component);
                         EditorUtility.SetDirty(result.Component);
-                        return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+                        return VerifyEdit("delete_faces", result.GameObject, result.Component, before,
+                            after => after.Faces < before.Faces,
+                            "face count to decrease",
                             $"Deleted {faces.Length} face(s) from '{result.GameObject.name}'.");
                     }
                 }
@@ -408,10 +448,14 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
             var faceIndices = faceIndicesToken.Select(t => t.Value<int>()).ToList();
             ToolHelpers.RecordUndo(mesh, "Delete Mesh Faces");
+            var fallbackBefore = TakeSnapshot(result.GameObject, result.Component);
             DeleteMeshFacesFallback(mesh, faceIndices);
             RefreshProBuilderMesh(result.Component);
             EditorUtility.SetDirty(mesh);
-            return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+            // 回退路径按三角形删除；索引越界或被 ProBuilder 重建覆盖时三角形数量不会减少
+            return VerifyEdit("delete_faces (fallback)", result.GameObject, result.Component, fallbackBefore,
+                after => after.MeshIndices < fallbackBefore.MeshIndices,
+                "Unity mesh triangle count to decrease (indices may be out of range, or the fallback edit was overwritten by ProBuilder's mesh rebuild)",
                 $"Deleted {faceIndices.Count} face(s) from '{result.GameObject.name}' using fallback method.");
         }
 
@@ -441,13 +485,16 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     if (method != null)
                     {
                         ToolHelpers.RecordUndo(result.Component, "Bevel ProBuilder Edges");
+                        var before = TakeSnapshot(result.GameObject, result.Component);
                         var typedEdges = Array.CreateInstance(_edgeType, edges.Length);
                         for (int i = 0; i < edges.Length; i++) typedEdges.SetValue(edges[i], i);
 
                         method.Invoke(null, new object[] { result.Component, typedEdges, distance });
                         RefreshProBuilderMesh(result.Component);
                         EditorUtility.SetDirty(result.Component);
-                        return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+                        return VerifyEdit("bevel_edges", result.GameObject, result.Component, before,
+                            after => after.Faces > before.Faces || after.Positions > before.Positions,
+                            "face or vertex count to increase (the given vertex pairs may not form edges of this mesh)",
                             $"Beveled {edges.Length} edge(s) by {distance} on '{result.GameObject.name}'.");
                     }
                 }
@@ -488,13 +535,16 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     if (method != null)
                     {
                         ToolHelpers.RecordUndo(result.Component, "Bridge ProBuilder Edges");
+                        var before = TakeSnapshot(result.GameObject, result.Component);
                         var typedEdges = Array.CreateInstance(_edgeType, edges.Length);
                         for (int i = 0; i < edges.Length; i++) typedEdges.SetValue(edges[i], i);
 
                         method.Invoke(null, new object[] { result.Component, typedEdges });
                         RefreshProBuilderMesh(result.Component);
                         EditorUtility.SetDirty(result.Component);
-                        return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+                        return VerifyEdit("bridge_edges", result.GameObject, result.Component, before,
+                            after => after.Faces > before.Faces,
+                            "a new bridging face (face count to increase)",
                             $"Bridged {edges.Length} edge(s) on '{result.GameObject.name}'.");
                     }
                 }
@@ -536,11 +586,16 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     if (method != null)
                     {
                         ToolHelpers.RecordUndo(result.Component, "Weld ProBuilder Vertices");
+                        var before = TakeSnapshot(result.GameObject, result.Component);
                         method.Invoke(null, new object[] { result.Component, allIndices, weldDistance });
                         RefreshProBuilderMesh(result.Component);
                         EditorUtility.SetDirty(result.Component);
-                        return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
-                            $"Welded vertices within {weldDistance} distance on '{result.GameObject.name}'.");
+                        // 焊接可能合法地什么都不改（没有足够近的顶点），因此不判失败，只如实报告前后计数
+                        var after = TakeSnapshot(result.GameObject, result.Component);
+                        var weldMessage = after.Positions != before.Positions || after.TrianglesHash != before.TrianglesHash
+                            ? $"Welded vertices within {weldDistance} distance on '{result.GameObject.name}' (vertices {before.Positions} -> {after.Positions})."
+                            : $"Weld ran on '{result.GameObject.name}' but no vertices were merged (none within {weldDistance}); mesh unchanged.";
+                        return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component), weldMessage);
                     }
                 }
                 catch (Exception ex)
@@ -555,10 +610,19 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 return ToolResponse.Fail("ProBuilder WeldVertices API not available and no mesh found.");
 
             ToolHelpers.RecordUndo(mesh, "Weld Mesh Vertices");
+            var fallbackBefore = TakeSnapshot(result.GameObject, result.Component);
             int welded = WeldMeshVerticesFallback(mesh, weldDistance);
             RefreshProBuilderMesh(result.Component);
             EditorUtility.SetDirty(mesh);
-            return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+            if (welded == 0)
+            {
+                return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
+                    $"No vertex pairs within {weldDistance} distance on '{result.GameObject.name}'; mesh unchanged (fallback method).");
+            }
+            // 回退路径重映射了三角形索引；若被 ProBuilder 重建覆盖，三角形会恢复原样
+            return VerifyEdit("weld_vertices (fallback)", result.GameObject, result.Component, fallbackBefore,
+                after => after.TrianglesHash != fallbackBefore.TrianglesHash,
+                "Unity mesh triangles to be remapped (the fallback edit may have been overwritten by ProBuilder's mesh rebuild)",
                 $"Welded {welded} vertex pair(s) within {weldDistance} distance on '{result.GameObject.name}' using fallback method.");
         }
 
@@ -650,11 +714,16 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     if (method != null)
                     {
                         ToolHelpers.RecordUndo(result.Component, "Triangulate ProBuilder Mesh");
+                        var before = TakeSnapshot(result.GameObject, result.Component);
                         method.Invoke(null, new object[] { result.Component });
                         RefreshProBuilderMesh(result.Component);
                         EditorUtility.SetDirty(result.Component);
+                        // 已全是三角形的网格合法地不会变化，因此只如实报告前后面数
+                        var after = TakeSnapshot(result.GameObject, result.Component);
                         return ToolResponse.OkWithData(SerializeMeshInfo(result.GameObject, result.Component),
-                            $"Triangulated '{result.GameObject.name}'.");
+                            after.Faces != before.Faces
+                                ? $"Triangulated '{result.GameObject.name}' (faces {before.Faces} -> {after.Faces})."
+                                : $"Triangulate ran on '{result.GameObject.name}' but the face count did not change ({after.Faces}); the mesh may already be all triangles.");
                     }
                 }
                 catch (Exception ex)
@@ -680,13 +749,25 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 .Where(n => !string.IsNullOrEmpty(n))
                 .ToArray();
             var newName = ToolHelpers.GetOptionalString(parameters, "new_name", "Combined ProBuilder Mesh");
-            var filters = names.Select(ToolHelpers.FindGameObject)
-                .Where(go => go != null && FindProBuilderMesh(go) != null)
-                .Select(go => go.GetComponent<MeshFilter>())
-                .Where(mf => mf != null && mf.sharedMesh != null)
-                .ToArray();
 
-            if (filters.Length < 2) return ToolResponse.Fail("Need at least two ProBuilder meshes to combine.");
+            // 逐个名字记录能否参与合并（筛选规则与以前一致），被跳过的名字如实回报
+            var items = new List<ToolItemResult>();
+            var filterList = new List<MeshFilter>();
+            foreach (var n in names)
+            {
+                var go = ToolHelpers.FindGameObject(n);
+                if (go == null) { items.Add(ToolItemResult.Failed(n, "GameObject not found; skipped")); continue; }
+                if (FindProBuilderMesh(go) == null) { items.Add(ToolItemResult.Failed(n, "no ProBuilderMesh component; skipped")); continue; }
+                var mf = go.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null) { items.Add(ToolItemResult.Failed(n, "no MeshFilter mesh; skipped")); continue; }
+                filterList.Add(mf);
+                items.Add(ToolItemResult.Succeeded(n));
+            }
+            var filters = filterList.ToArray();
+
+            if (filters.Length < 2)
+                return ToolResponse.Fail("Need at least two ProBuilder meshes to combine." +
+                    (items.Any(i => !i.Ok) ? " Skipped: " + string.Join("; ", items.Where(i => !i.Ok).Select(i => $"{i.Target} ({i.Error})")) : string.Empty));
 
             var combines = filters.Select(mf => new CombineInstance { mesh = mf.sharedMesh, transform = mf.transform.localToWorldMatrix }).ToArray();
             var goNew = new GameObject(newName);
@@ -699,7 +780,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             meshRenderer.sharedMaterial = filters[0].GetComponent<Renderer>()?.sharedMaterial;
             EditorUtility.SetDirty(goNew);
 
-            return ToolResponse.OkWithData(new { name = goNew.name, sourceCount = filters.Length, vertexCount = combinedMesh.vertexCount, note = "Combined as a standard Unity mesh because ProBuilder combine editor APIs vary by version." }, $"Combined {filters.Length} ProBuilder meshes into '{newName}'.");
+            var combineData = new { name = goNew.name, sourceCount = filters.Length, vertexCount = combinedMesh.vertexCount, note = "Combined as a standard Unity mesh because ProBuilder combine editor APIs vary by version." };
+            if (combinedMesh.vertexCount == 0)
+                return ToolResponse.Fail($"Created '{newName}' but the combined mesh has no vertices; the empty GameObject was left in the scene.");
+            return ToolResponse.FromItems($"Combined {filters.Length} ProBuilder meshes into '{newName}'", items, combineData);
         }
 
         private ToolResponse HandleGetVertices(JObject parameters)
@@ -730,24 +814,119 @@ namespace AgentCore.Editor.Tools.Native.Specialized
 
             ToolHelpers.RecordUndo(result.Component, "Move ProBuilder Vertices");
             var moved = 0;
+            // 逐个顶点记录：无效索引 / 缺少 position|offset 的条目以前被静默跳过，现在如实列出
+            var items = new List<ToolItemResult>();
+            var expected = new Dictionary<int, Vector3>();
+            var requestedIndices = new List<int>();
+            int entry = 0;
             foreach (var token in verticesArray.OfType<JObject>())
             {
+                var label = $"vertex entry #{entry++}";
                 var index = token["index"]?.Value<int>() ?? -1;
-                if (index < 0 || index >= positions.Count) continue;
+                if (index < 0 || index >= positions.Count)
+                {
+                    items.Add(ToolItemResult.Failed(label, $"index {index} out of range (mesh has {positions.Count} vertices)"));
+                    continue;
+                }
                 var current = (Vector3)positions[index];
                 if (token["position"] != null)
                     positions[index] = ToolHelpers.ParseVector3(token["position"], current);
                 else if (token["offset"] != null)
                     positions[index] = current + ToolHelpers.ParseVector3(token["offset"], Vector3.zero);
                 else
+                {
+                    items.Add(ToolItemResult.Failed(label, $"index {index}: neither 'position' nor 'offset' given"));
                     continue;
+                }
+                expected[index] = (Vector3)positions[index];
+                requestedIndices.Add(index);
+                items.Add(null); // 占位，写入后按实际顶点位置校验
                 moved++;
             }
 
             WriteMutablePositions(result.Component, result.GameObject, positions, source);
             RefreshProBuilderMesh(result.Component);
             EditorUtility.SetDirty(result.Component);
-            return ToolResponse.OkWithData(new { name = result.GameObject.name, moved, source }, $"Moved {moved} vertices on '{result.GameObject.name}'.");
+
+            // 校验：重新读取顶点，确认每个顶点确实到达目标位置（写入可能只改了副本，或被网格重建覆盖）
+            var actual = GetLocalVertices(result.Component, result.GameObject).ToList();
+            int verified = 0, slot = 0;
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i] != null) continue;
+                var index = requestedIndices[slot++];
+                var target = expected[index];
+                var label = $"vertex {index}";
+                if (index < actual.Count && Vector3.Distance(actual[index], target) <= VerifyTolerance)
+                {
+                    items[i] = ToolItemResult.Succeeded(label);
+                    verified++;
+                }
+                else
+                {
+                    var now = index < actual.Count ? actual[index].ToString("F4") : "missing";
+                    var want = target.ToString("F4");
+                    items[i] = ToolItemResult.Failed(label, $"position did not take effect (expected {want}, actual {now})");
+                }
+            }
+
+            return ToolResponse.FromItems($"Moved {verified} vertices on '{result.GameObject.name}'", items,
+                new { name = result.GameObject.name, moved = verified, requested = verticesArray.Count, source });
+        }
+
+        /// <summary>编辑结果校验的位置容差（本地/世界单位）</summary>
+        private const float VerifyTolerance = 1e-3f;
+
+        /// <summary>
+        /// 编辑前后的网格计数快照，用于确认修改是否真正生效。
+        /// </summary>
+        private struct MeshSnapshot
+        {
+            public int Positions;
+            public int Faces;
+            public int MeshVertices;
+            public int MeshIndices;
+            public int TrianglesHash;
+
+            public override string ToString()
+            {
+                return $"positions={Positions}, faces={Faces}, meshVertices={MeshVertices}, meshTriangleIndices={MeshIndices}";
+            }
+        }
+
+        private static MeshSnapshot TakeSnapshot(GameObject go, Component pb)
+        {
+            var mesh = GetMesh(go);
+            var tris = mesh != null ? mesh.triangles : Array.Empty<int>();
+            int hash = 17;
+            unchecked
+            {
+                for (int i = 0; i < tris.Length; i++) hash = hash * 31 + tris[i];
+            }
+            return new MeshSnapshot
+            {
+                Positions = pb != null ? GetLocalVertices(pb, go).Count() : 0,
+                Faces = pb != null ? GetCountProperty(pb, "faceCount", "faces") : 0,
+                MeshVertices = mesh != null ? mesh.vertexCount : 0,
+                MeshIndices = tris.Length,
+                TrianglesHash = hash
+            };
+        }
+
+        /// <summary>
+        /// 编辑后重新读取网格：符合预期则返回成功（附网格信息），否则如实返回失败。
+        /// 只做报告，不回滚、不阻止已经执行的修改（需要时可用 Undo 撤销）。
+        /// </summary>
+        private static ToolResponse VerifyEdit(string operation, GameObject go, Component pb, MeshSnapshot before,
+            Func<MeshSnapshot, bool> tookEffect, string expectation, string successMessage)
+        {
+            var after = TakeSnapshot(go, pb);
+            if (tookEffect(after))
+                return ToolResponse.OkWithData(SerializeMeshInfo(go, pb), successMessage);
+
+            return ToolResponse.Fail(
+                $"{operation} on '{go.name}' ran without an error but did not take effect: expected {expectation}. " +
+                $"Before: {before}. After: {after}.");
         }
 
         private static bool IsAvailable()
