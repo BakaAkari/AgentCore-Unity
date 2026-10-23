@@ -488,6 +488,15 @@ namespace AgentCore.Editor.Session
         public int MessageEndIndex { get; set; } = -1;
 
         /// <summary>
+        /// 浅拷贝（引用类型字段与原对象共享）。供 JSONL 存储在主线程捕获快照时替换可变子对象（如 SelfChallenge）用，
+        /// 不影响调用方持有的原对象。
+        /// </summary>
+        internal SerializableConversationTurn CloneShallow()
+        {
+            return (SerializableConversationTurn)MemberwiseClone();
+        }
+
+        /// <summary>
         /// 从运行时 ConversationTurn 创建可序列化版本。
         /// </summary>
         public static SerializableConversationTurn FromConversationTurn(ConversationTurn turn)

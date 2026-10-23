@@ -147,8 +147,10 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
-        /// 保存当前会话的实现。<paramref name="background"/> 为 true 时 JSON 序列化与落盘在后台线程进行
-        /// （快照对象在主线程构建，见 <see cref="SessionStorage.SaveInBackground"/>）。
+        /// 保存当前会话的实现。快照对象总在主线程构建；存储层只把相对上次落盘的增量（新消息 / 新轮次 /
+        /// 变化的轮次 / 截断 / 元数据）追加到会话的 JSONL 日志，历史改写过多时才整理为完整快照
+        /// （见 <see cref="SessionLogStore"/>）。<paramref name="background"/> 为 true 时比对、序列化与落盘
+        /// 在唯一的后台写入队列中进行（见 <see cref="SessionStorage.SaveInBackground"/>）。
         /// </summary>
         private void SaveCurrentSessionCore(List<ChatMessage> messages, List<ConversationTurn> turns,
             Core.Compression.CompressionMetrics compressionMetrics, bool background)

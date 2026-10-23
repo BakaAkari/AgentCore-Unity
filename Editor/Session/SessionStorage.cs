@@ -1,12 +1,10 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Utils;
@@ -14,16 +12,17 @@ using AgentCore.Editor.Utils;
 namespace AgentCore.Editor.Session
 {
     /// <summary>
-    /// 会话存储管理器 — 负责会话数据的 JSON 文件读写。
+    /// 会话存储管理器 — 会话持久化的静态门面，实际读写由 <see cref="SessionLogStore"/> 完成。
     /// <para>
     /// 存储路径：Library/AgentCore/sessions/（相对于 Unity 项目根目录）。
-    /// 该目录位于 Library/ 下，不进版本控制。
+    /// 该目录位于 Library/ 下，不进版本控制。每个会话一个 <c>&lt;id&gt;.jsonl</c> 追加式日志
+    /// （格式见 <see cref="SessionLogStore"/>）；旧版 <c>&lt;id&gt;.json</c> 仍可读取，首次保存时迁移。
     /// </para>
     /// <para>
     /// 线程模型：会话目录在 <c>[InitializeOnLoad]</c> 时于主线程缓存，之后任意线程都可安全取路径。
-    /// <see cref="SaveInBackground"/> 把 JSON 序列化 + 原子落盘移到后台；所有写入（同步/后台）共用一把写锁并按
-    /// 递增序号比较，旧序号的写入不会覆盖新序号。读取前先等待同一会话尚未落盘的后台写入，避免读到旧内容。
-    /// 域重载 / 退出前会等待在途写入完成。
+    /// 所有保存（同步 <see cref="Save"/> / 后台 <see cref="SaveInBackground"/>）在调用线程捕获快照后进入同一个 FIFO 写入队列，
+    /// 只把相对已落盘状态的增量追加到日志；读取 / 列表 / 检索 / 删除前先排空队列，避免读到旧内容。
+    /// 域重载 / 退出前排空队列（最多等待 5 秒）。
     /// </para>
     /// </summary>
     [InitializeOnLoad]
@@ -34,29 +33,11 @@ namespace AgentCore.Editor.Session
         /// <summary>日志前缀</summary>
         private const string LogPrefix = "[AgentCore] SessionStorage: ";
 
-        /// <summary>JSON 序列化设置</summary>
-        private static readonly JsonSerializerSettings JsonSettings = new JsonSerializerSettings
-        {
-            Formatting = Formatting.Indented,
-            NullValueHandling = NullValueHandling.Ignore,
-            DateFormatString = "yyyy-MM-ddTHH:mm:ss.fffZ",
-            DateTimeZoneHandling = DateTimeZoneHandling.Utc
-        };
-
         /// <summary>主线程缓存的会话目录（Application.dataPath 只能在主线程访问）。</summary>
         private static string _sessionDirectory;
 
-        /// <summary>所有会话文件写入共用的锁（同步 Save 与后台写入串行化）。</summary>
-        private static readonly object WriteLock = new object();
-
-        /// <summary>全局递增的保存序号；每次 Save / SaveInBackground 在调用线程上领取。</summary>
-        private static long _saveSequence;
-
-        /// <summary>每个会话已落盘的最大序号（受 <see cref="WriteLock"/> 保护）。</summary>
-        private static readonly Dictionary<string, long> WrittenSequence = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>每个会话最近一次后台写入的 Task。</summary>
-        private static readonly ConcurrentDictionary<string, Task> PendingWrites = new ConcurrentDictionary<string, Task>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>进程内唯一的会话存储（含唯一的后台写入队列）。</summary>
+        private static SessionLogStore _store;
 
         /// <summary>域重载 / 退出前等待在途写入的最长时间。</summary>
         private const int FlushTimeoutMs = 5000;
@@ -91,9 +72,21 @@ namespace AgentCore.Editor.Session
             return Path.Combine(Application.dataPath, "..", "Library", "AgentCore", "sessions");
         }
 
+        /// <summary>进程内唯一的 <see cref="SessionLogStore"/>（首次访问时创建）。</summary>
+        internal static SessionLogStore Store
+        {
+            get
+            {
+                var store = Volatile.Read(ref _store);
+                if (store != null) return store;
+                Interlocked.CompareExchange(ref _store, new SessionLogStore(GetSessionDirectory()), null);
+                return _store;
+            }
+        }
+
         /// <summary>
-        /// 将会话保存为 JSON 文件。
-        /// 文件名格式：{session.Id}.json
+        /// 同步保存会话：只把相对上次落盘的增量追加到 <c>{session.Id}.jsonl</c>（必要时整理为完整快照）。
+        /// 返回时已落盘。
         /// </summary>
         /// <param name="session">要保存的会话数据</param>
         public static void Save(SessionData session)
@@ -112,7 +105,7 @@ namespace AgentCore.Editor.Session
 
             try
             {
-                WriteCore(session, Interlocked.Increment(ref _saveSequence));
+                Store.Save(session);
             }
             catch (Exception ex)
             {
@@ -121,11 +114,10 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
-        /// 在后台线程序列化并落盘会话（用于每轮结束的自动保存等高频路径，避免大 JSON 序列化 + 落盘卡主线程）。
+        /// 后台保存（用于每轮结束的自动保存等高频路径）。
         /// <para>
-        /// 调用方须传入不再被修改的快照（如 <see cref="SessionData.FromAgentLoop"/> 新建的对象）。
-        /// 后台序列化若因共享子对象被并发修改而失败，会回到主线程用同一序号重试一次。
-        /// 序号在调用时领取：之后的同步 <see cref="Save"/> 一定覆盖它，它也不会覆盖之后的写入。
+        /// 快照在调用线程（主线程）捕获：列表浅拷贝，仍可能原地变化的末尾轮次的 SelfChallenge 深拷贝；
+        /// 增量比对、序列化与落盘在唯一的写入队列中进行，与同步 <see cref="Save"/> 严格按调用顺序生效。
         /// </para>
         /// </summary>
         public static void SaveInBackground(SessionData session)
@@ -136,139 +128,26 @@ namespace AgentCore.Editor.Session
                 return;
             }
 
-            long seq = Interlocked.Increment(ref _saveSequence);
-            var id = session.Id;
-            // 确保目录缓存已在主线程完成
-            GetSessionDirectory();
-
-            var task = Task.Run(() =>
+            try
             {
-                try
-                {
-                    WriteCore(session, seq);
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"{LogPrefix}Background save of {id} failed ({ex.Message}), retrying on main thread.");
-                    MainThread.Post(() =>
-                    {
-                        try
-                        {
-                            WriteCore(session, seq);
-                        }
-                        catch (Exception retryEx)
-                        {
-                            AgentCoreLog.Error($"{LogPrefix}Failed to save session {id}: {retryEx.Message}");
-                        }
-                    });
-                }
-            });
-            PendingWrites[id] = task;
-            // 只移除仍是自己的条目（之后的新写入已替换时保留新条目）
-            task.ContinueWith(t => ((ICollection<KeyValuePair<string, Task>>)PendingWrites).Remove(new KeyValuePair<string, Task>(id, t)),
-                TaskScheduler.Default);
-        }
-
-        /// <summary>
-        /// 序列化并原子写入；序号不新于已落盘版本时直接跳过（保证"后保存者胜出"）。
-        /// </summary>
-        private static void WriteCore(SessionData session, long seq)
-        {
-            lock (WriteLock)
-            {
-                if (WrittenSequence.TryGetValue(session.Id, out var written) && written >= seq)
-                    return;
-
-                var directory = GetSessionDirectory();
-                EnsureDirectoryExists(directory);
-
-                var filePath = Path.Combine(directory, $"{session.Id}.json");
-                var json = JsonConvert.SerializeObject(session, JsonSettings);
-                AtomicFile.WriteAllText(filePath, json, backupPath: filePath + BackupSuffix);
-                WrittenSequence[session.Id] = seq;
+                Store.SaveInBackground(session);
             }
-
-            AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session saved: {session.Id} ({session.Title})");
-        }
-
-        /// <summary>同步等待指定会话的在途后台写入（读文件前调用，避免读到旧内容）。</summary>
-        private static void WaitPendingWrite(string sessionId)
-        {
-            if (string.IsNullOrEmpty(sessionId)) return;
-            if (PendingWrites.TryGetValue(sessionId, out var task) && !task.IsCompleted)
+            catch (Exception ex)
             {
-                try { task.Wait(FlushTimeoutMs); } catch (Exception) { /* 写入错误已在任务内记录 */ }
+                AgentCoreLog.Error($"{LogPrefix}Failed to queue save of session {session.Id}: {ex.Message}");
             }
         }
 
-        /// <summary>异步等待指定会话的在途后台写入。</summary>
-        private static async Task WaitPendingWriteAsync(string sessionId)
-        {
-            if (string.IsNullOrEmpty(sessionId)) return;
-            if (PendingWrites.TryGetValue(sessionId, out var task) && !task.IsCompleted)
-            {
-                try { await task; } catch (Exception) { /* 写入错误已在任务内记录 */ }
-            }
-        }
-
-        /// <summary>同步等待全部在途后台写入（列表 / 检索 / 域重载 / 退出前）。</summary>
-        private static void WaitAllPendingWrites()
-        {
-            var tasks = PendingWrites.Values.Where(t => !t.IsCompleted).ToArray();
-            if (tasks.Length == 0) return;
-            try { Task.WaitAll(tasks, FlushTimeoutMs); } catch (Exception) { /* 写入错误已在任务内记录 */ }
-        }
-
-        /// <summary>域重载 / 编辑器退出前：等待在途后台写入落盘，避免最后一次自动保存丢失。</summary>
+        /// <summary>域重载 / 编辑器退出前：排空写入队列，避免最后一次自动保存丢失。</summary>
         private static void FlushPendingWrites()
         {
-            WaitAllPendingWrites();
-        }
-
-        /// <summary>上一份完好会话的备份后缀（由 AtomicFile 在替换时保留）。不匹配 *.json，不会出现在会话列表里。</summary>
-        private const string BackupSuffix = ".bak";
-
-        /// <summary>
-        /// 会话文件损坏时：把坏文件改名保留为 <c>*.corrupted-时间戳</c>，再从 <c>.bak</c> 恢复。
-        /// 绝不静默丢弃——无备份时坏文件仍在磁盘上，日志给出位置。
-        /// </summary>
-        private static SessionData RecoverFromBackup(string sessionId, string filePath, string reason)
-        {
-            var corruptedPath = $"{filePath}.corrupted-{DateTime.Now:yyyyMMdd-HHmmss}";
             try
             {
-                File.Move(filePath, corruptedPath);
+                Volatile.Read(ref _store)?.Flush(FlushTimeoutMs);
             }
             catch (Exception ex)
             {
-                AgentCoreLog.Warning($"{LogPrefix}Could not move corrupted session file aside: {ex.Message}");
-                corruptedPath = filePath;
-            }
-
-            var backupPath = filePath + BackupSuffix;
-            if (!File.Exists(backupPath))
-            {
-                AgentCoreLog.Error($"{LogPrefix}Session {sessionId} is corrupted ({reason}) and has no backup. The damaged file was kept at {corruptedPath}.");
-                return null;
-            }
-
-            try
-            {
-                var json = File.ReadAllText(backupPath);
-                var session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
-                if (session == null)
-                    throw new InvalidDataException("backup is empty");
-
-                AtomicFile.WriteAllText(filePath, json);
-                AgentCoreLog.Warning($"{LogPrefix}Session {sessionId} was corrupted ({reason}); restored the previous save from backup. " +
-                                     $"Changes after that save are lost. The damaged file was kept at {corruptedPath}.");
-                return session;
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Error($"{LogPrefix}Session {sessionId} is corrupted ({reason}) and its backup could not be loaded ({ex.Message}). " +
-                                   $"The damaged file was kept at {corruptedPath}.");
-                return null;
+                AgentCoreLog.Warning($"{LogPrefix}Flushing pending session writes failed: {ex.Message}");
             }
         }
 
@@ -287,30 +166,9 @@ namespace AgentCore.Editor.Session
 
             try
             {
-                WaitPendingWrite(sessionId);
-                var filePath = Path.Combine(GetSessionDirectory(), $"{sessionId}.json");
-
-                if (!File.Exists(filePath))
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session file not found: {filePath}");
-                    return null;
-                }
-
-                SessionData session;
-                try
-                {
-                    var json = File.ReadAllText(filePath);
-                    session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
-                }
-                catch (JsonException ex)
-                {
-                    return RecoverFromBackup(sessionId, filePath, ex.Message);
-                }
-
+                var session = Store.Load(sessionId);
                 if (session == null)
-                    return RecoverFromBackup(sessionId, filePath, "file is empty");
-
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded: {sessionId} ({session.Title}, {session.MessageCount} messages)");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session file not found or unreadable: {sessionId}");
                 return session;
             }
             catch (Exception ex)
@@ -323,10 +181,8 @@ namespace AgentCore.Editor.Session
         /// <summary>
         /// 异步加载指定会话（#1 CRITICAL 性能修复）。
         /// <para>
-        /// 文件读取与 JSON 反序列化都放到后台线程执行 —— 切换会话时会话文件可达数 MB，
-        /// 同步 <see cref="Load"/> 的 <c>File.ReadAllText</c> + <c>JsonConvert.Deserialize</c>
-        /// 会阻塞 Unity 主线程 50-200ms 造成明显卡顿。此方法把这两步都移出主线程，
-        /// await 续体回到主线程后调用方即可安全操作 UI。
+        /// 排空写入队列、读文件、重放日志都放到后台线程执行 —— 切换会话时会话文件可达数 MB，
+        /// 同步 <see cref="Load"/> 会阻塞 Unity 主线程造成明显卡顿。await 续体回到主线程后调用方即可安全操作 UI。
         /// </para>
         /// 同步 <see cref="Load"/> 保留作为兼容 fallback，供构造/重命名/打 tag 等非热路径同步上下文调用。
         /// </summary>
@@ -343,32 +199,10 @@ namespace AgentCore.Editor.Session
 
             try
             {
-                await WaitPendingWriteAsync(sessionId);
-                var filePath = Path.Combine(GetSessionDirectory(), $"{sessionId}.json");
-
-                if (!File.Exists(filePath))
-                {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session file not found: {filePath}");
-                    return null;
-                }
-
-                // 读取（异步 I/O）+ 反序列化（Task.Run 后台线程）都不占用主线程
-                var json = await File.ReadAllTextAsync(filePath, ct);
-                SessionData session;
-                try
-                {
-                    session = await Task.Run(
-                        () => JsonConvert.DeserializeObject<SessionData>(json, JsonSettings), ct);
-                }
-                catch (JsonException ex)
-                {
-                    return RecoverFromBackup(sessionId, filePath, ex.Message);
-                }
-
+                var store = Store;
+                var session = await Task.Run(() => store.Load(sessionId), ct);
                 if (session == null)
-                    return RecoverFromBackup(sessionId, filePath, "file is empty");
-
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session loaded (async): {sessionId} ({session.Title}, {session.MessageCount} messages)");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session file not found or unreadable: {sessionId}");
                 return session;
             }
             catch (OperationCanceledException)
@@ -384,61 +218,27 @@ namespace AgentCore.Editor.Session
 
         /// <summary>
         /// 列出所有已保存的会话摘要，按 UpdatedAt 降序排列。
+        /// jsonl 会话只读文件尾部的最后一条元数据记录，不重放整份历史。
         /// </summary>
         /// <returns>会话摘要列表</returns>
         public static List<SessionSummary> ListSessions()
         {
-            var summaries = new List<SessionSummary>();
-
             try
             {
-                WaitAllPendingWrites();
-                var directory = GetSessionDirectory();
-
-                if (!Directory.Exists(directory))
-                {
-                    return summaries;
-                }
-
-                var files = Directory.GetFiles(directory, "*.json");
-
-                // P2-2 fix: 使用 JObject 轻量级解析，只读取摘要字段，避免反序列化完整消息列表
-                foreach (var file in files)
-                {
-                    try
-                    {
-                        var json = File.ReadAllText(file);
-                        var summary = ParseSummary(json);
-                        if (summary != null)
-                        {
-                            summaries.Add(summary);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        AgentCoreLog.Warning($"{LogPrefix}Failed to parse session file {Path.GetFileName(file)}: {ex.Message}");
-                    }
-                }
-
-                // 按 UpdatedAt 降序排列（最近更新的在前）
+                var summaries = Store.ListSummaries();
                 summaries.Sort((a, b) => b.UpdatedAt.CompareTo(a.UpdatedAt));
+                return summaries;
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Error($"{LogPrefix}Failed to list sessions: {ex.Message}");
+                return new List<SessionSummary>();
             }
-
-            return summaries;
         }
 
         /// <summary>
         /// 异步列出所有已保存的会话摘要，按 UpdatedAt 降序排列（#8 HIGH 性能修复）。
-        /// <para>
-        /// 侧边栏刷新原本在主线程逐个 <c>File.ReadAllText</c> + <c>JObject.Parse</c> 全量会话文件。
-        /// 摘要所需的 <c>tag</c> / <c>archived</c> / <c>message_count</c> 字段在 JSON 中位于
-        /// <c>messages</c> 数组之后（尾部），无法只流式读头部，因此改为：文件读取用异步 I/O，
-        /// 解析集中放到一个后台 <see cref="Task.Run"/>，主线程全程不阻塞。
-        /// </para>
+        /// 文件读取与解析全部在后台线程进行，主线程不阻塞。
         /// </summary>
         /// <param name="ct">取消令牌</param>
         /// <returns>会话摘要列表</returns>
@@ -446,61 +246,10 @@ namespace AgentCore.Editor.Session
         {
             try
             {
-                foreach (var pending in PendingWrites.Values.ToArray())
-                {
-                    try { await pending; } catch (Exception) { /* 写入错误已在任务内记录 */ }
-                }
-
-                var directory = GetSessionDirectory();
-
-                if (!Directory.Exists(directory))
-                {
-                    return new List<SessionSummary>();
-                }
-
-                var files = Directory.GetFiles(directory, "*.json");
-
-                // 1. 异步读取全部文件内容（每次 await 期间主线程空闲）
-                var contents = new List<(string file, string json)>(files.Length);
-                foreach (var file in files)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    try
-                    {
-                        var json = await File.ReadAllTextAsync(file, ct);
-                        contents.Add((file, json));
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        AgentCoreLog.Warning($"{LogPrefix}Failed to read session file {Path.GetFileName(file)}: {ex.Message}");
-                    }
-                }
-
-                // 2. 后台线程集中解析 + 排序（JObject.Parse 会解析整份 JSON，属 CPU 密集，移出主线程）
+                var store = Store;
                 return await Task.Run(() =>
                 {
-                    var summaries = new List<SessionSummary>(contents.Count);
-                    foreach (var (file, json) in contents)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        try
-                        {
-                            var summary = ParseSummary(json);
-                            if (summary != null)
-                            {
-                                summaries.Add(summary);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            AgentCoreLog.Warning($"{LogPrefix}Failed to parse session file {Path.GetFileName(file)}: {ex.Message}");
-                        }
-                    }
-
+                    var summaries = store.ListSummaries(ct);
                     summaries.Sort((a, b) => b.UpdatedAt.CompareTo(a.UpdatedAt));
                     return summaries;
                 }, ct);
@@ -517,36 +266,7 @@ namespace AgentCore.Editor.Session
         }
 
         /// <summary>
-        /// 从会话 JSON 文本解析出轻量级摘要（只读取摘要字段，不反序列化完整消息列表）。
-        /// 供同步 <see cref="ListSessions"/> 与异步 <see cref="ListSessionsAsync"/> 共用。
-        /// </summary>
-        /// <param name="json">会话文件 JSON 文本</param>
-        /// <returns>会话摘要；当 id 为空时返回 null</returns>
-        private static SessionSummary ParseSummary(string json)
-        {
-            var obj = JObject.Parse(json);
-
-            var id = obj.Value<string>("id");
-            if (string.IsNullOrEmpty(id))
-            {
-                return null;
-            }
-
-            return new SessionSummary
-            {
-                Id = id,
-                Title = obj.Value<string>("title") ?? "未命名会话",
-                UpdatedAt = obj.Value<DateTime?>("updated_at") ?? DateTime.MinValue,
-                CreatedAt = obj.Value<DateTime?>("created_at") ?? DateTime.MinValue,
-                MessageCount = obj.Value<int?>("message_count") ?? 0,
-                Tag = obj.Value<string>("tag"),
-                Archived = obj.Value<bool?>("archived") ?? false,
-                TitleManuallySet = obj.Value<bool?>("title_manually_set") ?? false
-            };
-        }
-
-        /// <summary>
-        /// 删除指定会话文件。
+        /// 删除指定会话的全部文件（jsonl、备份、旧版 JSON 及其迁移副本）。
         /// </summary>
         /// <param name="sessionId">要删除的会话 ID</param>
         public static void Delete(string sessionId)
@@ -559,20 +279,10 @@ namespace AgentCore.Editor.Session
 
             try
             {
-                WaitPendingWrite(sessionId);
-                var filePath = Path.Combine(GetSessionDirectory(), $"{sessionId}.json");
-
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                    if (File.Exists(filePath + BackupSuffix))
-                        File.Delete(filePath + BackupSuffix);
+                if (Store.Delete(sessionId))
                     AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Session deleted: {sessionId}");
-                }
                 else
-                {
                     AgentCoreLog.Warning($"{LogPrefix}Session file not found for deletion: {sessionId}");
-                }
             }
             catch (Exception ex)
             {
@@ -618,47 +328,29 @@ namespace AgentCore.Editor.Session
 
             try
             {
-                WaitAllPendingWrites();
-                var directory = GetSessionDirectory();
-                if (!Directory.Exists(directory))
-                {
-                    return result;
-                }
+                var store = Store;
 
-                var files = Directory.GetFiles(directory, "*.json");
-
-                // 1. 先只解析摘要字段筛出 tag 匹配的 session，按 UpdatedAt 降序排列，
+                // 1. 先只读摘要（jsonl 只读文件尾部的元数据）筛出 tag 匹配的 session，按 UpdatedAt 降序排列，
                 //    再按 maxScanFiles 截断——保证"扫描哪些文件"这一步本身就是有界的。
-                var candidates = new List<(string file, SessionSummary summary)>();
-                foreach (var file in files)
+                var candidates = new List<SessionSummary>();
+                foreach (var summary in store.ListSummaries())
                 {
-                    try
+                    if (!string.IsNullOrEmpty(excludeSessionId) &&
+                        string.Equals(summary.Id, excludeSessionId, StringComparison.OrdinalIgnoreCase))
                     {
-                        var sessionId = Path.GetFileNameWithoutExtension(file);
-                        if (!string.IsNullOrEmpty(excludeSessionId) &&
-                            string.Equals(sessionId, excludeSessionId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        var json = File.ReadAllText(file);
-                        var summary = ParseSummary(json);
-                        if (summary == null) continue;
-                        if (string.IsNullOrEmpty(summary.Tag) ||
-                            !string.Equals(summary.Tag, tag, StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        candidates.Add((file, summary));
+                        continue;
                     }
-                    catch (Exception ex)
+
+                    if (string.IsNullOrEmpty(summary.Tag) ||
+                        !string.Equals(summary.Tag, tag, StringComparison.OrdinalIgnoreCase))
                     {
-                        AgentCoreLog.Warning($"{LogPrefix}Failed to parse session file for search {Path.GetFileName(file)}: {ex.Message}");
+                        continue;
                     }
+
+                    candidates.Add(summary);
                 }
 
-                candidates.Sort((a, b) => b.summary.UpdatedAt.CompareTo(a.summary.UpdatedAt));
+                candidates.Sort((a, b) => b.UpdatedAt.CompareTo(a.UpdatedAt));
                 result.MatchedTagSessionCount = candidates.Count;
 
                 bool scanTruncated = candidates.Count > maxScanFiles;
@@ -670,15 +362,14 @@ namespace AgentCore.Editor.Session
                 result.ScannedSessionCount = candidates.Count;
 
                 // 2. 逐个 session 全文匹配 Messages[].Content，产出片段级结果。
-                foreach (var (file, summary) in candidates)
+                foreach (var summary in candidates)
                 {
                     if (result.Hits.Count >= limit) break;
 
                     SessionData session;
                     try
                     {
-                        var json = File.ReadAllText(file);
-                        session = JsonConvert.DeserializeObject<SessionData>(json, JsonSettings);
+                        session = store.ReadForSearch(summary.Id);
                     }
                     catch (Exception ex)
                     {
@@ -755,23 +446,6 @@ namespace AgentCore.Editor.Session
             if (start > 0) snippet = "…" + snippet;
             if (end < content.Length) snippet += "…";
             return snippet;
-        }
-
-        #endregion
-
-        #region 私有方法
-
-        /// <summary>
-        /// 确保目录存在，如果不存在则创建。
-        /// </summary>
-        /// <param name="directory">目录路径</param>
-        private static void EnsureDirectoryExists(string directory)
-        {
-            if (!Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-                AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Created session directory: {directory}");
-            }
         }
 
         #endregion
