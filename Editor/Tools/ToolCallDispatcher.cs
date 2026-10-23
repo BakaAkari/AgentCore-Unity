@@ -279,15 +279,25 @@ namespace AgentCore.Editor.Tools
 
                 // 4. 治理层策略评估 (G.1)
                 var action = preflightAction;
-                var paramSummary = BuildParameterSummary(parameters);
-                var pathRisk = ToolPathRiskResolver.Resolve(parameters, tool.Metadata, out var pathTargets);
-                var decision = ToolRiskPolicy.Evaluate(
-                    tool.Metadata,
-                    pathRisk,
-                    toolName,
-                    action,
-                    paramSummary,
-                    pathTargets);
+                ToolPolicyDecision decision;
+                if (toolName == BatchExecuteReadOnlyToolName)
+                {
+                    // batch_execute 是纯调度器：每个子操作各自过完整策略，不再整体降级成一次 High 确认
+                    decision = EvaluateBatchExecute(tool.Metadata, parameters);
+                }
+                else
+                {
+                    var paramSummary = BuildParameterSummary(parameters);
+                    var pathRisk = ToolPathRiskResolver.Resolve(parameters, tool.Metadata, out var pathTargets, out var touchesProtected);
+                    decision = ToolRiskPolicy.Evaluate(
+                        tool.Metadata,
+                        pathRisk,
+                        toolName,
+                        action,
+                        paramSummary,
+                        pathTargets,
+                        touchesProtected);
+                }
 
                 switch (decision.Outcome)
                 {
@@ -683,20 +693,169 @@ namespace AgentCore.Editor.Tools
                 if (Safety.PlayModePreflight.IsBlockedInPlayMode(subTool.Metadata, subAction, out _))
                     return string.Empty;
 
-                var subPathRisk = ToolPathRiskResolver.Resolve(subArgs, subTool.Metadata, out var subTargets);
+                var subPathRisk = ToolPathRiskResolver.Resolve(subArgs, subTool.Metadata, out var subTargets, out var subProtected);
                 var subDecision = ToolRiskPolicy.Evaluate(
                     subTool.Metadata,
                     subPathRisk,
                     subToolName,
                     subAction,
                     BuildParameterSummary(subArgs),
-                    subTargets);
+                    subTargets,
+                    subProtected);
 
                 if (!subDecision.IsAllowed)
                     return string.Empty;
             }
 
             return Native.Meta.BatchExecuteTool.AllSubOperationsReadOnlySentinel;
+        }
+
+        /// <summary>
+        /// <c>batch_execute</c> 的策略评估：先让每个子操作各自走完整判定链（schema 校验、
+        /// Play Mode 拦截、路径风险、<see cref="ToolRiskPolicy.Evaluate"/>），再合并：
+        /// <list type="bullet">
+        ///   <item>任一子操作 Block / 无法解析 → 整批 Block（不再降级成一次确认）</item>
+        ///   <item>全部 Allow → Allow</item>
+        ///   <item>否则 → 一个确认框逐条列出需要确认的子操作；会话信任档取各子请求允许档的交集，
+        ///   因此只要有一条是底线操作，整批就只能逐次确认</item>
+        /// </list>
+        /// 参考 Claude Code："A rule must match each subcommand independently"。
+        /// </summary>
+        private ToolPolicyDecision EvaluateBatchExecute(ToolMetadata batchMetadata, JObject parameters)
+        {
+            var operations = parameters?["operations"] as JArray;
+            var batchRisk = new ToolExecutionRisk(
+                batchMetadata.RiskLevel,
+                batchMetadata.Capabilities,
+                WorkspaceOperationRisk.Safe,
+                batchMetadata.RequiresConfirmation);
+
+            if (operations == null || operations.Count == 0)
+            {
+                // 工具自身会返回"operations 为空"的失败，这里无需确认
+                return ToolPolicyDecision.Allow(batchRisk, new[] { "batch_execute has no operations." });
+            }
+
+            var blockReasons = new List<string>();
+            var confirmReasons = new List<string>();
+            var summary = new Dictionary<string, string>();
+            var targets = new List<string>();
+            var maxRisk = ToolRiskLevel.ReadOnly;
+            var caps = batchMetadata.Capabilities;
+            var worstPath = WorkspaceOperationRisk.Safe;
+            HashSet<ToolConfirmationTrustScope> scopes = null;
+
+            for (int i = 0; i < operations.Count; i++)
+            {
+                var label = $"#{i + 1}";
+                var op = operations[i] as JObject;
+                if (op == null)
+                {
+                    blockReasons.Add($"{label}: invalid operation (expected a JSON object)");
+                    continue;
+                }
+
+                var subToolName = op["tool"]?.Type == JTokenType.String ? op["tool"].Value<string>() : null;
+                if (string.IsNullOrEmpty(subToolName))
+                {
+                    blockReasons.Add($"{label}: missing 'tool'");
+                    continue;
+                }
+
+                label = $"#{i + 1} {subToolName}";
+                if (string.Equals(subToolName, BatchExecuteReadOnlyToolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    blockReasons.Add($"{label}: nested batch_execute is not allowed");
+                    continue;
+                }
+
+                var subTool = _registry.GetTool(subToolName);
+                if (subTool?.Metadata == null)
+                {
+                    blockReasons.Add($"{label}: unknown tool");
+                    continue;
+                }
+
+                var subArgs = op["args"] as JObject ?? new JObject();
+                if (!ToolParameterValidator.Validate(subArgs, subTool.Metadata.ParametersSchema, out var validationError))
+                {
+                    blockReasons.Add($"{label}: invalid arguments ({validationError})");
+                    continue;
+                }
+
+                var subAction = ExtractActionFromParameters(subArgs);
+                if (!string.IsNullOrEmpty(subAction))
+                    label += "." + subAction;
+
+                if (Safety.PlayModePreflight.IsBlockedInPlayMode(subTool.Metadata, subAction, out var playModeReason))
+                {
+                    blockReasons.Add($"{label}: {playModeReason}");
+                    continue;
+                }
+
+                var subPathRisk = ToolPathRiskResolver.Resolve(subArgs, subTool.Metadata, out var subTargets, out var subProtected);
+                var subDecision = ToolRiskPolicy.Evaluate(
+                    subTool.Metadata,
+                    subPathRisk,
+                    subToolName,
+                    subAction,
+                    BuildParameterSummary(subArgs),
+                    subTargets,
+                    subProtected);
+
+                if (subDecision.IsBlocked)
+                {
+                    blockReasons.Add($"{label}: {JoinReasons(subDecision.Reasons)}");
+                    continue;
+                }
+
+                if (subDecision.IsAllowed)
+                    continue;
+
+                // 需要确认的子操作：逐条展示工具 / action / 参数 / 目标
+                confirmReasons.Add($"{label}: {JoinReasons(subDecision.Reasons)}");
+                summary[label] = TruncateForLog(subArgs.ToString(Newtonsoft.Json.Formatting.None), 160);
+                if (subTargets != null)
+                    targets.AddRange(subTargets);
+
+                if (subTool.Metadata.RiskLevel > maxRisk)
+                    maxRisk = subTool.Metadata.RiskLevel;
+                caps |= subTool.Metadata.Capabilities;
+                if (subPathRisk > worstPath)
+                    worstPath = subPathRisk;
+
+                var subScopes = subDecision.ConfirmationRequest?.AllowedTrustScopes
+                    ?? (IReadOnlyList<ToolConfirmationTrustScope>)Array.Empty<ToolConfirmationTrustScope>();
+                if (scopes == null)
+                    scopes = new HashSet<ToolConfirmationTrustScope>(subScopes);
+                else
+                    scopes.IntersectWith(subScopes);
+            }
+
+            if (blockReasons.Count > 0)
+                return ToolPolicyDecision.Block(batchRisk, blockReasons);
+
+            if (confirmReasons.Count == 0)
+                return ToolPolicyDecision.Allow(batchRisk, new[] { "All batch_execute sub-operations are allowed by policy." });
+
+            var risk = new ToolExecutionRisk(maxRisk, caps, worstPath, requiresConfirmationByDeclaration: false);
+            var request = new ToolConfirmationRequest(
+                toolName: BatchExecuteReadOnlyToolName,
+                action: string.Empty,
+                risk: risk,
+                title: $"batch_execute: {confirmReasons.Count} of {operations.Count} operations need approval",
+                description: "Approving runs every operation in this batch exactly as listed below.",
+                reasons: confirmReasons,
+                parameterSummary: summary,
+                targets: targets,
+                allowedTrustScopes: new List<ToolConfirmationTrustScope>(scopes ?? new HashSet<ToolConfirmationTrustScope>()));
+
+            return ToolPolicyDecision.RequireConfirmation(risk, request, confirmReasons);
+        }
+
+        private static string JoinReasons(IReadOnlyList<string> reasons)
+        {
+            return reasons == null || reasons.Count == 0 ? "requires approval" : string.Join("; ", reasons);
         }
 
         /// <summary>

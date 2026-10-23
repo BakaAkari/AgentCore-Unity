@@ -142,6 +142,10 @@ namespace AgentCore.Editor.Tools.Safety
         /// <param name="action">本次调用的 action（若工具不区分 action，可传空字符串）。</param>
         /// <param name="parameterSummary">脱敏后的参数摘要（用于确认请求展示，不参与风险评估）。</param>
         /// <param name="targets">受影响的目标列表（路径 / GameObject 名 / Asset GUID 等）。</param>
+        /// <param name="touchesProtectedPath">
+        /// 写操作的目标路径是否命中受保护路径（<see cref="SafePath.IsProtected"/>，含项目外路径），
+        /// 由 <see cref="ToolPathRiskResolver"/> 给出。命中时进入"底线确认"，会话信任 / YOLO 不可跳过。
+        /// </param>
         /// <returns>策略决策。</returns>
         public static ToolPolicyDecision Evaluate(
             ToolMetadata metadata,
@@ -149,7 +153,8 @@ namespace AgentCore.Editor.Tools.Safety
             string toolName,
             string action,
             IReadOnlyDictionary<string, string> parameterSummary = null,
-            IReadOnlyList<string> targets = null)
+            IReadOnlyList<string> targets = null,
+            bool touchesProtectedPath = false)
         {
             if (metadata == null)
             {
@@ -181,6 +186,25 @@ namespace AgentCore.Editor.Tools.Safety
             // v1.11+ (Bug Q): 提前计算 isReadOnlyAction, 让 RequiresConfirmation 判定也能享受
             // 只读白名单跳过 (对齐 line 209 / 228 的粒度修复语义).
             bool isReadOnlyAction = metadata.IsReadOnlyAction(action);
+
+            // 底线确认（YOLO / 会话信任也不可跳过）：受保护路径写入、执行代码、资产删除、
+            // VCS 改写历史 / 丢弃改动、修改 Agent 自身配置。确认请求不提供任何会话信任档，
+            // 用户只能逐次允许或拒绝。参考 Claude Code 受保护路径检查先于 allow 规则求值。
+            if (!isReadOnlyAction && IsFloorOperation(metadata, action, touchesProtectedPath, out var floorReason))
+            {
+                reasons.Add(floorReason);
+                var confirmation = BuildConfirmationRequest(
+                    toolName,
+                    action,
+                    risk,
+                    metadata,
+                    reasons,
+                    parameterSummary,
+                    targets,
+                    allowSessionTrust: false);
+
+                return ToolPolicyDecision.RequireConfirmation(risk, confirmation, reasons);
+            }
 
             // v1.6.5: UI 端信任粒度改为 SessionLowMediumRisk / SessionAll (YOLO)。
             // 工具通过 [AgentTool(RequiresConfirmation = true)] 显式声明需要审批;
@@ -344,6 +368,80 @@ namespace AgentCore.Editor.Tools.Safety
                 }
             }
 
+            return false;
+        }
+
+        /// <summary>VCS 中会改写历史、发布或丢弃本地改动的 action token。</summary>
+        private static readonly HashSet<string> VcsFloorTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "commit", "push", "submit", "revert", "reset", "checkout", "restore", "switch",
+            "discard", "merge", "rebase", "remove", "cleanup", "sync", "update"
+        };
+
+        /// <summary>资产 / 文件删除类 action token。</summary>
+        private static readonly HashSet<string> DeleteFloorTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "delete", "remove", "destroy", "trash", "purge"
+        };
+
+        /// <summary>
+        /// 是否属于"底线确认"操作：会话信任 / YOLO 下仍须逐次确认。
+        /// 调用方已排除只读白名单 action。
+        /// </summary>
+        private static bool IsFloorOperation(
+            ToolMetadata metadata,
+            string action,
+            bool touchesProtectedPath,
+            out string reason)
+        {
+            reason = null;
+            var caps = metadata.Capabilities;
+
+            if (touchesProtectedPath)
+            {
+                reason = "Target is a protected path (ProjectSettings, manifest, .git, *.asmdef, Editor code, AgentCore itself, or outside the project); approval required every time.";
+                return true;
+            }
+
+            if ((caps & ToolCapability.ExecuteCode) != 0 || metadata.RiskLevel == ToolRiskLevel.CodeExecution)
+            {
+                reason = "Tool executes arbitrary code; approval required every time.";
+                return true;
+            }
+
+            if ((caps & ToolCapability.ModifyAgentConfig) != 0)
+            {
+                reason = "Tool modifies AgentCore's own configuration; approval required every time.";
+                return true;
+            }
+
+            if ((caps & ToolCapability.VersionControlWrite) != 0 && HasActionToken(action, VcsFloorTokens, out var vcsToken))
+            {
+                reason = $"Version control '{vcsToken}' can publish, rewrite or discard work; approval required every time.";
+                return true;
+            }
+
+            if ((caps & ToolCapability.DeleteProjectFiles) != 0 && HasActionToken(action, DeleteFloorTokens, out var deleteToken))
+            {
+                reason = $"'{deleteToken}' removes project files or assets; approval required every time.";
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasActionToken(string action, HashSet<string> tokens, out string matched)
+        {
+            matched = null;
+            if (string.IsNullOrWhiteSpace(action)) return false;
+            foreach (var token in action.Split('_'))
+            {
+                if (tokens.Contains(token))
+                {
+                    matched = token;
+                    return true;
+                }
+            }
             return false;
         }
 

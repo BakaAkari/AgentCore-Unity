@@ -64,7 +64,21 @@ namespace AgentCore.Editor.Tools.Safety
             ToolMetadata metadata,
             out List<string> resolvedTargets)
         {
+            return Resolve(parameters, metadata, out resolvedTargets, out _);
+        }
+
+        /// <summary>
+        /// 同上，并输出是否有写目标命中受保护路径（<see cref="SafePath.IsProtected"/>，含项目外路径），
+        /// 供 <see cref="ToolRiskPolicy"/> 做"底线确认"。
+        /// </summary>
+        public static WorkspaceOperationRisk Resolve(
+            JObject parameters,
+            ToolMetadata metadata,
+            out List<string> resolvedTargets,
+            out bool touchesProtectedPath)
+        {
             resolvedTargets = null;
+            touchesProtectedPath = false;
 
             // 快速路径：工具不具备写入能力 → 路径风险无意义
             if (metadata == null || (metadata.Capabilities & WriteMask) == 0)
@@ -110,6 +124,9 @@ namespace AgentCore.Editor.Tools.Safety
                         : WorkspacePathPolicy.GetRisk(rootInfo.Role);
                 }
 
+                if (IsProtectedTarget(pathValue, absolutePath))
+                    touchesProtectedPath = true;
+
                 if (targets == null)
                     targets = new List<string>();
                 targets.Add(pathValue);
@@ -133,6 +150,30 @@ namespace AgentCore.Editor.Tools.Safety
         // ------------------------------------------------------------------
         // 内部辅助
         // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 写目标是否命中受保护路径。
+        /// <para>
+        /// 项目内：按 <see cref="SafePath.IsProtected"/> 分段规则判断。
+        /// 项目外：只有输入本身是显式文件系统路径（盘符 / UNC / 含 <c>..</c>）才算——
+        /// WorkspaceRoot 可能是 Unity 项目的上级目录，"Main Camera"、"/Canvas/Button" 这类
+        /// GameObject 名拼到 WorkspaceRoot 下会落在 Unity 项目外，不能因此每次都强制确认。
+        /// </para>
+        /// </summary>
+        private static bool IsProtectedTarget(string pathValue, string absolutePath)
+        {
+            var projectRoot = SafePath.ProjectRoot;
+            if (SafePath.IsUnder(absolutePath, projectRoot))
+                return SafePath.IsProtected(absolutePath);
+
+            bool explicitFsPath =
+                pathValue.Contains("..") ||
+                (pathValue.Length >= 2 && pathValue[1] == ':') ||
+                pathValue.StartsWith(@"\\", StringComparison.Ordinal) ||
+                pathValue.StartsWith("//", StringComparison.Ordinal) ||
+                (Path.DirectorySeparatorChar == '/' && Path.IsPathRooted(pathValue));
+            return explicitFsPath;
+        }
 
         /// <summary>
         /// 从 JToken 中提取字符串路径值。支持简单字符串和数组中的第一个字符串。

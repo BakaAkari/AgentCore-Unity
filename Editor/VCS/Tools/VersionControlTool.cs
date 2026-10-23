@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Components.VCS.Config;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 
@@ -16,7 +17,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         Description = "Manage version control operations for SVN, Perforce (P4), and Git repositories. " +
                       "Read actions: detect_vcs, get_status, get_branch, get_log, get_diff, get_remote, get_tags, get_blame, " +
                       "get_sync_status, get_commit_info, get_client_info, get_changelist, get_info, get_file_log. " +
-                      "Write actions (REQUIRE CONFIRMATION): stage_files, unstage_files, commit, commit_files, " +
+                      "Write actions (the user is asked to approve each one in the editor; there is no confirm parameter): stage_files, unstage_files, commit, commit_files, " +
                       "create_branch, switch_branch, stash, stash_pop, checkout_files, revert_files, resolve_files, " +
                       "ignore_file, ignore_folder, ignore_extension, remove_files, cleanup. " +
                       "USE FOR: checking file status before/after changes, reviewing diffs, committing work, managing branches. " +
@@ -26,7 +27,17 @@ namespace AgentCore.Editor.Components.VCS.Tools
         Category = "VersionControl",
         Visibility = ToolVisibility.OnDemand,
         RequiresMainThread = true,
-        MayModifyScripts = false)]
+        MayModifyScripts = false,
+        // 写操作的确认由宿主 PermissionGate 发起（ToolRiskPolicy 按能力位 + 底线规则），
+        // 不再依赖模型自己传 confirmed=true —— 那等于让模型给自己审批。
+        RiskLevel = ToolRiskLevel.High,
+        Capabilities = ToolCapability.ReadProject | ToolCapability.VersionControlWrite,
+        ReadOnlyActions = new[]
+        {
+            "detect_vcs", "get_status", "get_branch", "get_log", "get_file_log", "get_diff",
+            "get_remote", "get_tags", "get_blame", "get_sync_status", "get_commit_info",
+            "get_client_info", "get_changelist", "get_info"
+        })]
     public class VersionControlTool : IAgentTool
     {
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
@@ -73,7 +84,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""revert_svn"",
                         ""add_files""
                     ],
-                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (require confirmed=true): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files (SVN).""
+                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (each one is approved by the user in the editor): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files (SVN).""
                 },
                 ""file_path"": {
                     ""type"": ""string"",
@@ -109,10 +120,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 ""change_number"": {
                     ""type"": ""string"",
                     ""description"": ""Perforce changelist number for get_changelist action""
-                },
-                ""confirmed"": {
-                    ""type"": ""boolean"",
-                    ""description"": ""Must be true to execute write operations. First call without confirmed returns a preview; second call with confirmed=true executes the operation.""
                 }
             }
         }");
@@ -125,16 +132,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             requiresMainThread: true
         );
 
-        // 操作类 actions 列表（需要确认）
-        private static readonly HashSet<string> _operationActions = new HashSet<string>
-        {
-            "cleanup", "stage_files", "unstage_files", "commit", "commit_files",
-            "create_branch", "switch_branch", "stash", "stash_pop",
-            "checkout_files", "revert_files", "resolve_files", "ignore_file", "ignore_folder",
-            "ignore_extension", "remove_files", "submit", "sync",
-            "update", "commit_svn", "revert_svn", "add_files"
-        };
-
         public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -143,18 +140,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
             try
             {
                 var action = ToolHelpers.GetRequiredString(parameters, "action").ToLowerInvariant();
-
-                // 操作类 action 需要确认机制
-                if (_operationActions.Contains(action))
-                {
-                    var confirmed = ToolHelpers.GetOptionalBool(parameters, "confirmed", false);
-                    if (!confirmed)
-                    {
-                        response = BuildConfirmationResponse(action, parameters);
-                        sw.Stop();
-                        return response.ToToolResult(sw.Elapsed.TotalMilliseconds);
-                    }
-                }
 
                 response = action switch
                 {
@@ -214,58 +199,6 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
             sw.Stop();
             return response.ToToolResult(sw.Elapsed.TotalMilliseconds);
-        }
-
-        // ===== 确认机制 =====
-
-        private ToolResponse BuildConfirmationResponse(string action, JObject parameters)
-        {
-            var adapter = GetAdapter();
-            var vcsType = adapter?.VcsType.ToString() ?? "Unknown";
-
-            var description = action switch
-            {
-                "cleanup" => "Cleanup the repository working copy metadata/locks",
-                "stage_files" or "add_files" or "checkout_files" => "Stage/add/check out files to version control",
-                "unstage_files" => "Unstage files from staging area",
-                "commit" or "commit_svn" or "submit" => "Commit/submit changes to repository",
-                "commit_files" => "Commit only the specified files to repository",
-                "create_branch" => "Create a new branch",
-                "switch_branch" => "Switch to a different branch (may affect working directory)",
-                "stash" => "Stash current working changes",
-                "stash_pop" => "Pop stashed changes back to working directory",
-                "revert_files" or "revert_svn" => "Revert files to repository version (DESTRUCTIVE: local changes will be lost)",
-                "resolve_files" => "Mark conflicted files as resolved after conflicts have been manually fixed",
-                "ignore_file" or "ignore_folder" or "ignore_extension" => "Add an ignore rule to version control ignore metadata",
-                "remove_files" => "Remove/schedule delete files from the working copy (DESTRUCTIVE)",
-                "sync" or "update" => "Sync/update working copy to latest version",
-                _ => $"Execute {action}"
-            };
-
-            var warning = action switch
-            {
-                "revert_files" or "revert_svn" => " WARNING: This will permanently discard local changes to the specified files!",
-                "remove_files" => " WARNING: This may delete files from disk or schedule them for deletion in version control.",
-                "cleanup" => " WARNING: Cleanup may alter VCS working-copy metadata/locks. Do not run while Unity is compiling or importing assets.",
-                "resolve_files" => " WARNING: This only marks conflicts as resolved; ensure conflict markers have already been fixed.",
-                "ignore_file" or "ignore_folder" or "ignore_extension" => " WARNING: This modifies ignore metadata and can hide matching untracked files from status.",
-                "commit_files" => " WARNING: Only the specified files will be submitted/committed; verify the file list before confirming.",
-                "switch_branch" => " WARNING: Switching branches may modify files in your working directory.",
-                "stash_pop" => " WARNING: This may cause merge conflicts if working directory has changes.",
-                _ => "This operation will modify your version control state."
-            };
-
-            var data = new
-            {
-                requires_confirmation = true,
-                action = action,
-                vcs_type = vcsType,
-                description = description,
-                warning = warning,
-                instruction = "To execute this operation, call again with confirmed=true"
-            };
-
-            return ToolResponse.OkWithData(data, $"Operation '{action}' requires confirmation. {description}. Call again with confirmed=true to proceed.");
         }
 
         // ===== Phase 1: 只读查询处理器 =====
