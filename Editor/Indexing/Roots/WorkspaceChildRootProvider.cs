@@ -45,11 +45,11 @@ namespace AgentCore.Editor.Components.Indexing.Roots
                 foreach (var dir in subDirs)
                 {
                     var normalized = dir.Replace('\\', '/');
-                    var dirName = Path.GetFileName(normalized).ToLowerInvariant();
+                    var dirName = Path.GetFileName(normalized);
 
                     // 跳过隐藏目录和常见非代码目录
                     if (dirName.StartsWith(".")) continue;
-                    if (IsExcludedDir(dirName)) continue;
+                    if (IsExcludedDir(dirName.ToLowerInvariant())) continue;
 
                     // 跳过 UnityRoot（由 UnityRootProvider 处理）
                     if (!string.IsNullOrEmpty(workspace.UnityRoot) &&
@@ -92,11 +92,26 @@ namespace AgentCore.Editor.Components.Indexing.Roots
             {
                 foreach (var kw in keywords)
                 {
-                    if (dirName.Contains(kw))
+                    if (MatchesKeyword(dirName, kw))
                         return (scopeType, role);
                 }
             }
             return (IndexScopeType.Unknown, IndexRootRole.EditableProjectCode);
+        }
+
+        /// <summary>
+        /// 关键词须是目录名开头的完整单词：其后是名称结尾、分隔符/数字，或驼峰的下一个单词
+        /// （"UI_Common"、"UICommon"、"build_tools" 命中；"Builds" 不命中 build，"AgentCore" 不命中 core）。
+        /// </summary>
+        private static bool MatchesKeyword(string dirName, string keyword)
+        {
+            if (!dirName.StartsWith(keyword, StringComparison.OrdinalIgnoreCase)) return false;
+            var i = keyword.Length;
+            if (i == dirName.Length || keyword[i - 1] > 127) return true; // 中文关键词没有大小写/单词边界，按前缀即可
+            var next = dirName[i];
+            if (!char.IsLetter(next)) return true;
+            return char.IsUpper(next) &&
+                   (char.IsLower(dirName[i - 1]) || (i + 1 < dirName.Length && char.IsLower(dirName[i + 1])));
         }
 
         private static bool IsExcludedDir(string dirName)

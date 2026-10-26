@@ -162,7 +162,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 ReportProgress(onProgress, progress);
 
                 var roots = _rootResolver.Resolve(workspace);
-                var enabledRoots = roots.Where(r => r.IsEnabled).ToList();
+                var enabledRoots = GetParticipatingRoots(roots);
 
                 // 5. 持久化 Roots，获取 rootId
                 var rootIdMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -178,9 +178,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 stateWorkspaceId = workspaceId;
                 stateRoots = enabledRoots;
                 await UpdateRootStatesAsync(workspaceId, enabledRoots, IndexRootState.Indexing);
+                await DisableStaleRootsAsync(workspaceId, roots, ct);
 
                 // 6. 扫描所有文件
-                var allFiles = ScanAllFiles(enabledRoots, progress, onProgress, ct);
+                var allFiles = ScanAllFiles(enabledRoots, progress, onProgress, ct, roots);
                 progress.TotalFiles = allFiles.Count;
                 ReportProgress(onProgress, progress);
 
@@ -320,7 +321,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 ReportProgress(onProgress, progress);
 
                 var roots = _rootResolver.Resolve(workspace);
-                var enabledRoots = roots.Where(r => r.IsEnabled).ToList();
+                var enabledRoots = GetParticipatingRoots(roots);
 
                 // 4. 持久化 Roots（新增的 Root 会被自动创建）
                 var rootIdMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -337,8 +338,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 stateRoots = enabledRoots;
                 await UpdateRootStatesAsync(workspaceId, enabledRoots, IndexRootState.Indexing);
 
-                // 5. 扫描磁盘上的当前文件
-                var diskFiles = ScanAllFiles(enabledRoots, progress, onProgress, ct);
+                await DisableStaleRootsAsync(workspaceId, roots, ct);
+
+                // 5. 扫描磁盘上的当前文件（扫描不完整的 Root 不参与删除判定）
+                var incompleteRootIds = new HashSet<int>();
+                var diskFiles = ScanAllFiles(enabledRoots, progress, onProgress, ct, roots, incompleteRootIds);
                 var diskFileSet = new HashSet<string>(
                     diskFiles.Select(f => f.FilePath),
                     StringComparer.OrdinalIgnoreCase);
@@ -355,6 +359,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 // 7. 计算变更集
                 var (toAdd, toUpdate, toDelete) = ComputeChangeset(diskFiles, indexedFilesMap, diskFileSet);
+                if (incompleteRootIds.Count > 0)
+                    toDelete.RemoveAll(f => incompleteRootIds.Contains(f.RootId));
 
                 progress.TotalFiles = toAdd.Count + toUpdate.Count;
                 ReportProgress(onProgress, progress);
@@ -565,6 +571,23 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                     // 确定文件所属 Root
                     var matchedRoot = FindRootForPath(normalizedPath, enabledRoots);
+                    if (matchedRoot != null && !IndexingSchedulePolicy.ParticipatesInBackgroundLoop(matchedRoot))
+                    {
+                        // OnDemand Root 只经 index_scope 更新
+                        matchedRoot = null;
+                    }
+                    else if (matchedRoot != null && !IndexRootScanner.ShouldIndex(normalizedPath, matchedRoot, roots))
+                    {
+                        // 与全量扫描同一套规则：.asmdef / .json、排除目录下的 .cs 等不入库，之前误入库的记录顺带清掉
+                        var excludedFile = await _store.GetFileByPathAsync(workspaceId, normalizedPath, ct);
+                        if (excludedFile != null)
+                        {
+                            await _store.DeleteDependenciesByFileAsync(excludedFile.Id, ct);
+                            await _store.DeleteSymbolsByFileAsync(excludedFile.Id, ct);
+                            await _store.DeleteFileAsync(excludedFile.Id, ct);
+                        }
+                        matchedRoot = null;
+                    }
                     if (matchedRoot == null)
                     {
                         // 文件不属于任何启用的 Root，跳过
@@ -763,7 +786,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 // 3. 扫描目标 Root
                 progress.Phase = IndexingPhase.Scanning;
                 ReportProgress(onProgress, progress);
-                var allFiles = ScanAllFiles(roots, progress, onProgress, ct);
+                var allFiles = ScanAllFiles(roots, progress, onProgress, ct, _rootResolver.Resolve(workspace));
                 progress.TotalFiles = allFiles.Count;
 
                 // 4. 索引
@@ -929,13 +952,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         /// <summary>
         /// 扫描所有启用 Root 下的文件，返回 (root, filePath) 列表。
-        /// 应用 IncludePatterns / ExcludePatterns 过滤，跳过超大文件。
+        /// 应用 IncludePatterns / ExcludePatterns 过滤，跳过超大文件；<paramref name="allRoots"/> 中嵌套在某个 Root 里的
+        /// 其他 Root 由其自身负责，不重复扫描。扫描不完整（目录不可读、整体失败）的 Root 记入 <paramref name="incompleteRootIds"/>。
         /// </summary>
         private List<(IndexRoot Root, string FilePath)> ScanAllFiles(
             IReadOnlyList<IndexRoot> roots,
             IndexingProgress progress,
             Action<IndexingProgress> onProgress,
-            CancellationToken ct)
+            CancellationToken ct,
+            IReadOnlyList<IndexRoot> allRoots = null,
+            HashSet<int> incompleteRootIds = null)
         {
             var result = new List<(IndexRoot, string)>();
 
@@ -954,8 +980,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 try
                 {
-                    var files = ScanRootFiles(root, ct);
-                    result.AddRange(files.Select(f => (root, f)));
+                    var scan = IndexRootScanner.Scan(root, allRoots ?? roots, _maxFileSizeBytes, ct);
+                    result.AddRange(scan.Files.Select(f => (root, f)));
+                    if (!scan.Complete) incompleteRootIds?.Add(root.Id);
                 }
                 catch (OperationCanceledException)
                 {
@@ -963,6 +990,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 }
                 catch (Exception ex)
                 {
+                    incompleteRootIds?.Add(root.Id);
                     AgentCoreLog.Warning($"[CodebaseIndexer] Failed to scan root '{root.RootPath}': {ex.Message}");
                 }
             }
@@ -971,128 +999,34 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 扫描单个 Root 目录下的所有匹配文件。
+        /// 参与全量 / 增量索引的 Root：已启用且不是 OnDemand（引擎、商业插件、生成代码、只读参考只经 index_scope 索引）。
         /// </summary>
-        private List<string> ScanRootFiles(IndexRoot root, CancellationToken ct)
+        private static List<IndexRoot> GetParticipatingRoots(IReadOnlyList<IndexRoot> roots)
         {
-            var result = new List<string>();
-            var rootPath = root.RootPath;
+            return roots.Where(r => r.IsEnabled && IndexingSchedulePolicy.ParticipatesInBackgroundLoop(r)).ToList();
+        }
 
-            // 构建包含模式（默认 *.cs）
-            var includePatterns = root.IncludePatterns != null && root.IncludePatterns.Count > 0
-                ? root.IncludePatterns
-                : new List<string> { "*.cs" };
+        /// <summary>
+        /// 存储里仍启用、但已不在解析结果中（目录消失、被停用、Root 划分变化，如 Assets/Scripts → Assets）的 Root：
+        /// 清掉它的文件与符号并标为停用，避免旧符号继续被搜到或与新 Root 下的同一文件重复。
+        /// </summary>
+        private async Task DisableStaleRootsAsync(int workspaceId, IReadOnlyList<IndexRoot> resolvedRoots, CancellationToken ct)
+        {
+            var activePaths = new HashSet<string>(
+                resolvedRoots.Where(r => r.IsEnabled).Select(r => r.RootPath.Replace('\\', '/').TrimEnd('/')),
+                StringComparer.OrdinalIgnoreCase);
 
-            // 递归枚举所有文件
-            foreach (var pattern in includePatterns)
+            foreach (var stored in await _store.GetRootsAsync(workspaceId, ct))
             {
                 ct.ThrowIfCancellationRequested();
+                if (!stored.IsEnabled || string.IsNullOrEmpty(stored.RootPath)) continue;
+                if (activePaths.Contains(stored.RootPath.Replace('\\', '/').TrimEnd('/'))) continue;
 
-                IEnumerable<string> files;
-                try
-                {
-                    files = Directory.EnumerateFiles(rootPath, pattern, SearchOption.AllDirectories);
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"[CodebaseIndexer] EnumerateFiles failed for '{rootPath}' pattern '{pattern}': {ex.Message}");
-                    continue;
-                }
-
-                foreach (var filePath in files)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    // 规范化路径
-                    var normalizedPath = filePath.Replace('\\', '/');
-
-                    // 应用排除规则
-                    if (IsExcluded(normalizedPath, rootPath, root.ExcludePatterns))
-                    {
-                        continue;
-                    }
-
-                    // 检查文件大小
-                    try
-                    {
-                        var fileInfo = new FileInfo(filePath);
-                        if (fileInfo.Length > _maxFileSizeBytes)
-                        {
-                            continue;
-                        }
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-
-                    result.Add(normalizedPath);
-                }
+                await ClearRootAsync(workspaceId, stored.Id, ct);
+                stored.IsEnabled = false;
+                await _store.UpsertRootAsync(workspaceId, stored, ct);
+                AgentCoreLog.Info($"[CodebaseIndexer] Root '{stored.RootPath}' is no longer active; cleared its index data and disabled it.");
             }
-
-            // 去重（多个 pattern 可能匹配同一文件）
-            return result.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        }
-
-        /// <summary>
-        /// 判断文件是否应被排除。
-        /// 排除规则支持：目录前缀（以 / 结尾）、文件名通配符（*.generated.cs）、精确路径片段。
-        /// </summary>
-        private static bool IsExcluded(string normalizedFilePath, string rootPath, List<string> excludePatterns)
-        {
-            if (excludePatterns == null || excludePatterns.Count == 0)
-                return false;
-
-            // 获取相对于 root 的路径（用于模式匹配）
-            var normalizedRoot = rootPath.Replace('\\', '/').TrimEnd('/') + '/';
-            var relativePath = normalizedFilePath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
-                ? normalizedFilePath.Substring(normalizedRoot.Length)
-                : normalizedFilePath;
-
-            foreach (var pattern in excludePatterns)
-            {
-                if (string.IsNullOrEmpty(pattern)) continue;
-
-                // 目录排除（以 / 结尾，如 "bin/"、"obj/"）
-                if (pattern.EndsWith("/"))
-                {
-                    var dirSegment = pattern.TrimEnd('/');
-                    // 检查路径中是否包含该目录段
-                    if (relativePath.IndexOf('/' + dirSegment + '/', StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        relativePath.StartsWith(dirSegment + '/', StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-                // 通配符模式（如 "*.generated.cs"）
-                else if (pattern.Contains('*') || pattern.Contains('?'))
-                {
-                    var fileName = Path.GetFileName(normalizedFilePath);
-                    if (MatchesWildcard(fileName, pattern))
-                        return true;
-                }
-                // 精确路径片段
-                else
-                {
-                    if (relativePath.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// 简单通配符匹配（支持 * 和 ?）。
-        /// </summary>
-        private static bool MatchesWildcard(string input, string pattern)
-        {
-            // 将通配符转换为正则表达式
-            var regexPattern = "^" + System.Text.RegularExpressions.Regex.Escape(pattern)
-                .Replace("\\*", ".*")
-                .Replace("\\?", ".") + "$";
-            return System.Text.RegularExpressions.Regex.IsMatch(
-                input, regexPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
 
         /// <summary>

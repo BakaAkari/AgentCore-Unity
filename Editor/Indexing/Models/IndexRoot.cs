@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace AgentCore.Editor.Components.Indexing.Models
 {
@@ -45,6 +46,8 @@ namespace AgentCore.Editor.Components.Indexing.Models
         public bool IsEnabled { get; set; } = true;
 
         /// <summary>文件包含模式列表（如 ["*.cs"]）。</summary>
+        /// <remarks>反序列化时整体替换默认列表，而不是追加到初始化器的默认值后面（否则每次读写都会叠加一份）。</remarks>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public List<string> IncludePatterns { get; set; } = new List<string> { "*.cs" };
 
         /// <summary>
@@ -52,6 +55,7 @@ namespace AgentCore.Editor.Components.Indexing.Models
         /// 支持目录前缀（以 "/" 结尾）和通配符（"*"）。
         /// 默认排除编译产物、Unity 缓存、VCS 元数据和构建输出目录。
         /// </summary>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public List<string> ExcludePatterns { get; set; } = new List<string>
         {
             // 编译产物
