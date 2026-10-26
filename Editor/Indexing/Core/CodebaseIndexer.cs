@@ -1143,6 +1143,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 throw;
             }
+            catch (ObjectDisposedException ex)
+            {
+                // 存储或写入队列已关闭（重载/退出）：后续文件都会同样失败，按取消中止整次运行，路径保留待下次索引
+                throw new OperationCanceledException(ex.Message, ex);
+            }
             catch (Exception ex)
             {
                 AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist index for '{filePath}': {ex.Message}");

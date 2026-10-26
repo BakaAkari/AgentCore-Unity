@@ -70,6 +70,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         static BackgroundIndexService()
         {
+            // 批处理模式（命令行测试、CI 构建）不做后台自动索引：进程随时退出，只会留下被中断的全量；手动 index_full 等不受影响
+            if (Application.isBatchMode) return;
             IndexingDirtyTracker.DirtyChanged += OnDirtyChanged;
             AssemblyReloadEvents.beforeAssemblyReload += CancelCurrentRun;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
