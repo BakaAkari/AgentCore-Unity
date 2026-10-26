@@ -34,7 +34,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
     /// 内部用 <see cref="_gate"/> 保护内存结构，长时间扫描在锁外进行。
     /// </para>
     /// </summary>
-    public sealed class JsonlIndexStore : IIndexStore, IIndexHealth, IScopedIndexStore, IPagedSymbolSearch, IAtomicFileIndexStore
+    public sealed class JsonlIndexStore : IIndexStore, IIndexHealth, IScopedIndexStore, IPagedSymbolSearch, IAtomicFileIndexStore, ISymbolLookup
     {
         // ── 常量 ────────────────────────────────────────────────────────────────
 
@@ -724,9 +724,29 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
 
             int limit = Math.Min(Math.Max(1, query.Limit), 200);
+            // 正则模式的查询串不是字面量，不参与匹配质量排序
+            var rankText = query.Regex ? null : query.Query;
             var page = ScanSymbols(candidates, s => PassesFilters(s, query, enabledRootIds) && (nameMatch == null || nameMatch(s)),
-                limit, ordered: true, ct);
+                limit, rankText, ct);
             return Task.FromResult(page);
+        }
+
+        /// <inheritdoc/>
+        public Task<SymbolInfo> GetSymbolByIdAsync(int workspaceId, int symbolId, CancellationToken ct = default)
+        {
+            EnsureLoaded();
+            lock (_gate)
+            {
+                foreach (var list in _symbolsByFile.Values)
+                {
+                    foreach (var s in list)
+                    {
+                        if (s.Id == symbolId && s.WorkspaceId == workspaceId)
+                            return Task.FromResult(s);
+                    }
+                }
+            }
+            return Task.FromResult<SymbolInfo>(null);
         }
 
         /// <inheritdoc/>
@@ -934,16 +954,20 @@ namespace AgentCore.Editor.Components.Indexing.Core
             if (string.IsNullOrWhiteSpace(text))
                 return Task.FromResult(new SymbolSearchPage());
 
+            // 与 SearchSymbolsPageAsync 一致：只返回已启用 Root 的符号，并按匹配质量稳定排序
+            HashSet<int> enabledRootIds;
             List<SymbolInfo> candidates;
             lock (_gate)
             {
+                enabledRootIds = new HashSet<int>(
+                    _roots.Values.Where(r => r.WorkspaceId == workspaceId && r.IsEnabled).Select(r => r.Id));
                 candidates = SnapshotSymbolsLocked(workspaceId);
             }
 
-            var page = ScanSymbols(candidates, s =>
-                    Contains(s.Name, text) || Contains(s.FullName, text) ||
-                    Contains(s.Namespace, text) || Contains(s.Signature, text),
-                Math.Max(1, maxResults), ordered: false, ct);
+            var page = ScanSymbols(candidates, s => enabledRootIds.Contains(s.RootId) &&
+                    (Contains(s.Name, text) || Contains(s.FullName, text) ||
+                     Contains(s.Namespace, text) || Contains(s.Signature, text)),
+                Math.Max(1, maxResults), text, ct);
             return Task.FromResult(page);
         }
 
@@ -1317,9 +1341,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <summary>
         /// 在锁外扫描候选符号：逐条检查取消，超过整体时间预算时停止并标记 timeout。
         /// 正则超时（<see cref="RegexMatchTimeoutException"/>）直接向上抛出。
+        /// 结果始终稳定排序：匹配质量（<paramref name="rankText"/> 为 null 时跳过）→ Scope → 名称 → 全名 → 文件 → 行号。
         /// </summary>
         private static SymbolSearchPage ScanSymbols(
-            List<SymbolInfo> candidates, Func<SymbolInfo, bool> predicate, int limit, bool ordered, CancellationToken ct)
+            List<SymbolInfo> candidates, Func<SymbolInfo, bool> predicate, int limit, string rankText, CancellationToken ct)
         {
             var sw = Stopwatch.StartNew();
             var matched = new List<SymbolInfo>();
@@ -1342,12 +1367,14 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     matched.Add(s);
             }
 
-            IEnumerable<SymbolInfo> result = matched;
-            if (ordered)
-            {
-                // 排序：当前 Scope > Shared > Project > Tools > Engine > Plugin
-                result = matched.OrderBy(s => GetScopePriority(s.ScopeType)).ThenBy(s => s.Name, StringComparer.Ordinal);
-            }
+            // 排序：匹配质量（Name 精确 > Name 前缀 > Name 包含 > 仅 FullName/其他字段命中）> Scope 优先级 > 名称
+            var result = matched
+                .OrderBy(s => GetMatchRank(s, rankText))
+                .ThenBy(s => GetScopePriority(s.ScopeType))
+                .ThenBy(s => s.Name, StringComparer.Ordinal)
+                .ThenBy(s => s.FullName, StringComparer.Ordinal)
+                .ThenBy(s => s.FilePath, StringComparer.Ordinal)
+                .ThenBy(s => s.LineNumber);
 
             var page = new SymbolSearchPage
             {
@@ -1370,6 +1397,20 @@ namespace AgentCore.Editor.Components.Indexing.Core
             return page;
         }
 
+        /// <summary>
+        /// 匹配质量分级（越小越靠前）：0 Name 或 FullName 精确、1 Name 前缀、2 Name 包含、3 其余（仅 FullName / 签名等命中）。
+        /// </summary>
+        internal static int GetMatchRank(SymbolInfo s, string text)
+        {
+            if (string.IsNullOrEmpty(text)) return 0;
+            var name = s.Name ?? string.Empty;
+            if (string.Equals(name, text, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(s.FullName, text, StringComparison.OrdinalIgnoreCase)) return 0;
+            if (name.StartsWith(text, StringComparison.OrdinalIgnoreCase)) return 1;
+            if (name.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0) return 2;
+            return 3;
+        }
+
         private static Func<SymbolInfo, bool> BuildNameMatcher(SearchQuery query)
         {
             if (string.IsNullOrEmpty(query.Query))
@@ -1385,7 +1426,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
             if (query.Fuzzy)
                 return s => Contains(s.Name, text) || Contains(s.FullName, text);
 
-            return s => string.Equals(s.Name, text, StringComparison.OrdinalIgnoreCase);
+            // 非模糊：Name 或 FullName 精确匹配（不区分大小写），full_name 查询才能命中
+            return s => string.Equals(s.Name, text, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.FullName, text, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool PassesFilters(SymbolInfo s, SearchQuery query, HashSet<int> enabledRootIds)
