@@ -164,7 +164,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <summary>
         /// 共享存储句柄：写操作排入单写线程，读操作直通后端；Dispose 为空操作。
         /// </summary>
-        private sealed class SerializedIndexStore : IIndexStore, IIndexHealth, IScopedIndexStore, IPagedSymbolSearch
+        private sealed class SerializedIndexStore : IIndexStore, IIndexHealth, IScopedIndexStore, IPagedSymbolSearch, IAtomicFileIndexStore
         {
             private IIndexStore _inner;
             private IndexWriteQueue _writer;
@@ -271,6 +271,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     }
                     return files.Count;
                 }, ct);
+            }
+
+            public Task<int> ReplaceFileIndexAsync(int workspaceId, int rootId, IndexedFile file, IReadOnlyList<SymbolInfo> symbols, CancellationToken ct = default)
+            {
+                var inner = Inner;
+                if (inner is IAtomicFileIndexStore atomic)
+                    return Writer.EnqueueAsync(() => atomic.ReplaceFileIndexAsync(workspaceId, rootId, file, symbols, ct), ct);
+
+                // 后端不支持一次提交：在同一个写任务里按安全顺序降级，不与其他写交错
+                return Writer.EnqueueAsync(() => IndexFileReplace.FallbackAsync(inner, workspaceId, rootId, file, symbols, ct), ct);
             }
 
             public Task AcknowledgeRebuildAsync(CancellationToken ct = default)

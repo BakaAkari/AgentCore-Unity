@@ -182,6 +182,60 @@ namespace AgentCore.Editor.Components.Indexing.Core
     }
 
     /// <summary>
+    /// 可选能力：原子替换单个文件的索引（文件记录 + 符号一次提交）。
+    /// 未实现该接口的后端由 <see cref="IndexFileReplace"/> 按“待定记录 → 符号 → 最终记录”的顺序降级写入。
+    /// </summary>
+    public interface IAtomicFileIndexStore
+    {
+        /// <summary>
+        /// 用新的文件记录与符号整体替换该路径的旧记录与旧符号（旧依赖由调用方另行处理），返回文件 Id。
+        /// 符号的 Id / FileId / WorkspaceId / RootId 由存储回写。
+        /// </summary>
+        Task<int> ReplaceFileIndexAsync(int workspaceId, int rootId, IndexedFile file, IReadOnlyList<SymbolInfo> symbols, CancellationToken ct = default);
+    }
+
+    /// <summary>
+    /// 单文件索引替换：后端支持 <see cref="IAtomicFileIndexStore"/> 时一次提交，否则按安全顺序降级。
+    /// </summary>
+    public static class IndexFileReplace
+    {
+        /// <summary>替换单个文件的文件记录与符号，返回文件 Id。</summary>
+        public static Task<int> ReplaceAsync(IIndexStore store, int workspaceId, int rootId, IndexedFile file, IReadOnlyList<SymbolInfo> symbols, CancellationToken ct = default)
+        {
+            if (store is IAtomicFileIndexStore atomic)
+                return atomic.ReplaceFileIndexAsync(workspaceId, rootId, file, symbols, ct);
+            return FallbackAsync(store, workspaceId, rootId, file, symbols, ct);
+        }
+
+        /// <summary>
+        /// 降级顺序：先写 LastModified=0 的待定记录（中途失败时增量核对会把该文件视为已变更而重试），
+        /// 再替换符号，最后写入真实文件记录。符号写入失败直接抛出，由调用方计为该文件失败。
+        /// </summary>
+        public static async Task<int> FallbackAsync(IIndexStore store, int workspaceId, int rootId, IndexedFile file, IReadOnlyList<SymbolInfo> symbols, CancellationToken ct = default)
+        {
+            var lastModified = file.LastModified;
+            file.LastModified = 0;
+            var fileId = await store.UpsertFileAsync(workspaceId, rootId, file, ct).ConfigureAwait(false);
+            file.Id = fileId;
+
+            await store.DeleteSymbolsByFileAsync(fileId, ct).ConfigureAwait(false);
+            if (symbols != null && symbols.Count > 0)
+            {
+                foreach (var sym in symbols)
+                {
+                    sym.FileId = fileId;
+                    sym.WorkspaceId = workspaceId;
+                    sym.RootId = rootId;
+                }
+                await store.BulkInsertSymbolsAsync(symbols, ct).ConfigureAwait(false);
+            }
+
+            file.LastModified = lastModified;
+            return await store.UpsertFileAsync(workspaceId, rootId, file, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// 可选能力：返回带总数与截断信息的符号搜索结果。
     /// </summary>
     public interface IPagedSymbolSearch

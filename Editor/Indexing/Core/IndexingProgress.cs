@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
@@ -31,6 +32,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         /// <summary>已跳过的文件数（超大文件、排除规则等）。</summary>
         public int SkippedFiles { get; set; }
+
+        /// <summary>
+        /// 读取 / 提取 / 写入失败、旧索引被保留的文件路径（针对性增量填写，调用方据此把这些路径留在脏队列重试）。
+        /// </summary>
+        public IReadOnlyList<string> FailedPaths { get; set; }
 
         /// <summary>进度百分比（0-100），TotalFiles=0 时为 -1（不确定）。</summary>
         public int ProgressPercent => TotalFiles > 0
@@ -83,6 +89,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 ExtractedSymbols = current.ExtractedSymbols,
                 ErrorFiles = current.ErrorFiles,
                 SkippedFiles = current.SkippedFiles,
+                FailedPaths = current.FailedPaths,
                 IsCompleted = true,
                 IsSuccess = true,
                 StartedAt = current.StartedAt,
@@ -104,6 +111,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 ExtractedSymbols = current.ExtractedSymbols,
                 ErrorFiles = current.ErrorFiles,
                 SkippedFiles = current.SkippedFiles,
+                FailedPaths = current.FailedPaths,
                 IsCompleted = true,
                 IsSuccess = false,
                 ErrorMessage = errorMessage,

@@ -34,7 +34,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
     /// 内部用 <see cref="_gate"/> 保护内存结构，长时间扫描在锁外进行。
     /// </para>
     /// </summary>
-    public sealed class JsonlIndexStore : IIndexStore, IIndexHealth, IScopedIndexStore, IPagedSymbolSearch
+    public sealed class JsonlIndexStore : IIndexStore, IIndexHealth, IScopedIndexStore, IPagedSymbolSearch, IAtomicFileIndexStore
     {
         // ── 常量 ────────────────────────────────────────────────────────────────
 
@@ -70,6 +70,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private const string OpClearWorkspace = "clearws";
         private const string OpClearRoot = "clearroot";
         private const string OpMeta = "meta";
+        private const string OpReplaceFile = "replfile";
 
         // ── 字段 ────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private long _opLogBytes;
         private long _baseBytes;
         private int _opCount;
+        private long _compactRetryAtBytes; // 整理失败后推迟到操作日志再增长一段再重试
 
         // 健康状态
         private volatile bool _loaded;
@@ -324,6 +326,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 case OpMeta:
                     ApplyMetaLocked((string)d["wid"], (string)d["k"], (string)d["v"]);
                     break;
+                case OpReplaceFile:
+                    ApplyReplaceFileLocked(d["file"]?.ToObject<IndexedFile>(), d["syms"]?.ToObject<List<SymbolInfo>>());
+                    break;
                 default:
                     throw new InvalidDataException($"unknown op '{op}'");
             }
@@ -382,13 +387,38 @@ namespace AgentCore.Editor.Components.Indexing.Core
             lock (_gate)
             {
                 ThrowIfDisposedLocked();
-                var existing = _workspaces.Values.FirstOrDefault(w => w.Fingerprint == workspace.Fingerprint);
+                var existing = FindWorkspaceLocked(workspace.Fingerprint, workspace.WorkspaceRoot);
                 if (existing != null)
                 {
-                    existing.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                    existing.Revision = workspace.Revision;
-                    existing.BranchId = workspace.BranchId;
-                    WriteOpLocked(OpWorkspace, existing, () => ApplyWorkspaceLocked(existing));
+                    // 身份只看规范化后的工作区根路径；SVN URL / 分支 / 修订号只是属性，变化时原地更新（svn switch 不产生新工作区）。
+                    // 旧格式（指纹含 VCS 信息）的记录在这里迁移到新指纹。没有变化时不写操作日志。
+                    var changed = existing.Fingerprint != workspace.Fingerprint
+                                  || existing.WorkspaceRoot != workspace.WorkspaceRoot
+                                  || existing.UnityRoot != workspace.UnityRoot
+                                  || existing.UnityRootRelativePath != workspace.UnityRootRelativePath
+                                  || existing.VcsType != workspace.VcsType
+                                  || existing.VcsRoot != workspace.VcsRoot
+                                  || existing.SvnUrl != workspace.SvnUrl
+                                  || existing.RepositoryRoot != workspace.RepositoryRoot
+                                  || existing.Revision != workspace.Revision
+                                  || existing.BranchId != workspace.BranchId;
+                    if (changed)
+                    {
+                        existing.Fingerprint = workspace.Fingerprint;
+                        existing.WorkspaceRoot = workspace.WorkspaceRoot;
+                        existing.UnityRoot = workspace.UnityRoot;
+                        existing.UnityRootRelativePath = workspace.UnityRootRelativePath;
+                        existing.VcsType = workspace.VcsType;
+                        existing.VcsRoot = workspace.VcsRoot;
+                        existing.SvnUrl = workspace.SvnUrl;
+                        existing.RepositoryRoot = workspace.RepositoryRoot;
+                        existing.Revision = workspace.Revision;
+                        existing.BranchId = workspace.BranchId;
+                        existing.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        WriteOpLocked(OpWorkspace, existing, () => ApplyWorkspaceLocked(existing));
+                    }
+
+                    ClearDuplicateWorkspacesLocked(existing);
                     return Task.FromResult(existing.Id);
                 }
 
@@ -404,7 +434,50 @@ namespace AgentCore.Editor.Components.Indexing.Core
             EnsureLoaded();
             lock (_gate)
             {
-                return Task.FromResult(_workspaces.Values.FirstOrDefault(w => w.Fingerprint == fingerprint));
+                var exact = _workspaces.Values.FirstOrDefault(w => w.Fingerprint == fingerprint);
+                if (exact != null || string.IsNullOrEmpty(fingerprint))
+                    return Task.FromResult(exact);
+
+                // 旧格式记录尚未被 Upsert 迁移：按其根路径重新计算的指纹匹配
+                return Task.FromResult(PickPrimaryWorkspaceLocked(_workspaces.Values.Where(w =>
+                    IndexWorkspaceResolver.ComputeWorkspaceFingerprint(w.WorkspaceRoot) == fingerprint)));
+            }
+        }
+
+        private IndexWorkspace FindWorkspaceLocked(string fingerprint, string workspaceRoot)
+        {
+            var exact = _workspaces.Values.FirstOrDefault(w => w.Fingerprint == fingerprint);
+            if (exact != null || string.IsNullOrEmpty(workspaceRoot))
+                return exact;
+
+            var root = IndexWorkspaceResolver.NormalizeWorkspaceRoot(workspaceRoot);
+            return PickPrimaryWorkspaceLocked(_workspaces.Values.Where(w =>
+                IndexWorkspaceResolver.NormalizeWorkspaceRoot(w.WorkspaceRoot) == root));
+        }
+
+        /// <summary>同一根路径有多条旧记录时（旧指纹随 SVN URL / 分支变化）：优先有完整全量索引的，其次最近更新的。</summary>
+        private IndexWorkspace PickPrimaryWorkspaceLocked(IEnumerable<IndexWorkspace> candidates)
+        {
+            return candidates
+                .OrderByDescending(w => !string.IsNullOrEmpty(GetMetadataLocked(w.Id, CodebaseIndexer.MetaKeyLastFullIndex)))
+                .ThenByDescending(w => w.UpdatedAt)
+                .ThenByDescending(w => w.Id)
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// 清掉与主记录同根路径的旧工作区留下的文件 / 符号（旧格式按 VCS 信息分出的副本），避免数据持续累积。
+        /// 记录本身保留（没有删除工作区的操作），清空后不再重复写日志。
+        /// </summary>
+        private void ClearDuplicateWorkspacesLocked(IndexWorkspace primary)
+        {
+            var root = IndexWorkspaceResolver.NormalizeWorkspaceRoot(primary.WorkspaceRoot);
+            foreach (var dup in _workspaces.Values.Where(w => w.Id != primary.Id
+                                                              && IndexWorkspaceResolver.NormalizeWorkspaceRoot(w.WorkspaceRoot) == root).ToList())
+            {
+                var wid = dup.Id;
+                if (_files.Values.Any(f => f.WorkspaceId == wid))
+                    WriteOpLocked(OpClearWorkspace, new { wid }, () => ApplyClearWorkspaceLocked(wid));
             }
         }
 
@@ -424,6 +497,18 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 if (existing != null)
                 {
+                    // 没有变化时不写操作日志（后台服务每轮都会 Upsert 全部 Root）
+                    if (existing.DisplayName == root.DisplayName
+                        && existing.ScopeType == root.ScopeType
+                        && existing.ScopeName == root.ScopeName
+                        && existing.Role == root.Role
+                        && existing.ReadOnly == root.ReadOnly
+                        && existing.IsEnabled == root.IsEnabled
+                        && SamePatterns(existing.IncludePatterns, root.IncludePatterns)
+                        && SamePatterns(existing.ExcludePatterns, root.ExcludePatterns)
+                        && existing.IsDefaultSearchScope == root.IsDefaultSearchScope)
+                        return Task.FromResult(existing.Id);
+
                     existing.DisplayName = root.DisplayName;
                     existing.ScopeType = root.ScopeType;
                     existing.ScopeName = root.ScopeName;
@@ -441,6 +526,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 WriteOpLocked(OpRoot, root, () => ApplyRootLocked(root));
                 return Task.FromResult(root.Id);
             }
+        }
+
+        private static bool SamePatterns(List<string> a, List<string> b)
+        {
+            if (a == null || b == null) return a == b;
+            return a.SequenceEqual(b, StringComparer.Ordinal);
         }
 
         /// <inheritdoc/>
@@ -484,6 +575,37 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 file.Id = _maxFileId + 1;
                 WriteOpLocked(OpFile, file, () => ApplyFileLocked(file));
+                return Task.FromResult(file.Id);
+            }
+        }
+
+        /// <inheritdoc/>
+        public Task<int> ReplaceFileIndexAsync(int workspaceId, int rootId, IndexedFile file, IReadOnlyList<SymbolInfo> symbols, CancellationToken ct = default)
+        {
+            if (file == null) throw new ArgumentNullException(nameof(file));
+            EnsureLoaded();
+            var list = symbols?.Where(s => s != null).ToList() ?? new List<SymbolInfo>();
+
+            lock (_gate)
+            {
+                ThrowIfDisposedLocked();
+                file.WorkspaceId = workspaceId;
+                file.RootId = rootId;
+                file.Id = _fileIdByKey.TryGetValue(FileKey(workspaceId, file.FilePath), out var existingId) && _files.ContainsKey(existingId)
+                    ? existingId
+                    : _maxFileId + 1;
+
+                var nextId = _maxSymbolId;
+                foreach (var sym in list)
+                {
+                    sym.Id = ++nextId;
+                    sym.FileId = file.Id;
+                    sym.WorkspaceId = workspaceId;
+                    sym.RootId = rootId;
+                }
+
+                // 文件记录与符号同一行提交：要么整体生效，要么（追加失败时）旧记录与旧符号原样保留
+                WriteOpLocked(OpReplaceFile, new { file, syms = list }, () => ApplyReplaceFileLocked(file, list));
                 return Task.FromResult(file.Id);
             }
         }
@@ -917,8 +1039,20 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         private void MaybeCompactLocked()
         {
-            if (_opLogBytes >= Math.Max(_compactMinBytes, _baseBytes))
+            if (_opLogBytes < Math.Max(Math.Max(_compactMinBytes, _baseBytes), _compactRetryAtBytes))
+                return;
+
+            // 走到这里时本次写入已追加到操作日志并生效：整理失败只记录警告，不能让调用方误以为写入失败
+            try
+            {
                 CompactLocked();
+                _compactRetryAtBytes = 0;
+            }
+            catch (Exception ex)
+            {
+                _compactRetryAtBytes = _opLogBytes + Math.Max(_compactMinBytes, 64 * 1024);
+                AgentCore.Editor.Utils.AgentCoreLog.Warning($"[JsonlIndexStore] Compaction failed, will retry later: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -1080,6 +1214,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
             ApplyDeleteSymbolsLocked(fileId);
         }
 
+        private void ApplyReplaceFileLocked(IndexedFile file, List<SymbolInfo> symbols)
+        {
+            if (file == null) throw new InvalidDataException("null file");
+            ApplyDeleteSymbolsLocked(file.Id);
+            ApplyFileLocked(file);
+            if (symbols == null) return;
+            foreach (var sym in symbols)
+                ApplySymbolLocked(sym);
+        }
+
         private void ApplySymbolLocked(SymbolInfo symbol)
         {
             if (!_symbolsByFile.TryGetValue(symbol.FileId, out var list))
@@ -1106,6 +1250,14 @@ namespace AgentCore.Editor.Components.Indexing.Core
             foreach (var id in _files.Values.Where(f => f.WorkspaceId == workspaceId).Select(f => f.Id).ToList())
                 ApplyDeleteFileLocked(id);
             RemoveSymbolsWhereLocked(s => s.WorkspaceId == workspaceId);
+
+            // 索引已清空：Root 状态（root:{id}:*）与全量完成标记一并失效，增量入口据此按 NO_FULL_INDEX 处理
+            if (_metadata.TryGetValue(workspaceId.ToString(CultureInfo.InvariantCulture), out var meta))
+            {
+                foreach (var key in meta.Keys.Where(k => k.StartsWith("root:", StringComparison.Ordinal)
+                                                         || k == CodebaseIndexer.MetaKeyLastFullIndex).ToList())
+                    meta.Remove(key);
+            }
         }
 
         private void ApplyClearRootLocked(int workspaceId, int rootId)

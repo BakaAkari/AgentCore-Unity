@@ -13,11 +13,31 @@ namespace AgentCore.Editor.Components.Indexing.Core
 {
     /// <summary>
     /// Coordinates background incremental indexing from accumulated dirty paths.
+    /// <para>
+    /// Besides dirty paths it also runs a whole-project reconcile (<see cref="CodebaseIndexer.RunIncrementalIndexAsync"/>,
+    /// mtime comparison that falls back to a full rebuild when no complete full index exists): once at a low
+    /// priority after editor start / domain reload, and as soon as possible when a targeted run reports
+    /// NO_FULL_INDEX. Every kind of run goes through the same gates (auto-index setting, session pause,
+    /// compiling, play mode, failure / burst backoff, quiet delay).
+    /// </para>
     /// </summary>
     [InitializeOnLoad]
     public static class BackgroundIndexService
     {
         private static readonly int[] BackoffSeconds = { 5, 30, 120 };
+
+        // After MaxConsecutiveFailures the service backs off for this long instead of stopping for the session.
+        private const int DisabledRetrySeconds = 600;
+
+        // A path that fails to index this many times in a row is dropped from the dirty queue (the next edit re-adds it).
+        private const int MaxPathAttempts = 3;
+
+        // Low-priority reconcile after editor start / domain reload waits at least this long.
+        private const double StartupReconcileDelaySeconds = 30;
+
+        // Running progress is published from the main thread at most this often.
+        private const double ProgressPublishIntervalSeconds = 0.5;
+
         private static CancellationTokenSource _cts;
         private static bool _running;
         private static double _nextRunAt;
@@ -30,16 +50,32 @@ namespace AgentCore.Editor.Components.Indexing.Core
         // A damaged store (IIndexHealth.RequiresRebuild) triggers at most one automatic full rebuild per session.
         private static bool _rebuildAttempted;
 
+        // Whole-project reconcile requests: missing full index (high priority) / startup check (low priority).
+        private static bool _fullIndexMissing;
+        private static bool _startupReconcilePending = true;
+        private static double _startupReconcileAt;
+
+        // Consecutive indexing failures per path (in-memory only).
+        private static readonly Dictionary<string, int> _pathFailures = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        // Progress of the current run, written by the indexer on a pool thread and published from OnEditorUpdate.
+        private static volatile IndexingProgress _runProgress;
+        private static int _runDirtyCount;
+        private static int _runTotalHint;
+        private static double _lastProgressPublishAt;
+
         // v1.4.0 — burst backoff (set by IndexingDirtyTracker when a large batch arrives)
         private static double _burstBackoffUntil;
         private static string _burstReason;
 
         static BackgroundIndexService()
         {
-            IndexingDirtyTracker.DirtyChanged += RequestRun;
+            IndexingDirtyTracker.DirtyChanged += OnDirtyChanged;
             AssemblyReloadEvents.beforeAssemblyReload += CancelCurrentRun;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             EditorApplication.update += OnEditorUpdate;
-            RequestRun();
+            _startupReconcileAt = EditorApplication.timeSinceStartup + StartupReconcileDelaySeconds;
+            OnDirtyChanged();
         }
 
         /// <summary>
@@ -64,25 +100,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// Requests a background indexing pass after the configured quiet delay.
+        /// Requests a background indexing pass after the configured quiet delay. An explicit request also
+        /// clears the failure counter and backoff, so a service that backed off after repeated failures
+        /// tries again right away.
         /// </summary>
         public static void RequestRun()
         {
-            var settings = GetSettings();
-            if (!settings.AutoIndexEnabled || _sessionPaused)
-            {
-                PublishDisabled(IndexingDirtyTracker.Count, _sessionPaused ? "Auto-index paused for this editor session." : null);
-                return;
-            }
-
-            if (!IndexingDirtyTracker.HasDirtyPaths)
-            {
-                PublishIdle();
-                return;
-            }
-
-            _nextRunAt = EditorApplication.timeSinceStartup + Math.Max(0, settings.QuietDelayMs) / 1000.0;
-            PublishPending(IndexingDirtyTracker.Count);
+            _consecutiveFailures = 0;
+            _backoffUntil = 0;
+            _pathFailures.Clear();
+            OnDirtyChanged();
         }
 
         /// <summary>
@@ -128,9 +155,63 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
         }
 
+        private static bool HasPendingWork =>
+            IndexingDirtyTracker.HasDirtyPaths || _fullIndexMissing || _startupReconcilePending;
+
+        /// <summary>Dirty set changed: schedule after the quiet delay (does not reset failure backoff).</summary>
+        private static void OnDirtyChanged()
+        {
+            var settings = GetSettings();
+            if (!settings.AutoIndexEnabled || _sessionPaused)
+            {
+                PublishDisabled(IndexingDirtyTracker.Count, _sessionPaused ? "Auto-index paused for this editor session." : null);
+                return;
+            }
+
+            if (_running)
+            {
+                return;
+            }
+
+            if (!IndexingDirtyTracker.HasDirtyPaths)
+            {
+                if (!HasPendingWork)
+                {
+                    PublishIdle();
+                }
+
+                return;
+            }
+
+            _nextRunAt = Math.Max(_nextRunAt, EditorApplication.timeSinceStartup + Math.Max(0, settings.QuietDelayMs) / 1000.0);
+            PublishPending(IndexingDirtyTracker.Count);
+        }
+
+        private static void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            // Entering play mode: stop the current batch; cancelled paths stay dirty and run after play mode.
+            if (state == PlayModeStateChange.ExitingEditMode)
+            {
+                CancelCurrentRun();
+            }
+        }
+
         private static void OnEditorUpdate()
         {
-            if (_running || !IndexingDirtyTracker.HasDirtyPaths)
+            if (_running)
+            {
+                PublishRunProgress();
+                return;
+            }
+
+            if (!HasPendingWork)
+            {
+                return;
+            }
+
+            // Only the startup reconcile is pending: wait quietly until its delay has passed.
+            if (!IndexingDirtyTracker.HasDirtyPaths && !_fullIndexMissing
+                && EditorApplication.timeSinceStartup < _startupReconcileAt)
             {
                 return;
             }
@@ -160,16 +241,18 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 return;
             }
 
-            if (_consecutiveFailures >= Math.Max(1, settings.MaxConsecutiveFailures))
-            {
-                PublishDisabled(IndexingDirtyTracker.Count, _lastError);
-                return;
-            }
-
             var now = EditorApplication.timeSinceStartup;
             if (_backoffUntil > now)
             {
-                PublishFailed(IndexingDirtyTracker.Count, _lastError);
+                if (_consecutiveFailures >= Math.Max(1, settings.MaxConsecutiveFailures))
+                {
+                    PublishDisabled(IndexingDirtyTracker.Count, _lastError);
+                }
+                else
+                {
+                    PublishFailed(IndexingDirtyTracker.Count, _lastError);
+                }
+
                 return;
             }
 
@@ -187,7 +270,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 _burstReason = null;
             }
 
-            if (_nextRunAt <= 0 || now < _nextRunAt)
+            if (now < _nextRunAt)
             {
                 PublishPending(IndexingDirtyTracker.Count);
                 return;
@@ -209,63 +292,31 @@ namespace AgentCore.Editor.Components.Indexing.Core
             var ct = _cts.Token;
             var snapshot = IndexingDirtyTracker.Snapshot(settings.MaxBatchFiles);
 
-            if (snapshot.Count == 0)
+            // Dirty paths first; a missing full index outranks them (targeted runs cannot proceed without it);
+            // the startup reconcile only runs once the dirty queue is empty.
+            var reconcile = _fullIndexMissing || (snapshot.Count == 0 && _startupReconcilePending);
+            if (!reconcile && snapshot.Count == 0)
             {
                 _running = false;
                 PublishIdle();
                 return;
             }
 
+            var settled = false;
+            IndexRootStateStore stateStore = null;
+            var priorStates = new Dictionary<int, IndexRootState>();
+
             try
             {
-                PublishRunning(snapshot.Count, 0, snapshot.Count, null);
+                _runProgress = null;
+                _runDirtyCount = snapshot.Count;
+                _runTotalHint = snapshot.Count;
+                PublishRunning(snapshot.Count, 0, Math.Max(1, snapshot.Count), null);
                 using (var store = IndexStoreFactory.CreateFromCurrent())
                 {
                     if (store == null)
                     {
                         throw new InvalidOperationException("Index store is not available for current workspace.");
-                    }
-
-                    // v1.4.0 — resolve workspace / roots up-front so we can:
-                    //   1. filter dirty paths by IndexRootPriority (skip OnDemand)
-                    //   2. persist per-root state after the run completes
-                    var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-                    var workspaceId = await store.UpsertWorkspaceAsync(workspace, ct);
-                    workspace = CloneWorkspaceWithId(workspace, workspaceId);
-                    var rootResolver = new IndexRootResolver();
-                    var allRoots = rootResolver.Resolve(workspace);
-                    var enabledRoots = allRoots.Where(r => r.IsEnabled).ToList();
-                    foreach (var r in enabledRoots)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        r.Id = await store.UpsertRootAsync(workspaceId, r, ct);
-                        r.WorkspaceId = workspaceId;
-                    }
-
-                    var (filteredChanged, filteredDeleted, skippedOnDemand, affectedRoots) =
-                        FilterByPriority(snapshot, enabledRoots);
-
-                    if (settings.VerboseLogging && skippedOnDemand > 0)
-                    {
-                        AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Skipped {skippedOnDemand} dirty paths belonging to OnDemand roots.");
-                    }
-
-                    if (filteredChanged.Count == 0 && filteredDeleted.Count == 0)
-                    {
-                        // All dirty paths belonged to OnDemand roots — drop them from the queue
-                        // so we don't spin. LLM/user can trigger index_scope manually.
-                        IndexingDirtyTracker.MarkProcessed(snapshot);
-                        _running = false;
-                        _consecutiveFailures = 0;
-                        _lastError = null;
-                        PublishIdle();
-                        return;
-                    }
-
-                    var stateStore = new IndexRootStateStore(store, workspaceId);
-                    foreach (var rootId in affectedRoots)
-                    {
-                        await stateStore.SetStateAsync(rootId, IndexRootState.Indexing, ct);
                     }
 
                     var maxFileSizeBytes = Math.Max(1, settings.MaxFileSizeKB) * 1024L;
@@ -277,52 +328,105 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     {
                         _rebuildAttempted = true;
                         AgentCoreLog.Warning($"[AgentCore] {health.HealthMessage ?? "Index store is damaged."} Running a full rebuild.");
-                        var rebuild = await indexer.RunFullIndexAsync(
-                            progress => PublishRunning(
-                                snapshot.Count,
-                                Math.Max(0, progress.ProcessedFiles),
-                                Math.Max(1, progress.TotalFiles),
-                                progress.CurrentFile),
-                            ct);
+                        var rebuild = await indexer.RunFullIndexAsync(OnRunProgress, ct);
                         ct.ThrowIfCancellationRequested();
                         if (!rebuild.IsSuccess)
                         {
                             throw new InvalidOperationException(rebuild.ErrorMessage ?? "Full index rebuild failed.");
                         }
 
-                        foreach (var rootId in affectedRoots)
+                        // The full rebuild already covered every dirty path in this snapshot
+                        // and marked every enabled root Ready / Failed.
+                        _fullIndexMissing = false;
+                        _startupReconcilePending = false;
+                    }
+                    else if (reconcile)
+                    {
+                        // Whole-project mtime reconcile; falls back to a full rebuild when no complete full index exists.
+                        // CodebaseIndexer writes the per-root states itself.
+                        if (settings.VerboseLogging)
                         {
-                            try { await stateStore.RefreshAndMarkReadyAsync(rootId, ct); }
-                            catch (Exception ex)
-                            {
-                                AgentCoreLog.Warning($"[AgentCore] Failed to refresh state for root {rootId}: {ex.Message}");
-                            }
+                            AgentCoreLog.Info(_fullIndexMissing
+                                ? "[AgentCore] No complete full index: running a background full index."
+                                : "[AgentCore] Running the startup index reconcile.");
                         }
 
-                        // The full rebuild already covered every dirty path in this snapshot.
+                        var result = await indexer.RunIncrementalIndexAsync(OnRunProgress, ct);
+                        ct.ThrowIfCancellationRequested();
+                        if (!result.IsSuccess)
+                        {
+                            throw new InvalidOperationException(result.ErrorMessage ?? "Background index reconcile failed.");
+                        }
+
+                        // The reconcile scanned every enabled root, so it covers the dirty paths of this snapshot.
+                        _fullIndexMissing = false;
+                        _startupReconcilePending = false;
                     }
                     else
                     {
+                        // v1.4.0 — resolve workspace / roots up-front so we can:
+                        //   1. filter dirty paths by IndexRootPriority (skip OnDemand)
+                        //   2. persist per-root state after the run completes
+                        var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                        var workspaceId = await store.UpsertWorkspaceAsync(workspace, ct);
+                        workspace = CloneWorkspaceWithId(workspace, workspaceId);
+                        var rootResolver = new IndexRootResolver();
+                        var allRoots = rootResolver.Resolve(workspace);
+                        var enabledRoots = allRoots.Where(r => r.IsEnabled).ToList();
+                        foreach (var r in enabledRoots)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            r.Id = await store.UpsertRootAsync(workspaceId, r, ct);
+                            r.WorkspaceId = workspaceId;
+                        }
+
+                        var (filteredChanged, filteredDeleted, skippedOnDemand, affectedRoots) =
+                            FilterByPriority(snapshot, enabledRoots);
+
+                        if (settings.VerboseLogging && skippedOnDemand > 0)
+                        {
+                            AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Skipped {skippedOnDemand} dirty paths belonging to OnDemand roots.");
+                        }
+
+                        if (filteredChanged.Count == 0 && filteredDeleted.Count == 0)
+                        {
+                            // All dirty paths belonged to OnDemand roots — drop them from the queue
+                            // so we don't spin. LLM/user can trigger index_scope manually.
+                            IndexingDirtyTracker.MarkProcessed(snapshot);
+                            _consecutiveFailures = 0;
+                            _lastError = null;
+                            PublishIdle();
+                            return;
+                        }
+
+                        stateStore = new IndexRootStateStore(store, workspaceId);
+                        foreach (var rootId in affectedRoots)
+                        {
+                            priorStates[rootId] = (await stateStore.LoadAsync(rootId, ct)).State;
+                            await stateStore.SetStateAsync(rootId, IndexRootState.Indexing, ct);
+                        }
+
+                        _runTotalHint = filteredChanged.Count + filteredDeleted.Count;
                         var result = await indexer.RunTargetedIncrementalAsync(
                             filteredChanged,
                             filteredDeleted,
                             Math.Max(1, settings.YieldEveryNFiles),
-                            progress => PublishRunning(
-                                snapshot.Count,
-                                Math.Max(0, progress.ProcessedFiles),
-                                Math.Max(filteredChanged.Count + filteredDeleted.Count, progress.TotalFiles),
-                                progress.CurrentFile),
+                            OnRunProgress,
                             ct);
 
-                        // Cancelled (domain reload / pause): not a failure, the paths stay dirty.
+                        // Cancelled (domain reload / pause / play mode): not a failure, the paths stay dirty.
                         ct.ThrowIfCancellationRequested();
 
                         if (!result.IsSuccess)
                         {
                             if (string.Equals(result.ErrorMessage, "NO_FULL_INDEX", StringComparison.Ordinal))
                             {
-                                _lastError = "Full index is required before background incremental indexing can run.";
-                                _nextRunAt = EditorApplication.timeSinceStartup + 30;
+                                // No usable full index (never built, cleared, or an interrupted rebuild):
+                                // schedule a background full index right away instead of polling every 30s.
+                                // The roots get their previous state back in finally.
+                                _fullIndexMissing = true;
+                                _lastError = null;
+                                _nextRunAt = 0;
                                 PublishPending(IndexingDirtyTracker.Count);
                                 return;
                             }
@@ -330,22 +434,26 @@ namespace AgentCore.Editor.Components.Indexing.Core
                             // Persist failure on affected roots so LLM/user can see which roots broke
                             foreach (var rootId in affectedRoots)
                             {
-                                try { await stateStore.MarkFailedAsync(rootId, result.ErrorMessage, ct); }
+                                try { await stateStore.MarkFailedAsync(rootId, result.ErrorMessage, CancellationToken.None); }
                                 catch { /* best-effort */ }
                             }
 
+                            settled = true;
                             throw new InvalidOperationException(result.ErrorMessage ?? "Background incremental indexing failed.");
                         }
 
                         // v1.4.0 — refresh per-root counts and mark Ready
                         foreach (var rootId in affectedRoots)
                         {
-                            try { await stateStore.RefreshAndMarkReadyAsync(rootId, ct); }
+                            try { await stateStore.RefreshAndMarkReadyAsync(rootId, CancellationToken.None); }
                             catch (Exception ex)
                             {
                                 AgentCoreLog.Warning($"[AgentCore] Failed to refresh state for root {rootId}: {ex.Message}");
                             }
                         }
+
+                        settled = true;
+                        KeepFailedPathsDirty(snapshot, result.FailedPaths);
                     }
                 }
 
@@ -357,13 +465,19 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 if (settings.VerboseLogging)
                 {
-                    AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] Background indexed {snapshot.Count} files.");
+                    AgentCore.Editor.Utils.AgentCoreLog.Info(reconcile
+                        ? "[AgentCore] Background index reconcile finished."
+                        : $"[AgentCore] Background indexed {snapshot.Count} files.");
                 }
 
                 if (IndexingDirtyTracker.HasDirtyPaths)
                 {
                     _nextRunAt = EditorApplication.timeSinceStartup + Math.Max(0, settings.QuietDelayMs) / 1000.0;
                     PublishPending(IndexingDirtyTracker.Count);
+                }
+                else if (HasPendingWork)
+                {
+                    PublishPending(0);
                 }
                 else
                 {
@@ -381,8 +495,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 var maxFailures = Math.Max(1, settings.MaxConsecutiveFailures);
                 if (_consecutiveFailures >= maxFailures)
                 {
+                    // Long backoff instead of stopping for the session; RequestRun / resume clears it earlier.
+                    _backoffUntil = EditorApplication.timeSinceStartup + DisabledRetrySeconds;
                     PublishDisabled(IndexingDirtyTracker.Count, _lastError);
-                    AgentCoreLog.Error($"[AgentCore] Background indexing disabled after {_consecutiveFailures} consecutive failures: {_lastError}");
+                    AgentCoreLog.Error($"[AgentCore] Background indexing failed {_consecutiveFailures} times in a row, retrying in {DisabledRetrySeconds / 60} min: {_lastError}");
                 }
                 else
                 {
@@ -394,8 +510,79 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             finally
             {
+                // NO_FULL_INDEX / cancel / unexpected exit: give the roots their state back instead of leaving them
+                // stuck in Indexing. A root that was Ready has unprocessed dirty files now, so it becomes Stale.
+                if (!settled && stateStore != null)
+                {
+                    foreach (var kvp in priorStates)
+                    {
+                        var restore = kvp.Value == IndexRootState.Ready || kvp.Value == IndexRootState.Indexing
+                            ? IndexRootState.Stale
+                            : kvp.Value;
+                        try { await stateStore.SetStateAsync(kvp.Key, restore, CancellationToken.None); }
+                        catch (Exception ex)
+                        {
+                            AgentCoreLog.Warning($"[AgentCore] Failed to restore state for root {kvp.Key}: {ex.Message}");
+                        }
+                    }
+                }
+
+                _runProgress = null;
                 _running = false;
             }
+        }
+
+        /// <summary>
+        /// Leaves paths that failed to index in the dirty queue (their old symbols were kept) so a later run retries
+        /// them. A path that keeps failing is dropped after <see cref="MaxPathAttempts"/> attempts; the next edit re-adds it.
+        /// </summary>
+        private static void KeepFailedPathsDirty(IndexingDirtySnapshot snapshot, IReadOnlyList<string> failedPaths)
+        {
+            var failed = new HashSet<string>(failedPaths ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var path in snapshot.ChangedPaths)
+            {
+                if (!failed.Contains(path))
+                {
+                    _pathFailures.Remove(path);
+                    continue;
+                }
+
+                _pathFailures.TryGetValue(path, out var attempts);
+                attempts++;
+                if (attempts < MaxPathAttempts)
+                {
+                    _pathFailures[path] = attempts;
+                    snapshot.Versions?.Remove(path);
+                }
+                else
+                {
+                    _pathFailures.Remove(path);
+                    AgentCoreLog.Warning($"[AgentCore] Indexing '{path}' failed {attempts} times, keeping its previous index entry until it changes again.");
+                }
+            }
+        }
+
+        /// <summary>Progress callback from the indexer (pool thread): only records, OnEditorUpdate publishes.</summary>
+        private static void OnRunProgress(IndexingProgress progress)
+        {
+            _runProgress = progress;
+        }
+
+        private static void PublishRunProgress()
+        {
+            var progress = _runProgress;
+            var now = EditorApplication.timeSinceStartup;
+            if (progress == null || now - _lastProgressPublishAt < ProgressPublishIntervalSeconds)
+            {
+                return;
+            }
+
+            _lastProgressPublishAt = now;
+            PublishRunning(
+                _runDirtyCount,
+                Math.Max(0, progress.ProcessedFiles),
+                Math.Max(Math.Max(1, _runTotalHint), progress.TotalFiles),
+                progress.CurrentFile);
         }
 
         private static IndexingAutoSettings GetSettings()

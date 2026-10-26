@@ -36,6 +36,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
         // ── State ────────────────────────────────────────────────────────────────
         private bool _isIndexing;
+        private CancellationTokenSource _indexCts;
         private string _lastIndexResult;
         private IndexingStats _cachedStats;
         private bool _statsDirty = true;
@@ -49,6 +50,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
         private Button _fullIndexButton;
         private Button _incrementalButton;
         private Button _clearButton;
+        private Button _cancelIndexButton;
         private Button _refreshStatsButton;
         private Label _backgroundStatusLabel;
         private Toggle _autoIndexToggle;
@@ -73,6 +75,8 @@ namespace AgentCore.Editor.Components.Indexing.UI
         public void Dispose()
         {
             IndexingStatusBus.StatusChanged -= OnBackgroundStatusChanged;
+            try { _indexCts?.Cancel(); }
+            catch (ObjectDisposedException) { }
         }
 
         // ── Public lifecycle (called by contribution) ────────────────────────────
@@ -382,6 +386,12 @@ namespace AgentCore.Editor.Components.Indexing.UI
             _clearButton.tooltip = "Remove all stored index data for the current workspace.";
             buttonRow.Add(_clearButton);
 
+            _cancelIndexButton = new Button(OnCancelIndexClicked) { text = "Cancel" };
+            _cancelIndexButton.AddToClassList(ButtonClass);
+            _cancelIndexButton.tooltip = "Stop the running Full / Incremental index.";
+            _cancelIndexButton.SetEnabled(false);
+            buttonRow.Add(_cancelIndexButton);
+
             content.Add(buttonRow);
 
             var help = new Label(
@@ -604,6 +614,13 @@ namespace AgentCore.Editor.Components.Indexing.UI
             _incrementalButton?.SetEnabled(enabled);
             _clearButton?.SetEnabled(enabled);
             _refreshStatsButton?.SetEnabled(enabled);
+            _cancelIndexButton?.SetEnabled(!enabled && _indexCts != null);
+        }
+
+        private void OnCancelIndexClicked()
+        {
+            try { _indexCts?.Cancel(); }
+            catch (ObjectDisposedException) { }
         }
 
         private void ShowStatus(string message, bool isError)
@@ -633,6 +650,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 return;
 
             _isIndexing = true;
+            _indexCts = new CancellationTokenSource();
             SetButtonsEnabled(false);
 
             if (_fullIndexButton != null)
@@ -640,8 +658,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
             if (_incrementalButton != null)
                 _incrementalButton.text = incremental ? "Indexing…" : "Incremental";
 
-            var cts = new CancellationTokenSource();
-            _ = RunIndexInternalAsync(incremental, cts.Token);
+            _ = RunIndexInternalAsync(incremental, _indexCts.Token);
         }
 
         private async System.Threading.Tasks.Task RunIndexInternalAsync(bool incremental, CancellationToken ct)
@@ -670,7 +687,11 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 else
                     result = await indexer.RunFullIndexAsync(null, ct);
 
-                if (result.IsCompleted && result.IsSuccess)
+                if (ct.IsCancellationRequested)
+                {
+                    ShowStatus("Indexing cancelled.", false);
+                }
+                else if (result.IsCompleted && result.IsSuccess)
                 {
                     var ms = result.ElapsedSeconds * 1000.0;
                     BackgroundIndexService.RequestRun();
@@ -699,6 +720,8 @@ namespace AgentCore.Editor.Components.Indexing.UI
             finally
             {
                 _isIndexing = false;
+                _indexCts?.Dispose();
+                _indexCts = null;
                 SetButtonsEnabled(true);
                 if (_fullIndexButton != null) _fullIndexButton.text = "Full Index";
                 if (_incrementalButton != null) _incrementalButton.text = "Incremental";
