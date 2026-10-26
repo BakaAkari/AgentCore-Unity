@@ -24,6 +24,39 @@ namespace AgentCore.Editor.Components.Indexing.Core
     public static class RoslynSymbolExtractor
     {
         /// <summary>
+        /// 解析用的预处理符号：编辑器当前实际编译的 defines（UNITY_EDITOR、平台、脚本 defines 等）。
+        /// 按编辑器所见的代码提取符号，#if !UNITY_EDITOR / 其他平台分支成为禁用文本，不会取代或重复编辑器分支
+        /// （这些分支仍可经文本搜索找到）。defines 只能在主线程读取，域重载时取好供后台线程使用；取不到时至少带 UNITY_EDITOR。
+        /// </summary>
+        private static volatile CSharpParseOptions s_parseOptions = CreateParseOptions(null);
+
+        [UnityEditor.InitializeOnLoadMethod]
+        private static void CaptureEditorDefines()
+        {
+            try
+            {
+                s_parseOptions = CreateParseOptions(UnityEditor.EditorUserBuildSettings.activeScriptCompilationDefines);
+            }
+            catch (Exception)
+            {
+                // 保持默认（仅 UNITY_EDITOR）
+            }
+        }
+
+        private static CSharpParseOptions CreateParseOptions(IEnumerable<string> defines)
+        {
+            var symbols = new HashSet<string>(StringComparer.Ordinal) { "UNITY_EDITOR" };
+            if (defines != null)
+            {
+                foreach (var define in defines)
+                {
+                    if (!string.IsNullOrWhiteSpace(define)) symbols.Add(define.Trim());
+                }
+            }
+            return CSharpParseOptions.Default.WithPreprocessorSymbols(symbols);
+        }
+
+        /// <summary>
         /// 从指定文件提取所有符号�?
         /// </summary>
         /// <param name="filePath">C# 文件绝对路径�?/param>
@@ -62,7 +95,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             SyntaxTree syntaxTree;
             try
             {
-                syntaxTree = CSharpSyntaxTree.ParseText(sourceText);
+                syntaxTree = CSharpSyntaxTree.ParseText(sourceText, s_parseOptions);
             }
             catch (Exception ex)
             {

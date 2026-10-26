@@ -5,7 +5,7 @@ using AgentCore.Editor.Components.Indexing.Models;
 namespace AgentCore.Editor.Components.Indexing.Roots
 {
     /// <summary>
-    /// 提供 UnityRoot 下的标准索引根（Assets/Scripts、Assets/Plugins、Packages）。
+    /// 提供 UnityRoot 下的标准索引根（Assets、Assets/Plugins、Packages）。
     /// Priority = 10（最高优先级，最先执行）。
     /// </summary>
     public sealed class UnityRootProvider : IIndexRootProvider
@@ -24,15 +24,16 @@ namespace AgentCore.Editor.Components.Indexing.Roots
 
             var unityRoot = workspace.UnityRoot;
 
-            // Assets/Scripts — 主项目代码
-            var scriptsPath = Path.Combine(unityRoot, "Assets", "Scripts").Replace('\\', '/');
-            if (Directory.Exists(scriptsPath))
+            // Assets — 主项目代码。始终以整个 Assets 为 Root，Assets/Scripts 之外的代码（如 Assets/Art 下的脚本）同样要能搜到；
+            // Assets/Plugins 是单独的只读 Root，扫描时作为嵌套 Root 剪掉，这里也排除以防它未被解析出来
+            var assetsPath = Path.Combine(unityRoot, "Assets").Replace('\\', '/');
+            if (Directory.Exists(assetsPath))
             {
-                result.Add(new IndexRoot
+                var assetsRoot = new IndexRoot
                 {
-                    RootPath = scriptsPath,
-                    RelativeToWorkspace = MakeRelative(workspace.WorkspaceRoot, scriptsPath),
-                    DisplayName = "Assets/Scripts",
+                    RootPath = assetsPath,
+                    RelativeToWorkspace = MakeRelative(workspace.WorkspaceRoot, assetsPath),
+                    DisplayName = "Assets",
                     ScopeType = IndexScopeType.Project,
                     ScopeName = "Project",
                     Role = IndexRootRole.EditableProjectCode,
@@ -40,29 +41,9 @@ namespace AgentCore.Editor.Components.Indexing.Roots
                     IsEnabled = true,
                     IsDefaultSearchScope = true,
                     ProviderId = ProviderId
-                });
-            }
-            else
-            {
-                // 如果没有 Scripts 子目录，则索引整个 Assets（排除 Plugins）
-                var assetsPath = Path.Combine(unityRoot, "Assets").Replace('\\', '/');
-                if (Directory.Exists(assetsPath))
-                {
-                    result.Add(new IndexRoot
-                    {
-                        RootPath = assetsPath,
-                        RelativeToWorkspace = MakeRelative(workspace.WorkspaceRoot, assetsPath),
-                        DisplayName = "Assets",
-                        ScopeType = IndexScopeType.Project,
-                        ScopeName = "Project",
-                        Role = IndexRootRole.EditableProjectCode,
-                        ReadOnly = false,
-                        IsEnabled = true,
-                        IsDefaultSearchScope = true,
-                        ExcludePatterns = new List<string> { "Plugins/", "bin/", "obj/", "Library/", "Temp/", "Generated/" },
-                        ProviderId = ProviderId
-                    });
-                }
+                };
+                assetsRoot.ExcludePatterns.Add("Plugins/");
+                result.Add(assetsRoot);
             }
 
             // Assets/Plugins — 第三方插件（只读）
