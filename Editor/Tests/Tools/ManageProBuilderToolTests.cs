@@ -353,6 +353,62 @@ namespace AgentCore.Tests.Editor.Tools
         }
 
         [Test]
+        public void SetUVProjection_Channel1_IsPartialAndPointsToGenerateLightmapUVs()
+        {
+            var name = CreateCube();
+            var result = Run(new JObject { ["action"] = "set_uv_projection", ["name"] = name, ["uv_channel"] = 1 });
+
+            // UV2 照常写入，但 ProBuilder 不保存它，结果须如实标为部分完成
+            Assert.IsTrue(result.Success, result.Error ?? result.Output);
+            Assert.IsFalse(result.IsFullSuccess, result.Output);
+            StringAssert.Contains("generate_lightmap_uvs", result.Output);
+        }
+
+        [Test]
+        public void GenerateLightmapUVs_StoresUnwrapParametersAndBuildsUV2()
+        {
+            var name = CreateCube();
+            var result = Run(new JObject
+            {
+                ["action"] = "generate_lightmap_uvs",
+                ["name"] = name,
+                ["hard_angle"] = 60,
+                ["pack_margin"] = 12,
+                ["contribute_gi"] = true
+            });
+            Assert.IsTrue(result.IsFullSuccess, result.Error ?? result.Output);
+
+            var data = Json(result)["data"];
+            Assert.AreEqual(60f, data["unwrap_parameters"]["hard_angle"].Value<float>(), 1e-4f);
+            Assert.AreEqual(12f, data["unwrap_parameters"]["pack_margin"].Value<float>(), 1e-4f);
+            Assert.IsTrue(data["contribute_gi"].Value<bool>());
+
+            var go = GameObject.Find(name);
+            var mesh = go.GetComponent<MeshFilter>().sharedMesh;
+            Assert.Greater(mesh.uv2.Length, 0);
+            Assert.AreEqual(mesh.vertexCount, mesh.uv2.Length);
+            Assert.IsTrue((UnityEditor.GameObjectUtility.GetStaticEditorFlags(go) & UnityEditor.StaticEditorFlags.ContributeGI) != 0);
+        }
+
+        [Test]
+        public void GenerateLightmapUVs_LaterEditKeepsUV2_WhenAutoLightmapUVsOn()
+        {
+            var name = CreateCube();
+            var generate = Run(new JObject { ["action"] = "generate_lightmap_uvs", ["name"] = name, ["contribute_gi"] = true });
+            Assert.IsTrue(generate.IsFullSuccess, generate.Error ?? generate.Output);
+            if (Json(generate)["data"]["uv2_regenerates_after_edits"]?.Value<bool>() != true)
+                Assert.Ignore("ProBuilder's Auto Lightmap UVs preference is off; later edits are expected to clear UV2.");
+
+            // 之后经本工具的编辑须像 ProBuilder 编辑器一样按展开参数重新生成 UV2，而不是留下被 ToMesh() 清空的网格
+            var extrude = Run(new JObject { ["action"] = "extrude_faces", ["name"] = name, ["face_indices"] = new JArray(0) });
+            Assert.IsTrue(extrude.IsFullSuccess, extrude.Error ?? extrude.Output);
+
+            var mesh = GameObject.Find(name).GetComponent<MeshFilter>().sharedMesh;
+            Assert.Greater(mesh.uv2.Length, 0);
+            Assert.AreEqual(mesh.vertexCount, mesh.uv2.Length);
+        }
+
+        [Test]
         public void BevelAndBridge_ResolveProBuilderApi()
         {
             var name = CreateCube();

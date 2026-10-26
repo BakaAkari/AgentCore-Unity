@@ -28,7 +28,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                       "Actions: create_shape (cube/cylinder/sphere/plane/stairs/arch/door/pipe/cone/torus/prism), " +
                       "get_info, get_vertices, get_faces, move_vertices, extrude_faces, delete_faces, bevel_edges, bridge_edges, " +
                       "weld_vertices, subdivide, triangulate, flip_normals, center_pivot, set_material, " +
-                      "set_uv_projection (planar/box/spherical/cylindrical), combine_meshes. " +
+                      "set_uv_projection (planar/box/spherical/cylindrical), generate_lightmap_uvs (UV2 for baked lighting), combine_meshes. " +
                       "USE FOR: rapid prototyping of level geometry, creating architectural elements (stairs, walls, doorways), " +
                       "in-Editor mesh editing without exporting to Blender/Maya, custom primitive shapes. " +
                       "NOT FOR: importing external 3D models (use manage_model_import), modifying imported meshes (those are read-only), " +
@@ -50,7 +50,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         private static readonly JObject _parametersSchema = JObject.Parse(@"{
             ""type"": ""object"",
             ""properties"": {
-                ""action"": { ""type"": ""string"", ""enum"": [""check_available"", ""create_shape"", ""get_info"", ""set_material"", ""center_pivot"", ""flip_normals"", ""subdivide"", ""combine_meshes"", ""get_vertices"", ""move_vertices"", ""get_faces"", ""extrude_faces"", ""delete_faces"", ""bevel_edges"", ""bridge_edges"", ""weld_vertices"", ""set_uv_projection"", ""triangulate""], ""description"": ""ProBuilder action to perform"" },
+                ""action"": { ""type"": ""string"", ""enum"": [""check_available"", ""create_shape"", ""get_info"", ""set_material"", ""center_pivot"", ""flip_normals"", ""subdivide"", ""combine_meshes"", ""get_vertices"", ""move_vertices"", ""get_faces"", ""extrude_faces"", ""delete_faces"", ""bevel_edges"", ""bridge_edges"", ""weld_vertices"", ""set_uv_projection"", ""generate_lightmap_uvs"", ""triangulate""], ""description"": ""ProBuilder action to perform"" },
                 ""shape"": { ""type"": ""string"", ""description"": ""Shape: cube, sphere, cylinder, cone, plane, stairs, door, arch, pipe, torus, prism"" },
                 ""name"": { ""type"": ""string"", ""description"": ""Target or new GameObject name"" },
                 ""names"": { ""type"": ""string"", ""description"": ""Comma-separated GameObject names for combine_meshes"" },
@@ -69,7 +69,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 ""bevel_distance"": { ""type"": ""number"", ""description"": ""Bevel distance/amount for bevel_edges (default: 0.1)"" },
                 ""weld_distance"": { ""type"": ""number"", ""description"": ""Maximum distance to weld vertices together (default: 0.01)"" },
                 ""uv_projection"": { ""type"": ""string"", ""description"": ""UV projection mode: planar, box, spherical, cylindrical (default: planar)"" },
-                ""uv_channel"": { ""type"": ""integer"", ""description"": ""UV channel index 0-3 (default: 0)"" }
+                ""uv_channel"": { ""type"": ""integer"", ""description"": ""UV channel index 0-3 (default: 0). Channel 1 (UV2) is the lightmap channel: ProBuilder does not store hand-written UV2 and replaces it on its next rebuild, so prefer generate_lightmap_uvs for lightmap UVs."" },
+                ""hard_angle"": { ""type"": ""number"", ""description"": ""generate_lightmap_uvs: angle (degrees) between neighbor triangles that creates a UV seam (ProBuilder default 88)"" },
+                ""pack_margin"": { ""type"": ""number"", ""description"": ""generate_lightmap_uvs: margin between UV charts in pixels, assuming a 1024x1024 lightmap (ProBuilder default 20)"" },
+                ""angle_error"": { ""type"": ""number"", ""description"": ""generate_lightmap_uvs: allowed UV angle distortion in percent (ProBuilder default 8)"" },
+                ""area_error"": { ""type"": ""number"", ""description"": ""generate_lightmap_uvs: allowed UV area distortion in percent (ProBuilder default 15)"" },
+                ""contribute_gi"": { ""type"": ""boolean"", ""description"": ""generate_lightmap_uvs: set (true) or clear (false) the Contribute GI static flag. With it set and ProBuilder's Auto Lightmap UVs preference on, ProBuilder regenerates UV2 after every later edit. Omit to leave the flag unchanged."" }
             },
             ""required"": [""action""]
         }");
@@ -129,9 +134,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                         case "bridge_edges": response = HandleBridgeEdges(parameters); break;
                         case "weld_vertices": response = HandleWeldVertices(parameters); break;
                         case "set_uv_projection": response = HandleSetUVProjection(parameters); break;
+                        case "generate_lightmap_uvs": response = HandleGenerateLightmapUVs(parameters); break;
                         case "triangulate": response = HandleTriangulate(parameters); break;
                         default:
-                            response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: check_available, create_shape, get_info, set_material, center_pivot, flip_normals, subdivide, combine_meshes, get_vertices, move_vertices, get_faces, extrude_faces, delete_faces, bevel_edges, bridge_edges, weld_vertices, set_uv_projection, triangulate");
+                            response = ToolResponse.Fail($"Unknown action: {action}. Valid actions: check_available, create_shape, get_info, set_material, center_pivot, flip_normals, subdivide, combine_meshes, get_vertices, move_vertices, get_faces, extrude_faces, delete_faces, bevel_edges, bridge_edges, weld_vertices, set_uv_projection, generate_lightmap_uvs, triangulate");
                             break;
                     }
                 }
@@ -660,10 +666,102 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     items.Add(ToolItemResult.Failed($"UV channel {uvChannel}", $"{mismatched} of {distinct.Length} UV(s) did not keep the projected value after refresh"));
             }
 
-            var note = uvChannel == 1
-                ? " Note: UV2 lives only on the Unity mesh; ProBuilder clears it on its next rebuild (it regenerates lightmap UVs)."
-                : string.Empty;
-            return Finish($"Applied {projectionMode} UV projection ({api}) to {faces.Length} face(s) on '{go.name}' (UV channel {uvChannel}).{note}", items, go, pb);
+            // UV2 只存在于 Unity Mesh 上，ProBuilder 没有保存它的数据：下一次 ToMesh() 会清空，开启自动光照贴图 UV 时会按展开参数重新生成。
+            // 照常写入（不阻断），但结果标为部分完成并指向能持久生效的 generate_lightmap_uvs，避免误以为已经保存
+            if (uvChannel == 1)
+                items.Add(ToolItemResult.Failed("UV2 persistence",
+                    "written to the Unity mesh only; ProBuilder keeps no UV2 data and replaces it on its next rebuild (any later edit). " +
+                    "For lightmap UVs that survive edits use generate_lightmap_uvs (stores unwrap parameters on the ProBuilder mesh)"));
+            return Finish($"Applied {projectionMode} UV projection ({api}) to {faces.Length} face(s) on '{go.name}' (UV channel {uvChannel})", items, go, pb);
+        }
+
+        /// <summary>
+        /// 按 ProBuilder 自身流程生成光照贴图 UV（UV2）：展开参数写入 ProBuilderMesh.unwrapParameters（随场景保存），
+        /// 再 ToMesh() + Refresh() + EditorMeshUtility.Optimize(generateLightmapUVs: true)。
+        /// 这是 UV2 在 ProBuilder 里唯一能持久的方式：之后的编辑会按同一组参数重新生成（需 Contribute GI + Auto Lightmap UVs 偏好）。
+        /// </summary>
+        private ToolResponse HandleGenerateLightmapUVs(JObject parameters)
+        {
+            var result = ResolveProBuilder(ToolHelpers.GetRequiredString(parameters, "name"));
+            if (result.Component == null) return NoProBuilderMesh(result.Name, result.GameObject);
+            var go = result.GameObject;
+            var pb = result.Component;
+
+            var optimize = FindOptimizeMethod();
+            if (optimize == null) return ApiMissing("generate_lightmap_uvs", "EditorMeshUtility.Optimize(ProBuilderMesh, bool)");
+            var unwrapProp = pb.GetType().GetProperty("unwrapParameters", BindingFlags.Public | BindingFlags.Instance);
+            var unwrap = unwrapProp?.GetValue(pb);
+            if (unwrap == null) return ApiMissing("generate_lightmap_uvs", "ProBuilderMesh.unwrapParameters");
+
+            ToolHelpers.RecordUndo(pb, "Generate ProBuilder Lightmap UVs");
+            var meshForUndo = GetMesh(go);
+            if (meshForUndo != null) ToolHelpers.RecordUndo(meshForUndo, "Generate ProBuilder Lightmap UVs");
+
+            var items = new List<ToolItemResult>();
+            foreach (var (key, property) in new[] { ("hard_angle", "hardAngle"), ("pack_margin", "packMargin"), ("angle_error", "angleError"), ("area_error", "areaError") })
+            {
+                if (parameters[key] == null || parameters[key].Type == JTokenType.Null) continue;
+                var prop = unwrap.GetType().GetProperty(property, BindingFlags.Public | BindingFlags.Instance);
+                if (prop == null || !prop.CanWrite) { items.Add(ToolItemResult.Failed(key, $"UnwrapParameters.{property} not found")); continue; }
+                prop.SetValue(unwrap, ToolHelpers.GetOptionalFloat(parameters, key));
+                items.Add(ToolItemResult.Succeeded(key));
+            }
+            // UnwrapParameters 是引用类型，写回 setter 以走 ProBuilder 自身的赋值逻辑
+            if (unwrapProp.CanWrite) unwrapProp.SetValue(pb, unwrap);
+
+            if (parameters["contribute_gi"] != null && parameters["contribute_gi"].Type != JTokenType.Null)
+            {
+                ToolHelpers.RecordUndo(go, "Generate ProBuilder Lightmap UVs");
+                var flags = GameObjectUtility.GetStaticEditorFlags(go);
+                flags = ToolHelpers.GetOptionalBool(parameters, "contribute_gi")
+                    ? flags | StaticEditorFlags.ContributeGI
+                    : flags & ~StaticEditorFlags.ContributeGI;
+                GameObjectUtility.SetStaticEditorFlags(go, flags);
+            }
+
+            try
+            {
+                if (!TryRebuildMesh(pb, out var rebuildError, lightmapUVs: false))
+                    return RebuildFailed("generate_lightmap_uvs", go, pb, rebuildError);
+                InvokeWithDefaults(optimize, null, pb, true);
+            }
+            catch (Exception ex)
+            {
+                return ToolResponse.Fail($"generate_lightmap_uvs failed inside ProBuilder (EditorMeshUtility.Optimize): {Unwrap(ex).Message}. Use Undo to revert any partial change.");
+            }
+            EditorUtility.SetDirty(pb);
+
+            var mesh = GetMesh(go);
+            var uv2 = mesh != null ? mesh.uv2 : null;
+            if (uv2 == null || uv2.Length == 0 || uv2.Length != mesh.vertexCount)
+                return ToolResponse.Fail($"generate_lightmap_uvs on '{go.name}' ran, but the mesh has no UV2 afterwards (ProBuilder skips lightmap UVs for non-triangle topology). The unwrap parameters were saved.");
+            EditorUtility.SetDirty(mesh);
+
+            // 之后的编辑是否会自动按这组参数重新生成 UV2：ProBuilder 偏好 Auto Lightmap UVs 开启且对象带 Contribute GI 静态标志
+            var autoUnwrap = IsAutoLightmapUVEnabled();
+            var contributeGI = HasContributeGI(go);
+            var regenerates = autoUnwrap == true && contributeGI;
+            var followUp = regenerates
+                ? "ProBuilder will regenerate UV2 with these parameters after later edits"
+                : !contributeGI
+                    ? "The object is not Contribute GI static, so later ProBuilder edits clear UV2; pass contribute_gi=true to have it regenerated automatically, or run generate_lightmap_uvs again after editing"
+                    : "ProBuilder's Auto Lightmap UVs preference is off, so later edits clear UV2; run generate_lightmap_uvs again after editing";
+
+            var data = JObject.FromObject(SerializeMeshInfo(go, pb));
+            data["uv2_vertices"] = uv2.Length;
+            data["contribute_gi"] = contributeGI;
+            data["auto_lightmap_uvs"] = autoUnwrap.HasValue ? (JToken)autoUnwrap.Value : JValue.CreateNull();
+            data["uv2_regenerates_after_edits"] = regenerates;
+            data["unwrap_parameters"] = new JObject
+            {
+                ["hard_angle"] = JToken.FromObject(unwrap.GetType().GetProperty("hardAngle")?.GetValue(unwrap) ?? 0f),
+                ["pack_margin"] = JToken.FromObject(unwrap.GetType().GetProperty("packMargin")?.GetValue(unwrap) ?? 0f),
+                ["angle_error"] = JToken.FromObject(unwrap.GetType().GetProperty("angleError")?.GetValue(unwrap) ?? 0f),
+                ["area_error"] = JToken.FromObject(unwrap.GetType().GetProperty("areaError")?.GetValue(unwrap) ?? 0f)
+            };
+            var message = $"Generated lightmap UVs (UV2, {uv2.Length} vertices) on '{go.name}' with ProBuilder's unwrapper; the unwrap parameters are stored on the ProBuilder mesh. {followUp}";
+            if (items.Any(i => !i.Ok)) return ToolResponse.Partial(message, items, data);
+            return ToolResponse.OkWithData(data, message + ".");
         }
 
         private ToolResponse HandleTriangulate(JObject parameters)
@@ -1089,8 +1187,10 @@ namespace AgentCore.Editor.Tools.Native.Specialized
         /// 把 ProBuilder 数据同步到 Unity Mesh：ToMesh() 然后 Refresh()。
         /// ProBuilder 4.x/5.x 中两者只有带可选参数的重载（ToMesh(MeshTopology = Triangles)、Refresh(RefreshMask = All)），
         /// 旧实现按无参签名查找会返回 null 而静默跳过，导致所有编辑都没有重建网格。找不到或调用失败时返回 false 并给出原因。
+        /// 完整重建后与 ProBuilder 编辑器一致：对象带 Contribute GI 且开启 Auto Lightmap UVs 时按 unwrapParameters 重新生成 UV2，
+        /// 否则 ToMesh() 清空的 UV2 会一直缺失（ProBuilder 手动编辑会自动补上，经本工具编辑却不会）。
         /// </summary>
-        private static bool TryRebuildMesh(Component pb, out string error, bool toMesh = true, bool refresh = true)
+        private static bool TryRebuildMesh(Component pb, out string error, bool toMesh = true, bool refresh = true, bool lightmapUVs = true)
         {
             error = null;
             var type = pb.GetType();
@@ -1108,6 +1208,12 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                     if (refreshMethod == null) { error = "ProBuilderMesh.Refresh() not found"; return false; }
                     InvokeWithDefaults(refreshMethod, pb);
                 }
+                if (toMesh && refresh && lightmapUVs && IsAutoLightmapUVEnabled() == true && HasContributeGI(pb.gameObject))
+                {
+                    var optimize = FindOptimizeMethod();
+                    if (optimize == null) { error = "lightmap UV regeneration: EditorMeshUtility.Optimize(ProBuilderMesh, bool) not found"; return false; }
+                    InvokeWithDefaults(optimize, null, pb, true);
+                }
                 return true;
             }
             catch (Exception ex)
@@ -1115,6 +1221,27 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 error = Unwrap(ex).Message;
                 return false;
             }
+        }
+
+        /// <summary>UnityEditor.ProBuilder.EditorMeshUtility.Optimize(ProBuilderMesh, bool generateLightmapUVs)；找不到时为 null</summary>
+        private static MethodInfo FindOptimizeMethod()
+        {
+            var editorMeshUtility = FindType("UnityEditor.ProBuilder.EditorMeshUtility, Unity.ProBuilder.Editor", "UnityEditor.ProBuilder.EditorMeshUtility");
+            return FindStaticMethod(editorMeshUtility, "Optimize", _proBuilderMeshType, typeof(bool));
+        }
+
+        /// <summary>ProBuilder 偏好 Auto Lightmap UVs（internal Lightmapping.autoUnwrapLightmapUV）；读不到时为 null</summary>
+        private static bool? IsAutoLightmapUVEnabled()
+        {
+            var prop = FindType("UnityEditor.ProBuilder.Lightmapping, Unity.ProBuilder.Editor", "UnityEditor.ProBuilder.Lightmapping")
+                ?.GetProperty("autoUnwrapLightmapUV", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            try { return prop?.GetValue(null) as bool?; }
+            catch (Exception) { return null; }
+        }
+
+        private static bool HasContributeGI(GameObject go)
+        {
+            return (GameObjectUtility.GetStaticEditorFlags(go) & StaticEditorFlags.ContributeGI) != 0;
         }
 
         private static Component FindProBuilderMesh(GameObject go)
