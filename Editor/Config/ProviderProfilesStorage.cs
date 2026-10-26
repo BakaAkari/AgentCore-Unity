@@ -96,6 +96,15 @@ namespace AgentCore.Editor.Config
         /// <summary>无个人模型选择时不写出该字段，避免旧状态文件仅因多出空字段而改动。</summary>
         public bool ShouldSerializemodelOverrides() => modelOverrides != null && modelOverrides.Count > 0;
 
+        /// <summary>
+        /// 本用户选择的辅助任务 profile；null = 跟随团队默认（共享文件中的 utilityProfileId），
+        /// "" = 本用户选择"跟随 active"（即便团队默认指定了某个 profile）。设置页切换只改这里，不改共享文件。
+        /// </summary>
+        public string utilityProfileId;
+
+        /// <summary>未做个人辅助模型选择时不写出该字段，避免旧状态文件改动。</summary>
+        public bool ShouldSerializeutilityProfileId() => utilityProfileId != null;
+
         public string ToJson()
             => JsonConvert.SerializeObject(this, Formatting.Indented).Replace("\r\n", "\n") + "\n";
 
@@ -303,6 +312,34 @@ namespace AgentCore.Editor.Config
                 && string.Equals(existing, model, StringComparison.Ordinal))
                 return false;
             state.modelOverrides[profile.id] = model;
+            return true;
+        }
+
+        /// <summary>
+        /// 解析本用户生效的辅助任务 profile id：个人选择优先（"" 表示跟随 active）；
+        /// 个人选择指向的 profile 已不存在时回落团队默认。
+        /// </summary>
+        public static string ResolveUtilityProfileId(string teamDefaultId, ProviderProfilesUserState state, Func<string, bool> profileExists)
+        {
+            var personal = state?.utilityProfileId;
+            if (personal != null && (personal.Length == 0 || (profileExists != null && profileExists(personal))))
+                return personal;
+            return teamDefaultId ?? "";
+        }
+
+        /// <summary>
+        /// 记录本用户的辅助任务 profile 选择（"" = 跟随 active）。与团队默认相同时清除个人覆盖，继续跟随团队默认。
+        /// </summary>
+        /// <returns>true 表示用户状态有变化。</returns>
+        public static bool SetUtilityOverride(ProviderProfilesUserState state, string teamDefaultId, string id)
+        {
+            if (state == null)
+                return false;
+            id ??= "";
+            var next = string.Equals(id, teamDefaultId ?? "", StringComparison.Ordinal) ? null : id;
+            if (string.Equals(state.utilityProfileId, next, StringComparison.Ordinal))
+                return false;
+            state.utilityProfileId = next;
             return true;
         }
 
