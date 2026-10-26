@@ -27,8 +27,10 @@ namespace AgentCore.Editor.Config
     /// <list type="bullet">
     /// <item>共享文件只含团队配置（profile 列表、团队默认 active、utility profile），且只在团队配置
     /// 实际变化时写入——写前把序列化结果与磁盘内容比较，未变则跳过；经 <see cref="AtomicFile"/> 原子写入。</item>
-    /// <item>运行时状态（连接验证结果、API Key 哈希、缓存命中、连接失败、最近使用时间）与个人 active 选择
-    /// 存于每用户的 <c>UserSettings/AgentCore/ProviderProfilesState.json</c>。</item>
+    /// <item>运行时状态（连接验证结果、API Key 哈希、缓存命中、连接失败、最近使用时间）与个人选择
+    /// （active profile、各 profile 的模型、辅助任务 profile）存于每用户的
+    /// <c>UserSettings/AgentCore/ProviderProfilesState.json</c>。团队默认只经 <see cref="SetTeamDefaults"/> /
+    /// <see cref="SetTeamDefaultModel"/> / <see cref="UpdateProfile"/> 等明确的团队配置操作修改。</item>
     /// <item>迁移：旧版共享文件中的运行时字段在首次加载时迁入用户状态；共享文件本身不在加载时改写，
     /// 下次团队配置变化保存时这些字段随之消失。</item>
     /// </list>
@@ -71,6 +73,7 @@ namespace AgentCore.Editor.Config
         /// <summary>
         /// v1.17.0: 辅助任务（上下文压缩 / 会话标题 / 记忆提取）使用的 profile id；空 = 跟随 active。
         /// 典型用法：主力用 Claude Opus，辅助任务用 Haiku / DeepSeek 这类便宜模型。
+        /// 这是团队默认（共享）；个人切换写入用户状态（<see cref="ProviderProfilesUserState.utilityProfileId"/>）。
         /// </summary>
         [SerializeField] private string utilityProfileId = "";
 
@@ -152,7 +155,7 @@ namespace AgentCore.Editor.Config
         /// <summary>
         /// 记录本用户为 profile 选择的模型（chat 面板模型下拉）。这是个人选择：只写
         /// <c>UserSettings/AgentCore/ProviderProfilesState.json</c>，不改共享文件；
-        /// 选择与团队默认相同时清除个人覆盖。设置页修改共享 modelName 请用 <see cref="UpdateProfile"/>。
+        /// 选择与团队默认相同时清除个人覆盖。修改团队默认模型请用 <see cref="SetTeamDefaultModel"/>。
         /// </summary>
         public void SetUserModel(string profileId, string model)
         {
@@ -170,17 +173,71 @@ namespace AgentCore.Editor.Config
             SaveAndNotify();
         }
 
-        /// <summary>辅助任务 profile id（空 = 跟随 active）。</summary>
-        public string UtilityProfileId => utilityProfileId;
+        /// <summary>
+        /// 修改 profile 的团队默认模型（共享 <see cref="ProviderProfile.modelName"/>，写入
+        /// <c>ProjectSettings/AgentCoreProviderProfiles.asset</c>，提交后影响全组）。
+        /// 只用于用户明确要改团队默认的操作；同时清除本用户对该 profile 的个人模型选择。
+        /// </summary>
+        public void SetTeamDefaultModel(string profileId, string model)
+        {
+            model = model?.Trim() ?? "";
+            UpdateProfile(profileId, p => p.modelName = model);
+        }
+
+        /// <summary>
+        /// 本用户生效的辅助任务 profile id（空 = 跟随 active）。个人选择优先；
+        /// 个人选择指向的 profile 已不存在时回落团队默认。
+        /// </summary>
+        public string UtilityProfileId
+        {
+            get
+            {
+                EnsureUserState();
+                return ProviderProfilesStorage.ResolveUtilityProfileId(utilityProfileId, _userState, id => FindById(id) != null);
+            }
+        }
+
+        /// <summary>团队默认辅助任务 profile id（共享文件中的值，空 = 跟随 active）。</summary>
+        public string TeamDefaultUtilityProfileId => utilityProfileId ?? "";
 
         /// <summary>辅助任务 profile；未设置或已被删除返回 null（调用方应回落 active）。</summary>
         public ProviderProfile GetUtility()
-            => FindById(utilityProfileId);
+            => FindById(UtilityProfileId);
 
-        /// <summary>设置辅助任务 profile（空 = 跟随 active）。</summary>
+        /// <summary>
+        /// 设置本用户的辅助任务 profile（空 = 跟随 active）。个人选择：只写用户状态，不改共享文件；
+        /// 与团队默认相同时清除个人覆盖。修改团队默认请用 <see cref="SetTeamDefaults"/>。
+        /// </summary>
         public void SetUtility(string id)
         {
-            utilityProfileId = id ?? "";
+            EnsureUserState();
+            if (!ProviderProfilesStorage.SetUtilityOverride(_userState, utilityProfileId, id))
+                return;
+            SaveAndNotify();
+        }
+
+        /// <summary>本用户当前的 active / 辅助模型选择是否与团队默认不同。</summary>
+        public bool HasPersonalSelection
+        {
+            get
+            {
+                EnsureUserState();
+                return ActiveProfileId != TeamDefaultProfileId || UtilityProfileId != TeamDefaultUtilityProfileId;
+            }
+        }
+
+        /// <summary>
+        /// 把团队默认 active / 辅助任务 profile 改为指定值（写入共享文件，提交后影响全组），
+        /// 并清除本用户对应的个人选择。只用于用户明确要改团队默认的操作（设置页"设为团队默认"）。
+        /// 指向不存在 profile 的 id 视为空。
+        /// </summary>
+        public void SetTeamDefaults(string activeId, string utilityId)
+        {
+            EnsureUserState();
+            activeProfileId = FindById(activeId) != null ? activeId : "";
+            utilityProfileId = FindById(utilityId) != null ? utilityId : "";
+            _userState.activeProfileId = null;
+            _userState.utilityProfileId = null;
             SaveAndNotify();
         }
 
@@ -318,6 +375,8 @@ namespace AgentCore.Editor.Config
                 _userState.modelOverrides?.Remove(id);
             if (_userState.activeProfileId == id)
                 _userState.activeProfileId = null;
+            if (_userState.utilityProfileId == id)
+                _userState.utilityProfileId = null;
 
             if (activeProfileId == id)
                 activeProfileId = "";

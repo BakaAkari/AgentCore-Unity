@@ -366,6 +366,40 @@ namespace AgentCore.Tests.Editor.Config
             Assert.AreEqual(0, legacy.modelOverrides.Count);
         }
 
+        [Test]
+        public void UtilityOverride_PersonalChoiceWins_AndMissingProfileFallsBackToTeamDefault()
+        {
+            var state = new ProviderProfilesUserState();
+            bool Exists(string id) => id == "p1" || id == "p2";
+
+            Assert.AreEqual("p1", ProviderProfilesStorage.ResolveUtilityProfileId("p1", state, Exists), "无个人选择跟随团队默认");
+
+            Assert.IsTrue(ProviderProfilesStorage.SetUtilityOverride(state, "p1", "p2"));
+            Assert.AreEqual("p2", ProviderProfilesStorage.ResolveUtilityProfileId("p1", state, Exists));
+
+            Assert.IsTrue(ProviderProfilesStorage.SetUtilityOverride(state, "p1", ""));
+            Assert.AreEqual("", ProviderProfilesStorage.ResolveUtilityProfileId("p1", state, Exists), "个人选择\"跟随 active\"也优先于团队默认");
+
+            state.utilityProfileId = "deleted";
+            Assert.AreEqual("p1", ProviderProfilesStorage.ResolveUtilityProfileId("p1", state, Exists));
+        }
+
+        [Test]
+        public void UtilityOverride_SelectingTeamDefault_ClearsOverride_AndIsOmittedFromJson()
+        {
+            var state = new ProviderProfilesUserState();
+            StringAssert.DoesNotContain("utilityProfileId", state.ToJson(), "无个人选择时不写字段");
+
+            ProviderProfilesStorage.SetUtilityOverride(state, "p1", "p2");
+            var back = ProviderProfilesUserState.FromJson(state.ToJson());
+            Assert.AreEqual("p2", back.utilityProfileId);
+
+            Assert.IsTrue(ProviderProfilesStorage.SetUtilityOverride(state, "p1", "p1"));
+            Assert.IsNull(state.utilityProfileId);
+            Assert.IsFalse(ProviderProfilesStorage.SetUtilityOverride(state, "p1", "p1"), "无覆盖时再选团队默认不算变化");
+            Assert.IsFalse(ProviderProfilesStorage.SetUtilityOverride(state, "", null), "团队默认为空时选\"跟随 active\"即团队默认");
+        }
+
         private static ProviderProfile Profile(string id)
         {
             var p = ProviderProfile.Create(id);
