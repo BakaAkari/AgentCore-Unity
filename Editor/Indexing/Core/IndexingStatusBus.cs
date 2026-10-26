@@ -72,6 +72,26 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public string ReasonPaused;
 
         /// <summary>
+        /// Whether two snapshots would look the same to subscribers. NextRunAt is compared to the
+        /// second because it is recomputed from the editor clock on every tick.
+        /// </summary>
+        public bool IsEquivalentTo(IndexingStatusSnapshot other)
+        {
+            return other != null
+                   && State == other.State
+                   && DirtyFileCount == other.DirtyFileCount
+                   && ProcessedFiles == other.ProcessedFiles
+                   && TotalFiles == other.TotalFiles
+                   && CurrentFile == other.CurrentFile
+                   && LastError == other.LastError
+                   && LastSuccessAt == other.LastSuccessAt
+                   && ConsecutiveFailures == other.ConsecutiveFailures
+                   && NextRunAt.HasValue == other.NextRunAt.HasValue
+                   && (!NextRunAt.HasValue || Math.Abs((NextRunAt.Value - other.NextRunAt.Value).TotalSeconds) < 1)
+                   && ReasonPaused == other.ReasonPaused;
+        }
+
+        /// <summary>
         /// Creates a copy so subscribers cannot mutate shared status state.
         /// </summary>
         public IndexingStatusSnapshot Clone()
@@ -113,11 +133,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public static IndexingStatusSnapshot Current => _current.Clone();
 
         /// <summary>
-        /// Publishes a new background indexing status snapshot.
+        /// Publishes a new background indexing status snapshot. Snapshots equivalent to the current one
+        /// are dropped, so callers may publish every editor tick without flooding subscribers.
         /// </summary>
         internal static void Publish(IndexingStatusSnapshot snapshot)
         {
-            if (snapshot == null)
+            if (snapshot == null || snapshot.IsEquivalentTo(_current))
             {
                 return;
             }

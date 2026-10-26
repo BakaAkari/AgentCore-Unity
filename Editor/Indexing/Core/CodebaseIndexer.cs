@@ -18,11 +18,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
     ///           同时删除已不存在的文件记录。
     ///
     /// 线程模型：
-    ///   - 文件扫描和 Roslyn 解析在后台线程执行（非主线程）。
+    ///   - 公共入口先在调用线程（主线程）解析 Workspace，运行主体（扫描、Roslyn 解析、写入）在线程池执行，
+    ///     不占用编辑器主线程。
     ///   - IIndexStore 写操作由 IndexService 的单写线程串行执行。
     ///   - 同一进程内的索引运行（全量 / 增量 / 针对性增量 / Scope）通过 s_runGate 排队，
     ///     面板、后台服务与工具同时触发时依次执行，不会交错写同一批文件。
-    ///   - 进度回调在调用线程上同步触发（调用方负责线程安全）。
+    ///   - 进度回调在线程池线程上触发（调用方负责切回主线程，不要在回调里直接碰 Unity API / UI）。
     /// </summary>
     public sealed class CodebaseIndexer
     {
@@ -107,21 +108,25 @@ namespace AgentCore.Editor.Components.Indexing.Core
             Action<IndexingProgress> onProgress = null,
             CancellationToken ct = default)
         {
-            return RunExclusiveAsync(() => RunFullIndexCoreAsync(onProgress, ct), onProgress, ct);
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            return RunExclusiveAsync(() => RunFullIndexCoreAsync(workspace, onProgress, ct), onProgress, ct);
         }
 
         private async Task<IndexingProgress> RunFullIndexCoreAsync(
+            IndexWorkspace resolvedWorkspace,
             Action<IndexingProgress> onProgress,
             CancellationToken ct)
         {
             var progress = IndexingProgress.CreateStarted(IndexingPhase.Initializing);
             ReportProgress(onProgress, progress);
+            var stateWorkspaceId = 0;
+            List<IndexRoot> stateRoots = null;
 
             try
             {
                 // 1. 解析 workspace
                 ct.ThrowIfCancellationRequested();
-                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var workspace = resolvedWorkspace;
                 var workspaceId = await _store.UpsertWorkspaceAsync(workspace, ct);
                 workspace = new IndexWorkspace
                 {
@@ -146,7 +151,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     AgentCoreLog.Info($"[CodebaseIndexer] Index version changed ({storedVersion} → {CurrentIndexVersion}), forcing full rebuild.");
                 }
 
-                // 3. 清空旧索引
+                // 3. 清空旧索引。先撤掉全量完成标记：中途取消 / 失败 / 崩溃时增量入口会看到 NO_FULL_INDEX，
+                //    而不是把半套数据当作完整索引；成功后由 IndexRunMetadata 写回。
+                await _store.SetMetadataAsync(workspaceId, MetaKeyLastFullIndex, null, ct);
                 await _store.ClearWorkspaceIndexAsync(workspaceId, ct);
 
                 // 4. 解析 Roots
@@ -167,6 +174,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     root.Id = rootId;
                     root.WorkspaceId = workspaceId;
                 }
+
+                stateWorkspaceId = workspaceId;
+                stateRoots = enabledRoots;
+                await UpdateRootStatesAsync(workspaceId, enabledRoots, IndexRootState.Indexing);
 
                 // 6. 扫描所有文件
                 var allFiles = ScanAllFiles(enabledRoots, progress, onProgress, ct);
@@ -218,6 +229,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 if (_store is IIndexHealth health && health.RequiresRebuild)
                     await health.AcknowledgeRebuildAsync(ct);
 
+                await UpdateRootStatesAsync(workspaceId, enabledRoots, IndexRootState.Ready);
+
                 // 9. 完成
                 var completed = IndexingProgress.CreateCompleted(progress);
                 ReportProgress(onProgress, completed);
@@ -225,6 +238,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (OperationCanceledException)
             {
+                await UpdateRootStatesAsync(stateWorkspaceId, stateRoots, IndexRootState.Stale);
                 progress.Phase = IndexingPhase.Completed;
                 var failed = IndexingProgress.CreateFailed(progress, "Indexing was cancelled.");
                 ReportProgress(onProgress, failed);
@@ -232,6 +246,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
+                await UpdateRootStatesAsync(stateWorkspaceId, stateRoots, IndexRootState.Failed, ex.Message);
                 var failed = IndexingProgress.CreateFailed(progress, $"Full indexing failed: {ex.Message}");
                 ReportProgress(onProgress, failed);
                 AgentCoreLog.Error($"[CodebaseIndexer] Full indexing failed: {ex}");
@@ -253,21 +268,25 @@ namespace AgentCore.Editor.Components.Indexing.Core
             Action<IndexingProgress> onProgress = null,
             CancellationToken ct = default)
         {
-            return RunExclusiveAsync(() => RunIncrementalIndexCoreAsync(onProgress, ct), onProgress, ct);
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            return RunExclusiveAsync(() => RunIncrementalIndexCoreAsync(workspace, onProgress, ct), onProgress, ct);
         }
 
         private async Task<IndexingProgress> RunIncrementalIndexCoreAsync(
+            IndexWorkspace resolvedWorkspace,
             Action<IndexingProgress> onProgress,
             CancellationToken ct)
         {
             var progress = IndexingProgress.CreateStarted(IndexingPhase.Initializing);
             ReportProgress(onProgress, progress);
+            var stateWorkspaceId = 0;
+            List<IndexRoot> stateRoots = null;
 
             try
             {
                 // 1. 解析 workspace
                 ct.ThrowIfCancellationRequested();
-                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var workspace = resolvedWorkspace;
                 var workspaceId = await _store.UpsertWorkspaceAsync(workspace, ct);
                 workspace = new IndexWorkspace
                 {
@@ -292,7 +311,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 if (string.IsNullOrEmpty(lastFullIndex) || storedVersion != CurrentIndexVersion)
                 {
                     AgentCoreLog.Info("[CodebaseIndexer] No full index found or version mismatch, falling back to full indexing.");
-                    return await RunFullIndexCoreAsync(onProgress, ct);
+                    return await RunFullIndexCoreAsync(resolvedWorkspace, onProgress, ct);
                 }
 
                 // 3. 解析 Roots
@@ -313,6 +332,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     root.Id = rootId;
                     root.WorkspaceId = workspaceId;
                 }
+
+                stateWorkspaceId = workspaceId;
+                stateRoots = enabledRoots;
+                await UpdateRootStatesAsync(workspaceId, enabledRoots, IndexRootState.Indexing);
 
                 // 5. 扫描磁盘上的当前文件
                 var diskFiles = ScanAllFiles(enabledRoots, progress, onProgress, ct);
@@ -362,19 +385,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     ReportProgress(onProgress, progress);
                 }
 
-                // 8c. 更新变更文件
+                // 8c. 更新变更文件：提取成功后才替换旧符号；失败时旧记录保持不变，下次按 mtime 仍判为变更而重试
                 foreach (var (root, filePath) in toUpdate)
                 {
                     ct.ThrowIfCancellationRequested();
                     progress.CurrentRoot = root.RootPath;
                     progress.CurrentFile = filePath;
-
-                    // 先删除旧符号和依赖
-                    if (indexedFilesMap.TryGetValue(filePath, out var oldFile))
-                    {
-                        await _store.DeleteDependenciesByFileAsync(oldFile.Id, ct);
-                        await _store.DeleteSymbolsByFileAsync(oldFile.Id, ct);
-                    }
 
                     await IndexFileAsync(workspaceId, root, filePath, workspace, progress, ct);
 
@@ -387,6 +403,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 ReportProgress(onProgress, progress);
 
                 await IndexRunMetadata.RecordAsync(_store, workspaceId, IndexRunKind.Incremental, null, DateTime.UtcNow, ct);
+                await UpdateRootStatesAsync(workspaceId, enabledRoots, IndexRootState.Ready);
 
                 // 10. 完成
                 var completed = IndexingProgress.CreateCompleted(progress);
@@ -395,6 +412,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (OperationCanceledException)
             {
+                await UpdateRootStatesAsync(stateWorkspaceId, stateRoots, IndexRootState.Stale);
                 progress.Phase = IndexingPhase.Completed;
                 var failed = IndexingProgress.CreateFailed(progress, "Incremental indexing was cancelled.");
                 ReportProgress(onProgress, failed);
@@ -402,6 +420,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (Exception ex)
             {
+                await UpdateRootStatesAsync(stateWorkspaceId, stateRoots, IndexRootState.Failed, ex.Message);
                 var failed = IndexingProgress.CreateFailed(progress, $"Incremental indexing failed: {ex.Message}");
                 ReportProgress(onProgress, failed);
                 AgentCoreLog.Error($"[CodebaseIndexer] Incremental indexing failed: {ex}");
@@ -432,12 +451,14 @@ namespace AgentCore.Editor.Components.Indexing.Core
             Action<IndexingProgress> onProgress = null,
             CancellationToken ct = default)
         {
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
             return RunExclusiveAsync(
-                () => RunTargetedIncrementalCoreAsync(changedPaths, deletedPaths, yieldEveryNFiles, onProgress, ct),
+                () => RunTargetedIncrementalCoreAsync(workspace, changedPaths, deletedPaths, yieldEveryNFiles, onProgress, ct),
                 onProgress, ct);
         }
 
         private async Task<IndexingProgress> RunTargetedIncrementalCoreAsync(
+            IndexWorkspace resolvedWorkspace,
             IReadOnlyList<string> changedPaths,
             IReadOnlyList<string> deletedPaths,
             int yieldEveryNFiles,
@@ -463,7 +484,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 // 1. 解析 workspace
                 ct.ThrowIfCancellationRequested();
-                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var workspace = resolvedWorkspace;
                 var workspaceId = await _store.UpsertWorkspaceAsync(workspace, ct);
                 workspace = new IndexWorkspace
                 {
@@ -511,6 +532,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 ReportProgress(onProgress, progress);
 
                 int processedCount = 0;
+                var failedPaths = new List<string>();
 
                 foreach (var deletedPath in deletedPaths)
                 {
@@ -555,16 +577,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                     progress.CurrentRoot = matchedRoot.RootPath;
 
-                    // 如果文件已存在于索引中，先删除旧记录
-                    var oldFile = await _store.GetFileByPathAsync(workspaceId, normalizedPath, ct);
-                    if (oldFile != null)
-                    {
-                        await _store.DeleteDependenciesByFileAsync(oldFile.Id, ct);
-                        await _store.DeleteSymbolsByFileAsync(oldFile.Id, ct);
-                    }
-
-                    // 重新索引（IndexFileAsync 内部会检查文件大小和存在性）
-                    await IndexFileAsync(workspaceId, matchedRoot, normalizedPath, workspace, progress, ct);
+                    // 重新索引（IndexFileAsync 内部会检查文件大小和存在性；提取成功后才替换旧记录，失败时旧符号保留）
+                    if (await IndexFileAsync(workspaceId, matchedRoot, normalizedPath, workspace, progress, ct) == FileIndexOutcome.Failed)
+                        failedPaths.Add(changedPath);
 
                     processedCount++;
                     progress.ProcessedFiles = processedCount;
@@ -581,7 +596,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 await IndexRunMetadata.RecordAsync(_store, workspaceId, IndexRunKind.Incremental, null, DateTime.UtcNow, ct);
 
-                // 7. 完成
+                // 7. 完成（失败的路径交给调用方保留为脏，稍后重试）
+                progress.FailedPaths = failedPaths;
                 var completed = IndexingProgress.CreateCompleted(progress);
                 ReportProgress(onProgress, completed);
                 return completed;
@@ -698,10 +714,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
             Action<IndexingProgress> onProgress = null,
             CancellationToken ct = default)
         {
-            return RunExclusiveAsync(() => RunScopeIndexCoreAsync(targetRoots, onProgress, ct), onProgress, ct);
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            return RunExclusiveAsync(() => RunScopeIndexCoreAsync(workspace, targetRoots, onProgress, ct), onProgress, ct);
         }
 
         private async Task<IndexingProgress> RunScopeIndexCoreAsync(
+            IndexWorkspace resolvedWorkspace,
             IReadOnlyList<IndexRoot> targetRoots,
             Action<IndexingProgress> onProgress,
             CancellationToken ct)
@@ -715,7 +733,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
                 // 1. 解析 workspace
                 ct.ThrowIfCancellationRequested();
-                var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                var workspace = resolvedWorkspace;
                 var workspaceId = await _store.UpsertWorkspaceAsync(workspace, ct);
                 workspace = new IndexWorkspace
                 {
@@ -808,6 +826,54 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         // ── 私有方法 ─────────────────────────────────────────────────────────────
 
+        /// <summary>单文件索引结果。</summary>
+        private enum FileIndexOutcome
+        {
+            Indexed,
+            Skipped,
+            Failed,
+        }
+
+        /// <summary>JSONL 后端不存依赖图，跳过 DependencyExtractor 以省掉每个文件一次语法树遍历。</summary>
+        private bool StoresDependencies => !string.Equals(_store.BackendType, "jsonl", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// 写入参与本次运行的 Root 状态（Ready 时重新统计文件 / 符号数）。
+        /// 尽力而为：状态写入失败只记警告，不影响索引结果；不使用调用方的取消令牌，取消路径也能落状态。
+        /// </summary>
+        private async Task UpdateRootStatesAsync(int workspaceId, IReadOnlyList<IndexRoot> roots, IndexRootState state, string error = null)
+        {
+            if (workspaceId <= 0 || roots == null)
+                return;
+
+            var stateStore = new IndexRootStateStore(_store, workspaceId);
+            foreach (var root in roots)
+            {
+                if (root == null || root.Id <= 0)
+                    continue;
+
+                try
+                {
+                    switch (state)
+                    {
+                        case IndexRootState.Ready:
+                            await stateStore.RefreshAndMarkReadyAsync(root.Id, CancellationToken.None);
+                            break;
+                        case IndexRootState.Failed:
+                            await stateStore.MarkFailedAsync(root.Id, error, CancellationToken.None);
+                            break;
+                        default:
+                            await stateStore.SetStateAsync(root.Id, state, CancellationToken.None);
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"[CodebaseIndexer] Failed to set state {state} for root {root.Id}: {ex.Message}");
+                }
+            }
+        }
+
         /// <summary>
         /// 删除单个 Root 的全部索引数据。后端支持 <see cref="IScopedIndexStore"/> 时一次完成，否则逐文件删除。
         /// </summary>
@@ -831,7 +897,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 排队获取进程内索引运行锁后执行。等待期间被取消时返回“已取消”进度而不是抛出。
+        /// 排队获取进程内索引运行锁后在线程池执行（扫描与 Roslyn 解析不占用主线程）。
+        /// 等待期间被取消时返回“已取消”进度而不是抛出。
         /// </summary>
         private static async Task<IndexingProgress> RunExclusiveAsync(
             Func<Task<IndexingProgress>> body,
@@ -852,7 +919,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
             try
             {
-                return await body();
+                return await Task.Run(body);
             }
             finally
             {
@@ -1030,9 +1097,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         /// <summary>
         /// 对单个文件执行索引（提取符号并持久化）。
-        /// 超大文件、读取失败的文件会被记录为 SkippedFiles 或 ErrorFiles。
+        /// 先提取，成功后再用 <see cref="IndexFileReplace"/> 一次替换文件记录与符号；读取 / 提取 / 写入失败时
+        /// 已有的旧记录与旧符号原样保留并返回 <see cref="FileIndexOutcome.Failed"/>，由调用方决定是否重试。
+        /// 超大文件记为 SkippedFiles，失败记为 ErrorFiles。
         /// </summary>
-        private async Task IndexFileAsync(
+        private async Task<FileIndexOutcome> IndexFileAsync(
             int workspaceId,
             IndexRoot root,
             string filePath,
@@ -1049,17 +1118,17 @@ namespace AgentCore.Editor.Components.Indexing.Core
             catch (Exception ex)
             {
                 AgentCoreLog.Warning($"[CodebaseIndexer] Cannot stat file '{filePath}': {ex.Message}");
-                progress.SkippedFiles++;
-                return;
+                progress.ErrorFiles++;
+                return FileIndexOutcome.Failed;
             }
 
             if (fileSize > _maxFileSizeBytes)
             {
                 progress.SkippedFiles++;
-                return;
+                return FileIndexOutcome.Skipped;
             }
 
-            // 提取符号（Roslyn 解析），对单个文件设置超时保护，避免极端文件卡死主线程
+            // 提取符号（Roslyn 解析），对单个文件设置超时保护，避免极端文件卡死索引
             ExtractionResult extraction;
             try
             {
@@ -1072,109 +1141,115 @@ namespace AgentCore.Editor.Components.Indexing.Core
             {
                 AgentCoreLog.Warning($"[CodebaseIndexer] Extraction timed out for '{filePath}' (>5s), skipping.");
                 progress.ErrorFiles++;
-                return;
+                return FileIndexOutcome.Failed;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 AgentCoreLog.Warning($"[CodebaseIndexer] Extraction failed for '{filePath}': {ex.Message}");
                 progress.ErrorFiles++;
-                return;
+                return FileIndexOutcome.Failed;
             }
 
             if (!extraction.IsSuccess)
             {
-                // 即使解析失败，也持久化文件记录（标记 HasErrors）
-                var errorFile = extraction.File ?? new IndexedFile
-                {
-                    FilePath = filePath,
-                    RelativeToRoot = MakeRelativeToRoot(filePath, root.RootPath),
-                    ContentHash = string.Empty,
-                    LastModified = GetLastModifiedTicks(filePath),
-                    LastIndexed = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    FileSize = fileSize,
-                    HasErrors = true,
-                    ErrorMessage = extraction.ErrorMessage,
-                    SymbolCount = 0,
-                };
+                progress.ErrorFiles++;
 
-                errorFile.WorkspaceId = workspaceId;
-                errorFile.RootId = root.Id;
-
+                // 已有旧记录：保留旧符号不动。没有旧记录时才写一条 HasErrors 的占位记录，
+                // LastModified 记为 0，使增量核对仍把它当作已变更而重试
                 try
                 {
-                    await _store.UpsertFileAsync(workspaceId, root.Id, errorFile, ct);
+                    if (await _store.GetFileByPathAsync(workspaceId, filePath, ct) == null)
+                    {
+                        var errorFile = extraction.File ?? new IndexedFile
+                        {
+                            FilePath = filePath,
+                            ContentHash = string.Empty,
+                            FileSize = fileSize,
+                            HasErrors = true,
+                            ErrorMessage = extraction.ErrorMessage,
+                            SymbolCount = 0,
+                        };
+                        errorFile.RelativeToRoot = MakeRelativeToRoot(filePath, root.RootPath);
+                        errorFile.LastModified = 0;
+                        errorFile.LastIndexed = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        await _store.UpsertFileAsync(workspaceId, root.Id, errorFile, ct);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist error file record '{filePath}': {ex.Message}");
                 }
 
-                progress.ErrorFiles++;
-                return;
+                return FileIndexOutcome.Failed;
             }
 
-            // 持久化文件记录
+            // 一次替换文件记录与符号（符号写入失败即视为该文件失败，旧数据保留）
             var indexedFile = extraction.File;
             indexedFile.WorkspaceId = workspaceId;
             indexedFile.RootId = root.Id;
             indexedFile.LastIndexed = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var symbols = extraction.Symbols ?? Array.Empty<SymbolInfo>();
 
             int fileId;
             try
             {
-                fileId = await _store.UpsertFileAsync(workspaceId, root.Id, indexedFile, ct);
+                fileId = await IndexFileReplace.ReplaceAsync(_store, workspaceId, root.Id, indexedFile, symbols, ct);
                 indexedFile.Id = fileId;
+                progress.ExtractedSymbols += symbols.Count;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist file record '{filePath}': {ex.Message}");
+                AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist index for '{filePath}': {ex.Message}");
                 progress.ErrorFiles++;
-                return;
+                return FileIndexOutcome.Failed;
             }
 
-            // 更新符号的 FileId
-            var symbols = extraction.Symbols;
-            if (symbols != null && symbols.Count > 0)
+            // 依赖关系（仅存依赖图的后端；尽力而为，失败不影响符号索引）
+            if (StoresDependencies)
             {
-                foreach (var sym in symbols)
-                {
-                    sym.FileId = fileId;
-                    sym.WorkspaceId = workspaceId;
-                    sym.RootId = root.Id;
-                }
-
                 try
                 {
-                    await _store.BulkInsertSymbolsAsync(symbols, ct);
-                    progress.ExtractedSymbols += symbols.Count;
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"[CodebaseIndexer] Failed to persist symbols for '{filePath}': {ex.Message}");
-                }
-
-                // 提取并持久化依赖关系
-                try
-                {
-                    // 构建 symbolName → dbId 映射（用于关联 FromSymbolId / ToSymbolId）
-                    var symbolIdMap = new Dictionary<string, int>(StringComparer.Ordinal);
-                    foreach (var sym in symbols)
+                    await _store.DeleteDependenciesByFileAsync(fileId, ct);
+                    if (symbols.Count > 0)
                     {
-                        if (!string.IsNullOrEmpty(sym.FullName) && sym.Id > 0)
-                            symbolIdMap[sym.FullName] = sym.Id;
+                        // 构建 symbolName → dbId 映射（用于关联 FromSymbolId / ToSymbolId）
+                        var symbolIdMap = new Dictionary<string, int>(StringComparer.Ordinal);
+                        foreach (var sym in symbols)
+                        {
+                            if (!string.IsNullOrEmpty(sym.FullName) && sym.Id > 0)
+                                symbolIdMap[sym.FullName] = sym.Id;
+                        }
+
+                        var deps = DependencyExtractor.ExtractFromTree(
+                            extraction.SyntaxTree, workspaceId, fileId, symbolIdMap);
+
+                        if (deps != null && deps.Count > 0)
+                            await _store.BulkInsertDependenciesAsync(deps, ct);
                     }
-
-                    var deps = DependencyExtractor.ExtractFromTree(
-                        extraction.SyntaxTree, workspaceId, fileId, symbolIdMap);
-
-                    if (deps != null && deps.Count > 0)
-                        await _store.BulkInsertDependenciesAsync(deps, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     AgentCoreLog.Warning($"[CodebaseIndexer] Failed to extract/persist dependencies for '{filePath}': {ex.Message}");
                 }
             }
+
+            return FileIndexOutcome.Indexed;
         }
 
         /// <summary>
