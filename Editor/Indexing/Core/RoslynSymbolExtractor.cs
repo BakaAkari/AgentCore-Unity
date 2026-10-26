@@ -121,6 +121,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
                     case StructDeclarationSyntax str:
                         symbols.Add(ExtractStruct(str, fileId, filePath, root, workspace, namespaceMap, lines));
                         break;
+                    case RecordDeclarationSyntax rec:
+                        symbols.Add(ExtractRecord(rec, fileId, filePath, root, workspace, namespaceMap, lines));
+                        break;
                     case EnumDeclarationSyntax enm:
                         symbols.Add(ExtractEnum(enm, fileId, filePath, root, workspace, namespaceMap, lines));
                         break;
@@ -221,6 +224,30 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
             return CreateSymbol(fileId, filePath, root, workspace, "struct", name, ns,
                 GetAccessibility(modifiers),
+                isPartial: modifiers.Any(SyntaxKind.PartialKeyword),
+                baseTypes: baseTypes,
+                genericParams: genericParams,
+                lineNumber: node.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
+                lines: lines,
+                declarationNode: node);
+        }
+
+        private static IndexSymbolInfo ExtractRecord(
+            RecordDeclarationSyntax node, int fileId, string filePath,
+            IndexRoot root, IndexWorkspace workspace,
+            Dictionary<SyntaxNode, string> namespaceMap, string[] lines)
+        {
+            var ns = GetNamespace(node, namespaceMap);
+            var name = node.Identifier.Text;
+            var baseTypes = ExtractBaseTypes(node.BaseList);
+            var genericParams = ExtractGenericParams(node.TypeParameterList);
+            var modifiers = node.Modifiers;
+
+            // record 的成员（含主构造参数生成的属性之外的显式成员）由 TypeDeclarationSyntax 分支统一提取
+            return CreateSymbol(fileId, filePath, root, workspace, "record", name, ns,
+                GetAccessibility(modifiers),
+                isStatic: modifiers.Any(SyntaxKind.StaticKeyword),
+                isAbstract: modifiers.Any(SyntaxKind.AbstractKeyword),
                 isPartial: modifiers.Any(SyntaxKind.PartialKeyword),
                 baseTypes: baseTypes,
                 genericParams: genericParams,
@@ -399,9 +426,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
             string[] baseTypes = null, string[] genericParams = null,
             int lineNumber = 0, string[] lines = null, SyntaxNode declarationNode = null)
         {
+            // FullName = 命名空间 + 外层类型链 + 名称（Ns.Outer.Inner.Member），保证嵌套类型与成员可按全名唯一定位
+            var qualifiedName = BuildContainingTypePath(declarationNode, name);
             var fullName = string.IsNullOrEmpty(ns) || ns == "<global>"
-                ? name
-                : $"{ns}.{name}";
+                ? qualifiedName
+                : $"{ns}.{qualifiedName}";
 
             var snippet = GenerateDeclarationSnippet(lines, lineNumber - 1, declarationNode);
 
@@ -466,6 +495,21 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
 
             return map;
+        }
+
+        /// <summary>
+        /// 拼接外层类型链：从声明节点向上收集所有包含它的类型声明名（不含命名空间）。
+        /// </summary>
+        private static string BuildContainingTypePath(SyntaxNode declarationNode, string name)
+        {
+            if (declarationNode == null) return name;
+            var parts = new List<string> { name };
+            for (var current = declarationNode.Parent; current != null; current = current.Parent)
+            {
+                if (current is BaseTypeDeclarationSyntax type)
+                    parts.Insert(0, type.Identifier.Text);
+            }
+            return string.Join(".", parts);
         }
 
         /// <summary>
@@ -543,11 +587,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
             var sb = new StringBuilder();
             for (var i = startLine; i <= endLine; i++)
             {
-                var line = lines[i];
+                // lines 由 Split('\n') 得到，CRLF 文件每行末尾残留 '\r'；去掉后统一用 '\n' 拼接，避免出现 "\r\r\n"
+                var line = lines[i].TrimEnd('\r');
                 // 截断超过 200 字符的行
                 if (line.Length > 200)
                     line = line.Substring(0, 200) + "...";
-                sb.AppendLine(line);
+                sb.Append(line).Append('\n');
 
                 // 遇到方法体开�?{ 或语句结�?; 时停止（保留签名�?
                 var trimmed = line.TrimEnd();

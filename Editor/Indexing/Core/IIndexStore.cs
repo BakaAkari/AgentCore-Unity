@@ -194,6 +194,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
     }
 
     /// <summary>
+    /// 可选能力：按符号 ID 直接查找（get_symbol_context 的 symbol_id 路径）。
+    /// 未实现该接口的后端，调用方应如实返回“不支持”，而不是返回空结果。
+    /// </summary>
+    public interface ISymbolLookup
+    {
+        /// <summary>返回指定 workspace 中 ID 对应的符号，不存在时返回 null。</summary>
+        Task<SymbolInfo> GetSymbolByIdAsync(int workspaceId, int symbolId, CancellationToken ct = default);
+    }
+
+    /// <summary>
     /// 截断原因常量（返回给模型的 truncatedReason）。
     /// </summary>
     public static class SearchTruncation

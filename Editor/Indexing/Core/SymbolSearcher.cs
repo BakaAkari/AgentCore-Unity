@@ -65,7 +65,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
             query.Limit = Math.Min(Math.Max(1, query.Limit), MaxResultLimit);
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return Array.Empty<SymbolInfo>();
 
@@ -87,7 +88,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
             query.Limit = Math.Min(Math.Max(1, query.Limit), MaxResultLimit);
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return new SymbolSearchPage();
 
@@ -131,18 +133,19 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 return Array.Empty<SymbolInfo>();
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return Array.Empty<SymbolInfo>();
 
-            // 规范化路径
-            var normalizedPath = NormalizePath(filePath, workspace.WorkspaceRoot);
-
-            var file = await _store.GetFileByPathAsync(stored.Id, normalizedPath, ct);
-            if (file == null)
-                return Array.Empty<SymbolInfo>();
-
-            return await _store.GetSymbolsByFileAsync(file.Id, ct);
+            // 相对路径先按 Unity 工程根解析，失败再按 WorkspaceRoot
+            foreach (var candidate in ResolvePathCandidates(filePath, workspace))
+            {
+                var file = await _store.GetFileByPathAsync(stored.Id, candidate, ct);
+                if (file != null)
+                    return await _store.GetSymbolsByFileAsync(file.Id, ct);
+            }
+            return Array.Empty<SymbolInfo>();
         }
 
         /// <summary>
@@ -156,7 +159,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
             CancellationToken ct = default)
         {
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return Array.Empty<NamespaceEntry>();
 
@@ -171,7 +175,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public async Task<IndexingStats> GetStatsAsync(CancellationToken ct = default)
         {
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return null;
 
@@ -186,7 +191,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
         public async Task<IReadOnlyList<IndexRoot>> GetRootsAsync(CancellationToken ct = default)
         {
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return Array.Empty<IndexRoot>();
 
@@ -229,9 +235,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
             var results = await SearchAsync(query, ct);
 
-            // 精确匹配 FullName
+            // 精确匹配 FullName（不区分大小写，与存储层非模糊匹配一致）
             return results
-                .Where(s => string.Equals(s.FullName, fullName, StringComparison.Ordinal))
+                .Where(s => string.Equals(s.FullName, fullName, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
 
@@ -288,7 +294,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             // 只返回类型级别符号
             var typeSymbolTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                "class", "interface", "struct", "enum", "delegate"
+                "class", "interface", "struct", "record", "enum", "delegate"
             };
 
             return results
@@ -311,7 +317,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 return Array.Empty<SymbolInfo>();
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-            var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return Array.Empty<SymbolInfo>();
 
@@ -324,7 +331,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
             };
             var typeResults = await _store.SearchSymbolsAsync(stored.Id, typeQuery, ct);
             var typeSymbol = typeResults.FirstOrDefault(s =>
-                string.Equals(s.FullName, typeFullName, StringComparison.Ordinal) &&
+                string.Equals(s.FullName, typeFullName, StringComparison.OrdinalIgnoreCase) &&
                 IsTypeSymbol(s.SymbolType));
 
             if (typeSymbol == null)
@@ -333,11 +340,13 @@ namespace AgentCore.Editor.Components.Indexing.Core
             // 获取同文件的所有符号，过滤出该类型的成员
             var fileSymbols = await _store.GetSymbolsByFileAsync(typeSymbol.FileId, ct);
 
-            // 成员符号：非类型级别，且 FullName 以 typeFullName. 开头
-            var memberPrefix = typeFullName + ".";
+            // 成员符号：非类型级别，FullName = 类型全名 + "." + 成员名（只取直接成员，不含嵌套类型的成员）
+            var memberPrefix = typeSymbol.FullName + ".";
             return fileSymbols
                 .Where(s => !IsTypeSymbol(s.SymbolType) &&
-                            (s.FullName?.StartsWith(memberPrefix, StringComparison.Ordinal) == true))
+                            s.FullName != null &&
+                            s.FullName.StartsWith(memberPrefix, StringComparison.OrdinalIgnoreCase) &&
+                            s.FullName.IndexOf('.', memberPrefix.Length) < 0)
                 .ToList();
         }
 
@@ -351,7 +360,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
             try
             {
                 var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-                var stored = await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+                // 后台线程且缓存未就绪时 workspace 为 null：按"未找到"处理，由调用方给出"工作区正在解析"提示
+            var stored = workspace == null ? null : await _store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
                 return stored != null;
             }
             catch
@@ -363,29 +373,60 @@ namespace AgentCore.Editor.Components.Indexing.Core
         // ── 私有方法 ─────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 规范化文件路径：如果是相对路径，则相对于 WorkspaceRoot 解析为绝对路径。
+        /// 输入路径的候选绝对路径（正斜杠）：绝对路径原样；相对路径先按 Unity 工程根，再按 WorkspaceRoot。
         /// </summary>
-        private static string NormalizePath(string filePath, string workspaceRoot)
+        public static IReadOnlyList<string> ResolvePathCandidates(string filePath, IndexWorkspace workspace)
         {
+            var result = new List<string>();
             if (string.IsNullOrEmpty(filePath))
-                return filePath;
+                return result;
 
-            // 已是绝对路径
             if (Path.IsPathRooted(filePath))
-                return filePath.Replace('\\', '/');
-
-            // 相对路径：相对于 WorkspaceRoot
-            if (!string.IsNullOrEmpty(workspaceRoot))
             {
-                var combined = Path.Combine(workspaceRoot, filePath);
-                return combined.Replace('\\', '/');
+                result.Add(NormalizeAbsolute(filePath));
+                return result;
             }
 
-            return filePath.Replace('\\', '/');
+            foreach (var baseDir in new[] { workspace?.UnityRoot, workspace?.WorkspaceRoot })
+            {
+                if (string.IsNullOrEmpty(baseDir)) continue;
+                var combined = NormalizeAbsolute(Path.Combine(baseDir, filePath));
+                if (!result.Contains(combined))
+                    result.Add(combined);
+            }
+
+            if (result.Count == 0)
+                result.Add(filePath.Replace('\\', '/'));
+            return result;
         }
 
         /// <summary>
-        /// 判断符号类型是否为类型级别（class / interface / struct / enum / delegate）。
+        /// 转为相对 Unity 工程根的路径（Assets/... 或 Packages/...），与其他工具输出一致；不在工程内时返回 null。
+        /// </summary>
+        public static string ToUnityRelativePath(string absolutePath, IndexWorkspace workspace)
+        {
+            if (string.IsNullOrEmpty(absolutePath) || string.IsNullOrEmpty(workspace?.UnityRoot))
+                return null;
+            var path = absolutePath.Replace('\\', '/');
+            var root = workspace.UnityRoot.Replace('\\', '/').TrimEnd('/') + "/";
+            return path.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? path.Substring(root.Length) : null;
+        }
+
+        private static string NormalizeAbsolute(string path)
+        {
+            try
+            {
+                path = Path.GetFullPath(path);
+            }
+            catch (Exception)
+            {
+                // 非法字符等：保留原样，交给存储层按"未找到"处理
+            }
+            return path.Replace('\\', '/');
+        }
+
+        /// <summary>
+        /// 判断符号类型是否为类型级别（class / interface / struct / record / enum / delegate）。
         /// </summary>
         private static bool IsTypeSymbol(string symbolType)
         {
@@ -395,6 +436,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 case "class":
                 case "interface":
                 case "struct":
+                case "record":
                 case "enum":
                 case "delegate":
                     return true;

@@ -39,7 +39,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                       "list_root_states (per-root Ready/Indexing/Stale/NotIndexed/Failed with counts), " +
                       "mark_stale (force re-index of a root/scope on next background pass), " +
                       "resolve_workspace, list_roots, index_full, index_scope, index_incremental, " +
-                      "search_symbol, search_text (symbol-name text search; also returns literal *.cs source-line hits via ripgrep as text_matches when rg is installed), list_namespaces, get_file_symbols, get_stats, clear_index, " +
+                      "search_symbol (ranked: exact name > name prefix > name contains > full-name only; on 0 results index_warning states index coverage and ripgrep text_matches are attached), " +
+                      "search_text (symbol-name text search; also returns literal *.cs source-line hits via ripgrep as text_matches when rg is installed), list_namespaces, get_file_symbols, get_stats, clear_index, " +
                       "get_dependencies, find_usages, get_symbol_context, get_backend_info. " +
                       "USE FOR: finding class/method definitions, understanding code structure, dependency analysis, " +
                       "navigating large codebases, finding all usages of a symbol, diagnosing why searches return no results. " +
@@ -74,7 +75,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     },
     ""symbol_type"": {
       ""type"": ""string"",
-      ""enum"": [""class"", ""interface"", ""struct"", ""enum"", ""method"", ""property"", ""field"", ""event"", ""constructor"", ""delegate""],
+      ""enum"": [""class"", ""interface"", ""struct"", ""record"", ""enum"", ""method"", ""property"", ""field"", ""event"", ""constructor"", ""delegate""],
       ""description"": ""[search_symbol] 符号类型过滤（不填则不过滤）""
     },
     ""scope_type"": {
@@ -362,7 +363,17 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
             var perRootEntries = await BuildPerRootStateEntriesAsync(ct);
             var perRootDtos = perRootEntries.Select(e => e.Dto).ToList();
-            var advice = BuildDiagnoseAdvice(snapshot, perRootEntries);
+
+            // 实际存储内容（文件 / 符号数、全量时间）：root 状态全为 Ready 不代表库里真的有数据
+            IndexCompleteness completeness = null;
+            if (workspace != null)
+            {
+                using var store = CreateStore();
+                var stored = store != null ? await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct) : null;
+                if (stored != null)
+                    completeness = await ReadIndexCompletenessAsync(store, stored.Id, ct);
+            }
+            var advice = BuildDiagnoseAdvice(snapshot, perRootEntries, completeness, workspace != null);
 
             return ToolResponse.OkWithData(new
             {
@@ -387,6 +398,13 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                     display_name = workspace.DisplayName,
                     resolved_roots = resolvedRoots?.Count ?? 0,
                     enabled_roots = resolvedRoots?.Count(r => r.IsEnabled) ?? 0,
+                },
+                index_contents = completeness == null ? null : new
+                {
+                    total_files = completeness.TotalFiles,
+                    total_symbols = completeness.TotalSymbols,
+                    last_full_index_at = completeness.LastFullIndexAt?.ToString("O"),
+                    summary = completeness.Describe(),
                 },
                 roots = perRootDtos,
                 advice = advice,
@@ -424,6 +442,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 return ToolResponse.Fail("索引存储初始化失败，请检查 WorkspaceRoot 配置。");
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return ToolResponse.Fail("尚未建立索引，mark_stale 无对象可标记。");
@@ -486,6 +506,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             try
             {
                 var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                if (workspace == null)
+                    return ToolResponse.Fail(WorkspaceResolvingMessage);
                 var rootResolver = new IndexRootResolver();
                 var roots = rootResolver.Resolve(workspace);
 
@@ -507,7 +529,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 {
                     fingerprint = workspace.Fingerprint,
                     workspace_root = workspace.WorkspaceRoot,
-                    unity_root = workspace.WorkspaceRoot, // WorkspaceRoot 包含 UnityRoot
+                    unity_root = workspace.UnityRoot,
                     display_name = workspace.DisplayName,
                     vcs_type = workspace.VcsType,
                     vcs_root_path = workspace.VcsRootPath,
@@ -542,6 +564,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             {
                 // 降级：从 Provider 动态发现
                 var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                if (workspace == null)
+                    return ToolResponse.Fail(WorkspaceResolvingMessage);
                 var rootResolver = new IndexRootResolver();
                 var discovered = rootResolver.Resolve(workspace);
 
@@ -635,6 +659,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
             // 获取所有 Root，过滤出目标 Root
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var workspaceId = await store.UpsertWorkspaceAsync(workspace, ct);
             workspace = new IndexWorkspace
             {
@@ -790,26 +816,37 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             if (readOnlyToken != null && readOnlyToken.Type != JTokenType.Null)
                 query.ReadOnly = readOnlyToken.Value<bool>();
 
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
+
             using var store = CreateStore();
-            if (store == null)
-                return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
+            var stored = store != null ? await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct) : null;
+            if (stored == null)
+            {
+                // 与 search_text 一致：索引不可用时附带源码文本命中，而不是直接失败
+                var warning = store == null
+                    ? "索引存储初始化失败，仅返回源码文本命中；符号结果需先执行 index_full。"
+                    : "尚未建立索引，仅返回源码文本命中；符号结果需先执行 index_full 或 index_incremental。";
+                var fallback = await SearchTextFallbackAsync(queryStr, query.Regex, query.Limit, workspace, ct);
+                return await BuildTextOnlyResultAsync(queryStr, Task.FromResult(fallback), warning);
+            }
 
             var searcher = new SymbolSearcher(store);
-
-            if (!await searcher.IsIndexAvailableAsync(ct))
-                return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
-
             var page = await searcher.SearchPageAsync(query, ct);
-
-            // 获取 workspace 信息用于结果上下文
-            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
-
             var resultItems = page.Matches.Select(s => BuildSymbolResult(s, workspace)).ToList();
+
+            // 0 结果或索引不完整：写明索引状态；0 结果时附带源码文本回退，避免把"没索引到"误当成"不存在"
+            var completeness = await ReadIndexCompletenessAsync(store, stored.Id, ct);
+            var textResult = resultItems.Count == 0
+                ? await SearchTextFallbackAsync(queryStr, query.Regex, query.Limit, workspace, ct)
+                : null;
 
             return ToolResponse.OkWithData(new
             {
                 workspace_fingerprint = workspace.Fingerprint,
                 workspace_root = workspace.WorkspaceRoot,
+                unity_root = workspace.UnityRoot,
                 branch_id = workspace.BranchId,
                 query = queryStr,
                 matches = resultItems,
@@ -817,8 +854,15 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 totalIsLowerBound = page.TotalIsLowerBound ? true : (bool?)null,
                 truncated = page.Truncated,
                 truncatedReason = page.TruncatedReason,
-                index_warning = GetIndexHealthWarning(store),
-            }, DescribePage("符号", resultItems.Count, page));
+                index_warning = completeness.WarningFor(resultItems.Count),
+                engine = textResult?.Engine,
+                engine_note = textResult?.Note,
+                text_matches = textResult?.Matches,
+                text_totalMatches = textResult?.TotalMatches,
+                text_truncated = textResult?.Truncated,
+            }, DescribePage("符号", resultItems.Count, page)
+               + (resultItems.Count == 0 ? $"；{completeness.Describe()}" : string.Empty)
+               + DescribeTextResult(textResult));
         }
 
         /// <summary>
@@ -834,20 +878,26 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 scopeType = parsed;
             }
 
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
+
             using var store = CreateStore();
             if (store == null)
                 return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
 
-            var searcher = new SymbolSearcher(store);
-
-            if (!await searcher.IsIndexAvailableAsync(ct))
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
 
+            var searcher = new SymbolSearcher(store);
             var namespaces = await searcher.ListNamespacesAsync(scopeType, ct);
+            var completeness = await ReadIndexCompletenessAsync(store, stored.Id, ct);
 
             return ToolResponse.OkWithData(new
             {
                 scope_type_filter = scopeTypeStr,
+                index_warning = completeness.WarningFor(namespaces.Count),
                 total = namespaces.Count,
                 namespaces = namespaces.Select(n => new
                 {
@@ -857,7 +907,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                     file_count = n.FileCount,
                     symbol_count = n.SymbolCount,
                 }).ToList(),
-            }, $"共 {namespaces.Count} 个命名空间");
+            }, $"共 {namespaces.Count} 个命名空间" + (namespaces.Count == 0 ? $"；{completeness.Describe()}" : string.Empty));
         }
 
         /// <summary>
@@ -867,25 +917,40 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         {
             var filePath = ToolHelpers.GetRequiredString(parameters, "file_path");
 
+            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
+
             using var store = CreateStore();
             if (store == null)
                 return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
 
-            var searcher = new SymbolSearcher(store);
-
-            if (!await searcher.IsIndexAvailableAsync(ct))
+            var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
+            if (stored == null)
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
 
-            var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            var searcher = new SymbolSearcher(store);
             var symbols = await searcher.GetSymbolsByFileAsync(filePath, ct);
 
             if (symbols.Count == 0)
+            {
+                // 区分"文件不存在"与"文件存在但未入索引"，并写明索引状态
+                var candidates = SymbolSearcher.ResolvePathCandidates(filePath, workspace);
+                var existing = candidates.FirstOrDefault(System.IO.File.Exists);
+                var completeness = await ReadIndexCompletenessAsync(store, stored.Id, ct);
+                var reason = existing == null
+                    ? $"文件不存在（已尝试：{string.Join("，", candidates)}；相对路径先按 Unity 工程根解析，再按 WorkspaceRoot）"
+                    : "文件存在但索引中没有它的符号（可能尚未索引、所在 root 未启用，或文件内没有可提取的声明）";
                 return ToolResponse.OkWithData(new
                 {
                     file_path = filePath,
+                    resolved_path = existing,
+                    file_exists = existing != null,
                     total = 0,
                     symbols = new object[0],
-                }, $"文件 '{filePath}' 中未找到符号（可能尚未索引或文件不存在）");
+                    index_warning = completeness.Describe(),
+                }, $"文件 '{filePath}' 中未找到符号：{reason}；{completeness.Describe()}");
+            }
 
             return ToolResponse.OkWithData(new
             {
@@ -950,6 +1015,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 return ToolResponse.Fail("索引存储初始化失败，请检查 WorkspaceRoot 配置。");
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
 
             if (stored == null)
@@ -975,6 +1042,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
             // 源码全文命中交给 ripgrep（与索引查询并行）；索引只负责 Roslyn 符号
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var textTask = RgLocator.TryGetExecutable(out var rgPath)
                 ? Task.Run(() => SearchSourceTextWithRipgrep(rgPath, text, limit, workspace?.UnityRoot, ct))
                 : null;
@@ -1016,6 +1085,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
 
             var resultItems = page.Matches.Select(s => BuildSymbolResult(s, workspace)).ToList();
             var textResult = textTask != null ? await textTask : null;
+            var completeness = await ReadIndexCompletenessAsync(store, stored.Id, ct);
             return ToolResponse.OkWithData(new
             {
                 query = text,
@@ -1025,7 +1095,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 totalIsLowerBound = page.TotalIsLowerBound ? true : (bool?)null,
                 truncated = page.Truncated,
                 truncatedReason = page.TruncatedReason,
-                index_warning = GetIndexHealthWarning(store),
+                index_warning = completeness.WarningFor(resultItems.Count),
                 engine = textResult?.Engine ?? "dotnet",
                 engine_note = textResult?.Note,
                 text_matches = textResult?.Matches,
@@ -1201,6 +1271,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
@@ -1209,12 +1281,13 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             int fileId = 0;
             if (!string.IsNullOrEmpty(filePath))
             {
-                // 支持相对路径
-                var absPath = filePath;
-                if (!System.IO.Path.IsPathRooted(absPath) && !string.IsNullOrEmpty(workspace.WorkspaceRoot))
-                    absPath = System.IO.Path.Combine(workspace.WorkspaceRoot, filePath);
-
-                var indexedFile = await store.GetFileByPathAsync(stored.Id, absPath, ct);
+                // 相对路径先按 Unity 工程根（Assets/... / Packages/...）解析，失败再按 WorkspaceRoot
+                IndexedFile indexedFile = null;
+                foreach (var candidate in SymbolSearcher.ResolvePathCandidates(filePath, workspace))
+                {
+                    indexedFile = await store.GetFileByPathAsync(stored.Id, candidate, ct);
+                    if (indexedFile != null) break;
+                }
                 if (indexedFile == null)
                     return ToolResponse.Fail($"文件 '{filePath}' 未在索引中找到，请先执行索引。");
                 fileId = indexedFile.Id;
@@ -1258,6 +1331,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
@@ -1303,39 +1378,72 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 return ToolResponse.Fail("索引存储初始化失败，请先执行 index_full 建立索引。");
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return ToolResponse.Fail("尚未建立索引，请先执行 index_full 或 index_incremental。");
 
-            // 通过 full_name 查找符号
             SymbolInfo targetSymbol = null;
+            string matchNote = null;
             if (!string.IsNullOrEmpty(fullName))
             {
+                // 非模糊查询在存储层同时比较 Name 与 FullName（不区分大小写）
                 var searcher = new SymbolSearcher(store);
-                var query = new AgentCore.Editor.Components.Indexing.Query.SearchQuery
-                {
-                    Query = fullName,
-                    Fuzzy = false,
-                    Limit = 5,
-                };
-                var candidates = await searcher.SearchAsync(query, ct);
+                var candidates = await searcher.SearchAsync(new SearchQuery { Query = fullName, Fuzzy = false, Limit = 20 }, ct);
                 targetSymbol = candidates.FirstOrDefault(s =>
-                    string.Equals(s.FullName, fullName, StringComparison.Ordinal));
-                if (targetSymbol == null)
-                    targetSymbol = candidates.FirstOrDefault();
-            }
-            else if (symbolId > 0)
-            {
-                // 通过 file symbols 查找（需要先找到文件）
-                // 降级：通过符号文本搜索查找 symbol_id 对应的符号
-                var searcher = new SymbolSearcher(store);
-                var allByFile = await store.SearchSymbolsByTextAsync(stored.Id, "", 1, ct);
-                // 直接通过 GetSymbolsByFileAsync 无法按 ID 查，改用 search_text 降级
-                // 实际上 get_symbol_context 主要通过 full_name 使用，symbol_id 路径作为辅助
-            }
+                    string.Equals(s.FullName, fullName, StringComparison.OrdinalIgnoreCase));
 
-            if (targetSymbol == null && symbolId == 0)
-                return ToolResponse.Fail($"未找到符号 '{fullName}'，请先确认符号名称或执行索引。");
+                // 兼容旧索引：旧版成员 / 嵌套类型的 FullName 不含外层类型链（Ns.Member），按末段名称回查
+                var lastDot = fullName.LastIndexOf('.');
+                if (targetSymbol == null && lastDot > 0 && lastDot < fullName.Length - 1)
+                {
+                    var shortName = fullName.Substring(lastDot + 1);
+                    var containerName = fullName.Substring(0, lastDot);
+                    containerName = containerName.Substring(containerName.LastIndexOf('.') + 1);
+                    var byName = await searcher.SearchAsync(new SearchQuery { Query = shortName, Fuzzy = false, Limit = 50 }, ct);
+                    foreach (var s in byName)
+                    {
+                        if (!string.Equals(s.Name, shortName, StringComparison.OrdinalIgnoreCase) ||
+                            string.IsNullOrEmpty(s.Namespace) ||
+                            !fullName.StartsWith(s.Namespace + ".", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        // 同文件中存在同名外层类型才算命中，避免同命名空间下不同类型的同名成员串号
+                        var sameFile = await store.GetSymbolsByFileAsync(s.FileId, ct);
+                        if (sameFile.Any(t => t.Id != s.Id && string.Equals(t.Name, containerName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            targetSymbol = s;
+                            break;
+                        }
+                    }
+                    if (targetSymbol != null)
+                        matchNote = $"按旧索引格式匹配（索引中 FullName 为 '{targetSymbol.FullName}'，不含外层类型）；执行一次 index_full 后全名会包含外层类型链。";
+                }
+
+                if (targetSymbol == null && candidates.Count > 0)
+                {
+                    // 只有短名称命中（如传入了不带命名空间的名字）：取排序第一的候选并说明
+                    targetSymbol = candidates[0];
+                    matchNote = candidates.Count > 1
+                        ? $"'{fullName}' 不是完整全名，按名称命中 {candidates.Count} 个候选，已取第一个；请用 full_name 精确指定。"
+                        : $"'{fullName}' 按名称命中（全名为 '{targetSymbol.FullName}'）。";
+                }
+
+                if (targetSymbol == null)
+                {
+                    var completeness = await ReadIndexCompletenessAsync(store, stored.Id, ct);
+                    return ToolResponse.Fail($"未找到符号 '{fullName}'。{completeness.Describe()}。可用 search_symbol（模糊）或 search_text 确认名称。");
+                }
+            }
+            else
+            {
+                // symbol_id 路径：后端支持按 ID 查找时直接取，否则如实说明不支持
+                if (!(store is ISymbolLookup lookup))
+                    return ToolResponse.Fail($"unsupported: 当前索引后端（{store.BackendType}）不支持按 symbol_id 查找，请改用 full_name。");
+                targetSymbol = await lookup.GetSymbolByIdAsync(stored.Id, symbolId, ct);
+                if (targetSymbol == null)
+                    return ToolResponse.Fail($"未找到 symbol_id={symbolId} 的符号（索引重建后符号 ID 会变化，请重新 search_symbol 获取 id，或改用 full_name）。");
+            }
 
             object symbolResult = targetSymbol != null ? BuildSymbolResult(targetSymbol, workspace) : null;
 
@@ -1412,6 +1520,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
             return ToolResponse.OkWithData(new
             {
                 symbol = symbolResult,
+                match_note = matchNote,
                 file_symbols_count = fileSymbols?.Length ?? 0,
                 file_symbols = fileSymbols,
                 dependencies_count = depsResult?.Length ?? 0,
@@ -1436,6 +1545,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 return ToolResponse.Fail("索引存储初始化失败，请检查 WorkspaceRoot 配置。");
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return ToolResponse.Fail(WorkspaceResolvingMessage);
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
 
             // 默认后端是 JSONL（目录内的操作日志 + 快照），只有 SQLite 后端才有单一数据库文件
@@ -1473,6 +1584,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 return null;
 
             var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+            if (workspace == null)
+                return null;
             var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
             if (stored == null)
                 return null;
@@ -1523,13 +1636,33 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         }
 
         /// <summary>
-        /// 索引健康警告（存储有损坏行 / 需要重建时返回说明，健康时为 null）。
+        /// 后台线程首次调用时 WorkspaceContext 缓存可能尚未就绪（只能在主线程解析），此时 workspace 为 null。
+        /// 这不是索引缺失，不能引导去 index_full。
         /// </summary>
-        private static string GetIndexHealthWarning(IIndexStore store)
+        private const string WorkspaceResolvingMessage =
+            "工作区正在解析（Unity 工程信息需由编辑器主线程识别，通常发生在编辑器刚启动或脚本刚重载时），请稍后重试；这不是索引缺失，无需执行 index_full。";
+
+        /// <summary>
+        /// 读取当前索引完整性（附带后台索引是否正在运行）。
+        /// </summary>
+        private static Task<IndexCompleteness> ReadIndexCompletenessAsync(IIndexStore store, int workspaceId, CancellationToken ct)
         {
-            if (store is IIndexHealth health && (health.RequiresRebuild || health.CorruptLineCount > 0))
-                return health.HealthMessage ?? $"索引存储有 {health.CorruptLineCount} 行损坏，结果可能不完整。";
-            return null;
+            return IndexCompleteness.ReadAsync(store, workspaceId,
+                IndexingStatusBus.Current.State == IndexingBackgroundState.Running, ct);
+        }
+
+        /// <summary>
+        /// 符号查询 0 结果时的源码文本回退（ripgrep，字面量）。rg 不可用 / 查询为正则时返回说明而不搜索。
+        /// </summary>
+        private static async Task<SourceTextResult> SearchTextFallbackAsync(string text, bool isRegex, int limit, IndexWorkspace workspace, CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(text))
+                return null;
+            if (isRegex)
+                return new SourceTextResult { Engine = "dotnet", Note = "查询为正则，未执行 ripgrep 字面量源码回退。" };
+            if (!RgLocator.TryGetExecutable(out var rgPath))
+                return new SourceTextResult { Engine = "dotnet", Note = "未找到 ripgrep（rg），无法附带源码文本回退；可安装 rg 或改用 manage_file 搜索内容。" };
+            return await Task.Run(() => SearchSourceTextWithRipgrep(rgPath, text, limit, workspace?.UnityRoot, ct), ct);
         }
 
         private static object BuildSymbolResult(SymbolInfo s, IndexWorkspace workspace)
@@ -1544,12 +1677,17 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                     workspaceRelativePath = normalizedFile.Substring(normalizedRoot.Length);
             }
 
+            // 与其他工具一致的工程相对路径（Assets/... 或 Packages/...）；工程外文件（如外部 Shared root）退回绝对路径
+            var unityRelativePath = SymbolSearcher.ToUnityRelativePath(s.FilePath, workspace);
+
             return new
             {
+                id = s.Id,
                 name = s.Name,
                 full_name = s.FullName,
                 symbol_type = s.SymbolType,
                 @namespace = s.Namespace,
+                path = unityRelativePath ?? s.FilePath,
                 file_path = s.FilePath,
                 workspace_relative_path = workspaceRelativePath,
                 line_number = s.LineNumber,
@@ -1625,6 +1763,8 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 }
 
                 var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
+                if (workspace == null)
+                    return result;
                 var stored = await store.GetWorkspaceByFingerprintAsync(workspace.Fingerprint, ct);
 
                 // Resolve current roots from providers (may include roots not yet persisted)
@@ -1692,9 +1832,31 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         /// v1.4.0 — Build human-readable advice for the diagnose action.
         /// Rules are evaluated in a fixed order (top-down); triggered rules accumulate.
         /// </summary>
-        private static List<string> BuildDiagnoseAdvice(IndexingStatusSnapshot snapshot, List<PerRootEntry> perRoot)
+        private static List<string> BuildDiagnoseAdvice(IndexingStatusSnapshot snapshot, List<PerRootEntry> perRoot,
+            IndexCompleteness completeness, bool workspaceResolved)
         {
             var advice = new List<string>();
+
+            if (!workspaceResolved)
+            {
+                advice.Add(WorkspaceResolvingMessage);
+                return advice;
+            }
+
+            // 先看实际存储内容：空库 / 无全量时不能报"健康"
+            if (completeness == null)
+            {
+                advice.Add("当前 Workspace 尚无索引数据。请执行 search_code::index_full 建立索引。");
+            }
+            else
+            {
+                if (completeness.TotalSymbols == 0)
+                    advice.Add($"索引存储中实际只有 {completeness.TotalFiles} 个文件、0 个符号（可能被清空、写入未完成或 root 未覆盖源码）。请执行 search_code::index_full 重建。");
+                else if (!completeness.LastFullIndexAt.HasValue)
+                    advice.Add("索引从未完成过全量（last_full_index_at 缺失），部分 root 可能未覆盖。建议执行 search_code::index_full。");
+                if (completeness.HealthWarning != null)
+                    advice.Add(completeness.HealthWarning);
+            }
 
             if (snapshot.State == IndexingBackgroundState.Disabled)
             {
@@ -1754,7 +1916,11 @@ namespace AgentCore.Editor.Components.Indexing.Tools
                 }
                 if (ready == perRoot.Count && failed == 0 && stale == 0 && indexing == 0)
                 {
-                    advice.Add("所有 root 均为 Ready 状态，索引健康。");
+                    // 只有存储里确有符号、做过全量且无损坏时才报健康
+                    if (completeness != null && !completeness.Incomplete)
+                        advice.Add($"所有 root 均为 Ready 状态，索引健康（{completeness.TotalFiles} 个文件，{completeness.TotalSymbols} 个符号）。");
+                    else
+                        advice.Add("所有 root 标记为 Ready，但索引内容不完整（见上方说明），搜索结果可能缺失。");
                 }
             }
             else
