@@ -24,62 +24,13 @@ namespace AgentCore.Editor.UI
         private const int MaxConfirmationValueLength = 180;
 
         /// <summary>
-        /// 本会话已激活的信任 scope 集合。
-        /// <para>
-        /// v1.6.5:通过 <see cref="UnityEditor.SessionState"/> 持久化,
-        /// 跨 Domain Reload 保留,Editor 完全重启时归零。
-        /// </para>
-        /// <para>
-        /// <b>初始化规则</b>:字段声明为空集合(纯 CLR,零 Unity API);
-        /// 真正的加载在 <see cref="LoadSessionTrustScopesFromState"/> 里,
-        /// 由 <c>CreateGUI</c> 生命周期方法显式触发。
-        /// 这是 Unity 的硬要求 — ScriptableObject/EditorWindow 的字段初始化器 (等价于构造器上下文)
-        /// 严禁调用 SessionState/EditorPrefs/AssetDatabase 等 Unity API。
-        /// </para>
-        /// </summary>
-        private readonly HashSet<ToolConfirmationTrustScope> _sessionTrustScopes = new HashSet<ToolConfirmationTrustScope>();
-
-        /// <summary>SessionState 键,存储 YOLO 会话信任状态 (跨 Domain Reload 但不跨 Editor 重启)。</summary>
-        private const string SessionTrustStateKey = "AgentCore.SessionTrustScopes";
-
-        /// <summary>
-        /// 从 SessionState 恢复本会话已激活的信任 scope。
-        /// <para>
-        /// 必须在 <c>CreateGUI</c> 等生命周期方法中调用,不能在字段初始化器/构造器中调用
-        /// (Unity 会抛 UnityException: GetString is not allowed to be called from a ScriptableObject constructor)。
-        /// </para>
+        /// 从共享信任状态（<see cref="ToolTrustState"/>）加载本会话已激活的信任 scope。
+        /// 信任状态由 Chat、MCP 等所有调用来源共用；Chat 只负责展示与修改。
+        /// 必须在 <c>CreateGUI</c> 等生命周期方法中调用（加载会读 SessionState）。
         /// </summary>
         private void LoadSessionTrustScopesFromState()
         {
-            _sessionTrustScopes.Clear();
-            var raw = SessionState.GetString(SessionTrustStateKey, string.Empty);
-            if (string.IsNullOrEmpty(raw)) return;
-
-            foreach (var token in raw.Split(','))
-            {
-                if (Enum.TryParse<ToolConfirmationTrustScope>(token.Trim(), out var scope))
-                {
-                    _sessionTrustScopes.Add(scope);
-                }
-            }
-        }
-
-        /// <summary>
-        /// 将当前信任 scope 序列化写入 SessionState,以便 Domain Reload 后自动恢复。
-        /// <para>
-        /// 空守卫:<see cref="_sessionTrustScopes"/> 若为 null(极端情况下的半初始化状态),直接返回不写入。
-        /// </para>
-        /// </summary>
-        private void SaveSessionTrustScopes()
-        {
-            if (_sessionTrustScopes == null) return;
-
-            if (_sessionTrustScopes.Count == 0)
-            {
-                SessionState.EraseString(SessionTrustStateKey);
-                return;
-            }
-            SessionState.SetString(SessionTrustStateKey, string.Join(",", _sessionTrustScopes));
+            ToolTrustState.EnsureLoaded();
         }
 
         private sealed class PendingToolConfirmation
@@ -384,8 +335,7 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private void ResolvePendingToolConfirmationWithTrust(PendingToolConfirmation pending, ToolConfirmationTrustScope scope)
         {
-            _sessionTrustScopes.Add(scope);
-            SaveSessionTrustScopes();
+            ToolTrustState.Add(scope);
             CompletePendingToolConfirmation(pending, true, updateUi: true);
         }
 
@@ -542,9 +492,7 @@ namespace AgentCore.Editor.UI
                 CompletePendingToolConfirmation(_pendingToolConfirmations.Dequeue(), false, updateUi: false);
             }
 
-            // 空守卫:_sessionTrustScopes 可能因半初始化处于 null 状态 (v1.6.5 已修复初始化顺序,但保留兜底)
-            _sessionTrustScopes?.Clear();
-            SaveSessionTrustScopes();
+            ToolTrustState.Clear();
             HideToolConfirmationPanel();
         }
 
@@ -553,8 +501,7 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private bool IsSessionYoloActive()
         {
-            var scopes = _sessionTrustScopes;
-            return scopes != null && scopes.Contains(ToolConfirmationTrustScope.SessionAll);
+            return ToolTrustState.IsYoloActive;
         }
 
         /// <summary>
@@ -562,7 +509,7 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private bool IsToolConfirmationTrusted(ToolConfirmationRequest request)
         {
-            return ToolConfirmationTrust.IsTrusted(request, _sessionTrustScopes);
+            return ToolTrustState.IsTrusted(request);
         }
 
         /// <summary>
