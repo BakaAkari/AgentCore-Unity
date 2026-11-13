@@ -20,7 +20,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                       "get_sync_status, get_commit_info, get_client_info, get_changelist, get_info, get_file_log. " +
                       "Write actions (the user is asked to approve each one in the editor; there is no confirm parameter): stage_files, unstage_files, commit, commit_files, " +
                       "create_branch, switch_branch, stash, stash_pop, checkout_files, revert_files, resolve_files, " +
-                      "ignore_file, ignore_folder, ignore_extension, remove_files, cleanup, lock_files, unlock_files (SVN). " +
+                      "ignore_file, ignore_folder, ignore_extension, remove_files, cleanup, lock_files, unlock_files, move_files (SVN). " +
                       "USE FOR: checking file status before/after changes, reviewing diffs, committing work, managing branches. " +
                       "NOT FOR: file content reading (use manage_file), project-wide search (use search_code). " +
                       "ACTIVATE WHEN: user mentions git/svn/p4/commit/diff/branch/status/revert/blame. " +
@@ -80,6 +80,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""remove_files"",
                         ""lock_files"",
                         ""unlock_files"",
+                        ""move_files"",
                         ""submit"",
                         ""sync"",
                         ""update"",
@@ -87,7 +88,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                         ""revert_svn"",
                         ""add_files""
                     ],
-                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (each one is approved by the user in the editor): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files, lock_files, unlock_files (SVN). SVN notes: Unity .meta files are added/deleted/reverted/committed together with their assets automatically; get_status reports locks and svn:needs-lock files modified without a lock; operations that only partly succeed return status=partial with per-path results. Paths: inputs may be relative to the Unity project root (e.g. Assets/Foo.prefab), relative to the VCS root, or absolute; returned paths are relative to the Unity project root when the file is inside the project, otherwise relative to the VCS root (see detect_vcs root_path / project_root).""
+                    ""description"": ""Action to perform. Read-only: detect_vcs, get_status, get_branch, get_log, get_file_log, get_diff, get_remote, get_tags, get_blame, get_sync_status, get_commit_info, get_client_info (Perforce), get_changelist (Perforce), get_info (SVN). Write operations (each one is approved by the user in the editor): cleanup, stage_files, unstage_files, commit, commit_files, create_branch, switch_branch, stash, stash_pop (Git); checkout_files, revert_files, resolve_files, ignore_file, ignore_folder, ignore_extension (Git/SVN only, NOT Perforce), remove_files, submit, sync (Perforce); update, commit_svn, revert_svn, add_files, lock_files, unlock_files, move_files (SVN). SVN notes: move_files moves/renames one file or folder (svn move, keeps history) together with its .meta so GUIDs and references survive; get_commit_info accepts 1234 / r1234 / HEAD and lists repository paths changed in that revision; Unity .meta files are added/deleted/reverted/committed together with their assets automatically; get_status reports locks and svn:needs-lock files modified without a lock; operations that only partly succeed return status=partial with per-path results. Paths: inputs may be relative to the Unity project root (e.g. Assets/Foo.prefab), relative to the VCS root, or absolute; returned paths are relative to the Unity project root when the file is inside the project, otherwise relative to the VCS root (see detect_vcs root_path / project_root).""
                 },
                 ""file_path"": {
                     ""type"": ""string"",
@@ -110,7 +111,15 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 },
                 ""revision"": {
                     ""type"": ""string"",
-                    ""description"": ""Commit hash/revision number for get_commit_info action""
+                    ""description"": ""Commit hash/revision number for get_commit_info action (SVN: 1234, r1234 or HEAD)""
+                },
+                ""source_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""move_files (SVN): file or folder to move/rename, e.g. Assets/Old/Foo.prefab. Its .meta moves with it automatically.""
+                },
+                ""destination_path"": {
+                    ""type"": ""string"",
+                    ""description"": ""move_files (SVN): new path, e.g. Assets/New/Bar.prefab. Must not exist; missing parent folders are created. Relative paths use the same base as source_path.""
                 },
                 ""message"": {
                     ""type"": ""string"",
@@ -133,7 +142,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
 
         public ToolMetadata Metadata => new ToolMetadata(
             name: "version_control",
-            description: "Manage version control system (SVN/Perforce/Git). Supports read-only queries (status, log, diff, blame) and guarded write operations (stage, commit, revert, cleanup, resolve, ignore, remove, branch). Write operations require user confirmation.",
+            description: "Manage version control system (SVN/Perforce/Git). Supports read-only queries (status, log, diff, blame) and guarded write operations (stage, commit, revert, cleanup, resolve, ignore, remove, move, lock, branch). Write operations require user confirmation.",
             category: "VersionControl",
             parametersSchema: _parametersSchema,
             requiresMainThread: true
@@ -179,6 +188,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     "remove_files" => await HandleRemoveFiles(parameters, cancellationToken),
                     "lock_files" => await HandleLockFiles(parameters, true, cancellationToken),
                     "unlock_files" => await HandleLockFiles(parameters, false, cancellationToken),
+                    "move_files" => await HandleMoveFiles(parameters, cancellationToken),
 
                     // Phase 2: Git 操作
                     "create_branch" => await HandleCreateBranch(parameters, cancellationToken),
@@ -606,7 +616,29 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 return ToolResponse.OkWithData(data, $"Change {result.ChangeNumber}: {result.Description}");
             }
 
-            // SVN: svn log -r <revision>
+            // SVN: svn log -v -r <revision> ^/
+            if (adapter is SvnAdapter svnAdapter)
+            {
+                var result = await svnAdapter.GetCommitInfoAsync(revision, ct);
+
+                if (!result.Success)
+                    return ToolResponse.Fail($"Failed to get commit info: {result.ErrorMessage}");
+
+                var data = new
+                {
+                    vcs_type = "SVN",
+                    revision = result.Revision,
+                    author = result.Author,
+                    date = result.Date,
+                    message = result.Message,
+                    // 仓库路径（如 /trunk/Assets/Foo.prefab），带动作前缀 A/M/D/R
+                    changed_paths = result.ChangedFiles,
+                    changed_paths_count = result.ChangedFiles.Count
+                };
+
+                return ToolResponse.OkWithData(data, $"r{result.Revision}: {result.Message}");
+            }
+
             return ToolResponse.Fail($"get_commit_info is not supported for {adapter.VcsType}. Use get_log instead.");
         }
 
@@ -971,6 +1003,24 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 ? await svnAdapter.LockFilesAsync(filePaths, ToolHelpers.GetOptionalString(parameters, "message"), ct)
                 : await svnAdapter.UnlockFilesAsync(filePaths, ct);
             return ToOperationResponse(adapter, result, doLock ? "Failed to lock files" : "Failed to unlock files");
+        }
+
+        private async Task<ToolResponse> HandleMoveFiles(JObject parameters, CancellationToken ct)
+        {
+            var adapter = GetAdapter();
+            if (adapter == null)
+                return ToolResponse.Fail(AdapterUnavailableMessage);
+
+            if (adapter is not SvnAdapter svnAdapter)
+                return ToolResponse.Fail("move_files is only available for SVN. Current VCS: " + adapter.VcsType);
+
+            var source = ToolHelpers.GetOptionalString(parameters, "source_path");
+            var destination = ToolHelpers.GetOptionalString(parameters, "destination_path");
+            if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(destination))
+                return ToolResponse.Fail("source_path and destination_path are required for move_files action.");
+
+            var result = await svnAdapter.MoveAsync(source, destination, ct);
+            return ToOperationResponse(adapter, result, "Failed to move");
         }
 
         private async Task<ToolResponse> HandleSync(CancellationToken ct)

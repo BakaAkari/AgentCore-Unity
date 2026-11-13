@@ -196,6 +196,38 @@ namespace AgentCore.Editor.Components.VCS.UI
             ApplyNeedsLock(targets, baseDirectory, unityRoot, snapshot);
         }
 
+        /// <summary>
+        /// status XML 中 <c>wc-status item="external"</c> 的条目路径（externals 的根）。
+        /// <c>propget -R</c> 不会跨进 externals，需要对每个 external 根单独 propget。
+        /// </summary>
+        public static List<string> ParseExternalRoots(string statusXml)
+        {
+            var roots = new List<string>();
+            if (string.IsNullOrWhiteSpace(statusXml))
+                return roots;
+            try
+            {
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(statusXml)))
+                {
+                    string currentPath = null;
+                    while (reader.Read())
+                    {
+                        if (reader.NodeType != System.Xml.XmlNodeType.Element)
+                            continue;
+                        if (reader.Name == "entry")
+                            currentPath = reader.GetAttribute("path");
+                        else if (reader.Name == "wc-status" && currentPath != null && reader.GetAttribute("item") == "external")
+                            roots.Add(currentPath);
+                    }
+                }
+            }
+            catch (System.Xml.XmlException)
+            {
+                // 截断的 XML：保留已读到的部分
+            }
+            return roots;
+        }
+
         /// <summary>带 svn:needs-lock 的路径列表。</summary>
         public static void ApplyNeedsLock(IEnumerable<string> paths, string baseDirectory, string unityRoot, SvnOverlaySnapshot snapshot)
         {
