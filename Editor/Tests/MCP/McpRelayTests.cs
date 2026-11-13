@@ -24,6 +24,8 @@ namespace AgentCore.Tests.Editor.MCP
     {
         private const string Token = "relay-test-token";
 
+        internal static McpRelayBuilder.BuildResult SharedBuild => _build ?? (_build = McpRelayBuilder.Build(McpRelayBuilder.ResolveToolchain()));
+
         private static McpRelayBuilder.BuildResult _build;
         private string _project;
 
@@ -99,7 +101,7 @@ namespace AgentCore.Tests.Editor.MCP
             private readonly StringBuilder _stderr = new StringBuilder();
             private int _nextId;
 
-            public RelayProcess(McpRelayBuilder.BuildResult build, string project)
+            public RelayProcess(McpRelayBuilder.BuildResult build, string project, IDictionary<string, string> environment = null)
             {
                 var info = new ProcessStartInfo
                 {
@@ -113,6 +115,11 @@ namespace AgentCore.Tests.Editor.MCP
                     StandardOutputEncoding = new UTF8Encoding(false),
                     StandardErrorEncoding = new UTF8Encoding(false),
                 };
+                if (environment != null)
+                {
+                    foreach (var pair in environment)
+                        info.EnvironmentVariables[pair.Key] = pair.Value;
+                }
                 _process = Process.Start(info);
                 _process.OutputDataReceived += (_, e) =>
                 {
@@ -157,7 +164,7 @@ namespace AgentCore.Tests.Editor.MCP
                 Send(message);
             }
 
-            /// <summary>等待满足条件的消息（其余消息丢弃）。</summary>
+            /// <summary>等待满足条件的消息（取走它；其余消息保留，供后续等待匹配）。</summary>
             public async Task<JObject> WaitForAsync(Func<JObject, bool> predicate, int timeoutMs = 15000)
             {
                 var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
@@ -165,11 +172,14 @@ namespace AgentCore.Tests.Editor.MCP
                 {
                     lock (_messages)
                     {
-                        while (_messages.Count > 0)
+                        var match = _messages.FirstOrDefault(predicate);
+                        if (match != null)
                         {
-                            var message = _messages.Dequeue();
-                            if (predicate(message))
-                                return message;
+                            var rest = _messages.Where(m => !ReferenceEquals(m, match)).ToList();
+                            _messages.Clear();
+                            foreach (var m in rest)
+                                _messages.Enqueue(m);
+                            return match;
                         }
                     }
                     await Task.Delay(20);

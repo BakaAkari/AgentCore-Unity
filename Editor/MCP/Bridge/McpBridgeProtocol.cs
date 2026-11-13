@@ -12,6 +12,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     /// <item><c>listTools { id }</c></item>
     /// <item><c>callTool { id, name, arguments }</c> —— <c>id</c> 在同一 relay 内唯一。</item>
     /// <item><c>cancel { id }</c></item>
+    /// <item><c>resume { ids }</c> —— 重连后发送：取回断开前已发出、尚未收到结果的调用。已完成的立即答复，
+    ///       仍在执行的完成后答复，bridge 不认识的（编辑器重启过）答复为错误。</item>
     /// </list>
     /// <para>bridge → relay：</para>
     /// <list type="bullet">
@@ -19,6 +21,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     /// <item><c>tools { id, tools: [ { name, description, inputSchema } ], schemaHash }</c></item>
     /// <item><c>progress { id, message }</c></item>
     /// <item><c>result { id, status: "ok" | "partial" | "error", text, images: [ { mimeType, data } ] }</c></item>
+    /// <item><c>unknownCalls { ids }</c> —— resume 中 bridge 不认识的调用。编辑器 PID 未变说明调用断开前没送达，relay 重发；
+    ///       PID 变了说明编辑器重启过，relay 报告结果丢失。</item>
     /// <item><c>reloading {}</c> —— 即将 Domain Reload，连接随后断开；relay 应重连并保持挂起的调用。</item>
     /// <item><c>ready { schemaHash }</c> —— 重载完成、重连成功后发送。</item>
     /// </list>
@@ -35,6 +39,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         public const string Tools = "tools";
         public const string CallTool = "callTool";
         public const string Cancel = "cancel";
+        public const string Resume = "resume";
+        public const string UnknownCalls = "unknownCalls";
         public const string Progress = "progress";
         public const string Result = "result";
         public const string Reloading = "reloading";

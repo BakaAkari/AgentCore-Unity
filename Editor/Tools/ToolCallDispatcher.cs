@@ -622,6 +622,8 @@ namespace AgentCore.Editor.Tools
                 _ = ExecuteToolOnMainThreadAsync(tool, parameters, ct, tcs);
             };
             EditorApplication.update += callback;
+            // 编辑器失焦时 update 降频（外部 MCP 客户端调用时用户通常在终端里）：主动请求一次更新
+            try { EditorApplication.QueuePlayerLoopUpdate(); } catch (Exception) { /* 退出中等极少数时机 */ }
 
             return await tcs.Task;
         }

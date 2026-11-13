@@ -33,10 +33,19 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         private readonly StreamWriter _writer;
         private volatile bool _closed;
 
+        private readonly Func<string, bool> _testSink;
+
         internal McpBridgeConnection(TcpClient client, StreamWriter writer)
         {
             _client = client;
             _writer = writer;
+        }
+
+        /// <summary>测试用：不经网络，消息交给 <paramref name="sink"/>（返回 false 模拟发送失败）。</summary>
+        internal McpBridgeConnection(string relayId, Func<string, bool> sink)
+        {
+            RelayId = relayId;
+            _testSink = sink;
         }
 
         public string RelayId { get; internal set; }
@@ -52,6 +61,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             if (_closed || message == null)
                 return false;
             var line = message.ToString(Formatting.None);
+            if (_testSink != null)
+                return _testSink(line);
             try
             {
                 lock (_writeLock)
@@ -74,7 +85,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             if (_closed)
                 return;
             _closed = true;
-            try { _client.Close(); } catch (Exception) { /* 已断开 */ }
+            try { _client?.Close(); } catch (Exception) { /* 已断开 */ }
         }
     }
 

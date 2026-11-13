@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Core;
 using AgentCore.Editor.LLM;
 using AgentCore.Editor.Tools;
+using AgentCore.Editor.Tools.Infrastructure;
 using AgentCore.Editor.Tools.Safety;
 using AgentCore.Editor.Utils;
 using Newtonsoft.Json;
@@ -87,6 +88,23 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             McpAuditLog.Append(clientName, toolName, arguments, outcome.Status, stopwatch.Elapsed.TotalMilliseconds,
                 outcome.Status == McpBridgeProtocol.StatusOk ? null : outcome.Text);
             return outcome;
+        }
+
+        /// <summary>
+        /// 该调用是否可能改了脚本、需要等编译（与内嵌 Chat 的 IsScriptModifyingCommand 一致：
+        /// 工具声明了 MayModifyScripts，且 action 不是只读动作）。
+        /// </summary>
+        public static bool MayTriggerCompilation(string toolName, JObject arguments)
+        {
+            var tool = string.IsNullOrEmpty(toolName) ? null : ToolRegistry.Instance.GetTool(toolName);
+            if (tool == null)
+                return false;
+            var attribute = (AgentToolAttribute)Attribute.GetCustomAttribute(tool.GetType(), typeof(AgentToolAttribute));
+            if (attribute == null || !attribute.MayModifyScripts)
+                return false;
+            var action = ((string)arguments?["action"])?.ToLowerInvariant();
+            return !(action == "read" || action == "list" || action == "get_info" || action == "get"
+                     || action == "search" || action == "validate");
         }
 
         internal static McpCallOutcome ToOutcome(string toolName, ToolResult result)
