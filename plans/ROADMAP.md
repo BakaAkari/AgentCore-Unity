@@ -1,15 +1,15 @@
 # AgentCore Unity 路线图
 
-> **版本**：以 `package.json` 为准（当前 1.18.0） | **更新**：2026-11-13
+> **版本**：以 `package.json` 为准（当前 1.19.0） | **更新**：2026-11-13
 > 本文只写三件事：现状、主线、搁置项。完成的工作记在 `CHANGELOG.md`；1.18.0 之前的完整路线图（Phase 1~10 历程、ADR-1~19、风险评估）已归档到 [`_archive/roadmap/ROADMAP-v1.18.0-full.md`](_archive/roadmap/ROADMAP-v1.18.0-full.md)。
 
 ## 现状
 
 - **定位**：Unity 编辑器内嵌的 agent。目标工程是企业级 Unity 2022.3 项目，版本控制以 SVN 为主（Git / Perforce 同样支持）；SVN 工作副本根是 WorkspaceRoot，Unity 工程是其下的子根。
-- **已有能力**：约 65 个原生工具；多供应商 LLM（OpenAI 兼容 / 原生 Anthropic、prompt 缓存、备用 profile）；风险策略 + allow / ask / deny 权限规则 + 按消息检查点回退；SVN 全流程（`.meta` 跟随、锁、移动、Project 窗口角标）；代码符号索引 + ripgrep 文本搜索；会话、记忆、Skills。
-- **质量**：Unity EditMode 测试 813 个，2026-11-13 结果为 812 通过 / 0 失败 / 1 个仅非 Windows 运行而跳过。
+- **已有能力**：约 65 个原生工具；多供应商 LLM（OpenAI 兼容 / 原生 Anthropic、prompt 缓存、备用 profile）；风险策略 + allow / ask / deny 权限规则 + 按消息检查点回退；SVN 全流程（`.meta` 跟随、锁、移动、Project 窗口角标）；代码符号索引 + ripgrep 文本搜索；会话、记忆、Skills；MCP Server（Claude Code / Codex 经 MCP 使用全部工具，跨 Domain Reload 不丢调用）。
+- **质量**：Unity EditMode 测试 857 个，2026-11-13 结果为 856 通过 / 0 失败 / 1 个仅非 Windows 运行而跳过。MCP M1 已在真实编辑器上用 Claude Code 2.1.305、Codex CLI 0.167 与验收脚本跑通（含改脚本触发编译与重载）。
 - **仍生效的原则**：ADR-17 极简（默认最优、少暴露选项）；审查级别完全由用户选择，YOLO 下不做任何阻断；有版本控制兜底，覆盖类操作执行而不报错；不打包第三方二进制。ADR 全文见归档文件 §4。
-- **未发布**：main 领先 origin 约 140 个提交，团队尚未拿到 1.18.0。
+- **未发布**：main 领先 origin 约 150 个提交，团队尚未拿到 1.18.0 / 1.19.0。
 
 ## 主线
 
@@ -19,7 +19,7 @@
 |------|------|----------|
 | 1 | **发布 1.18.0 并让团队试用** | 推送；重新打 tgz 并通过 `tools/verify-tarball`、`tools/verify-meta`；在真实 SVN 工作副本手测：他人持锁的红色角标、新建文件夹提交带 `.meta`、更新冲突报告为 partial、externals 内 needs-lock 角标、`move_files` 后引用不断 |
 | 2 | **按试用反馈修复** | 顺带完成：SVN 分支名格式统一；SVN 自由文本消息的路径改以 Unity 工程根为基准 |
-| 3 | **MCP Server**（AgentCore 对外提供完整 MCP 能力） | 设计已定稿：[`mcp-server-design.md`](mcp-server-design.md)。relay 用 Unity 自带 Mono，默认跟随 AgentCore 审查级别，M1 验证 Claude Code 与 Codex。M1 拆为 5 张票：共享信任状态 → 编辑器桥接 → relay 与协议 → Domain Reload 恢复 → 接入配置与验收；M2 无状态协议 / Resources / Prompts / Elicitation，M3 Tasks 与本机 HTTP |
+| 3 | **MCP Server M2** | M1 已完成（1.19.0，设计见 [`mcp-server-design.md`](mcp-server-design.md)）。M2：2026-07-28 无状态协议（`server/discover`、`_meta`、MRTR、`subscriptions/listen`）、Resources、Prompts（Skills）、Elicitation 确认通道、“信任客户端”审查级别、Chat 中的外部会话视图；M3：Tasks 扩展、本机 Streamable HTTP |
 
 ## 搁置项
 

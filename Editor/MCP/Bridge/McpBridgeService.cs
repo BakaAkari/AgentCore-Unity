@@ -35,6 +35,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         private static readonly McpCallLedger Ledger = new McpCallLedger();
 
         private static McpBridgeServer _server;
+        private static volatile bool _reloading;
         private static string _token;
         private static McpToolCatalog.Snapshot _catalog;
 
@@ -104,6 +105,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         {
             if (_server == null)
                 return;
+            _reloading = true;
             WriteEndpoint("reloading");
             SessionState.SetString(PendingKey, Ledger.Serialize());
             _server.Broadcast(new JObject { ["type"] = McpBridgeProtocol.Reloading });
@@ -251,8 +253,19 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 var relayId = connection.RelayId;
                 var client = connection.ClientName;
                 var ct = Ledger.Begin(relayId, id, name);
+                if (_reloading)
+                {
+                    // 重载已开始：不执行也不答复，relay 重连后重发
+                    Ledger.Forget(relayId, id);
+                    return;
+                }
 
                 var outcome = await McpToolExecutor.ExecuteAsync(name, arguments, client, ct).ConfigureAwait(false);
+                if (outcome.NotStarted)
+                {
+                    Ledger.Forget(relayId, id);
+                    return;
+                }
 
                 if (outcome.Status != McpBridgeProtocol.StatusError
                     && (outcome.CompileRelated || McpToolExecutor.MayTriggerCompilation(name, arguments)))

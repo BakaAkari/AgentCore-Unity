@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-11-13
+
+MCP Server（M1）：Claude Code、Codex 等 MCP 客户端可直接使用 AgentCore 的 Unity 工具。设计文档：`plans/mcp-server-design.md`。
+
+### Added
+- 可选组件 **MCP Server**（`AGENTCORE_MCP`，Tools & Extensions 页启用）：
+  - 两段式：编辑器外的 relay（由 Unity 自带 Mono 运行；源码 `Editor/MCP/Relay~` 随包分发，启用时用 Unity 自带 Roslyn 编译到 `Library/AgentCore/Mcp/relay/bin/`，包里不放二进制）承载 MCP 协议（stdio，2025-11-25 / 2025-06-18 / 2025-03-26 / 2024-11-05），经本机 TCP + 随机令牌把调用交给编辑器内的 McpBridge
+  - 调用走与 Chat 完全相同的 `ToolCallDispatcher`：参数校验、Play Mode 预检、风险策略、allow / ask / deny 权限规则、检查点
+  - 审查级别跟随 AgentCore 当前信任状态（含 YOLO）；需要确认时在 Unity 的 AgentCore 窗口弹出确认卡片并标明来源客户端，窗口未打开时自动打开
+  - 跨 Domain Reload：改脚本的调用等编译结束再返回，编译错误附在结果中；重载打断的调用结果存入 SessionState，relay 重连后取回；重载期间的新调用排队、工具列表用缓存应答；重载前未开始执行的调用自动重发；编辑器重启 / 未运行时给出明确说明
+  - 进度通知、取消、`notifications/tools/list_changed`；纯只读工具带 `readOnlyHint`
+  - 每次调用写审计记录 `Library/AgentCore/Mcp/audit.jsonl`
+  - MCP 卡片：运行状态、已连接客户端、最近调用；一键复制 Claude Code 命令与 Codex `config.toml` 片段；换 Unity 版本后提示重新复制
+- `ToolTrustState`：会话信任状态抽成共享服务，Chat 与 MCP 共用
+- `ToolConfirmationHost`：非 Chat 来源的确认请求排进 Chat 窗口的确认队列
+
+### Changed
+- 工具主线程派发时主动唤醒编辑器（`QueuePlayerLoopUpdate`），编辑器在后台时调用不再被降频拖慢
+- `tools/verify-meta` 跳过 Unity 不导入的 `~` / `.` 目录
+
 ## [1.18.0] - 2026-11-13
 
 全模块审查修复（P0~P3）、SVN 工作流整线重做、索引修正与权限规则。主版本控制按 SVN 设计；审查级别完全由用户选择，YOLO 下不做任何阻断。

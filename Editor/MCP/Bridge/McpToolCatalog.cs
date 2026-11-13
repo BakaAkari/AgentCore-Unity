@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
+using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -42,14 +43,21 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                          .Where(d => d?.Function != null && !ExcludedTools.ContainsKey(d.Function.Name))
                          .OrderBy(d => d.Function.Name, StringComparer.Ordinal))
             {
-                tools.Add(new JObject
+                var tool = new JObject
                 {
                     ["name"] = definition.Function.Name,
                     ["description"] = definition.Function.Description ?? string.Empty,
                     ["inputSchema"] = definition.Function.Parameters != null
                         ? definition.Function.Parameters.DeepClone()
                         : (JToken)new JObject { ["type"] = "object", ["properties"] = new JObject() }
-                });
+                };
+
+                // 纯只读工具标 readOnlyHint：客户端（如 Codex）据此可免确认直接调用；其余工具不标，由客户端按自己的规则询问
+                var metadata = ToolRegistry.Instance.GetTool(definition.Function.Name)?.Metadata;
+                if (metadata != null && metadata.RiskLevel == ToolRiskLevel.ReadOnly)
+                    tool["annotations"] = new JObject { ["readOnlyHint"] = true };
+
+                tools.Add(tool);
             }
 
             return new Snapshot { Tools = tools, SchemaHash = ComputeHash(tools) };

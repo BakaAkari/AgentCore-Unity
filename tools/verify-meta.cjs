@@ -87,6 +87,9 @@ function walk(dir, files, dirs) {
     for (const e of entries) {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) {
+            // Unity never imports folders ending in '~' or starting with '.' (e.g. Editor/MCP/Relay~,
+            // source compiled outside Unity), so they have no .meta by design.
+            if (e.name.endsWith('~') || e.name.startsWith('.')) continue;
             dirs.push(full);
             walk(full, files, dirs);
         } else if (e.isFile()) {

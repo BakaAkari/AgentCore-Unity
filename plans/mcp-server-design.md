@@ -1,6 +1,6 @@
 # AgentCore MCP Server 设计
 
-> 状态：**已定稿（2026-11-13）**，M1 待实施
+> 状态：**已定稿（2026-11-13）**；**M1 已实现（1.19.0）**，实现中的调整见文末“M1 实现记录”
 > 取代：[`mcp-server-feasibility.md`](mcp-server-feasibility.md) 中的进程模型（编辑器内 HttpListener）与协议选型（HTTP+SSE）。可行性文档其余部分（工具映射、模块划分思路）仍可参考。
 > 关联：[`ROADMAP.md`](ROADMAP.md) 主线第 3 项；`AGENTS.md` §3.4 可选组件模式
 
@@ -124,3 +124,22 @@ Claude Code / Codex ──stdio──> relay.exe (Unity Mono, 每会话一个)
 | 不同 Unity 版本自带 Mono / Roslyn 路径或引用集不同 | 编译与启动路径由 `EditorApplication.applicationContentsPath` 推导；在 2022.3 与 6000.x 各验证一次 |
 | relay 编译失败 | 卡片显示编译错误；不影响内嵌 Chat |
 | 客户端的 MCP 工具调用超时短于编译耗时 | 发进度通知；记录 Claude Code、Codex 的超时配置项写进接入说明 |
+
+## 10. M1 实现记录（2026-11-13）
+
+实现中对上文的调整：
+
+- **端口**：优先沿用重载前的端口，被 TIME_WAIT 占用时换端口并更新发现文件；relay 每次重连都重读发现文件，所以端口变化无影响。
+- **relay 安装位置**：编译产物按源码哈希缓存在 `Library/AgentCore/Mcp/relay/<hash>/`，再复制到固定路径 `relay/bin/AgentCoreMcpRelay.exe`（客户端配置只写这个路径，插件升级不用改配置）；旧 relay 正被客户端运行时保留旧的，卡片提示重启客户端。
+- **内部 RPC 增补**：relay 重连后发 `resume { ids }` 取回断开前已发出的调用；bridge 对不认识的 id 回 `unknownCalls { ids }`，relay 按编辑器 PID 判断——同一进程（调用断开前没送达，或重载前尚未开始执行）则重发，进程变了（编辑器重启）则报告结果丢失。
+- **重载前未开始的调用**：主线程工作队列在重载前被清空时，bridge 不答复（视为未送达），由上一条机制重发；重载已开始后到达的调用同样处理。
+- **改脚本的调用**：编译出错时结果附编译错误，状态 ok 降为 partial（MCP 中 isError=true）；编译成功并重载时，结果在重载后交付并附“已编译并重载”说明。
+- **工具注解**：风险等级为 ReadOnly 的工具带 `readOnlyHint: true`（Codex 等客户端据此可免确认）。
+- **发现文件读写**：relay 以共享读方式打开发现文件，bridge 替换失败时短暂重试，避免并发读导致发现文件未更新。
+
+验收结果（Unity 2022.3.50f1，Megacity Metro 测试工程）：
+
+- 验收脚本（stdio MCP 客户端）：工具列表 55 个；编辑器在后台时只读调用延迟 5–60 ms（重载刚结束时首个调用约 0.3–7 s，含排队等待）；写合法脚本 → 编译 → 重载 → 返回结果；写错误脚本 → 返回 CS0029 编译错误；重载期间的调用排队后执行；关闭编辑器后列表用缓存应答、调用返回“编辑器未运行”。
+- Claude Code 2.1.305（`--mcp-config`）：成功调用 find_gameobjects、read_console。
+- Codex CLI 0.167（`-c mcp_servers.agentcore...`）：成功调用同两个工具；`codex exec` 非交互模式下对未标只读的工具需要审批（交互模式会询问用户）。
+- EditMode 测试 857 个：856 通过、0 失败、1 个仅非 Windows 运行而跳过。

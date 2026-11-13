@@ -101,6 +101,26 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 ---
 
+## 7. 在 Claude Code / Codex 里使用 AgentCore（MCP）
+
+让终端里的 Claude Code 或 Codex 直接调用 AgentCore 的 Unity 工具（场景、预制体、脚本、SVN 等），不需要另装任何东西。
+
+1. 打开 `Edit > Project Settings > AgentCore > Tools & Extensions`，启用 **MCP Server**（会触发一次脚本编译）。
+2. 卡片状态显示 **Ready** 后：
+   - **Claude Code**：点 **Copy Claude Code command**，在终端里粘贴执行一次。
+   - **Codex**：点 **Copy Codex config**，粘贴到 `~/.codex/config.toml`（已有 `[mcp_servers.agentcore]` 时替换它）。
+3. 重启 Claude Code / Codex。Unity 需要保持打开。
+
+说明：
+
+- 审查级别跟随 AgentCore Chat 当前的设置（包括 YOLO）。需要确认时，确认卡片出现在 Unity 的 AgentCore 窗口里，并标明来自哪个客户端。权限规则对外部客户端同样生效。
+- 改脚本的调用会等 Unity 编译完再返回；有编译错误时错误会附在结果里。编译期间新的调用会排队，Unity 恢复后自动执行。
+- 每次调用记录在工程的 `Library/AgentCore/Mcp/audit.jsonl`。
+- 换了 Unity 版本后卡片会提示，重新复制一次配置即可。
+- 编译较慢的大工程：Codex 配置已把工具超时设为 10 分钟；Claude Code 可设环境变量 `MCP_TOOL_TIMEOUT`（毫秒）调大。
+
+---
+
 ## 故障排查
 
 | 问题 | 解决方案 |
@@ -109,3 +129,5 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 | 工具调用报错 | 查看 Unity Console 错误日志 |
 | 编译后会话丢失 | 通常自动恢复，未恢复可重新打开 AgentCore 窗口 |
 | VCS / Indexing 工具不可见 | 确认在 Project Settings 的 Tools & Extensions 分页启用了对应组件 |
+| Claude Code / Codex 提示 Unity 编辑器未运行 | 先在 Unity 中打开该工程，并确认 MCP Server 组件已启用、卡片状态为 Ready |
+| 客户端提示令牌无效或需要重新复制配置 | 在 MCP Server 卡片重新复制配置并替换客户端里的旧配置 |

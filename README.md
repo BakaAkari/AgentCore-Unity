@@ -79,6 +79,7 @@ Disabled by default, enabled via scripting define symbols:
 
 - **Version Control** (`AGENTCORE_VCS`) — Git / SVN / Perforce status, diff, log, commit workflows
 - **Code Indexing** (`AGENTCORE_INDEXING`) — Roslyn-based symbol search, background incremental indexing
+- **MCP Server** (`AGENTCORE_MCP`) — lets Claude Code, Codex and other MCP clients use AgentCore's Unity tools, with the same permission rules and review level as the chat; survives script reloads. See `QUICK_START.md` §7
 
 ## Documentation
 

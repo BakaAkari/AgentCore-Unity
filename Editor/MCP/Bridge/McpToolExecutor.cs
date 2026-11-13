@@ -23,6 +23,12 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         /// <summary>工具结果与编译相关（写脚本 / 请求编译）：重载后需要补上编译结果。</summary>
         public bool CompileRelated;
 
+        /// <summary>
+        /// 调用还没开始执行就被 Domain Reload 丢弃（主线程工作队列在重载前被清空）：不答复，
+        /// relay 重连后 resume 得到 unknownCalls，对同一编辑器进程重发。
+        /// </summary>
+        public bool NotStarted;
+
         public JObject ToMessage(string id) => new JObject
         {
             ["type"] = McpBridgeProtocol.Result,
@@ -67,9 +73,21 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 };
                 var dispatcher = new ToolCallDispatcher(ToolRegistry.Instance, ProviderFactory(clientName));
 
-                var dispatchTask = await MainThread.RunAsync(() => dispatcher.DispatchAsync(call, ct)).ConfigureAwait(false);
-                var callResult = await dispatchTask.ConfigureAwait(false);
-                outcome = ToOutcome(toolName, callResult?.Result);
+                var started = false;
+                try
+                {
+                    var dispatchTask = await MainThread.RunAsync(() =>
+                    {
+                        started = true;
+                        return dispatcher.DispatchAsync(call, ct);
+                    }).ConfigureAwait(false);
+                    var callResult = await dispatchTask.ConfigureAwait(false);
+                    outcome = ToOutcome(toolName, callResult?.Result);
+                }
+                catch (OperationCanceledException) when (!started && !ct.IsCancellationRequested)
+                {
+                    outcome = new McpCallOutcome { NotStarted = true, Status = McpBridgeProtocol.StatusError, Text = "Not started (script reload)." };
+                }
             }
             catch (OperationCanceledException)
             {
@@ -85,6 +103,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 Gate.Release();
             }
 
+            if (outcome.NotStarted)
+                return outcome;
             McpAuditLog.Append(clientName, toolName, arguments, outcome.Status, stopwatch.Elapsed.TotalMilliseconds,
                 outcome.Status == McpBridgeProtocol.StatusOk ? null : outcome.Text);
             return outcome;

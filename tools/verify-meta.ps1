@@ -41,8 +41,12 @@ if (-not (Test-Path $Root -PathType Container)) {
 
 # Collect all candidate files (excluding .meta itself).
 # Also skip files whose extension we don't consider Unity assets.
+# Unity never imports folders ending in '~' or starting with '.' (e.g. Editor/MCP/Relay~),
+# so files under them have no .meta by design.
+$hiddenDir = '[\\/](\.[^\\/]*|[^\\/]*~)([\\/]|$)'
 $candidates = Get-ChildItem -Path $Root -Recurse -File `
     | Where-Object {
+        $_.FullName -notmatch $hiddenDir -and
         $_.Name -notlike '*.meta' -and
         ($Extensions -contains $_.Extension -or $_.Name -like '*.md.template')
       }
@@ -60,7 +64,7 @@ foreach ($f in $candidates) {
 
 # Also verify: every directory under Editor/ should have a .meta (Unity
 # requires directory meta for asmdef nesting to work correctly).
-$dirCandidates = Get-ChildItem -Path $Root -Recurse -Directory
+$dirCandidates = Get-ChildItem -Path $Root -Recurse -Directory | Where-Object { $_.FullName -notmatch $hiddenDir }
 $dirMissing = @()
 foreach ($d in $dirCandidates) {
     $metaPath = "$($d.FullName).meta"

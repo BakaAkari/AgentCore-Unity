@@ -28,10 +28,36 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             var temp = path + ".tmp-" + Guid.NewGuid().ToString("N").Substring(0, 8);
             File.WriteAllText(temp, contents, new UTF8Encoding(false));
-            if (File.Exists(path))
-                File.Replace(temp, path, null);
-            else
-                File.Move(temp, path);
+            try
+            {
+                // relay 每次重连都会读发现文件：撞上它正在读时 Replace 会失败，短暂重试
+                for (var attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        if (File.Exists(path))
+                            File.Replace(temp, path, null);
+                        else
+                            File.Move(temp, path);
+                        return;
+                    }
+                    catch (IOException) when (attempt < 20)
+                    {
+                        System.Threading.Thread.Sleep(25);
+                    }
+                    catch (UnauthorizedAccessException) when (attempt < 20)
+                    {
+                        System.Threading.Thread.Sleep(25);
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(temp))
+                {
+                    try { File.Delete(temp); } catch (Exception) { /* 下次写入时再清 */ }
+                }
+            }
         }
     }
 }

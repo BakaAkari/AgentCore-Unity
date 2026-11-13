@@ -20,6 +20,7 @@ namespace AgentCore.Editor.Components.MCP.Relay
     public static class McpRelayBuilder
     {
         public const string RelayExeName = "AgentCoreMcpRelay.exe";
+        private const string BinDirName = "bin";
         private const string NewtonsoftDllName = "Newtonsoft.Json.dll";
         private static readonly TimeSpan CompileTimeout = TimeSpan.FromSeconds(120);
 
@@ -52,6 +53,9 @@ namespace AgentCore.Editor.Components.MCP.Relay
             public string RelayPath;
             public string MonoPath;
             public string Error;
+
+            /// <summary>新版本已编译但还没装到固定位置（旧 relay 正被 MCP 客户端运行、文件被占用）。</summary>
+            public string Warning;
         }
 
         private static Task<BuildResult> _current;
@@ -129,7 +133,7 @@ namespace AgentCore.Editor.Components.MCP.Relay
                 var outputDir = Path.Combine(toolchain.OutputRoot, hash);
                 var relayPath = Path.Combine(outputDir, RelayExeName);
                 if (File.Exists(relayPath) && File.Exists(Path.Combine(outputDir, NewtonsoftDllName)))
-                    return new BuildResult { Success = true, RelayPath = relayPath, MonoPath = toolchain.Mono };
+                    return Install(toolchain, outputDir, hash);
 
                 var staging = outputDir + ".building-" + Guid.NewGuid().ToString("N").Substring(0, 6);
                 Directory.CreateDirectory(staging);
@@ -155,12 +159,44 @@ namespace AgentCore.Editor.Components.MCP.Relay
                     TryDeleteDirectory(outputDir);
                 Directory.Move(staging, outputDir);
                 CleanupOldBuilds(toolchain.OutputRoot, outputDir);
-                return new BuildResult { Success = true, RelayPath = relayPath, MonoPath = toolchain.Mono };
+                return Install(toolchain, outputDir, hash);
             }
             catch (Exception ex)
             {
                 return Fail(ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 客户端配置里写的是固定路径 <c>relay/bin/AgentCoreMcpRelay.exe</c>：插件升级后配置不用改。
+        /// 把编译产物复制过去；旧 relay 正在被客户端运行（Windows 上文件被占用）时保留旧的，下次启用 / 打开编辑器时再装。
+        /// </summary>
+        private static BuildResult Install(Toolchain toolchain, string builtDir, string hash)
+        {
+            var binDir = Path.Combine(toolchain.OutputRoot, BinDirName);
+            var installedRelay = Path.Combine(binDir, RelayExeName);
+            var hashFile = Path.Combine(binDir, "version.txt");
+            var result = new BuildResult { Success = true, RelayPath = installedRelay, MonoPath = toolchain.Mono };
+
+            try
+            {
+                if (File.Exists(installedRelay) && File.Exists(hashFile) && File.ReadAllText(hashFile).Trim() == hash)
+                    return result;
+
+                Directory.CreateDirectory(binDir);
+                File.Copy(Path.Combine(builtDir, NewtonsoftDllName), Path.Combine(binDir, NewtonsoftDllName), true);
+                File.Copy(Path.Combine(builtDir, RelayExeName), installedRelay, true);
+                File.WriteAllText(hashFile, hash);
+            }
+            catch (IOException) when (File.Exists(installedRelay))
+            {
+                result.Warning = "A newer AgentCore relay was built, but the current one is in use by an MCP client. Restart Claude Code / Codex to finish updating.";
+            }
+            catch (UnauthorizedAccessException) when (File.Exists(installedRelay))
+            {
+                result.Warning = "A newer AgentCore relay was built, but the current one is in use by an MCP client. Restart Claude Code / Codex to finish updating.";
+            }
+            return result;
         }
 
         private static BuildResult Fail(string error) => new BuildResult { Success = false, Error = error };
@@ -220,7 +256,8 @@ namespace AgentCore.Editor.Components.MCP.Relay
             {
                 foreach (var dir in Directory.GetDirectories(root))
                 {
-                    if (!string.Equals(Path.GetFullPath(dir), Path.GetFullPath(keep), StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(Path.GetFullPath(dir), Path.GetFullPath(keep), StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(Path.GetFileName(dir), BinDirName, StringComparison.OrdinalIgnoreCase))
                         TryDeleteDirectory(dir); // 正在被客户端运行的旧版本会删除失败，留到下次
                 }
             }

@@ -220,6 +220,11 @@ namespace AgentCore.Tests.Editor.MCP
             CollectionAssert.AreEqual(names.OrderBy(n => n, StringComparer.Ordinal).ToList(), names);
             Assert.IsTrue(snapshot.Tools.All(t => t["inputSchema"] is JObject));
             Assert.AreEqual(snapshot.SchemaHash, McpToolCatalog.Build().SchemaHash, "hash must be deterministic");
+
+            // 纯只读工具带 readOnlyHint；有写入动作的工具不带
+            var byName = snapshot.Tools.ToDictionary(t => (string)t["name"]);
+            Assert.IsTrue(snapshot.Tools.Any(t => t["annotations"]?["readOnlyHint"]?.Value<bool>() == true), "some read-only tool is annotated");
+            Assert.IsNull(byName["manage_file"]["annotations"], "manage_file can write");
         }
 
         [Test]
@@ -288,6 +293,28 @@ namespace AgentCore.Tests.Editor.MCP
             var failed = McpToolExecutor.ToOutcome("t", ToolResult.Fail("boom"));
             Assert.AreEqual(McpBridgeProtocol.StatusError, failed.Status);
             Assert.AreEqual("boom", failed.Text);
+        }
+
+        [Test]
+        public void ClientConfig_ClaudeCode_QuotesPathsWithSpaces()
+        {
+            var command = AgentCore.Editor.Components.MCP.Config.McpClientConfig.ClaudeCodeCommand(
+                @"C:\Program Files\Unity\mono.exe", @"D:\Unity Project\Lib\relay.exe", @"D:\Unity Project\Game");
+            Assert.AreEqual(
+                @"claude mcp add --scope user agentcore -- ""C:\Program Files\Unity\mono.exe"" ""D:\Unity Project\Lib\relay.exe"" --project ""D:\Unity Project\Game""",
+                command);
+        }
+
+        [Test]
+        public void ClientConfig_CodexToml_UsesLiteralStrings()
+        {
+            var toml = AgentCore.Editor.Components.MCP.Config.McpClientConfig.CodexToml(
+                @"C:\Program Files\Unity\mono.exe", @"D:\Unity Project\relay.exe", @"D:\Unity Project\Game");
+            StringAssert.Contains("[mcp_servers.agentcore]", toml);
+            StringAssert.Contains(@"command = 'C:\Program Files\Unity\mono.exe'", toml);
+            StringAssert.Contains(@"args = ['D:\Unity Project\relay.exe', ""--project"", 'D:\Unity Project\Game']", toml);
+            StringAssert.Contains("tool_timeout_sec = 600", toml);
+            Assert.AreEqual(@"""it's\\x""", AgentCore.Editor.Components.MCP.Config.McpClientConfig.TomlString(@"it's\x"));
         }
 
         [Test]

@@ -93,6 +93,19 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             }
         }
 
+        /// <summary>调用未执行就被重载丢弃：删掉记录且不答复，relay 的 resume 会把它当作未送达并重发。</summary>
+        public void Forget(string relayId, string id)
+        {
+            lock (_gate)
+            {
+                if (_entries.TryGetValue(Key(relayId, id), out var entry))
+                {
+                    entry.Cts?.Dispose();
+                    _entries.Remove(Key(relayId, id));
+                }
+            }
+        }
+
         public void Cancel(string relayId, string id)
         {
             CancellationTokenSource cts = null;
