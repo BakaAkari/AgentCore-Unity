@@ -1,0 +1,20 @@
+{
+    "name": "AgentCore.MCP.Editor",
+    "rootNamespace": "AgentCore.Editor.Components.MCP",
+    "references": [
+        "AgentCore.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "AGENTCORE_MCP"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,47 @@
+namespace AgentCore.Editor.Components.MCP.Bridge
+{
+    /// <summary>
+    /// relay ↔ McpBridge 内部 RPC 约定（设计见 plans/mcp-server-design.md §3.3）。
+    /// <para>
+    /// 传输：127.0.0.1 TCP，UTF-8，每行一个 JSON 对象（无 BOM，'\n' 结尾）。所有消息带 <c>type</c> 字段。
+    /// </para>
+    /// <para>relay → bridge：</para>
+    /// <list type="bullet">
+    /// <item><c>hello { token, relayId, relayVersion, bridgeProtocol, client: { name, version } }</c> —— 必须是第一条，5 秒内到达。
+    ///       <c>relayId</c> 是 relay 进程的唯一标识，重连时不变，用于把重载期间挂起的结果交还给同一个 relay。</item>
+    /// <item><c>listTools { id }</c></item>
+    /// <item><c>callTool { id, name, arguments }</c> —— <c>id</c> 在同一 relay 内唯一。</item>
+    /// <item><c>cancel { id }</c></item>
+    /// </list>
+    /// <para>bridge → relay：</para>
+    /// <list type="bullet">
+    /// <item><c>helloOk { bridgeProtocol, projectPath, unityVersion, schemaHash }</c>；令牌或版本不符时 <c>helloError { message }</c> 后断开。</item>
+    /// <item><c>tools { id, tools: [ { name, description, inputSchema } ], schemaHash }</c></item>
+    /// <item><c>progress { id, message }</c></item>
+    /// <item><c>result { id, status: "ok" | "partial" | "error", text, images: [ { mimeType, data } ] }</c></item>
+    /// <item><c>reloading {}</c> —— 即将 Domain Reload，连接随后断开；relay 应重连并保持挂起的调用。</item>
+    /// <item><c>ready { schemaHash }</c> —— 重载完成、重连成功后发送。</item>
+    /// </list>
+    /// </summary>
+    public static class McpBridgeProtocol
+    {
+        /// <summary>内部 RPC 版本：relay 与 bridge 不一致时拒绝连接（不做向下兼容，提示重新复制配置）。</summary>
+        public const int Version = 1;
+
+        public const string Hello = "hello";
+        public const string HelloOk = "helloOk";
+        public const string HelloError = "helloError";
+        public const string ListTools = "listTools";
+        public const string Tools = "tools";
+        public const string CallTool = "callTool";
+        public const string Cancel = "cancel";
+        public const string Progress = "progress";
+        public const string Result = "result";
+        public const string Reloading = "reloading";
+        public const string Ready = "ready";
+
+        public const string StatusOk = "ok";
+        public const string StatusPartial = "partial";
+        public const string StatusError = "error";
+    }
+}

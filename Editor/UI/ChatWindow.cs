@@ -200,6 +200,13 @@ namespace AgentCore.Editor.UI
         /// 通过 Unity 菜单打开 AgentCore 主窗口。
         /// 快捷键：Ctrl+Shift+Q (Windows) / Cmd+Shift+Q (macOS)。
         /// </summary>
+        [InitializeOnLoadMethod]
+        private static void RegisterAsConfirmationHost()
+        {
+            // MCP 等外部来源需要确认而窗口未打开时，由确认宿主调用它打开窗口
+            ToolConfirmationHost.OpenHost = ShowWindow;
+        }
+
         [MenuItem("Window/AgentCore %#q")]
         public static void ShowWindow()
         {
@@ -415,6 +422,8 @@ namespace AgentCore.Editor.UI
                 // 必须在此处(CreateGUI 生命周期内)调用,不能在字段初始化器/构造器中调用
                 LoadSessionTrustScopesFromState();
                 InitializeToolConfirmationPanel(chatArea, inputArea);
+                // 其他调用来源（MCP 等）的确认也排进本窗口的确认队列
+                ToolConfirmationHost.Register(RequestEmbeddedToolConfirmationAsync);
                 InitializeAskUserPanel(chatArea, inputArea);
 
                 // 6.8 Phase 6.0.4: 创建上下文使用情况面板并插入到 input-area 之前（在文件变更面板之后）
@@ -464,6 +473,7 @@ namespace AgentCore.Editor.UI
         /// </summary>
         private void OnDestroy()
         {
+            ToolConfirmationHost.Unregister(RequestEmbeddedToolConfirmationAsync);
             ReleasePendingAttachTexture();
             // 窗口真正关闭（非 Domain Reload）：待发送图随窗口一起丢弃，下次打开不再恢复
             _pendingAttachImageDataUrl = null;

@@ -456,6 +456,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 case "indexing":
                     OptionalComponentManager.SetIndexingEnabled(enabled);
                     break;
+                case "mcp":
+                    OptionalComponentManager.SetMcpEnabled(enabled);
+                    break;
                 default:
                     EditorUtility.DisplayDialog(
                         "Unsupported Optional Component",

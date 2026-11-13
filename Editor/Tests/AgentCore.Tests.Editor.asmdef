@@ -5,6 +5,7 @@
         "AgentCore.Editor",
         "AgentCore.VCS.Editor",
         "AgentCore.Indexing.Editor",
+        "AgentCore.MCP.Editor",
         "UnityEditor.TestRunner",
         "UnityEngine.TestRunner"
     ],

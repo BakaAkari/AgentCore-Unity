@@ -174,6 +174,15 @@ namespace AgentCore.Editor.UI
                 _toolConfirmationPanel.Add(description);
             }
 
+            if (!string.IsNullOrEmpty(request.Source))
+            {
+                var sourceNotice = new Label(string.Format(
+                    AgentCore.Editor.L10n.Loc.Tr("toolConfirmation.externalSource", "来自外部客户端（MCP）：{0}"),
+                    request.Source));
+                sourceNotice.AddToClassList("tool-confirmation-description");
+                _toolConfirmationPanel.Add(sourceNotice);
+            }
+
             if (request.TriggeredByRule != null)
             {
                 var ruleNotice = new Label(string.Format(

@@ -68,6 +68,11 @@ namespace AgentCore.Editor.Tools.Safety
         /// </summary>
         public IReadOnlyList<string> RulePaths { get; internal set; }
 
+        /// <summary>
+        /// 调用来源（如 MCP 客户端名 "claude-code"）；为 null 表示内嵌 Chat 自己的调用。仅用于确认 UI 展示。
+        /// </summary>
+        public string Source { get; set; }
+
         public ToolConfirmationRequest(
             string toolName,
             string action,

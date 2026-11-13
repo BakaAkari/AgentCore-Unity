@@ -25,6 +25,8 @@ namespace AgentCore.Editor.Extensions
         /// </summary>
         public const string IndexingDefine = "AGENTCORE_INDEXING";
 
+        public const string McpDefine = "AGENTCORE_MCP";
+
         // ─────────────────────────────────────────────────────────────────────
         // Project-level enablement tracking (v1.4.3)
         //
@@ -64,7 +66,13 @@ namespace AgentCore.Editor.Extensions
                     "Code Indexing (experimental)",
                     "Roslyn-based C# symbol index for search_code tool. May impact Editor performance on large projects.",
                     IndexingDefine,
-                    IsIndexingEnabled())
+                    IsIndexingEnabled()),
+                new OptionalComponentInfo(
+                    "mcp",
+                    "MCP Server",
+                    "Let external AI clients (Claude Code, Codex) use AgentCore's Unity tools over MCP. Same permission rules and review level as the Chat window.",
+                    McpDefine,
+                    IsMcpEnabled())
             };
         }
 
@@ -113,6 +121,16 @@ namespace AgentCore.Editor.Extensions
         public static void SetIndexingEnabled(bool enabled)
         {
             SetDefine(IndexingDefine, enabled, userInitiated: true);
+        }
+
+        public static bool IsMcpEnabled()
+        {
+            return HasDefine(McpDefine);
+        }
+
+        public static void SetMcpEnabled(bool enabled)
+        {
+            SetDefine(McpDefine, enabled, userInitiated: true);
         }
 
         // ─────────────────────────────────────────────────────────────────────
