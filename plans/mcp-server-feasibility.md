@@ -1,6 +1,6 @@
 # AgentCore as MCP Server — 可行性方案
 
-> 状态：方案评估 / 待用户确认进入 ROADMAP
+> 状态：**已被 [`mcp-server-design.md`](mcp-server-design.md)（2026-11-13）取代**——进程模型与协议选型以新文档为准，本文仅供参考
 > 创建日期：2026-06-15
 > 关联：[`AGENTS.md`](../AGENTS.md:1) §3.4 Optional Components 模式
 

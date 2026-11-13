@@ -19,7 +19,7 @@
 |------|------|----------|
 | 1 | **发布 1.18.0 并让团队试用** | 推送；重新打 tgz 并通过 `tools/verify-tarball`、`tools/verify-meta`；在真实 SVN 工作副本手测：他人持锁的红色角标、新建文件夹提交带 `.meta`、更新冲突报告为 partial、externals 内 needs-lock 角标、`move_files` 后引用不断 |
 | 2 | **按试用反馈修复** | 顺带完成：SVN 分支名格式统一；SVN 自由文本消息的路径改以 Unity 工程根为基准 |
-| 3 | **MCP Server**（AgentCore 对外提供完整 MCP 能力） | 方案待评审：relay（编辑器外，承载 MCP 协议）+ 编辑器内桥接（复用 `ToolCallDispatcher`），跨 Domain Reload 不丢请求；M1 tools / 进度 / 取消 / reload 恢复，M2 2026-07-28 无状态协议、Resources、Prompts、Elicitation，M3 Tasks 扩展与本机 HTTP。方案评审通过后写入 `plans/mcp-server-design.md`，取代 `mcp-server-feasibility.md` 的进程模型与协议部分 |
+| 3 | **MCP Server**（AgentCore 对外提供完整 MCP 能力） | 设计已定稿：[`mcp-server-design.md`](mcp-server-design.md)。relay 用 Unity 自带 Mono，默认跟随 AgentCore 审查级别，M1 验证 Claude Code 与 Codex。M1 拆为 5 张票：共享信任状态 → 编辑器桥接 → relay 与协议 → Domain Reload 恢复 → 接入配置与验收；M2 无状态协议 / Resources / Prompts / Elicitation，M3 Tasks 与本机 HTTP |
 
 ## 搁置项
 
