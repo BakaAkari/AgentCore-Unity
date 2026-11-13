@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-11-13
+
+全模块审查修复（P0~P3）、SVN 工作流整线重做、索引修正与权限规则。主版本控制按 SVN 设计；审查级别完全由用户选择，YOLO 下不做任何阻断。
+
+### Added
+- 权限规则：allow / ask / deny 规则（deny > ask > allow，glob 匹配），用户级 `UserSettings/AgentCore/PermissionRules.json` 与项目级 `ProjectSettings/AgentCore/PermissionRules.json` 分层，可在本地停用项目规则；新增 Permissions 设置页；确认卡片"始终允许"会自动放行队列中已匹配新规则的确认；YOLO 绕过全部规则
+- 检查点：按用户消息记录检查点，可回退文件与对话
+- ripgrep 文本搜索后端：`manage_file search_content` 与 `search_code search_text` 优先使用 ripgrep，不可用时回退 .NET 扫描；Tools & Extensions 页显示检测状态、支持自定义路径与重新检测（不打包 rg，只用 PATH 或用户指定路径）
+- 工具结果新增 `partial`（部分成功）状态，UI 以"部分完成"警告样式显示
+- `version_control`（SVN）：`lock_files` / `unlock_files`；`move_files` 移动 / 重命名并保留历史，`.meta` 自动跟随，未受控文件回退为文件系统移动；`get_commit_info` 支持 SVN（`1234` / `r1234` / `HEAD`，列出该修订改动的仓库路径）
+- Project 窗口 SVN 状态角标（M/A/D/C/?/!、needs-lock、本人 / 他人锁定、锁失效，他人锁定显示持有者与注释，跨域重载保留）与多选、`.meta` 感知的右键菜单；externals 内的文件同样显示 needs-lock 角标
+- 项目上下文报告 SVN 异常与工作副本路径前缀
+- `MainThread` 主线程调度器；`ChildProcessJob` 以 Job Object 收容子进程树（超时 / 取消时整树结束）
+- API Key 在 Windows 上以 DPAPI 加密存储，旧明文首次读取时透明迁移
+
+### Changed
+- 会话存储改为追加式 JSONL + 单一后台写入队列，旧 JSON 会话自动迁移；保存保留上一版备份，损坏时自动恢复
+- 索引 JSONL 存储改为追加式操作日志 + 分代整理；`IndexService` 单例与单写线程
+- 配置拆分：Provider Profile 共享文件只存团队配置，运行时状态与个人模型 / 辅助模型选择写入 UserSettings；团队默认需在设置页明确修改
+- Git 状态改用 porcelain v2 `-z` 解析；SVN 状态改用流式 XML 解析（补全属性冲突 / 树冲突、锁、移动、switch）
+- VCS 子进程参数改为列表传递并非交互执行；长文件列表按命令行上限分批，提交保持原子
+- VCS 远端检查移出刷新路径，改为后台定时 / 手动触发，失败退避且只警告一次；面板提交历史按需刷新
+- `version_control` 的输入输出路径统一以 Unity 工程根为基准
+- 审查完全遵循用户选择的级别：YOLO 不再被任何确认阻断；机密文件与链接路径不再硬拒绝，改走受保护路径确认；VCS 去掉模型自确认；Play Mode 下补标风险元数据的工具恢复可写
+- Agent 运行中停止按钮原位替换发送按钮；LLM 自动重试提示改为信息状态
+
+### Fixed
+- LLM：流式响应按 SSE 规范成帧，截断回复不再当成功；"响应头超时 + 空闲看门狗"替代整体超时；重试改为指数退避 + 抖动并遵循 Retry-After；网关探测失败不再中止运行
+- 核心循环：同一时刻只有一个运行（ActiveRun）；每次请求前修复 tool_call / tool_result 配对；域重载前暂存工具结果避免重复执行；CompilationWatcher 按 generation 隔离；AgentLoop 初始化防重入
+- 会话 / 配置 / 索引 / 脚本写入改为原子写；自动保存序列化与落盘移出主线程；自动记忆在主线程采集快照、后台只做网络请求
+- UI：`ask_user` 等待态可直接作答，取消 / 切换会话时放弃挂起提问；输入草稿与待发送图跨 Domain Reload 保留，纹理及时销毁
+- 工具：`batch_execute` 逐子项过策略并如实回报回滚范围；`manage_build` 按 BuildReport 回报成败；`manage_probuilder` 按 ProBuilder 5.x API 修复各编辑动作并校验生效，UV2 改走展开流程；`smart_operations` 逐项回报；25 个工具补齐风险元数据，未声明能力位的工具 fail-closed；`manage_file` 搜索加正则超时、扫描预算与生成目录剪枝
+- SVN：工作副本检测改用 `svn info --xml`（嵌套工程 / external 根）；svn.exe 统一定位（含 TortoiseSVN 安装目录）并按字节解码，中文路径与消息不再乱码；add / delete / revert / commit 自动带 `.meta`；更新冲突与跳过报告为 partial；面板 Revert All 排除未受控文件；Cleanup 不再被硬拦截；TortoiseProc 定位与参数转义
+- Perforce 获取 pending changelist 时解析真实 client 名；git 输出路径不再被 C 风格引号转义；无 SVN 时继续检测 Git / P4
+- 索引：范围修正（Assets 全覆盖、OnDemand 不自动索引、扫描剪枝与定向增量过滤）；脏集合带版本号比较删除并去抖；批处理模式不自动索引，存储关闭时整次中止；`search_code` 返回截断信息、修正排序与误导结果；Scope 重建记录各类索引时间
+- svn info 移出主线程，WorkspaceContext 解析不再阻塞编辑器
+
 ## [1.17.0] - 2026-10-22
 
 多供应商 LLM 兼容与 prompt 缓存优化。设计文档：`plans/multi-llm-provider-design.md`。
