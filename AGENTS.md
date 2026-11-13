@@ -20,7 +20,7 @@
 |---|---|---|
 | **0** | **`plans/HANDOFF-v1.8.0-to-v1.9.0.md`** | **接手指南**（已解决/待解决/遗留 issue + 环境/git 状态 + 8 份必读入口） |
 | 1 | 本文件 (AGENTS.md) | LLM 开发规范, 目录结构, 工具开发模板 |
-| 2 | `plans/ROADMAP.md` §3.w.1 v1.8.0 收尾 | 能力覆盖 milestone 完整上下文 |
+| 2 | `plans/ROADMAP.md` | 现状、主线、搁置项（1.18.0 前的完整路线图与 ADR 见 `plans/_archive/roadmap/ROADMAP-v1.18.0-full.md`） |
 | 3 | `plans/capability-coverage-audit.md` | v1.8.0 立项审计方法论（v1.9.0 P1/P2 必读）|
 | 4 | `plans/adversarial-coverage-audit.md` | Undo/mutating-side 对抗式审计 |
 | 5 | `plans/agentcore-execute-code-constraints.md` | execute_code 反射探测硬约束 |
@@ -989,7 +989,7 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 
 1. **`package.json`** — 修改 `"version"` 字段
 2. **`CHANGELOG.md`** — 在顶部新增版本节，记录变更内容
-3. **`ROADMAP.md`** — 将对应任务标记为 `[x]`，更新里程碑状态
+3. **`ROADMAP.md`** — 更新“现状”，完成的主线项从表中删除
 4. **（如适用）`AGENTS.md`** — 如果本次变更引入了新的架构规则或编码约束
 5. **（如适用）`README.md`** — 如果新增了用户可见的核心功能
 

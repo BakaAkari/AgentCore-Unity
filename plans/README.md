@@ -10,7 +10,7 @@
 
 | 文档 | 用途 | 状态 |
 |------|------|------|
-| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — Phase 6~9 路线图、任务清单、ADR 记录 | 活跃维护 |
+| [**ROADMAP.md**](ROADMAP.md) | **主导方向文档** — 现状、主线、搁置项（1.18.0 前的完整版与 ADR-1~19 见 [`_archive/roadmap/`](_archive/roadmap/)） | 活跃维护 |
 | [**v1.13.0/provider-profile-plan.md**](v1.13.0/provider-profile-plan.md) | **v1.13.0 Provider Profile 方案** — 多 Provider 配置管理设计文档 | ✅ 已实施 (v1.13.0) |
 | [**v1.10.0/smoke-test-findings.md**](v1.10.0/smoke-test-findings.md) | **v1.10.x Windows 测试发现汇总** — 21 bugs (A~U)，全部已修或驳回 | ✅ 已完成 |
 | [**v1.10.0-system-capability-assessment.md**](v1.10.0-system-capability-assessment.md) | **v1.10.0 系统能力评估** — 92→89/100 (Windows 测试后下调)，包含 Part 9 修订 | ⚠️ 2026-07-27 修订 |
