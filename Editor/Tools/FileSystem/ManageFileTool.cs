@@ -197,7 +197,7 @@ namespace AgentCore.Editor.Tools.FileSystem
                 },
                 ""file_pattern"": {
                     ""type"": ""string"",
-                    ""description"": ""Glob filter for files scanned by search_content, '|' separates several (e.g., '*.json|*.yaml'; default: '*')""
+                    ""description"": ""Glob filter for files scanned by search_content, '|' separates several (e.g., '*.json|*.yaml'; default: '*'). Unity serialized assets (.prefab, .unity, .asset, .mat, .controller, .anim) are skipped unless named explicitly, e.g. '*.prefab' or '*.cs|*.prefab'. Ignored when path is a single file.""
                 },
                 ""case_sensitive"": {
                     ""type"": ""boolean"",
@@ -637,6 +637,10 @@ namespace AgentCore.Editor.Tools.FileSystem
             var path = ToolHelpers.GetOptionalString(parameters, "path", ".");
             var fullPath = ResolveSafePath(path);
 
+            if (File.Exists(fullPath))
+                return ToolResponse.Fail(
+                    $"'{path}' is a file, not a directory. Use read_file to read it, search_content with this path to search inside it, " +
+                    $"or list_directory with path '{ToRelativePath(Path.GetDirectoryName(fullPath))}' to list its folder.");
             if (!Directory.Exists(fullPath))
                 return ToolResponse.Fail($"Directory not found: '{path}'");
 
@@ -740,8 +744,10 @@ namespace AgentCore.Editor.Tools.FileSystem
             var path = ToolHelpers.GetOptionalString(parameters, "path", "Assets");
             var fullPath = ResolveSafePath(path);
 
-            if (!Directory.Exists(fullPath))
-                return ToolResponse.Fail($"Directory not found: '{path}'");
+            // path 指向单个文件：只搜这一个文件，不做后缀 / 隐藏文件过滤（显式点名的文件就是要搜的）
+            bool singleFile = File.Exists(fullPath);
+            if (!singleFile && !Directory.Exists(fullPath))
+                return ToolResponse.Fail($"Path not found: '{path}' (search_content accepts a directory or a single file)");
 
             var request = new ContentSearchRequest
             {
@@ -757,7 +763,11 @@ namespace AgentCore.Editor.Tools.FileSystem
                     .DefaultIfEmpty("*")
                     .ToArray(),
                 IncludeHidden = ToolHelpers.GetOptionalBool(parameters, "include_hidden", false),
+                SingleFile = singleFile,
             };
+
+            if (singleFile)
+                return SearchContentDotnet(request, null, ct);
 
             string engineNote = null;
             if (RgLocator.TryGetExecutable(out var rgPath))
@@ -783,6 +793,7 @@ namespace AgentCore.Editor.Tools.FileSystem
             public bool CaseSensitive;
             public string[] FilePatterns;
             public bool IncludeHidden;
+            public bool SingleFile;
         }
 
         /// <summary>
@@ -792,6 +803,36 @@ namespace AgentCore.Editor.Tools.FileSystem
         private static bool IsExtensionRequested(string[] filePatterns, string extension)
         {
             return filePatterns.Any(fp => fp != "*" && fp != "*.*" && fp.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Unity 序列化资源后缀：默认不搜，但 Inspector / Prefab 覆盖的真实取值就在这些文件里，跳过时必须告诉调用方。
+        /// </summary>
+        internal static readonly string[] UnityAssetExtensions = { ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim" };
+
+        /// <summary>
+        /// 两个引擎共用的后缀过滤：在默认跳过列表中、且 file_pattern 没有显式点名该后缀时跳过
+        /// （'*' 与 '*.prefab' 同时出现时，'*.prefab' 生效）。
+        /// </summary>
+        internal static bool IsSkippedByExtension(string[] filePatterns, string extension)
+        {
+            return !string.IsNullOrEmpty(extension)
+                   && SearchSkippedExtensions.Contains(extension)
+                   && !IsExtensionRequested(filePatterns, extension);
+        }
+
+        /// <summary>本次搜索因默认过滤而没有搜的 Unity 序列化资源后缀。</summary>
+        internal static string[] SkippedUnityAssetExtensions(string[] filePatterns)
+        {
+            return UnityAssetExtensions.Where(ext => IsSkippedByExtension(filePatterns, ext)).ToArray();
+        }
+
+        private static string UnityAssetSkipHint(string[] skipped)
+        {
+            if (skipped.Length == 0)
+                return null;
+            return $"Unity serialized assets ({string.Join(", ", skipped)}) were NOT searched (skipped by default); values set in prefabs/scenes/assets " +
+                   "can differ from code defaults - set file_pattern (e.g. '*.prefab') or pass the asset file itself as path to search them";
         }
 
         /// <summary>
@@ -838,7 +879,7 @@ namespace AgentCore.Editor.Tools.FileSystem
 
             foreach (var ext in SearchSkippedExtensions)
             {
-                if (allFiles || !IsExtensionRequested(req.FilePatterns, ext))
+                if (IsSkippedByExtension(req.FilePatterns, ext))
                     options.ExcludeGlobs.Add("*" + ext);
             }
 
@@ -894,7 +935,7 @@ namespace AgentCore.Editor.Tools.FileSystem
                         var ext = Path.GetExtension(file);
                         if (!req.IncludeHidden && fileName.StartsWith("."))
                             continue;
-                        if (SearchSkippedExtensions.Contains(ext) && (allFiles || !IsExtensionRequested(req.FilePatterns, ext)))
+                        if (IsSkippedByExtension(req.FilePatterns, ext))
                             continue;
                         rootFiles.Add(fileName);
                     }
@@ -1005,6 +1046,7 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ["truncatedReason"] = rg.TruncatedReason,
                 ["excluded_dirs"] = new JArray(excludedDirs),
                 ["excluded_dirs_complete"] = excludedListComplete,
+                ["skipped_extensions"] = new JArray(SkippedUnityAssetExtensions(req.FilePatterns)),
                 ["engine"] = "ripgrep"
             };
 
@@ -1018,6 +1060,9 @@ namespace AgentCore.Editor.Tools.FileSystem
                 msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to search it)";
             if (!excludedListComplete)
                 msg += $"; excluded_dirs may be incomplete (listing stopped after {ExcludedDirScanMaxDirs} dirs / {ExcludedDirScanBudget.TotalMilliseconds:0} ms; obj/ is still skipped at every depth)";
+            var rgSkipHint = UnityAssetSkipHint(SkippedUnityAssetExtensions(req.FilePatterns));
+            if (rgSkipHint != null)
+                msg += "; " + rgSkipHint;
 
             return ToolResponse.OkWithData(data, msg);
         }
@@ -1061,23 +1106,28 @@ namespace AgentCore.Editor.Tools.FileSystem
             string scanStopReason = null;
             var budget = Stopwatch.StartNew();
 
-            var binaryExtensions = SearchSkippedExtensions;
             var filePatterns = req.FilePatterns;
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var directories = new[] { fullPath }.Concat(recursive
-                ? EnumerateDirectoriesPruned(fullPath, true, includeHidden, excludedDirs, ct)
-                : Enumerable.Empty<string>());
+            int filesSkippedByExtension = 0;
+            string singleFileNote = null;
+            var directories = req.SingleFile
+                ? Enumerable.Empty<string>()
+                : new[] { fullPath }.Concat(recursive
+                    ? EnumerateDirectoriesPruned(fullPath, true, includeHidden, excludedDirs, ct)
+                    : Enumerable.Empty<string>());
 
-            foreach (var dir in directories)
+            // 单文件模式只产出这一个文件，复用同一套扫描循环
+            var fileGroups = req.SingleFile
+                ? new IEnumerable<string>[] { new[] { fullPath } }
+                : directories.SelectMany(dir => filePatterns.Select(fp => SafeEnumerateFiles(dir, fp)));
+
+            foreach (var group in fileGroups)
             {
                 if (scanStopReason != null) break;
 
-                foreach (var fp in filePatterns)
                 {
-                    if (scanStopReason != null) break;
-
-                    foreach (var file in SafeEnumerateFiles(dir, fp))
+                    foreach (var file in group)
                     {
                         ct.ThrowIfCancellationRequested();
 
@@ -1097,12 +1147,15 @@ namespace AgentCore.Editor.Tools.FileSystem
                             continue;
 
                         var fileName = Path.GetFileName(file);
-                        if (!includeHidden && fileName.StartsWith("."))
+                        if (!req.SingleFile && !includeHidden && fileName.StartsWith("."))
                             continue;
 
                         var ext = Path.GetExtension(file);
-                        if (binaryExtensions.Contains(ext))
+                        if (!req.SingleFile && IsSkippedByExtension(filePatterns, ext))
+                        {
+                            filesSkippedByExtension++;
                             continue;
+                        }
 
                         string[] lines;
                         try
@@ -1110,7 +1163,11 @@ namespace AgentCore.Editor.Tools.FileSystem
                             // Skip very large files
                             var fi = new FileInfo(file);
                             if (fi.Length > MaxReadSize)
+                            {
+                                if (req.SingleFile)
+                                    singleFileNote = $"file is larger than {MaxReadSize / (1024 * 1024)}MB and was not searched; use read_file with offset/limit";
                                 continue;
+                            }
 
                             lines = File.ReadAllLines(file);
                             bytesRead += fi.Length;
@@ -1186,8 +1243,13 @@ namespace AgentCore.Editor.Tools.FileSystem
                 ["excluded_dirs"] = new JArray(excludedDirs),
                 ["engine"] = "dotnet"
             };
+            var skippedAssetExts = req.SingleFile ? Array.Empty<string>() : SkippedUnityAssetExtensions(filePatterns);
+            data["skipped_extensions"] = new JArray(skippedAssetExts);
+            data["files_skipped_by_extension"] = filesSkippedByExtension;
             if (engineNote != null)
                 data["engine_note"] = engineNote;
+            if (singleFileNote != null)
+                data["note"] = singleFileNote;
 
             var msg = $"Found {matchCount}{(scanStopReason != null ? "+" : "")} matching lines in {filesMatched} files (searched {filesSearched} files)";
             if (overMax)
@@ -1200,6 +1262,11 @@ namespace AgentCore.Editor.Tools.FileSystem
                 msg += $"; skipped generated dirs: {string.Join(", ", excludedDirs)} (pass one as path to search it)";
             if (engineNote != null)
                 msg += $"; note: {engineNote}";
+            if (singleFileNote != null)
+                msg += $"; note: {singleFileNote}";
+            var skipHint = UnityAssetSkipHint(skippedAssetExts);
+            if (skipHint != null)
+                msg += filesSkippedByExtension > 0 ? $"; {filesSkippedByExtension} file(s) skipped by extension. {skipHint}" : "; " + skipHint;
 
             return ToolResponse.OkWithData(data, msg);
         }
