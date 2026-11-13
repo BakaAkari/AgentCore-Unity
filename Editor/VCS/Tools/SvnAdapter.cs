@@ -334,7 +334,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         /// <summary>"r123" → "123"；数字与 svn 关键字原样返回（关键字转大写）；其它返回 null。</summary>
-        internal static string NormalizeRevision(string revision)
+        public static string NormalizeRevision(string revision)
         {
             var rev = revision?.Trim();
             if (string.IsNullOrEmpty(rev))
@@ -1492,7 +1492,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         }
 
         /// <summary>svn 报告源不在版本控制下（E155010 / W155010 / E200005 / E200009）。</summary>
-        internal static bool IsNotVersionedError(string error)
+        public static bool IsNotVersionedError(string error)
         {
             if (string.IsNullOrEmpty(error))
                 return false;
