@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Components.MCP.Relay;
 using AgentCore.Editor.Utils;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -79,6 +80,9 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
                 WriteEndpoint("ready");
                 LastError = null;
+
+                // relay 随包以源码分发：启用后在后台编译一次（源码不变则复用）
+                McpRelayBuilder.EnsureBuiltAsync();
                 AgentCoreLog.Info($"[AgentCore][MCP] Bridge listening on 127.0.0.1:{server.Port} ({_catalog.Tools.Count} tools).");
             }
             catch (Exception ex)
