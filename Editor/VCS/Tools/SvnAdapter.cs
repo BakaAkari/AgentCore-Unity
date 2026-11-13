@@ -277,6 +277,76 @@ namespace AgentCore.Editor.Components.VCS.Tools
             }
         }
 
+        /// <summary>
+        /// 单个提交的详情（svn log -v -r N ^/）：查询仓库根，提交只改了工作副本以外的路径也能查到。
+        /// 接受 "123" / "r123" / "HEAD" 等 svn 修订号写法。
+        /// </summary>
+        public async Task<VcsCommitDetail> GetCommitInfoAsync(string revision, CancellationToken ct = default)
+        {
+            var result = new VcsCommitDetail();
+            var rev = NormalizeRevision(revision);
+            if (rev == null)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Invalid SVN revision: '{revision}'. Use a number (e.g. 1234 or r1234), HEAD, BASE, COMMITTED or PREV.";
+                return result;
+            }
+
+            try
+            {
+                var cmd = await VcsCommandExecutor.ExecuteAsync(
+                    "svn", new List<string> { "log", "-v", "--xml", "--non-interactive", "-r", rev, "^/" },
+                    _workingDirectory, timeoutSeconds: 60, ct: ct);
+                result.RawOutput = cmd.Output;
+                if (!cmd.Success)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = SvnCommandLine.AppendErrorHint(cmd.ErrorMessage?.Trim());
+                    return result;
+                }
+
+                var commit = ParseSvnLogXml(cmd.Output).FirstOrDefault();
+                if (commit == null)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = $"Revision {rev} not found.";
+                    return result;
+                }
+
+                result.Success = true;
+                result.Revision = commit.Revision;
+                result.Author = commit.Author;
+                result.Date = commit.Date;
+                result.Message = commit.Message;
+                result.ChangedFiles = commit.ChangedFiles;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to get SVN commit info: {ex.Message}";
+            }
+
+            return result;
+        }
+
+        /// <summary>"r123" → "123"；数字与 svn 关键字原样返回（关键字转大写）；其它返回 null。</summary>
+        internal static string NormalizeRevision(string revision)
+        {
+            var rev = revision?.Trim();
+            if (string.IsNullOrEmpty(rev))
+                return null;
+            if ((rev[0] == 'r' || rev[0] == 'R') && rev.Length > 1 && rev.Skip(1).All(char.IsDigit))
+                rev = rev.Substring(1);
+            if (rev.All(char.IsDigit))
+                return rev;
+            var upper = rev.ToUpperInvariant();
+            return upper == "HEAD" || upper == "BASE" || upper == "COMMITTED" || upper == "PREV" ? upper : null;
+        }
+
         /// <summary>单个文件 / 目录的提交历史（文本输出，供模型阅读）。</summary>
         public async Task<CommandResult> GetPathLogAsync(string filePath, int maxCount, CancellationToken ct = default)
         {
@@ -1277,6 +1347,171 @@ namespace AgentCore.Editor.Components.VCS.Tools
             return await RunLockOperationAsync(false, filePaths, null, ct);
         }
 
+        /// <summary>
+        /// 移动 / 重命名（svn move --parents）。资源的 .meta 一起移动，保持 GUID 不变、引用不断。
+        /// 未纳入版本控制的一端（资源或 .meta）改为普通文件系统移动，并在资源已受控时把移动后的 .meta 加入版本控制。
+        /// 目标的相对路径与源使用同一个基准（工作副本根或 Unity 项目根）。
+        /// </summary>
+        public async Task<VcsOperationResult> MoveAsync(string sourcePath, string destinationPath, CancellationToken ct = default)
+        {
+            var result = new VcsOperationResult { OperationName = "SVN Move" };
+            if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(destinationPath))
+            {
+                result.Success = false;
+                result.ErrorMessage = "Both source and destination paths are required.";
+                return result;
+            }
+
+            try
+            {
+                // 传入的是 .meta 时按资源处理：.meta 总是跟随资源
+                if (UnityMetaPaths.IsMeta(sourcePath) && UnityMetaPaths.IsMeta(destinationPath))
+                {
+                    sourcePath = UnityMetaPaths.GetCompanion(sourcePath);
+                    destinationPath = UnityMetaPaths.GetCompanion(destinationPath);
+                }
+
+                var srcAbs = ResolvePath(sourcePath.Trim());
+                var dstAbs = ResolveDestinationPath(sourcePath.Trim(), srcAbs, destinationPath.Trim());
+                var srcDisplay = ToDisplayPath(srcAbs);
+                var dstDisplay = ToDisplayPath(dstAbs);
+
+                if (!SvnCommandLine.CanPassToSvn(srcAbs) || !SvnCommandLine.CanPassToSvn(dstAbs))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = SvnCommandLine.UnrepresentablePathError(SvnCommandLine.CanPassToSvn(srcAbs) ? destinationPath : sourcePath);
+                    return result;
+                }
+                if (!File.Exists(srcAbs) && !Directory.Exists(srcAbs))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = $"Source not found: {srcDisplay}";
+                    return result;
+                }
+                if (File.Exists(dstAbs) || Directory.Exists(dstAbs))
+                {
+                    result.Success = false;
+                    result.ErrorMessage = $"Destination already exists: {dstDisplay}";
+                    return result;
+                }
+
+                var outputs = new List<string>();
+                var main = await MoveOneAsync(srcAbs, dstAbs, ct);
+                outputs.Add(main.output);
+                if (!main.ok)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = main.error;
+                    result.RawOutput = main.output;
+                    return result;
+                }
+                result.AffectedFiles.Add(dstDisplay);
+                result.LogLines.Add(main.versioned ? $"svn move {srcDisplay} -> {dstDisplay}" : $"moved unversioned {srcDisplay} -> {dstDisplay} (file system)");
+
+                var srcMeta = srcAbs.TrimEnd('/', '\\') + UnityMetaPaths.MetaExtension;
+                var dstMeta = dstAbs.TrimEnd('/', '\\') + UnityMetaPaths.MetaExtension;
+                if (File.Exists(srcMeta))
+                {
+                    if (File.Exists(dstMeta))
+                    {
+                        result.FailedFiles[ToDisplayPath(srcMeta)] = $"Destination .meta already exists: {ToDisplayPath(dstMeta)}";
+                    }
+                    else
+                    {
+                        var meta = await MoveOneAsync(srcMeta, dstMeta, ct);
+                        outputs.Add(meta.output);
+                        if (!meta.ok)
+                        {
+                            result.FailedFiles[ToDisplayPath(srcMeta)] = meta.error;
+                        }
+                        else
+                        {
+                            result.AffectedFiles.Add(ToDisplayPath(dstMeta));
+                            if (!meta.versioned && main.versioned)
+                            {
+                                // 资源受控而 .meta 不受控：移动后把 .meta 加入版本控制，避免提交出没有 .meta 的资源
+                                var add = await VcsCommandExecutor.ExecuteAsync(
+                                    "svn", new List<string> { "add", "--parents", "--force", "--non-interactive", SvnCommandLine.PathArg(dstMeta) },
+                                    _workingDirectory, ct: ct);
+                                outputs.Add(add.Output);
+                                if (!add.Success)
+                                    result.FailedFiles[ToDisplayPath(dstMeta)] = $"Moved, but svn add failed: {add.ErrorMessage?.Trim()}";
+                            }
+                        }
+                    }
+                }
+
+                result.RawOutput = string.Join("\n", outputs.Where(o => !string.IsNullOrWhiteSpace(o)));
+                result.Success = true;
+                result.IsPartial = result.FailedFiles.Count > 0;
+                result.Message = $"Moved {srcDisplay} -> {dstDisplay}" + (main.versioned ? " (scheduled in SVN; commit to record the move)." : " (unversioned, file system only).");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Failed to move: {ex.Message}";
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 移动单个路径：先 svn move；源不受版本控制时退回文件系统移动。返回是否走了 svn。
+        /// </summary>
+        private async Task<(bool ok, bool versioned, string error, string output)> MoveOneAsync(string srcAbs, string dstAbs, CancellationToken ct)
+        {
+            var cmd = await VcsCommandExecutor.ExecuteAsync(
+                "svn", new List<string> { "move", "--parents", "--non-interactive", SvnCommandLine.PathArg(srcAbs), SvnCommandLine.PathArg(dstAbs) },
+                _workingDirectory, ct: ct);
+            if (cmd.Success)
+                return (true, true, null, cmd.Output);
+
+            var error = (cmd.ErrorMessage ?? string.Empty).Trim();
+            if (!IsNotVersionedError(error))
+                return (false, true, error, cmd.Output);
+
+            try
+            {
+                var parent = Path.GetDirectoryName(dstAbs);
+                if (!string.IsNullOrEmpty(parent))
+                    Directory.CreateDirectory(parent);
+                if (Directory.Exists(srcAbs))
+                    Directory.Move(srcAbs, dstAbs);
+                else
+                    File.Move(srcAbs, dstAbs);
+                return (true, false, null, cmd.Output);
+            }
+            catch (Exception ex)
+            {
+                return (false, false, $"File system move failed: {ex.Message}", cmd.Output);
+            }
+        }
+
+        /// <summary>svn 报告源不在版本控制下（E155010 / W155010 / E200005 / E200009）。</summary>
+        internal static bool IsNotVersionedError(string error)
+        {
+            if (string.IsNullOrEmpty(error))
+                return false;
+            return error.Contains("E155010") || error.Contains("W155010") || error.Contains("E200005") || error.Contains("E200009")
+                   || error.IndexOf("not under version control", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>目标相对路径与源采用同一个基准：源按 Unity 项目根解析出来的，目标也按项目根解析。</summary>
+        private string ResolveDestinationPath(string sourceInput, string sourceAbs, string destinationInput)
+        {
+            if (Path.IsPathRooted(destinationInput))
+                return destinationInput;
+            if (!Path.IsPathRooted(sourceInput) && !string.IsNullOrEmpty(_projectDirectory)
+                && !string.Equals(NormalizePath(_projectDirectory), NormalizePath(_workingDirectory), StringComparison.Ordinal)
+                && string.Equals(NormalizePath(sourceAbs), NormalizePath(ResolveAbsolutePath(sourceInput, _projectDirectory)), StringComparison.Ordinal))
+                return ResolveAbsolutePath(destinationInput, _projectDirectory);
+            return ResolveAbsolutePath(destinationInput, _workingDirectory);
+        }
+
         private async Task<VcsOperationResult> RunLockOperationAsync(bool doLock, List<string> filePaths, string comment, CancellationToken ct)
         {
             var result = new VcsOperationResult { OperationName = doLock ? "SVN Lock" : "SVN Unlock" };
@@ -1716,13 +1951,27 @@ namespace AgentCore.Editor.Components.VCS.Tools
                     var date = entry.Element("date")?.Value;
                     var message = entry.Element("msg")?.Value;
 
-                    commits.Add(new VcsCommit
+                    var commit = new VcsCommit
                     {
                         Revision = revision ?? "unknown",
                         Author = author ?? "unknown",
                         Date = date ?? "unknown",
                         Message = (message ?? "").Replace("\r\n", "\n")
-                    });
+                    };
+                    // svn log -v：<paths><path action="M" copyfrom-path=".." copyfrom-rev="..">/trunk/a</path></paths>
+                    var paths = entry.Element("paths");
+                    if (paths != null)
+                    {
+                        foreach (var path in paths.Elements("path"))
+                        {
+                            var line = $"{path.Attribute("action")?.Value ?? "?"} {path.Value}";
+                            var copyFrom = path.Attribute("copyfrom-path")?.Value;
+                            if (!string.IsNullOrEmpty(copyFrom))
+                                line += $" (from {copyFrom}@{path.Attribute("copyfrom-rev")?.Value})";
+                            commit.ChangedFiles.Add(line);
+                        }
+                    }
+                    commits.Add(commit);
                 }
             }
             catch (Exception ex)

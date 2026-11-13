@@ -185,11 +185,35 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (!string.IsNullOrEmpty(needsLock.Output))
                 SvnOverlayStatusParser.ApplyNeedsLockXml(needsLock.Output, unityRoot, unityRoot, snapshot);
 
+            // propget -R 不跨进 externals：对工程内的每个 external 根单独查一次
+            foreach (var external in SvnOverlayStatusParser.ParseExternalRoots(status.RawOutput))
+            {
+                string externalRoot;
+                try { externalRoot = Path.GetFullPath(Path.Combine(adapter.WorkingDirectory, external)); }
+                catch (Exception) { continue; }
+                if (!Directory.Exists(externalRoot) || !IsUnderDirectory(externalRoot, unityRoot))
+                    continue;
+                var externalNeedsLock = await VcsCommandExecutor.ExecuteAsync(
+                    "svn", new List<string> { "propget", "svn:needs-lock", "-R", "--xml", "--non-interactive", "." }, externalRoot, SvnTimeoutSeconds)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(externalNeedsLock.Output))
+                    SvnOverlayStatusParser.ApplyNeedsLockXml(externalNeedsLock.Output, externalRoot, unityRoot, snapshot);
+            }
+
             if (remote != null && remote.Success && remote.LockedFiles != null && remote.LockedFiles.Count > 0)
                 SvnOverlayStatusParser.ApplyRemoteLocks(remote.LockedFiles, remote.PathBase ?? baseDirectory, unityRoot, snapshot);
 
             SvnOverlayStatusParser.PropagateToFolders(snapshot);
             return (snapshot, null);
+        }
+
+        private static bool IsUnderDirectory(string path, string directory)
+        {
+            var p = Path.GetFullPath(path).TrimEnd('\\', '/');
+            var d = Path.GetFullPath(directory).TrimEnd('\\', '/');
+            return p.Length > d.Length
+                   && p.StartsWith(d, StringComparison.OrdinalIgnoreCase)
+                   && (p[d.Length] == '\\' || p[d.Length] == '/');
         }
 
         private static void ReportError(string error)
