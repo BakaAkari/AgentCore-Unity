@@ -68,6 +68,9 @@ namespace AgentCore.Tests.Editor.MCP
                             }
                         });
                         break;
+                    case McpBridgeProtocol.Request:
+                        connection.Send(AnswerRequest(id, (string)message["method"], message["params"] as JObject));
+                        break;
                     case McpBridgeProtocol.CallTool:
                         if (HoldCalls)
                         {
@@ -90,6 +93,37 @@ namespace AgentCore.Tests.Editor.MCP
 
             public void OnDisconnected(McpBridgeConnection connection)
             {
+            }
+
+            private static JObject AnswerRequest(string id, string method, JObject parameters)
+            {
+                var response = new JObject { ["type"] = McpBridgeProtocol.Response, ["id"] = id };
+                switch (method)
+                {
+                    case "resources/list":
+                        response["result"] = new JObject
+                        {
+                            ["resources"] = new JArray { new JObject { ["uri"] = "unity://console", ["name"] = "console" } },
+                            ["resourceTemplates"] = new JArray { new JObject { ["uriTemplate"] = "unity://asset/{+path}", ["name"] = "asset" } }
+                        };
+                        break;
+                    case "resources/read":
+                        if ((string)parameters?["uri"] == "unity://missing")
+                            response["error"] = new JObject { ["code"] = -32602, ["message"] = "Resource not found: unity://missing" };
+                        else
+                            response["result"] = new JObject { ["contents"] = new JArray { new JObject { ["uri"] = parameters?["uri"], ["mimeType"] = "text/plain", ["text"] = "中文 content" } } };
+                        break;
+                    case "prompts/list":
+                        response["result"] = new JObject { ["prompts"] = new JArray { new JObject { ["name"] = "scene-authoring" } } };
+                        break;
+                    case "prompts/get":
+                        response["result"] = new JObject { ["messages"] = new JArray { new JObject { ["role"] = "user", ["content"] = new JObject { ["type"] = "text", ["text"] = "skill:" + (string)parameters?["arguments"]?["task"] } } } };
+                        break;
+                    default:
+                        response["error"] = new JObject { ["code"] = -32601, ["message"] = "Method not found" };
+                        break;
+                }
+                return response;
             }
         }
 
@@ -300,13 +334,64 @@ namespace AgentCore.Tests.Editor.MCP
                     var pingId = relay.Request("ping");
                     Assert.IsNotNull((await relay.ResponseAsync(pingId))["result"]);
 
-                    var unknownId = relay.Request("resources/list");
+                    var unknownId = relay.Request("completion/complete");
                     Assert.AreEqual(-32601, (int)(await relay.ResponseAsync(unknownId))["error"]["code"]);
 
                     var hello = bridge.Messages.Count; // 握手后的消息都经过处理器
                     Assert.Greater(hello, 0);
                     Assert.AreEqual("relay-test", server.Connections.Single().ClientName);
                 }
+            }
+        }
+
+        [Test]
+        public async Task Relay_ResourcesAndPrompts_AreForwarded()
+        {
+            using (var server = new McpBridgeServer(Token, new FakeBridge()))
+            {
+                server.Start(0);
+                WriteEndpoint(_project, server.Port);
+                using (var relay = new RelayProcess(_build, _project))
+                {
+                    var initId = relay.Request("initialize", new JObject
+                    {
+                        ["protocolVersion"] = "2025-11-25",
+                        ["capabilities"] = new JObject(),
+                        ["clientInfo"] = new JObject { ["name"] = "t" }
+                    });
+                    var init = await relay.ResponseAsync(initId);
+                    Assert.IsNotNull(init["result"]["capabilities"]["resources"]);
+                    Assert.IsNotNull(init["result"]["capabilities"]["prompts"]);
+                    relay.Notify("notifications/initialized");
+
+                    var list = await relay.ResponseAsync(relay.Request("resources/list"));
+                    Assert.AreEqual("unity://console", (string)list["result"]["resources"][0]["uri"]);
+                    var templates = await relay.ResponseAsync(relay.Request("resources/templates/list"));
+                    Assert.AreEqual("unity://asset/{+path}", (string)templates["result"]["resourceTemplates"][0]["uriTemplate"]);
+
+                    var read = await relay.ResponseAsync(relay.Request("resources/read", new JObject { ["uri"] = "unity://asset/Assets/a.txt" }));
+                    Assert.AreEqual("中文 content", (string)read["result"]["contents"][0]["text"]);
+                    var missing = await relay.ResponseAsync(relay.Request("resources/read", new JObject { ["uri"] = "unity://missing" }));
+                    Assert.AreEqual(-32602, (int)missing["error"]["code"]);
+
+                    var prompts = await relay.ResponseAsync(relay.Request("prompts/list"));
+                    Assert.AreEqual("scene-authoring", (string)prompts["result"]["prompts"][0]["name"]);
+                    var prompt = await relay.ResponseAsync(relay.Request("prompts/get", new JObject { ["name"] = "scene-authoring", ["arguments"] = new JObject { ["task"] = "x" } }));
+                    Assert.AreEqual("skill:x", (string)prompt["result"]["messages"][0]["content"]["text"]);
+                }
+            }
+        }
+
+        [Test]
+        public async Task Relay_EditorNotRunning_ListsEmptyResourcesAndPrompts()
+        {
+            using (var relay = new RelayProcess(_build, _project))
+            {
+                await relay.InitializeAsync();
+                Assert.AreEqual(0, ((JArray)(await relay.ResponseAsync(relay.Request("resources/list")))["result"]["resources"]).Count);
+                Assert.AreEqual(0, ((JArray)(await relay.ResponseAsync(relay.Request("prompts/list")))["result"]["prompts"]).Count);
+                var read = await relay.ResponseAsync(relay.Request("resources/read", new JObject { ["uri"] = "unity://console" }));
+                StringAssert.Contains("not running", (string)read["error"]["message"]);
             }
         }
 

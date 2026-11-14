@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.MCP.Relay;
 using AgentCore.Editor.Core;
@@ -207,6 +208,9 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                         if (id != null)
                             Ledger.Cancel(connection.RelayId, id);
                         break;
+                    case McpBridgeProtocol.Request:
+                        _ = HandleRequestAsync(connection, id, (string)message["method"], message["params"] as JObject ?? new JObject());
+                        break;
                     case McpBridgeProtocol.Resume:
                         Ledger.Resume(connection, (message["ids"] as JArray)?.Select(t => (string)t).Where(s => s != null));
                         break;
@@ -217,6 +221,43 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             {
                 // 不取消正在执行的调用：relay 可能只是在重连（编辑器重载、网络抖动），结果留待 resume
                 Ledger.Detach(connection);
+            }
+
+            /// <summary>通用请求：资源与提示。结果或错误原样回给 relay。</summary>
+            private static async Task HandleRequestAsync(McpBridgeConnection connection, string id, string method, JObject parameters)
+            {
+                var response = new JObject { ["type"] = McpBridgeProtocol.Response, ["id"] = id };
+                try
+                {
+                    JObject result;
+                    switch (method)
+                    {
+                        case "resources/list":
+                            result = await MainThread.RunAsync(() => McpResourceCatalog.List()).ConfigureAwait(false);
+                            break;
+                        case "resources/read":
+                            result = await McpResourceCatalog.ReadAsync((string)parameters["uri"], connection.ClientName, CancellationToken.None).ConfigureAwait(false);
+                            break;
+                        case "prompts/list":
+                            result = await MainThread.RunAsync(() => McpPromptCatalog.List()).ConfigureAwait(false);
+                            break;
+                        case "prompts/get":
+                            result = await MainThread.RunAsync(() => McpPromptCatalog.Get((string)parameters["name"], parameters["arguments"] as JObject)).ConfigureAwait(false);
+                            break;
+                        default:
+                            throw new McpRequestException(-32601, "Method not found: " + method);
+                    }
+                    response["result"] = result;
+                }
+                catch (McpRequestException ex)
+                {
+                    response["error"] = new JObject { ["code"] = ex.Code, ["message"] = ex.Message };
+                }
+                catch (Exception ex)
+                {
+                    response["error"] = new JObject { ["code"] = -32603, ["message"] = ex.Message };
+                }
+                connection.Send(response);
             }
 
             private static async Task ListToolsAsync(McpBridgeConnection connection, string id)

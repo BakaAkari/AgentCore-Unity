@@ -12,6 +12,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     /// <item><c>listTools { id }</c></item>
     /// <item><c>callTool { id, name, arguments }</c> —— <c>id</c> 在同一 relay 内唯一。</item>
     /// <item><c>cancel { id }</c></item>
+    /// <item><c>request { id, method, params }</c> —— 通用请求（resources/list、resources/read、prompts/list、prompts/get 等），
+    ///       答复 <c>response { id, result }</c> 或 <c>response { id, error: { code, message } }</c>。</item>
     /// <item><c>resume { ids }</c> —— 重连后发送：取回断开前已发出、尚未收到结果的调用。已完成的立即答复，
     ///       仍在执行的完成后答复，bridge 不认识的用 unknownCalls 告诉 relay（由 relay 判断重发或报告丢失）。</item>
     /// </list>
@@ -41,6 +43,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         public const string Cancel = "cancel";
         public const string Resume = "resume";
         public const string UnknownCalls = "unknownCalls";
+        public const string Request = "request";
+        public const string Response = "response";
         public const string Progress = "progress";
         public const string Result = "result";
         public const string Reloading = "reloading";
