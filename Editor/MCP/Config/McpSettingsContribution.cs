@@ -39,9 +39,41 @@ namespace AgentCore.Editor.Components.MCP.Config
             DrawClientConfig();
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField(
-                "External clients follow the review level of the AgentCore chat (including YOLO); confirmations appear in the AgentCore window.",
-                EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Review", EditorStyles.boldLabel);
+            DrawReviewSettings();
+        }
+
+        private static readonly GUIContent[] ReviewLevelOptions =
+        {
+            new GUIContent("Follow AgentCore chat", "Same review level as the AgentCore chat, including YOLO and permission rules."),
+            new GUIContent("Trust MCP clients", "Calls from MCP clients run without confirmation (the client asks you itself). Permission deny rules are skipped, like YOLO."),
+        };
+
+        private static readonly GUIContent[] ConfirmLocationOptions =
+        {
+            new GUIContent("AgentCore window in Unity", "Confirmation cards appear in the AgentCore window, labelled with the client."),
+            new GUIContent("MCP client when supported", "Ask in the client (MCP elicitation). Clients without support fall back to the AgentCore window."),
+        };
+
+        private static void DrawReviewSettings()
+        {
+            EditorGUI.BeginChangeCheck();
+            var level = EditorGUILayout.Popup(new GUIContent("Review level"), (int)McpSettings.ReviewLevel, ReviewLevelOptions);
+            if (EditorGUI.EndChangeCheck())
+                McpSettings.ReviewLevel = (McpReviewLevel)level;
+
+            using (new EditorGUI.DisabledScope(McpSettings.ReviewLevel == McpReviewLevel.TrustClient))
+            {
+                EditorGUI.BeginChangeCheck();
+                var location = EditorGUILayout.Popup(new GUIContent("Confirm in"), (int)McpSettings.ConfirmLocation, ConfirmLocationOptions);
+                if (EditorGUI.EndChangeCheck())
+                    McpSettings.ConfirmLocation = (McpConfirmLocation)location;
+            }
+
+            if (McpSettings.ReviewLevel == McpReviewLevel.TrustClient)
+            {
+                EditorGUILayout.HelpBox("MCP clients run every tool without asking here, including deletes and script changes. Version control is your safety net.", MessageType.Info);
+            }
         }
 
         private static void DrawClientConfig()

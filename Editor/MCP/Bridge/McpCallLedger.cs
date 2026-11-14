@@ -52,6 +52,15 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 _connections[connection.RelayId] = connection;
         }
 
+        /// <summary>该 relay 当前的连接（已断开时为 null）。</summary>
+        public McpBridgeConnection GetConnection(string relayId)
+        {
+            if (relayId == null)
+                return null;
+            lock (_gate)
+                return _connections.TryGetValue(relayId, out var connection) && !connection.IsClosed ? connection : null;
+        }
+
         public void Detach(McpBridgeConnection connection)
         {
             if (connection?.RelayId == null)

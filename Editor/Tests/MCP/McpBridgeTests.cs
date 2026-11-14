@@ -101,7 +101,7 @@ namespace AgentCore.Tests.Editor.MCP
 
         private Func<string> _origLoad;
         private Action<string> _origSave;
-        private Func<string, IToolConfirmationProvider> _origFactory;
+        private Func<McpCallContext, IToolConfirmationProvider> _origFactory;
         private string _tempDir;
 
         [SetUp]

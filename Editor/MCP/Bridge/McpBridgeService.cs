@@ -92,6 +92,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 WriteEndpoint("ready");
                 LastError = null;
                 McpResourceEvents.Start(message => _server?.Broadcast(message));
+                Config.McpSettings.Warm();
                 AgentCoreLog.Info($"[AgentCore][MCP] Bridge listening on 127.0.0.1:{server.Port} ({_catalog.Tools.Count} tools).");
 
                 // relay 随包以源码分发：启用后在后台编译一次（源码不变则复用）
@@ -181,6 +182,69 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             }
         }
 
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<bool?>> PendingConfirms =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<bool?>>();
+
+        /// <summary>与 Unity 窗口确认卡片相同的等待上限：无人答复即拒绝。</summary>
+        private static readonly TimeSpan ClientConfirmTimeout = TimeSpan.FromSeconds(120);
+
+        /// <summary>
+        /// 请发起调用的客户端确认。返回 true / false = 用户的答复（超时视为拒绝）；null = 客户端不支持或已断开，调用方改在 Unity 窗口确认。
+        /// </summary>
+        public static async Task<bool?> AskClientAsync(McpCallContext context, AgentCore.Editor.Tools.Safety.ToolConfirmationRequest request, CancellationToken ct)
+        {
+            var connection = Ledger.GetConnection(context.RelayId);
+            if (connection == null)
+                return null;
+
+            var confirmId = Guid.NewGuid().ToString("N");
+            var tcs = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            PendingConfirms[confirmId] = tcs;
+            try
+            {
+                if (!connection.Send(new JObject
+                    {
+                        ["type"] = McpBridgeProtocol.Confirm,
+                        ["id"] = context.CallId,
+                        ["confirmId"] = confirmId,
+                        ["title"] = string.IsNullOrEmpty(request.Title) ? request.ToolName : request.Title,
+                        ["message"] = DescribeForClient(request),
+                    }))
+                {
+                    return null;
+                }
+
+                var done = await Task.WhenAny(tcs.Task, Task.Delay(ClientConfirmTimeout, ct)).ConfigureAwait(false);
+                return done == tcs.Task ? tcs.Task.Result : false;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            finally
+            {
+                PendingConfirms.TryRemove(confirmId, out _);
+            }
+        }
+
+        /// <summary>给客户端看的确认说明：做什么、为什么需要确认、目标与关键参数。</summary>
+        internal static string DescribeForClient(AgentCore.Editor.Tools.Safety.ToolConfirmationRequest request)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("Unity (AgentCore) asks for approval: ")
+              .Append(request.ToolName)
+              .Append(string.IsNullOrEmpty(request.Action) ? string.Empty : " / " + request.Action);
+            if (!string.IsNullOrEmpty(request.Description))
+                sb.Append("\n").Append(request.Description);
+            if (request.Reasons != null && request.Reasons.Count > 0)
+                sb.Append("\nWhy: ").Append(string.Join("; ", request.Reasons));
+            if (request.Targets != null && request.Targets.Count > 0)
+                sb.Append("\nTargets: ").Append(string.Join(", ", request.Targets.Take(6))).Append(request.Targets.Count > 6 ? " ..." : string.Empty);
+            if (request.ParameterSummary != null && request.ParameterSummary.Count > 0)
+                sb.Append("\nParameters: ").Append(string.Join(", ", request.ParameterSummary.Take(6).Select(p => p.Key + "=" + p.Value)));
+            return sb.ToString();
+        }
+
         private sealed class Handler : IMcpBridgeHandler
         {
             public JObject OnHello(McpBridgeConnection connection)
@@ -213,6 +277,14 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                         break;
                     case McpBridgeProtocol.Request:
                         _ = HandleRequestAsync(connection, id, (string)message["method"], message["params"] as JObject ?? new JObject());
+                        break;
+                    case McpBridgeProtocol.ConfirmResult:
+                        var confirmId = (string)message["confirmId"];
+                        if (confirmId != null && PendingConfirms.TryRemove(confirmId, out var pendingConfirm))
+                        {
+                            var approved = message["approved"];
+                            pendingConfirm.TrySetResult(approved == null || approved.Type == JTokenType.Null ? (bool?)null : (bool)approved);
+                        }
                         break;
                     case McpBridgeProtocol.Resume:
                         Ledger.Resume(connection, (message["ids"] as JArray)?.Select(t => (string)t).Where(s => s != null));
@@ -305,7 +377,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                     return;
                 }
 
-                var outcome = await McpToolExecutor.ExecuteAsync(name, arguments, client, ct).ConfigureAwait(false);
+                var callContext = new McpCallContext { RelayId = relayId, CallId = id, ClientName = client };
+                var outcome = await McpToolExecutor.ExecuteAsync(name, arguments, callContext, ct).ConfigureAwait(false);
                 if (outcome.NotStarted)
                 {
                     Ledger.Forget(relayId, id);

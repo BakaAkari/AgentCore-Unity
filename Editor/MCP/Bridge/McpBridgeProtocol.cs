@@ -25,6 +25,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     /// <item><c>result { id, status: "ok" | "partial" | "error", text, images: [ { mimeType, data } ] }</c></item>
     /// <item><c>unknownCalls { ids }</c> —— resume 中 bridge 不认识的调用。编辑器 PID 未变说明调用断开前没送达，relay 重发；
     ///       PID 变了说明编辑器重启过，relay 报告结果丢失。</item>
+    /// <item><c>confirm { id, confirmId, title, message }</c> —— 设置为“在客户端确认”时，请发起调用 <c>id</c> 的客户端确认；
+    ///       relay 答复 <c>confirmResult { confirmId, approved: true | false | null }</c>，null 表示客户端不支持，改在 Unity 窗口确认。</item>
     /// <item><c>reloading {}</c> —— 即将 Domain Reload，连接随后断开；relay 应重连并保持挂起的调用。</item>
     /// <item><c>ready { schemaHash }</c> —— 重载完成、重连成功后发送。</item>
     /// </list>
@@ -44,6 +46,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         public const string Resume = "resume";
         public const string UnknownCalls = "unknownCalls";
         public const string Request = "request";
+        public const string Confirm = "confirm";
+        public const string ConfirmResult = "confirmResult";
         public const string Response = "response";
         public const string Progress = "progress";
         public const string Result = "result";

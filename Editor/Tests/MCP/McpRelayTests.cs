@@ -71,7 +71,21 @@ namespace AgentCore.Tests.Editor.MCP
                     case McpBridgeProtocol.Request:
                         connection.Send(AnswerRequest(id, (string)message["method"], message["params"] as JObject));
                         break;
+                    case McpBridgeProtocol.ConfirmResult:
+                        TaskCompletionSource<JToken> waiter;
+                        lock (_confirms)
+                        {
+                            _confirms.TryGetValue((string)message["confirmId"], out waiter);
+                            _confirms.Remove((string)message["confirmId"]);
+                        }
+                        waiter?.TrySetResult(message["approved"]);
+                        break;
                     case McpBridgeProtocol.CallTool:
+                        if ((string)message["name"] == "needs_confirm")
+                        {
+                            _ = ConfirmThenAnswer(connection, id);
+                            break;
+                        }
                         if (HoldCalls)
                         {
                             lock (Held)
@@ -93,6 +107,35 @@ namespace AgentCore.Tests.Editor.MCP
 
             public void OnDisconnected(McpBridgeConnection connection)
             {
+            }
+
+            private readonly Dictionary<string, TaskCompletionSource<JToken>> _confirms = new Dictionary<string, TaskCompletionSource<JToken>>();
+
+            /// <summary>模拟需要确认的工具：请客户端确认，按答复给出 approved / denied / fallback（客户端不支持）。</summary>
+            private async Task ConfirmThenAnswer(McpBridgeConnection connection, string id)
+            {
+                var confirmId = "c-" + id;
+                var tcs = new TaskCompletionSource<JToken>();
+                lock (_confirms)
+                    _confirms[confirmId] = tcs;
+                connection.Send(new JObject
+                {
+                    ["type"] = McpBridgeProtocol.Confirm,
+                    ["id"] = id,
+                    ["confirmId"] = confirmId,
+                    ["title"] = "Delete asset",
+                    ["message"] = "Unity (AgentCore) asks for approval: manage_asset / delete"
+                });
+                var answer = await tcs.Task.ConfigureAwait(false);
+                var text = answer == null || answer.Type == JTokenType.Null ? "fallback" : ((bool)answer ? "approved" : "denied");
+                connection.Send(new JObject
+                {
+                    ["type"] = McpBridgeProtocol.Result,
+                    ["id"] = id,
+                    ["status"] = "ok",
+                    ["text"] = text,
+                    ["images"] = new JArray()
+                });
             }
 
             private static JObject AnswerRequest(string id, string method, JObject parameters)

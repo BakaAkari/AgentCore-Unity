@@ -50,10 +50,15 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     {
 
         /// <summary>测试可替换：按客户端名构造确认提供器。</summary>
-        internal static Func<string, IToolConfirmationProvider> ProviderFactory = client => new McpConfirmationProvider(client);
+        internal static Func<McpCallContext, IToolConfirmationProvider> ProviderFactory = context => new McpConfirmationProvider(context);
 
-        public static async Task<McpCallOutcome> ExecuteAsync(string toolName, JObject arguments, string clientName, CancellationToken ct)
+        public static Task<McpCallOutcome> ExecuteAsync(string toolName, JObject arguments, string clientName, CancellationToken ct) =>
+            ExecuteAsync(toolName, arguments, McpCallContext.ForClient(clientName), ct);
+
+        public static async Task<McpCallOutcome> ExecuteAsync(string toolName, JObject arguments, McpCallContext context, CancellationToken ct)
         {
+            context ??= new McpCallContext();
+            var clientName = context.ClientName;
             if (string.IsNullOrEmpty(toolName))
                 return McpCallOutcome.Error("Missing tool name.");
             if (McpToolCatalog.ExcludedTools.TryGetValue(toolName, out var reason))
@@ -69,7 +74,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                     Id = "mcp_" + Guid.NewGuid().ToString("N").Substring(0, 12),
                     Function = new FunctionCall { Name = toolName, Arguments = arguments.ToString(Formatting.None) }
                 };
-                var dispatcher = new ToolCallDispatcher(ToolRegistry.Instance, ProviderFactory(clientName));
+                var dispatcher = new ToolCallDispatcher(ToolRegistry.Instance, ProviderFactory(context));
 
                 var started = false;
                 try
