@@ -39,8 +39,16 @@ namespace AgentCore.Editor.Tools.FileSystem
         RiskLevel = ToolRiskLevel.High,
         Capabilities = ToolCapability.WriteProjectFiles | ToolCapability.DeleteProjectFiles,
         ReadOnlyActions = new[] { "read_file", "file_info", "list_directory", "search_content" })]
-    public class ManageFileTool : IAgentTool
+    public class ManageFileTool : IAgentTool, IConcurrentReadTool
     {
+        // ProjectRoot is initialized during main-thread tool discovery. Each read uses local
+        // buffers; rg state is read through RgLocator's thread-safe cache.
+        public bool SupportsConcurrentRead(string action) =>
+            string.Equals(action, "read_file", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(action, "file_info", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(action, "list_directory", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(action, "search_content", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// Maximum file size in bytes that can be read (5 MB).
         /// </summary>

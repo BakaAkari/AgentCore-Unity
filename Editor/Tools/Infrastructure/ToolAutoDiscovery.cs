@@ -156,7 +156,7 @@ namespace AgentCore.Editor.Tools.Infrastructure
         /// 同时为未来在工具类内部主动构造完整 ToolMetadata 留出迁移路径。
         /// </para>
         /// </summary>
-        private sealed class RiskEnrichedTool : IAgentTool
+        private sealed class RiskEnrichedTool : IAgentTool, IConcurrentReadTool
         {
             private readonly IAgentTool _inner;
             private readonly ToolMetadata _metadata;
@@ -192,6 +192,9 @@ namespace AgentCore.Editor.Tools.Infrastructure
             }
 
             public ToolMetadata Metadata => _metadata;
+
+            public bool SupportsConcurrentRead(string action) =>
+                _inner is IConcurrentReadTool reader && reader.SupportsConcurrentRead(action);
 
             public Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default)
             {

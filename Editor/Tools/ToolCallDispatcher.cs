@@ -119,7 +119,7 @@ namespace AgentCore.Editor.Tools
     /// <para>
     /// 设计要点：
     /// <list type="bullet">
-    ///   <item>工具调用<b>串行执行</b>（Unity Editor 不支持并行操作场景对象）</item>
+    ///   <item>显式声明安全的后台只读调用有界并发；写入、主线程及未声明工具保持顺序</item>
     ///   <item>参数解析容错：无效 JSON 返回错误结果而非抛出异常</item>
     ///   <item>未知工具返回错误结果而非抛出异常</item>
     ///   <item>治理层策略：Block → 直接拒绝；RequireConfirmation → 请求用户确认；Allow → 直接执行</item>
@@ -142,6 +142,9 @@ namespace AgentCore.Editor.Tools
 
         /// <summary>工具注册表引用</summary>
         private readonly ToolRegistry _registry;
+
+        // A cancelled batch retains ownership until all started reads have drained.
+        private readonly SemaphoreSlim _batchGate = new SemaphoreSlim(1, 1);
 
         /// <summary>
         /// 用户确认提供器。
@@ -208,7 +211,10 @@ namespace AgentCore.Editor.Tools
         /// <param name="ct">取消令牌</param>
         /// <returns>工具调用结果</returns>
         /// <exception cref="ArgumentNullException">toolCall 为 null 时抛出</exception>
-        public async Task<ToolCallResult> DispatchAsync(ToolCall toolCall, CancellationToken ct = default)
+        public Task<ToolCallResult> DispatchAsync(ToolCall toolCall, CancellationToken ct = default)
+            => DispatchCoreAsync(toolCall, ct, backgroundRead: false);
+
+        private async Task<ToolCallResult> DispatchCoreAsync(ToolCall toolCall, CancellationToken ct, bool backgroundRead)
         {
             if (toolCall == null)
                 throw new ArgumentNullException(nameof(toolCall));
@@ -394,9 +400,19 @@ namespace AgentCore.Editor.Tools
 
                 // 检查点：按参数里的写入目标先备份原内容，并为本次调用开一个命名 Undo 组，供"回退到这条消息之前"使用
                 ToolResult result;
-                using (CheckpointStore.BeginToolCall(toolName, writeTargets))
+                // Concurrent reads have no writes/Undo to capture. Do not overlap the shared
+                // checkpoint tool scope or create Undo groups for these worker operations.
+                using (backgroundRead ? null : CheckpointStore.BeginToolCall(toolName, writeTargets))
                 {
-                    if (tool.Metadata.RequiresMainThread)
+                    ct.ThrowIfCancellationRequested();
+                    if (backgroundRead)
+                    {
+                        // Recheck the actual registered instance, including after an approval wait.
+                        if (!SupportsConcurrentRead(tool, parameters))
+                            throw new InvalidOperationException("Tool is no longer eligible for concurrent reads.");
+                        result = await Task.Run(() => tool.ExecuteAsync(parameters, ct), ct);
+                    }
+                    else if (tool.Metadata.RequiresMainThread)
                     {
                         result = await ExecuteOnMainThreadAsync(tool, parameters, ct);
                     }
@@ -464,7 +480,7 @@ namespace AgentCore.Editor.Tools
         /// <summary>
         /// 批量分发执行多个 <see cref="ToolCall"/>。
         /// <para>
-        /// 按顺序逐个调用 <see cref="DispatchAsync"/>，收集所有结果。
+        /// 相邻的显式安全只读调用最多 4 个并发；其他调用作为屏障，前后均不跨越。
         /// 单个工具失败不影响其他工具的执行。
         /// </para>
         /// </summary>
@@ -474,20 +490,73 @@ namespace AgentCore.Editor.Tools
         public async Task<List<ToolCallResult>> DispatchAllAsync(
             IReadOnlyList<ToolCall> toolCalls,
             CancellationToken ct = default,
-            Action<ToolCallResult> onResult = null)
+            Action<ToolCallResult> onResult = null,
+            Action onBatchStarted = null)
         {
             if (toolCalls == null || toolCalls.Count == 0)
                 return new List<ToolCallResult>();
 
-            var results = new List<ToolCallResult>(toolCalls.Count);
-
-            // 串行执行（Unity Editor 不支持并行操作场景对象）
-            foreach (var toolCall in toolCalls)
+            await _batchGate.WaitAsync(ct);
+            try
             {
                 ct.ThrowIfCancellationRequested();
-                var result = await DispatchAsync(toolCall, ct);
-                results.Add(result);
-                onResult?.Invoke(result);
+                onBatchStarted?.Invoke();
+                return await DispatchBatchCoreAsync(toolCalls, ct, onResult);
+            }
+            finally
+            {
+                _batchGate.Release();
+            }
+        }
+
+        private async Task<List<ToolCallResult>> DispatchBatchCoreAsync(
+            IReadOnlyList<ToolCall> toolCalls,
+            CancellationToken ct,
+            Action<ToolCallResult> onResult)
+        {
+            var results = new List<ToolCallResult>(toolCalls.Count);
+
+            for (var index = 0; index < toolCalls.Count;)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!CanDispatchConcurrentRead(toolCalls[index]))
+                {
+                    var result = await DispatchAsync(toolCalls[index++], ct);
+                    results.Add(result);
+                    onResult?.Invoke(result);
+                    continue;
+                }
+
+                // Start only a bounded, contiguous group. Never move a read across a write,
+                // main-thread call, malformed call, or a tool that has not opted in.
+                var group = new List<Task<ToolCallResult>>(MaxConcurrentReads);
+                try
+                {
+                    group.Add(DispatchCoreAsync(toolCalls[index++], ct, backgroundRead: true));
+                    while (index < toolCalls.Count && group.Count < MaxConcurrentReads &&
+                           !ct.IsCancellationRequested && CanDispatchConcurrentRead(toolCalls[index]))
+                        group.Add(DispatchCoreAsync(toolCalls[index++], ct, backgroundRead: true));
+
+                    var pending = new List<Task<ToolCallResult>>(group);
+                    while (pending.Count > 0)
+                    {
+                        var completed = await Task.WhenAny(pending);
+                        pending.Remove(completed);
+                        // Serialize ledger/UI callbacks on the original calling context, as
+                        // each result arrives. Never invoke SessionState callbacks on a worker.
+                        onResult?.Invoke(await completed);
+                    }
+                }
+                finally
+                {
+                    // Cancellation or a callback failure must not leave background reads
+                    // running into the next write, next turn, or caller's cleanup.
+                    await Task.WhenAll(group);
+                }
+                // Completion order is free; the model receives the original tool_call order.
+                foreach (var task in group)
+                    results.Add(await task);
+                ct.ThrowIfCancellationRequested();
             }
 
             var successCount = CountSuccessful(results);
@@ -496,6 +565,37 @@ namespace AgentCore.Editor.Tools
             AgentCore.Editor.Utils.AgentCoreLog.Info($"{LogPrefix}Batch dispatch completed: {toolCalls.Count} calls, {successCount} success ({partialCount} partial), {failCount} failed");
 
             return results;
+        }
+
+        internal const int MaxConcurrentReads = 4;
+
+        private bool CanDispatchConcurrentRead(ToolCall call)
+        {
+            if (call?.Function == null)
+                return false;
+            var tool = _registry.GetTool(call.Function.Name);
+            // Parse quietly here; DispatchAsync retains the existing validation/error reporting.
+            try
+            {
+                var args = string.IsNullOrWhiteSpace(call.Function.Arguments)
+                    ? new JObject() : JObject.Parse(call.Function.Arguments);
+                return tool?.Metadata != null &&
+                       ToolParameterValidator.Validate(args, tool.Metadata.ParametersSchema, out _) &&
+                       SupportsConcurrentRead(tool, args);
+            }
+            catch (Exception) { return false; } // Classification failure falls back to normal serial dispatch.
+        }
+
+        private static bool SupportsConcurrentRead(IAgentTool tool, JObject parameters)
+        {
+            var metadata = tool?.Metadata;
+            if (metadata == null || metadata.RequiresMainThread || !(tool is IConcurrentReadTool reader))
+                return false;
+            var action = ExtractActionFromParameters(parameters);
+            var readOnly = metadata.IsReadOnlyAction(action) ||
+                (metadata.RiskLevel == ToolRiskLevel.ReadOnly &&
+                 (metadata.Capabilities & ~ToolCapability.ReadProject) == 0);
+            return readOnly && reader.SupportsConcurrentRead(action);
         }
 
         #endregion

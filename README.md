@@ -10,7 +10,7 @@
 
 AgentCore Unity is an **Editor-only UPM package**, not a generic coding-agent wrapper. It's a native execution layer purpose-built for Unity projects: model reasoning, live Editor state, 50+ native tools, project knowledge, version control, code indexing, and verification feedback — wired into one governed loop.
 
-- **Package**: `com.agentcore.unity` · **Version**: `1.20.0` · **Unity**: `2021.3+`
+- **Package**: `com.agentcore.unity` · **Version**: `1.20.1` · **Unity**: `2021.3+`
 - Editor-only assembly — zero runtime footprint, never ships in your build
 - Built-in tools covering scenes, GameObjects, components, prefabs, assets, materials, shaders, UI, physics, audio, cameras, Timeline, Cinemachine, ProBuilder, builds, tests, and more
 
@@ -21,6 +21,7 @@ Generic coding agents don't know what a `Prefab` variant override is, can't pres
 - **Real tool execution** — not code suggestions. It adds components, edits transforms, runs Play Mode, reads Console errors, and fixes them itself.
 - **Play Mode safety** — the dispatcher permits declared runtime-safe actions and blocks unsupported writes. Tools using the write interceptor skip disk saves for runtime-only edits; this is not a sandbox for arbitrary code. See `SECURITY.md` for the limits.
 - **Risk-gated execution** — destructive ops prompt for confirmation; session-level trust scopes (Trust Low/Med, YOLO) let you tune the friction.
+- **Concurrent file reads** — up to four adjacent audited `manage_file` reads/searches run in parallel; writes and other tools remain ordered.
 - **Survives recompiles** — Domain Reload doesn't kill your session; pending tool calls and conversation state recover automatically.
 - **Multi-provider** — supports OpenAI-compatible endpoints (local models, OpenRouter, your own gateway) and native Anthropic connections. Provider Profiles let you keep several configs and hot-swap.
 
@@ -91,7 +92,7 @@ The AgentCore chat can also use tools from external MCP servers (stdio or HTTP, 
 
 ## Verification and tool inventory
 
-Unity EditMode tests live in `Editor/Tests/`, including MCP relay process integration tests. The recorded 1.20.0 acceptance run on Unity 2022.3.50f1 had **905 tests: 904 passed, 0 failed, 1 platform-specific skip**. This is a dated release result, not a guarantee for every Unity version; see [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and manual checks.
+Unity EditMode tests live in `Editor/Tests/`, including MCP relay process integration tests. The recorded 1.20.1 acceptance run on Unity 2022.3.50f1 had **916 tests: 915 passed, 0 failed, 1 platform-specific skip**. This is a dated release result, not a guarantee for every Unity version; see [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and manual checks.
 
 At 1.20.0, source declares **60 built-in tools** (52 under `Editor/Tools/Native`, plus file, cloud, VCS and indexing tools). Runtime availability depends on enabled components, disabled tools and Chat tool scope; external MCP tools are additional. Use the runtime tool list as the authority, rather than treating the source count as the number exposed to every client. MCP excludes Chat-only helpers and external MCP proxies.
 

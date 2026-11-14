@@ -486,5 +486,17 @@ namespace AgentCore.Editor.Tools
         Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken cancellationToken = default);
     }
 
+    /// <summary>
+    /// Explicit opt-in for independent, reentrant reads. Only ExecuteAsync runs on a worker;
+    /// policy evaluation and result callbacks remain on the dispatcher's calling context.
+    /// Implementations must not access Unity APIs, mutate shared state, or depend on other
+    /// calls in the same read group. The predicate must be pure and must reject unknown actions.
+    /// Read-only risk metadata alone is not evidence of thread safety.
+    /// </summary>
+    public interface IConcurrentReadTool
+    {
+        bool SupportsConcurrentRead(string action);
+    }
+
     #endregion
 }

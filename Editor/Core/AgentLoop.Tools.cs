@@ -92,7 +92,7 @@ namespace AgentCore.Editor.Core
         /// 执行流程：
         /// <list type="number">
         ///   <item>为每个 tool_call 发送 <see cref="AgentEventType.ToolCallStarted"/> 事件</item>
-        ///   <item>通过 <see cref="ToolCallDispatcher"/> 串行执行所有工具调用</item>
+        ///   <item>通过 <see cref="ToolCallDispatcher"/> 执行工具调用（安全只读可并发，其余保持顺序）</item>
         ///   <item>为每个结果发送 <see cref="AgentEventType.ToolCallCompleted"/> 或 <see cref="AgentEventType.ToolCallFailed"/> 事件</item>
         ///   <item>将工具结果作为 <c>role="tool"</c> 消息追加到 LLM 历史</item>
         ///   <item>更新 <see cref="ConversationTurn.ToolCalls"/> 记录</item>
@@ -121,17 +121,15 @@ namespace AgentCore.Editor.Core
                 EmitEvent(AgentEvent.ToolCallStarted(toolName, arguments, assistantTurn.Id, tc.Id));
             }
 
-            // Phase 4.5: 在工具执行前记录目标文件的行数快照
-            _fileChangeTracker?.SnapshotBeforeExecution(toolCalls);
-
-            // Phase 2 Step 11: 在工具执行前启动 Console 错误捕获
-            _consoleCapture.StartCapture();
-
-            // 通过 ToolCallDispatcher 串行执行所有工具调用。
-            // 每个调用的开始 / 结果都暂存到 SessionState：结果要等编译结束才写入历史，
-            // 期间发生的域重载不能让已执行的调用变成"结果未知"而被模型重复执行（见 PendingToolResults）。
-            PendingToolResults.Begin(SessionManager.Instance.CurrentSessionId, toolCalls);
-            var results = await _dispatcher.DispatchAllAsync(toolCalls, ct, PendingToolResults.Complete);
+            // Wait for a cancelled previous batch to drain before replacing its ledger
+            // or starting the next batch's snapshots/capture. Writes cannot pass old reads.
+            var results = await _dispatcher.DispatchAllAsync(toolCalls, ct, PendingToolResults.Complete,
+                onBatchStarted: () =>
+                {
+                    _fileChangeTracker?.SnapshotBeforeExecution(toolCalls);
+                    _consoleCapture.StartCapture();
+                    PendingToolResults.Begin(SessionManager.Instance.CurrentSessionId, toolCalls);
+                });
 
             // Phase 2 Step 11: 停止 Console 错误捕获
             var consoleErrors = _consoleCapture.StopCapture();

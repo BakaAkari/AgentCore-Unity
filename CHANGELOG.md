@@ -5,12 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.20.1] - 2026-11-14
+
+### Changed
+- 同一轮相邻的安全只读调用最多 4 个并发：目前启用 `manage_file` 的 `read_file`、`file_info`、`list_directory`、`search_content`。实际文件读取/搜索放到后台线程，权限检查仍走原流程。
+- 写操作、Unity 主线程工具与未声明并发安全的工具保持顺序，并等待前面的读取全部结束；结果按原调用顺序回填，取消或结果回调失败时先等待已启动读取退出；下一批派发及其结果台账初始化也等待旧批退出。
+- 新增 `IConcurrentReadTool` 显式声明接口：只读风险标记不自动开启并发；索引、VCS、外部 MCP 工具维持原执行方式。并发读取不创建写操作检查点/Undo 组。
+
 
 ### Documentation
 - 对齐 README、快速入门、贡献与安全说明、开发规范、路线图和设计文档导航：更正测试覆盖、工具统计口径、1.20.0 推送与打包状态、MCP 已交付范围、共享信任状态、JSONL 会话存储和项目说明加载路径。
 - 明确实现边界：Trust Low/Med 不覆盖副作用请求；YOLO 跳过确认及权限规则但不跳过 Play Mode 预检；主程序集仍有 SRP Core 引用；`batch_execute` 的 transaction 仅回滚 Unity Undo 记录，不保证文件/资产等副作用原子回滚。
-- 旧版设计、审计与交接文档标清历史状态；不改变代码、审查策略或已发布 1.20.0 包。
+- 旧版设计、审计与交接文档标清历史状态；该文档对齐不改变审查策略；已发布 1.20.0 包保持不变。
 
 ## [1.20.0] - 2026-11-14
 

@@ -374,6 +374,8 @@ ToolAutoDiscovery.DiscoverAndRegisterAll()
 
 ### 4.6 参数解析规范
 
+> **只读并发契约（1.20.1）**：仅 `RequiresMainThread=false` 且实现 `IConcurrentReadTool` 的显式只读 action 可并发。声明前须确认 ExecuteAsync 可重入、只用线程安全快照和局部状态，不访问 Unity API、不修改共享状态、不依赖同组调用结果。风险 ReadOnly 本身不能证明线程安全。调度器将权限与回调留在调用上下文，仅工具执行进入 worker；写操作和未声明工具为屏障，结果顺序保持输入顺序。当前仅 manage_file 的四个只读 action 启用。
+
 使用 `ToolHelpers` 中的方法（具体可用方法请阅读 `Editor/Tools/Infrastructure/ToolHelpers.cs`）：
 
 ```csharp
