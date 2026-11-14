@@ -415,6 +415,8 @@ namespace AgentCore.Editor.UI
                     // 插入顺序：statusLine → fileChangePanel → inputArea
                     chatArea.Insert(inputIndex, _fileChangeSummaryPanel);
                     chatArea.Insert(inputIndex, _agentStatusLine);
+                    // 外部 MCP 客户端的活动（无外部活动时隐藏）
+                    chatArea.Insert(inputIndex, new ExternalActivityBar());
                 }
 
                 // 6.75 创建内嵌工具确认面板，避免系统弹窗依赖 Unity 前台窗口。

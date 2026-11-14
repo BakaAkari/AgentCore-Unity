@@ -65,7 +65,33 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 return McpCallOutcome.Error($"Tool '{toolName}' is not available over MCP ({reason}).");
 
             arguments ??= new JObject();
+
+            // 工具注册表可能还没建立（Chat 窗口从未打开、或被其他流程清空）：先在主线程做一次自动发现
+            if (!ToolRegistry.Instance.HasTool(toolName))
+            {
+                try
+                {
+                    await MainThread.RunAsync(() =>
+                    {
+                        ToolAutoDiscovery.DiscoverAndRegisterAll();
+                        // 发现过一次后注册表又被清空时，DiscoverAndRegisterAll 会直接跳过：重置后再来一次
+                        if (ToolRegistry.Instance.Count == 0)
+                        {
+                            ToolAutoDiscovery.Reset();
+                            ToolAutoDiscovery.DiscoverAndRegisterAll();
+                        }
+                    }).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    AgentCoreLog.Warning($"[AgentCore][MCP] Tool discovery failed: {ex.Message}");
+                }
+            }
+
             var stopwatch = Stopwatch.StartNew();
+            var argumentsText = arguments.ToString(Formatting.None);
+            var activity = ExternalToolActivity.Begin(clientName, toolName, (string)arguments["action"],
+                argumentsText.Length > 2000 ? argumentsText.Substring(0, 2000) + "..." : argumentsText);
             McpCallOutcome outcome;
             try
             {
@@ -104,6 +130,11 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
             // Unity 的延迟事件（hierarchyChanged、projectChanged 等）在下一次编辑器 tick 才派发：唤醒一次，资源变化通知才能及时发出
             try { UnityEditor.EditorApplication.QueuePlayerLoopUpdate(); } catch (Exception) { /* ignore */ }
+
+            var preview = outcome.Text ?? string.Empty;
+            ExternalToolActivity.End(activity,
+                outcome.NotStarted ? "cancelled" : outcome.Status,
+                outcome.NotStarted ? "Not started: Unity reloaded scripts; the client resends it." : (preview.Length > 4000 ? preview.Substring(0, 4000) + "..." : preview));
 
             if (outcome.NotStarted)
                 return outcome;

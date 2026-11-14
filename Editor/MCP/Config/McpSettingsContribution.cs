@@ -30,6 +30,8 @@ namespace AgentCore.Editor.Components.MCP.Config
 
             if (!string.IsNullOrEmpty(McpBridgeService.LastCallSummary))
                 EditorGUILayout.LabelField("Last call", McpBridgeService.LastCallSummary);
+            if (GUILayout.Button(new GUIContent("Open activity", "What MCP clients have done in this editor: tools, arguments and results.")))
+                AgentCore.Editor.UI.ExternalActivityWindow.ShowWindow();
 
             if (!string.IsNullOrEmpty(McpBridgeService.LastError))
                 EditorGUILayout.HelpBox(McpBridgeService.LastError, MessageType.Warning);
