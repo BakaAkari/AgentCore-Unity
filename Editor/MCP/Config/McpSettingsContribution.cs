@@ -43,6 +43,45 @@ namespace AgentCore.Editor.Components.MCP.Config
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Review", EditorStyles.boldLabel);
             DrawReviewSettings();
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Local HTTP endpoint", EditorStyles.boldLabel);
+            DrawHttpEndpoint();
+        }
+
+        private static void DrawHttpEndpoint()
+        {
+            EditorGUI.BeginChangeCheck();
+            var enabled = EditorGUILayout.ToggleLeft(
+                new GUIContent("Enable (for clients that connect by URL)",
+                    "Runs an HTTP endpoint on 127.0.0.1 in a separate process that survives script reloads. Most users only need the stdio setup above."),
+                McpSettings.HttpEnabled);
+            if (EditorGUI.EndChangeCheck())
+            {
+                McpSettings.HttpEnabled = enabled;
+                McpHttpEndpoint.Apply();
+            }
+
+            if (!McpSettings.HttpEnabled)
+                return;
+
+            EditorGUILayout.LabelField("URL", McpHttpEndpoint.Url);
+            EditorGUILayout.LabelField("Status", McpHttpEndpoint.IsRunning ? "Running" : "Starting / stopped");
+            if (!string.IsNullOrEmpty(McpHttpEndpoint.LastError))
+                EditorGUILayout.HelpBox(McpHttpEndpoint.LastError, MessageType.Warning);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Copy Claude Code command (HTTP)"))
+                Copy(McpHttpEndpoint.ClaudeCodeCommand(McpHttpEndpoint.Url, McpHttpEndpoint.Token), null);
+            if (GUILayout.Button("Copy Codex config (HTTP)"))
+                Copy(McpHttpEndpoint.CodexToml(McpHttpEndpoint.Url, McpHttpEndpoint.Token), null);
+            if (!McpHttpEndpoint.IsRunning && GUILayout.Button("Restart", GUILayout.Width(70)))
+                McpHttpEndpoint.Apply();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.LabelField(
+                "The copied configuration contains an access token for this project. Anyone with it can use AgentCore's tools on this machine; do not share it.",
+                EditorStyles.wordWrappedMiniLabel);
         }
 
         private static readonly GUIContent[] ReviewLevelOptions =
@@ -130,8 +169,16 @@ namespace AgentCore.Editor.Components.MCP.Config
         private static void Copy(string text, string monoPath)
         {
             EditorGUIUtility.systemCopyBuffer = text;
-            EditorPrefs.SetString(CopiedMonoKey, monoPath);
-            Debug.Log("[AgentCore][MCP] Copied to clipboard:\n" + text);
+            if (monoPath != null)
+            {
+                EditorPrefs.SetString(CopiedMonoKey, monoPath);
+                Debug.Log("[AgentCore][MCP] Copied to clipboard:\n" + text);
+            }
+            else
+            {
+                // HTTP 配置含访问令牌：不写进日志
+                Debug.Log("[AgentCore][MCP] Copied the HTTP configuration to the clipboard.");
+            }
         }
     }
 }

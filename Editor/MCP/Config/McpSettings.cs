@@ -64,6 +64,20 @@ namespace AgentCore.Editor.Components.MCP.Config
             }
         }
 
+        /// <summary>是否开启本机 HTTP 端点（给只能填 URL 的客户端，或多个客户端共用）。默认关闭。</summary>
+        public static bool HttpEnabled
+        {
+            get => EditorPrefs.GetBool(Prefix + "HttpEnabled", false);
+            set => EditorPrefs.SetBool(Prefix + "HttpEnabled", value);
+        }
+
+        /// <summary>HTTP 端点端口：首次开启时选一个空闲端口并记住，之后保持不变（客户端配置不用改）。0 = 未选。</summary>
+        public static int HttpPort
+        {
+            get => EditorPrefs.GetInt(Prefix + "HttpPort", 0);
+            set => EditorPrefs.SetInt(Prefix + "HttpPort", value);
+        }
+
         /// <summary>主线程上预读一次，之后后台线程读缓存值。</summary>
         internal static void Warm()
         {

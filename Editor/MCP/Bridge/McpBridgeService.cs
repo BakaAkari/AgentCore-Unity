@@ -97,6 +97,9 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
                 // relay 随包以源码分发：启用后在后台编译一次（源码不变则复用）
                 McpRelayBuilder.EnsureBuiltAsync();
+
+                // 本机 HTTP 端点（开启时）：独立进程，重载后若仍在运行则不重复启动
+                McpHttpEndpoint.Apply();
             }
             catch (Exception ex)
             {
@@ -269,7 +272,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                         _ = ListToolsAsync(connection, id);
                         break;
                     case McpBridgeProtocol.CallTool:
-                        _ = CallToolAsync(connection, id, (string)message["name"], message["arguments"] as JObject);
+                        _ = CallToolAsync(connection, id, (string)message["name"], message["arguments"] as JObject, (string)message["client"]);
                         break;
                     case McpBridgeProtocol.Cancel:
                         if (id != null)
@@ -363,12 +366,13 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 }
             }
 
-            private static async Task CallToolAsync(McpBridgeConnection connection, string id, string name, JObject arguments)
+            private static async Task CallToolAsync(McpBridgeConnection connection, string id, string name, JObject arguments, string clientOverride)
             {
                 if (string.IsNullOrEmpty(id))
                     return;
                 var relayId = connection.RelayId;
-                var client = connection.ClientName;
+                // 本机 HTTP 端点的 relay 同时服务多个客户端：每个调用带上自己的客户端名
+                var client = string.IsNullOrEmpty(clientOverride) ? connection.ClientName : clientOverride;
                 var ct = Ledger.Begin(relayId, id, name);
                 if (_reloading)
                 {
