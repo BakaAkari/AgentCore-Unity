@@ -86,6 +86,16 @@ namespace AgentCore.Tests.Editor.MCP
                             _ = ConfirmThenAnswer(connection, id);
                             break;
                         }
+                        if ((string)message["name"] == "slow")
+                        {
+                            _ = SlowAnswer(connection, id, (int?)message["arguments"]?["ms"] ?? 5000, false);
+                            break;
+                        }
+                        if ((string)message["name"] == "slow_confirm")
+                        {
+                            _ = SlowAnswer(connection, id, (int?)message["arguments"]?["ms"] ?? 4000, true);
+                            break;
+                        }
                         if (HoldCalls)
                         {
                             lock (Held)
@@ -110,6 +120,26 @@ namespace AgentCore.Tests.Editor.MCP
             }
 
             private readonly Dictionary<string, TaskCompletionSource<JToken>> _confirms = new Dictionary<string, TaskCompletionSource<JToken>>();
+
+            /// <summary>模拟耗时工具：先报进度，等待后答复；<paramref name="confirm"/> 时等待后再请客户端确认。</summary>
+            private async Task SlowAnswer(McpBridgeConnection connection, string id, int ms, bool confirm)
+            {
+                connection.Send(new JObject { ["type"] = McpBridgeProtocol.Progress, ["id"] = id, ["message"] = "building" });
+                await Task.Delay(ms).ConfigureAwait(false);
+                if (confirm)
+                {
+                    await ConfirmThenAnswer(connection, id).ConfigureAwait(false);
+                    return;
+                }
+                connection.Send(new JObject
+                {
+                    ["type"] = McpBridgeProtocol.Result,
+                    ["id"] = id,
+                    ["status"] = "ok",
+                    ["text"] = "slow done",
+                    ["images"] = new JArray()
+                });
+            }
 
             /// <summary>模拟需要确认的工具：请客户端确认，按答复给出 approved / denied / fallback（客户端不支持）。</summary>
             private async Task ConfirmThenAnswer(McpBridgeConnection connection, string id)
