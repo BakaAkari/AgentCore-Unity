@@ -41,6 +41,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             var tools = new JArray();
             foreach (var definition in ToolDefinitionBuilder.BuildAllEnabled()
                          .Where(d => d?.Function != null && !ExcludedTools.ContainsKey(d.Function.Name))
+                         // 外部 MCP 服务器的代理工具（AgentCore 作为客户端接入的）不再转出去
+                         .Where(d => !d.Function.Name.StartsWith(AgentCore.Editor.McpClient.McpProxyTool.NamePrefix, StringComparison.Ordinal))
                          .OrderBy(d => d.Function.Name, StringComparer.Ordinal))
             {
                 var tool = new JObject

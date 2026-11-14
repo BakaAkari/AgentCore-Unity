@@ -63,6 +63,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 return McpCallOutcome.Error("Missing tool name.");
             if (McpToolCatalog.ExcludedTools.TryGetValue(toolName, out var reason))
                 return McpCallOutcome.Error($"Tool '{toolName}' is not available over MCP ({reason}).");
+            if (toolName.StartsWith(AgentCore.Editor.McpClient.McpProxyTool.NamePrefix, StringComparison.Ordinal))
+                return McpCallOutcome.Error($"Tool '{toolName}' belongs to an external MCP server and is not re-exported.");
 
             arguments ??= new JObject();
 

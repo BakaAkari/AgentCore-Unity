@@ -87,7 +87,20 @@ namespace AgentCore.Editor.Tools.Infrastructure
 
                 AgentCore.Editor.Utils.AgentCoreLog.Info($"[AgentCore] ToolAutoDiscovery: Registered {registered} tools ({errors} errors).");
             }
+
+            // 注册表重建后，动态工具（外部 MCP 服务器的代理工具等）需要重新登记
+            try
+            {
+                Rebuilt?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                AgentCore.Editor.Utils.AgentCoreLog.Warning($"[AgentCore] ToolAutoDiscovery: Rebuilt handler failed: {ex.Message}");
+            }
         }
+
+        /// <summary>注册表被重建（<see cref="DiscoverAndRegisterAll"/> 实际执行）之后触发，在调用线程上。</summary>
+        public static event Action Rebuilt;
 
         /// <summary>
         /// 注册单个工具类型
