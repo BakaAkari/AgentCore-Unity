@@ -1,5 +1,7 @@
 # ADR-18: Skill 加载机制 —— 从"编译期全量注入"到"运行时按需检索"
 
+> **状态核对（2026-11-14，1.20.0）**：核心 Skills 能力已实施（自 1.6.0 起）：`SkillRegistry`、`load_skill` 的 list/load/list_loaded/unload/reload，以及会话内 SkillContext。支持项目目录覆盖内置 skills；reload 只刷新目录缓存，已加载内容需 unload 后重新 load。下文 Draft 与 Tier 2 自演化部分保留为原始方案，不能理解为整个 Skills 系统仍未实现。
+
 > **状态**: Draft (2026-07-11)
 > **决策人**: 项目 PO / 唯一用户
 > **触发**: 用户希望 AgentCore 具备"翻手册再答题"能力（类似 Claude Code Skills），突破当前"Bootstrap 一次性全量装配 + 无法会话内更新"的架构限制

@@ -1,4 +1,4 @@
-﻿# AgentCore Package Development Rules
+# AgentCore Package Development Rules
 
 > 本文件定义了 `com.agentcore.unity` 包的 LLM 开发规范。
 > 面向使用 AI 辅助开发此项目的开发者，确保代码修改的一致性、稳定性和健壮性。
@@ -18,17 +18,17 @@
 
 | 顺序 | 文档 | 用途 |
 |---|---|---|
-| **0** | **`plans/HANDOFF-v1.8.0-to-v1.9.0.md`** | **接手指南**（已解决/待解决/遗留 issue + 环境/git 状态 + 8 份必读入口） |
+| **0** | **`plans/README.md`** | **当前文档入口**（活跃设计、历史记录与版本状态） |
 | 1 | 本文件 (AGENTS.md) | LLM 开发规范, 目录结构, 工具开发模板 |
 | 2 | `plans/ROADMAP.md` | 现状、主线、搁置项（1.18.0 前的完整路线图与 ADR 见 `plans/_archive/roadmap/ROADMAP-v1.18.0-full.md`） |
 | 3 | `plans/capability-coverage-audit.md` | v1.8.0 立项审计方法论（v1.9.0 P1/P2 必读）|
 | 4 | `plans/adversarial-coverage-audit.md` | Undo/mutating-side 对抗式审计 |
 | 5 | `plans/agentcore-execute-code-constraints.md` | execute_code 反射探测硬约束 |
-| 6 | `CHANGELOG.md` v1.8.0 章节 | 本版每一条改动 |
+| 6 | `CHANGELOG.md` 最新发布章节 | 当前版本改动与历史记录 |
 | 7 | `Editor/Bootstrap/Resources/SOUL.md` | Agent 行为准则（尤其 §2.10 + §2.11）|
-| 8 | `plans/perf-issue-agent-streaming-blocks-editor.md` | 已知 Editor 主线程阻塞 issue |
+| 8 | `plans/archive/perf-issue-agent-streaming-blocks-editor.md` | 已知 Editor 主线程阻塞 issue |
 
-**做任何开发前**：确认你已完成 HANDOFF §8 交接确认清单。
+**做任何开发前**：核对当前 `package.json`、工作区状态、ROADMAP 与相关源码。`HANDOFF-v1.8.0-to-v1.9.0.md` 是历史交接记录，其旧安装版本和旧待办不代表当前要求。
 
 ---
 
@@ -39,7 +39,7 @@
 | 包名 | `com.agentcore.unity` |
 | Unity 最低版本 | 2021.3+ |
 | 依赖 | `com.unity.nuget.newtonsoft-json` (通过 UPM) |
-| asmdef | `AgentCore.Editor` (Editor-only, 零外部引用) |
+| asmdef | `AgentCore.Editor` (Editor-only；引用以 asmdef 为准) |
 | 语言 | C# 9.0 (Unity 2022.3 支持范围) |
 
 > 版本号和具体依赖版本请查阅 `package.json`。
@@ -53,15 +53,15 @@ AgentCore 是一个 **Unity Editor 内嵌的 AI Agent 插件**，通过 Chat 窗
 ```
 AgentCore.Editor.asmdef
 ├── includePlatforms: ["Editor"]    ← 仅 Editor 平台
-├── references: []                  ← 零外部程序集引用
+├── references: ["Unity.RenderPipelines.Core.Runtime"] ← 当前显式引用
 └── autoReferenced: true            ← 自动被 Editor 代码引用
 ```
 
 **关键约束**:
 - 所有代码必须在 `Editor/` 目录下
-- 不得引用任何外部 asmdef（包括用户项目的程序集）
+- 不得引用用户项目程序集，也不得从主程序集反向引用可选组件。当前主 asmdef 已显式引用 `Unity.RenderPipelines.Core.Runtime`；不要再声称零外部引用。
 - 不得使用 Runtime-only API（如 `Application.isPlaying` 在 Editor 中可用，但 `SceneManager.LoadScene` 的行为不同）
-- 唯一的外部依赖是 `Newtonsoft.Json`（通过 UPM 包引用）
+- `package.json` 显式声明 `com.unity.nuget.newtonsoft-json`；asmdef 另有 SRP Core 程序集引用。未安装 SRP Core 的宿主兼容性不能由 Editor-only 或 versionDefines 推断，需要单独验证。
 
 ---
 
@@ -82,7 +82,7 @@ com.agentcore.unity/
 │   ├── Bootstrap/                  # 启动引导系统
 │   │   └── Resources/              #   内嵌资源 (SOUL.md, TOOLS.md.template 等)
 │   ├── Config/                     # 配置系统 (Settings, SecureKeyStorage 等)
-│   ├── Core/                       # 核心运行时 (AgentLoop partial 9 文件, 状态机, 编译监控等)
+│   ├── Core/                       # 核心运行时 (AgentLoop partial 文件, 状态机, 编译监控等)
 │   ├── Indexing/                   # 代码索引可选组件（受 AGENTCORE_INDEXING 控制）
 │   │   ├── Config/                 #   组件描述符
 │   │   ├── Core/                   #   索引引擎 (CodebaseIndexer, RoslynSymbolExtractor 等)
@@ -368,7 +368,7 @@ ToolAutoDiscovery.DiscoverAndRegisterAll()
 - 工具类不能是 abstract 或 generic
 - 一个类只能有一个 `[AgentTool]` 特性
 - 工具名称（Name）必须全局唯一
-- `ToolAutoDiscovery` 每次发现前会重建 `ToolRegistry`，以保证可选组件启用/禁用后的工具列表与当前已编译程序集一致
+- `ToolAutoDiscovery` 首次发现或 Reset 后重新发现时重建 `ToolRegistry`；已初始化的重复调用直接返回。重建完成触发 `Rebuilt` 事件，外部 MCP 代理据此重新注册。
 
 > 详细实现请阅读 `Editor/Tools/Infrastructure/ToolAutoDiscovery.cs`。
 
@@ -487,7 +487,7 @@ bool flag = JsonHelper.GetBool(jobj, "key", false);
 
 ### 6.2 Bootstrap 系统修改规则
 
-Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自动) → PROJECT.md(用户)`
+Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自动) → PROJECT.md(用户)`。用户文件优先取 Unity 工程根目录，其次 `AgentCore/` 子目录；当前不会自动加载 `AGENTS.md` / `CLAUDE.md` 作为项目说明。
 
 > 修改前先阅读 `Editor/Bootstrap/BootstrapLoader.cs` 了解完整加载逻辑。
 
@@ -521,14 +521,16 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 
 ### 6.4 Session 系统修改规则
 
-- `SessionData` 是可序列化的，所有字段必须标记 `[Serializable]`
-- `SessionStorage` 使用 JSON 文件存储
+- `SessionData` 及需要的自定义数据类型标记 `[Serializable]`；该属性作用于类型，不是每个字段。保持 JSON 序列化兼容。
+- `SessionStorage` 使用每会话追加式 JSONL 与单一 FIFO 写入队列；旧 JSON 自动迁移，保留备份用于损坏恢复。
 - `AutoMemoryStrategy` 在会话结束时自动提取记忆，依赖 LLM 调用
 - 修改 `SessionData` 结构时注意向后兼容（旧会话文件仍需可加载）
 
 > 修改前先阅读 `Editor/Session/` 下的所有文件了解当前数据模型。
 
 ### 6.5 v1.6.x 架构模式补充
+
+> §6.5–6.11 保留版本演进中的问题与修复背景。当前公共规则以 §6.1–6.4、下述信任状态说明及源码为准；旧字段名、旧事件时序和旧模型管道不能作为当前接口契约。例如当前已支持原生 Anthropic，不能把历史 OpenAICompatibleClient 管道说明理解为所有调用只能使用 OpenAI 协议。
 
 #### AssistantTurnView 多轮布局
 
@@ -560,10 +562,10 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 
 工具确认已从 per-call 确认改为 session-level 信任 scope：
 
-- `SessionLowMediumRisk`：本会话内所有 ReadOnly/Low/Medium 风险工具直通
-- `SessionAll`（YOLO）：本会话内所有工具无条件直通
+- `SessionLowMediumRisk`：仅允许该 scope、无副作用能力位的 ReadOnly/Low/Medium 请求直通；`ask` 规则触发的请求仍需显式确认。
+- `SessionAll`（YOLO）：跳过确认与 ask/deny 权限规则；不跳过 dispatcher 的 Play Mode 预检、参数校验或工具自身约束。
 - 信任 scope 通过 `UnityEditor.SessionState` 持久化，跨 Domain Reload 保留
-- ChatWindow 的 `_sessionTrustScopes` 字段初始化必须在 `CreateGUI` 中显式调用 `LoadSessionTrustScopesFromState()`（Unity 硬要求：ScriptableObject 构造器中不得调用 SessionState API）
+- 信任状态由 `ToolTrustState` 统一持有，Chat 与 MCP 共用；主线程初始化 SessionState 读取，后台读取走线程安全快照。不要再向 ChatWindow 添加独立信任副本；编辑器重启后状态清除。
 
 #### Context Ingest
 
@@ -808,6 +810,8 @@ public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken
 
 ## 8. 测试与验证
 
+自动化测试位于 `Editor/Tests/`，程序集为 `AgentCore.Tests.Editor`。完整测试环境需启用 VCS / Indexing / MCP，安装 Unity Test Framework，并在宿主 `Packages/manifest.json` 的 `testables` 中加入本包；具体运行步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)。1.20.0 的历史验收是 Unity 2022.3.50f1 下 905 项（904 通过 / 0 失败 / 1 跳过），每次变更应报告当次实际结果，不能复用历史结果作为本次测试。
+
 ### 8.1 编译验证
 
 每次修改后必须确认：
@@ -871,7 +875,7 @@ AgentCore Project Settings 采用 **shell + top-tab pages + cards** 架构（自
 
 **核心架构**：
 - `AgentCoreSettingsProvider` 是外壳（约 230 行），维护有序 `IAgentCoreSettingsPage[]`，绘制顶部 Tab 导航并分发到当前 page。
-- 每个 `IAgentCoreSettingsPage`（当前 6 个：Dashboard / Model & Agent / Context & Memory / Tools & Extensions / Workspace / UI & Diagnostics）负责一屏的业务设置。
+- 每个 `IAgentCoreSettingsPage`（当前 6 个：Dashboard / Model & Agent / Context & Memory / Tools & Extensions / Permissions / Workspace）负责一屏的业务设置。
 - Page 内部使用 `AgentCoreSettingsUi.DrawCard(...)` 或 `AgentCoreSettingsUi.DrawServiceCard(...)` 组织内容，垂直堆叠，每张 card 一个业务子领域。
 
 **约束**：
@@ -952,7 +956,7 @@ AgentCore 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH
 | **Major `+1`** | 破坏性架构变更、移除/重命名公开 API、asmdef 结构变更 | `0.x.x` → `1.0.0` |
 
 **特殊规则**：
-- `0.x.x` 阶段（当前）：Minor 升级表示一个 Phase 的完成或重大功能集合的交付
+- 当前已进入 `1.x`；旧 `0.x.x` 的 Phase 对应关系仅作历史参考，按上表 SemVer 规则判定版本升级。
 - 版本号**三处同步更新**：`package.json` → `CHANGELOG.md` → `ROADMAP.md`
 - 不允许出现"代码已改、版本未动"的状态
 

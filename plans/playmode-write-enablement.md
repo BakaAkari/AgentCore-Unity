@@ -1,5 +1,7 @@
 # Playmode Write 工具解禁方案
 
+> **状态核对（2026-11-14，1.20.0）**：本文为历史方案。当前 dispatcher 仍调用 `PlayModePreflight`：只读与显式 runtime-safe action 可放行，硬禁止或未获运行时安全标记的写操作会被拒绝；接入 `PlaymodeWriteInterceptor` 的落盘包装在 Play Mode 中跳过保存。不能把早期“所有 write 放开”方案当作当前保证；YOLO 不绕过此预检。
+
 **提案版本**: v0.1-draft  
 **提案日期**: 2026-07-30  
 **当前状态**: 风险分析阶段  

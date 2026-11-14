@@ -14,15 +14,17 @@ reproducible with exact repro steps.
 
 ## Testing model (please read before submitting PRs)
 
-There is currently **no automated test suite** for this project. Verification
-today is:
+Automated EditMode tests are in `Editor/Tests/` (`AgentCore.Tests.Editor`), including process-level MCP relay tests. The 1.20.0 acceptance record on Unity 2022.3.50f1 is 905 tests: 904 passed, 0 failed, 1 non-Windows-only test skipped on Windows.
 
-1. A compile check (build the package in the Unity Editor) — catches syntax
-   errors, missing usings, broken references. It does **not** catch runtime
-   or behavioral bugs.
-2. Manual verification in the Unity Editor: exercising the affected tool
-   actions in both Edit Mode and Play Mode, checking Console output, and
-   confirming Play Mode changes revert cleanly on Stop.
+To run the full suite in a Unity host project:
+
+1. Install this package and Unity Test Framework. For a UPM package, add `"testables": ["com.agentcore.unity"]` to the host's `Packages/manifest.json` (merge with existing entries).
+2. Enable VCS, Code Indexing and MCP Server in AgentCore's Tools & Extensions settings. The test assembly references all three optional assemblies; testing with them disabled is not the full-suite configuration.
+3. Open `Window > General > Test Runner`, choose **EditMode**, and run all AgentCore tests. Save the result XML and Editor log. For batch runs, use Unity's `-batchmode -projectPath <host> -runTests -testPlatform EditMode -testResults <xml> -logFile <log>` arguments.
+4. Exercise affected tool actions manually in Edit Mode and Play Mode, inspect Console output, and check compilation/reload, cancellation and Undo as relevant. For runtime-only edits, verify their behavior after Stop.
+5. Before packaging, run `npm run verify-meta`; `npm pack` runs metadata and tarball verification through the package scripts. These package checks do not run Unity tests.
+
+The release count above is a historical result. Report the actual counts, enabled components and Unity version for your change.
 
 Known limitation: some real bugs in this codebase have shipped with a clean
 compile and only surfaced when exercised in Play Mode. See CHANGELOG v1.14.0
@@ -42,5 +44,5 @@ and declare appropriate risk/capability/visibility metadata.
 ## Pull requests
 
 - Fork, branch, PR against `main`.
-- Describe what changed and why, and list any manual verification performed.
+- Describe what changed and why, and list automated test results and manual verification performed.
 - Breaking changes to public tool schemas should be called out explicitly.

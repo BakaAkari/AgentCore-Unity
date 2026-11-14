@@ -1,15 +1,15 @@
 # AgentCore MCP Server 设计
 
-> 状态：**已定稿（2026-11-13）**；**M1 已实现（1.19.0）**，实现中的调整见文末“M1 实现记录”
+> 状态：**M1 已实现（1.19.0）；M2 / M3 与 MCP 客户端已实现（1.20.0，2026-11-14）**。§1–9 保留分阶段设计，实际实现与验收见 §10–11；不能把阶段名称视为待开发状态。
 > 取代：[`mcp-server-feasibility.md`](mcp-server-feasibility.md) 中的进程模型（编辑器内 HttpListener）与协议选型（HTTP+SSE）。可行性文档其余部分（工具映射、模块划分思路）仍可参考。
-> 关联：[`ROADMAP.md`](ROADMAP.md) 主线第 3 项；`AGENTS.md` §3.4 可选组件模式
+> 关联：[`ROADMAP.md`](ROADMAP.md) 现状与试用验收；`AGENTS.md` §3.4 可选组件模式
 
 ## 1. 目标与约束
 
 - 让外部 MCP 客户端调用 AgentCore 的全部 Unity 能力。团队主要客户端为 **Claude Code 与 Codex**，M1 只验证这两个。
 - 目标工程是 Unity 2022.3、没有任何现成 Unity MCP；所有 MCP 能力由 AgentCore 自己提供。
 - 不另起一套安全策略：MCP 只是工具调用的另一个来源，走与内嵌 Chat 相同的 `ToolCallDispatcher`。
-- 遵守现有原则：审查级别由用户选择、YOLO 不阻断；不打包二进制（ADR-17、P2 决定）；默认最优、少暴露选项。
+- 遵守现有原则：审查级别由用户选择；YOLO 跳过确认与权限规则（不跳过 Play Mode 预检、参数校验及工具自身约束）；不打包二进制（ADR-17、P2 决定）；默认最优、少暴露选项。
 
 ## 2. 已定决策
 
@@ -22,7 +22,7 @@
 | 客户端传输 | M1：stdio（每个客户端会话由客户端拉起一个 relay）；M3：可选本机 Streamable HTTP | Claude Code、Codex 对 stdio 支持最好；stdio 连接不受编辑器重载影响 |
 | 默认审查级别 | **跟随 AgentCore 当前级别**（与 Chat 共用信任状态，含 YOLO）；M2 加“信任客户端”选项 | 用户决定 |
 | 确认位置 | M1：Unity 内确认卡片；M2：客户端支持 elicitation 时可改到客户端 | 先复用现有 UI |
-| 反向（AgentCore 作为 MCP 客户端） | 搁置到 MCP Server M2 之后 | 先把服务端做稳 |
+| 反向（AgentCore 作为 MCP 客户端） | 已在 1.20.0 实现 stdio / HTTP 工具接入 | OAuth 与外部 resources/prompts 仍搁置，见 §11 |
 
 ## 3. 架构
 

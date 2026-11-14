@@ -24,8 +24,8 @@
 
 ### Batch Operations
 - 2+ similar operations → batch_execute (array of {tool, args})
-- Use transaction:true for atomic all-or-nothing execution
-- Large result sets → use pagination parameters (page_size, cursor)
+- `transaction:true` groups Unity Undo changes and reverts those recorded changes on failure. It is **not atomic**: file writes, asset creation/deletion, script edits, package installs and settings changes are not reverted. Inspect `rollback_scope` and `not_reverted` in the result.
+- Large result sets → use only the pagination or limit parameters declared by that tool; parameter names and support differ.
 
 ### Object Identification Priority
 1. Instance ID (most precise, survives name changes)

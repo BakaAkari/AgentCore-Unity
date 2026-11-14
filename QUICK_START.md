@@ -1,6 +1,6 @@
 # AgentCore Unity — 快速上手
 
-在 Unity 编辑器里和 AI 直接对话，让它帮你搭场景、写代码、查问题、整理项目。默认已适配企业内网本地部署模型，装完即可用，无需额外配置。
+在 Unity 编辑器里和 AI 直接对话，让它帮你搭场景、写代码、查问题、整理项目。默认连接企业内网本地部署模型；能访问该网络时可直接使用，否则先按第 6 节配置可达的模型服务。
 
 **三步上手**
 
@@ -19,7 +19,7 @@
    或 **Add package from git URL...**，粘贴仓库地址（企业内网地址向项目 TA 或工具组同事索取）
 3. 等待导入完成
 
-装完后菜单多出 `Window > AgentCore`，默认连接企业内网模型，无需手动配置即可直接使用。
+装完后菜单多出 `Window > AgentCore`，默认连接企业内网模型；网络不可达时需要配置自己的 Provider Profile。
 
 ---
 
@@ -31,7 +31,7 @@
 > "排查这个 Prefab 为什么报 Missing Reference"
 > "扫一遍 Assets 目录看看有没有重复资源"
 
-**会话级信任**：确认弹窗支持快捷放行——**Trust Low/Med**（ReadOnly/Low/Medium 风险工具直通，High 风险仍弹窗）、**YOLO (All)**（本会话所有操作直通，含删除/推送等破坏性操作，慎用）。
+**会话级信任**：确认弹窗支持快捷放行——**Trust Low/Med**（只放行允许该信任范围、且不含写入/执行/网络等副作用能力的 ReadOnly/Low/Medium 请求；`ask` 规则仍需确认）、**YOLO (All)**（跳过确认及权限规则中的 ask/deny）。信任状态在同一编辑器内由 Chat 与 MCP 共用，跨脚本重载保留，重启编辑器清除。YOLO 不跳过参数校验、Play Mode 预检及工具自身约束；工具确认卡片 120 秒未处理会自动拒绝。
 
 ---
 
@@ -76,7 +76,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 - 改动前确保有版本控制或备份点。
 - 高风险操作核对确认面板再放行；不确定就用 Trust Low/Med，别直接 YOLO。
 - 相似任务一次性交给它批量跑，别一条条发。
-- 项目根目录放一份 `PROJECT.md` 写项目约定，Agent 会自动读取。
+- Unity 工程根目录放一份 `PROJECT.md` 写项目约定，Agent 会自动读取；根目录没有该文件时才查找 `AgentCore/PROJECT.md`。`SOUL.ext.md` 按相同路径规则追加行为约定。当前不会自动把 `AGENTS.md` / `CLAUDE.md` 作为项目说明加载。
 
 ---
 
@@ -89,7 +89,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 | 字段 | 说明 |
 |------|------|
 | Display Name | Profile 显示名 |
-| Endpoint | OpenAI 兼容 API 地址 |
+| Endpoint | 所选协议的 API 地址（支持 OpenAI 兼容 / 原生 Anthropic） |
 | API Key | 点 **Set API Key** 弹窗输入，不明文显示，存本机不随项目同步 |
 | Model | 下拉选择；点 **Refresh** 拉取模型列表；不支持列表接口时退化为文本框 |
 | Override Temperature | 关闭用全局默认；打开后滑块调节 0.0–2.0 |
@@ -113,7 +113,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 说明：
 
-- **审查**：卡片的 Review level 默认“Follow AgentCore chat”——跟随 AgentCore Chat 当前的设置（包括 YOLO），权限规则对外部客户端同样生效；改为“Trust MCP clients”后外部调用不再在 Unity 里确认（客户端自己会问你）。
+- **审查**：卡片的 Review level 默认“Follow AgentCore chat”——跟随 AgentCore Chat 当前的设置（包括 YOLO），权限规则对外部客户端同样生效；改为“Trust MCP clients”后外部调用绕过 Unity 的确认与 ask/deny 权限规则（是否在客户端询问取决于客户端配置，Unity 不保证它会询问）。
 - **在哪确认**：Confirm in 默认是 Unity 的 AgentCore 窗口（卡片标明来自哪个客户端，窗口没开会自动打开）；改为“MCP client when supported”后，支持的客户端会在自己的界面里问你，不支持的仍回到 Unity。
 - **资源与提示**：客户端还能读取工程上下文、场景层级、Console、版本控制状态和工程内文本文件（`unity://...`），以及把 AgentCore 的 Skills 当作 prompt 使用；订阅了的资源变化时会收到通知。
 - **改脚本**：调用会等 Unity 编译完再返回，有编译错误时错误附在结果里；编译期间新的调用排队，Unity 恢复后自动执行。支持 Tasks 扩展的客户端会把超过 3 秒的调用转为可轮询的任务。
@@ -143,7 +143,9 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 3. 点 **Reload**，卡片显示每个服务器的连接状态和工具数。
 
-服务器的工具以 `mcp__<服务器>__<工具>` 出现在 Chat 中（按需激活，分类 `MCP: <服务器>`），和 AgentCore 自带工具走同一套审查与权限规则；只有服务器标为只读的工具不需要确认。脚本重载后会自动重连。
+需要自行安装服务器运行环境（示例中的 `npx` 需要 Node.js/npm）。个人配置位于 `UserSettings/AgentCore/McpServers.json`，团队配置位于 `ProjectSettings/AgentCore/McpServers.json`；令牌放个人配置。当前接入范围是工具，不支持外部服务器的 OAuth 登录、resources 或 prompts。
+
+服务器的工具以 `mcp__<服务器>__<工具>` 出现在 Chat 中（按需激活，分类 `MCP: <服务器>`），和 AgentCore 自带工具走同一套审查与权限规则；服务器标为只读的工具默认按 ReadOnly 处理，其余按 High 处理；最终是否确认仍取决于权限规则和当前审查级别。脚本重载后会自动重连。
 
 ---
 

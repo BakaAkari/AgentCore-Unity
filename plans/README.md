@@ -1,12 +1,14 @@
-﻿# AgentCore 计划文档导航
+# AgentCore 计划文档导航
 
-> **最后更新**: 2026-08-19 | **当前版本**: v1.16.0 | **下一目标**: 待规划 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后核对**: 2026-11-14 | **当前版本**: 见 [`package.json`](../package.json)（1.20.0） | **当前主线**: 团队试用与 SVN 验收 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
 ---
 
-## 活跃文档（当前开发指导）
+## 文档入口（状态列区分当前规则与历史记录）
+
+旧版本计划、审计、交接文档保留当时的判断与验收结果，不代表当前待办。当前能力以源码、CHANGELOG 与 ROADMAP 为准；设计意图不能替代实现事实。
 
 | 文档 | 用途 | 状态 |
 |------|------|------|
@@ -19,15 +21,19 @@
 | [**adversarial-coverage-audit.md**](adversarial-coverage-audit.md) | **对抗性审计方法论** — 三步矩阵校验流程 (覆盖/根因/版本)，**需补 Step 4~7** (Windows 教训) | 方法论基线 |
 | [**capability-coverage-audit.md**](capability-coverage-audit.md) | **能力覆盖面审计方法** — A 轴 (Unity 菜单) + B 轴 (API 命名空间) | 方法论基线 |
 | [**adr-17-minimalism.md**](adr-17-minimalism.md) | **产品哲学基线** — 极简即开即用：默认最优、一件事一开关、术语白话 | 已定稿 |
-| [**adr-18-skill-loading-mechanism.md**](adr-18-skill-loading-mechanism.md) | **Skill 加载机制 ADR** — 运行时按需检索，Tier 2 自演化知识 | Draft，待实施 |
+| [**adr-18-skill-loading-mechanism.md**](adr-18-skill-loading-mechanism.md) | **Skill 加载机制 ADR** — 运行时按需检索，Tier 2 自演化知识 | 核心加载已实施；Tier 2 自演化等剩余设想不等于已交付 |
 | [**agent-prompt-guidelines.md**](agent-prompt-guidelines.md) | **Agent Prompt 层通用准则** — LLM-based agent system prompt 基础框架 | 活跃维护 |
-| [**llm-agent-architecture-remediation-plan.md**](llm-agent-architecture-remediation-plan.md) | **LLM/Agent 架构安全治理准则** — Tool Risk Policy / WorkspacePathPolicy / Lazy Tool Discovery；Phase 7/8 前置依据 | 活跃维护，长期治理约束 |
-| [**mcp-server-feasibility.md**](mcp-server-feasibility.md) | **MCP Server 可行性方案（Phase 8）** — 外部 IDE / CLI 通过 MCP 调用 Unity 工具 | 设计基线完成，待启动 |
+| [**llm-agent-architecture-remediation-plan.md**](llm-agent-architecture-remediation-plan.md) | **LLM/Agent 架构安全治理准则** — Tool Risk Policy / WorkspacePathPolicy / Lazy Tool Discovery；Phase 7/8 前置依据 | 治理设计与历史审查；当前实现差异见文首说明 |
+| [**mcp-server-design.md**](mcp-server-design.md) | **MCP 实际设计与实现记录** — relay + bridge、M1/M2/M3 与外部 MCP 客户端 | 1.19.0 / 1.20.0 已实施，见 §10–11 |
+| [**mcp-server-feasibility.md**](mcp-server-feasibility.md) | **早期 MCP 可行性方案** | 历史参考，进程模型和协议方案已被新设计取代 |
 
 ### 版本历史（最近）
 
 | 版本 | 发布日期 | 主要变更 | 文档 |
 |------|---------|---------|------|
+| **v1.20.0** | 2026-11-14 | MCP M2/M3、Resources/Prompts、Tasks、HTTP、外部 MCP 客户端 | [CHANGELOG.md](../CHANGELOG.md) |
+| **v1.19.0** | 2026-11-13 | MCP Server M1、共享信任与确认宿主 | [CHANGELOG.md](../CHANGELOG.md) |
+| **v1.18.0** | 2026-11-13 | SVN 工作流、权限规则、检查点、存储与索引修复 | [CHANGELOG.md](../CHANGELOG.md) |
 | **v1.13.0** | 2026-07-31 | Provider Profile 系统 + Error-driven Request Pruning + RequestPruningRegistry EditorPrefs 持久化 + tool_call.id 跨供应商清洗 | [CHANGELOG.md](../CHANGELOG.md#1130---2026-07-31) |
 | **v1.12.0-alpha.7** | 2026-07-29 | Prompt-code 一致性 + 死代码清理 + Category 统一 | [CHANGELOG.md](../CHANGELOG.md#1120-alpha7---2026-07-29) |
 | **v1.12.0-alpha.1~6** | 2026-07-28~29 | Session Organization — tag registry / 归档区 / 自动命名 debounce / 移除 Silent mode | [CHANGELOG.md](../CHANGELOG.md) |
@@ -134,7 +140,7 @@
 
 ### 对于 AI 助手
 
-1. **优先参考活跃文档** — ROADMAP 是当前开发主导文档；ADR-17 是产品哲学基线
+1. **优先参考当前入口** — ROADMAP 是当前开发主导文档；ADR-17 是产品哲学基线。先核对文首状态，不把旧版审计的问题清单当作当前缺陷清单。
 2. **极简哲学优先** — 涉及 Settings / UI / 用户可见字段时，必须先对齐 ADR-17
 3. **治理层优先** — 涉及工具扩展、MCP、文件写入或自治增强时，必须先对齐 `llm-agent-architecture-remediation-plan.md`
 4. **代码事实优先** — 当文档与实际代码不一致时，以 `Editor/` 下的源码为准

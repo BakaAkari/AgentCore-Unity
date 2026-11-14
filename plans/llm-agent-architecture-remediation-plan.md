@@ -1,5 +1,7 @@
 # AgentCore LLM/Agent 架构修复准则
 
+> **状态核对（2026-11-14，1.20.0）**：本文保留原始治理设计与历史问题清单，旧 Phase 顺序不是当前待办清单。风险/能力元数据、按需工具发现、路径风险、权限规则、检查点、MCP 双向接入已有实现；不能继续按“全量工具暴露、缺少风险字段、MCP 未启动”的旧前提开发。当前状态见 [ROADMAP.md](ROADMAP.md) 与 [CHANGELOG](../CHANGELOG.md)。本文件中的治理原则仍供设计参考，具体执行行为以源码为准：YOLO 绕过确认及 ask/deny，但 PlayModePreflight 仍先于风险策略执行；MCP 列表不沿用 Chat 按需 scope，而是过滤已启用工具并排除 Chat 辅助工具与外部代理。TaskLedger、子 agent 等方案不因此视为已交付。
+
 > 本文档是 [`com.agentcore.unity`](package.json:1) 后续 LLM/Agent 架构修复与代码改造的最终准则文档。
 >
 > 输入来源：

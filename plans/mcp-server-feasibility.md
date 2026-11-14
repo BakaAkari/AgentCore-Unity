@@ -1,5 +1,7 @@
 # AgentCore as MCP Server — 可行性方案
 
+> **状态核对（2026-11-14，1.20.0）**：本文是历史可行性研究，不再作为待启动计划。MCP M1/M2/M3 与客户端已交付；当前进程模型、协议、工具过滤与确认行为见 [mcp-server-design.md](mcp-server-design.md) §10–11。下文的编辑器内 HTTP、Capability Scope 和未来步骤属于当时设计，不能直接视为当前实现或重新实施的任务。
+
 > 状态：**已被 [`mcp-server-design.md`](mcp-server-design.md)（2026-11-13）取代**——进程模型与协议选型以新文档为准，本文仅供参考
 > 创建日期：2026-06-15
 > 关联：[`AGENTS.md`](../AGENTS.md:1) §3.4 Optional Components 模式
