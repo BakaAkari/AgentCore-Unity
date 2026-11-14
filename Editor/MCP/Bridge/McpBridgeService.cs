@@ -64,7 +64,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             EditorApplication.quitting += OnQuitting;
-            EditorApplication.delayCall += Start;
+            // MainThread.Post 会唤醒空闲 / 失焦的编辑器（delayCall 在编辑器空闲时可能一直不执行）
+            MainThread.Post(Start);
         }
 
         private static void Start()

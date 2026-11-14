@@ -44,11 +44,10 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     /// <summary>
     /// 执行 MCP 工具调用：每次调用一个绑定来源客户端的 <see cref="ToolCallDispatcher"/>，
     /// 走与 Chat 完全相同的校验、Play Mode 预检、风险策略、权限规则与检查点；整个分发在主线程上进行。
-    /// MCP 调用之间串行执行（同一时刻只有一个外部调用在改编辑器状态）。
+    /// 各调用的同步部分都在主线程上执行；不做全局串行，避免一个等待人工确认的调用堵住其他调用。
     /// </summary>
     public static class McpToolExecutor
     {
-        private static readonly SemaphoreSlim Gate = new SemaphoreSlim(1, 1);
 
         /// <summary>测试可替换：按客户端名构造确认提供器。</summary>
         internal static Func<string, IToolConfirmationProvider> ProviderFactory = client => new McpConfirmationProvider(client);
@@ -62,7 +61,6 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
             arguments ??= new JObject();
             var stopwatch = Stopwatch.StartNew();
-            await Gate.WaitAsync(ct).ConfigureAwait(false);
             McpCallOutcome outcome;
             try
             {
@@ -97,10 +95,6 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             {
                 AgentCoreLog.Warning($"[AgentCore][MCP] Tool '{toolName}' failed: {ex.Message}");
                 outcome = McpCallOutcome.Error($"Exception executing '{toolName}': {ex.Message}");
-            }
-            finally
-            {
-                Gate.Release();
             }
 
             if (outcome.NotStarted)

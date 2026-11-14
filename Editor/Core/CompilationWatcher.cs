@@ -100,6 +100,8 @@ namespace AgentCore.Editor.Core
             {
                 AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             };
+            // 编辑器空闲 / 失焦时 delayCall 可能迟迟不执行：主动请求一次更新
+            try { EditorApplication.QueuePlayerLoopUpdate(); } catch (Exception) { /* ignore */ }
 
             return task;
         }

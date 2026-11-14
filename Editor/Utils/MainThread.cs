@@ -150,12 +150,9 @@ namespace AgentCore.Editor.Utils
 
             _queue.Enqueue(item);
 
-            if (!IsMainThread)
-            {
-                // 编辑器失焦时 update 频率很低，主动请求一次 player loop 更新以尽快泵出
-                try { EditorApplication.QueuePlayerLoopUpdate(); }
-                catch (Exception) { /* 极少数时机（退出中）调用失败，下一帧 update 仍会泵出 */ }
-            }
+            // 编辑器失焦或空闲时 update 可能很久才跑一次（主线程上投递也一样）：主动请求一次 player loop 更新以尽快泵出
+            try { EditorApplication.QueuePlayerLoopUpdate(); }
+            catch (Exception) { /* 极少数时机（退出中）调用失败，下一帧 update 仍会泵出 */ }
         }
 
         private static void Pump()

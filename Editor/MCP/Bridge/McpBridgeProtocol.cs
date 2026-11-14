@@ -13,7 +13,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     /// <item><c>callTool { id, name, arguments }</c> —— <c>id</c> 在同一 relay 内唯一。</item>
     /// <item><c>cancel { id }</c></item>
     /// <item><c>resume { ids }</c> —— 重连后发送：取回断开前已发出、尚未收到结果的调用。已完成的立即答复，
-    ///       仍在执行的完成后答复，bridge 不认识的（编辑器重启过）答复为错误。</item>
+    ///       仍在执行的完成后答复，bridge 不认识的用 unknownCalls 告诉 relay（由 relay 判断重发或报告丢失）。</item>
     /// </list>
     /// <para>bridge → relay：</para>
     /// <list type="bullet">

@@ -65,6 +65,8 @@ namespace AgentCore.Editor.Tools.Safety
                 while ((handler = Volatile.Read(ref _handler)) == null && DateTime.UtcNow < deadline)
                 {
                     ct.ThrowIfCancellationRequested();
+                    // 窗口的 CreateGUI 需要编辑器 tick：失焦时主动唤醒
+                    try { UnityEditor.EditorApplication.QueuePlayerLoopUpdate(); } catch (Exception) { /* ignore */ }
                     await Task.Delay(100, ct).ConfigureAwait(false);
                 }
 

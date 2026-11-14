@@ -70,7 +70,8 @@ namespace AgentCore.Editor.UI
             pending.TimeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(ConfirmationTimeoutSeconds));
             pending.TimeoutSource.Token.Register(() => ScheduleResolvePendingToolConfirmation(pending, false));
 
-            EditorApplication.delayCall += () => EnqueuePendingToolConfirmation(pending);
+            // MainThread.Post 会唤醒失焦的编辑器（delayCall 在编辑器空闲时可能长时间不执行，外部 MCP 调用时尤其常见）
+            AgentCore.Editor.Utils.MainThread.Post(() => EnqueuePendingToolConfirmation(pending));
             return tcs.Task;
         }
 
@@ -441,7 +442,7 @@ namespace AgentCore.Editor.UI
                 return;
             }
 
-            EditorApplication.delayCall += () => CompletePendingToolConfirmation(pending, approved, updateUi: true);
+            AgentCore.Editor.Utils.MainThread.Post(() => CompletePendingToolConfirmation(pending, approved, updateUi: true));
         }
 
         private void CompletePendingToolConfirmation(PendingToolConfirmation pending, bool approved, bool updateUi)
