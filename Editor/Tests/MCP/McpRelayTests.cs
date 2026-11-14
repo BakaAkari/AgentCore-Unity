@@ -222,6 +222,29 @@ namespace AgentCore.Tests.Editor.MCP
                 return null;
             }
 
+            /// <summary>与 <see cref="WaitForAsync"/> 相同，但超时返回 null 而不是让测试失败。</summary>
+            public async Task<JObject> TryWaitForAsync(Func<JObject, bool> predicate, int timeoutMs)
+            {
+                var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                while (DateTime.UtcNow < deadline)
+                {
+                    lock (_messages)
+                    {
+                        var match = _messages.FirstOrDefault(predicate);
+                        if (match != null)
+                        {
+                            var rest = _messages.Where(m => !ReferenceEquals(m, match)).ToList();
+                            _messages.Clear();
+                            foreach (var m in rest)
+                                _messages.Enqueue(m);
+                            return match;
+                        }
+                    }
+                    await Task.Delay(20);
+                }
+                return null;
+            }
+
             public Task<JObject> ResponseAsync(int id, int timeoutMs = 15000) =>
                 WaitForAsync(m => m["id"] != null && m["id"].Type == JTokenType.Integer && (int)m["id"] == id, timeoutMs);
 

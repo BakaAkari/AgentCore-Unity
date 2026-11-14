@@ -97,11 +97,29 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 outcome = McpCallOutcome.Error($"Exception executing '{toolName}': {ex.Message}");
             }
 
+            // Unity 的延迟事件（hierarchyChanged、projectChanged 等）在下一次编辑器 tick 才派发：唤醒一次，资源变化通知才能及时发出
+            try { UnityEditor.EditorApplication.QueuePlayerLoopUpdate(); } catch (Exception) { /* ignore */ }
+
             if (outcome.NotStarted)
                 return outcome;
+
+            // 可写工具执行后：场景、工程文件与版本控制状态可能变了（编辑器空闲时 Unity 自己的变更事件可能迟迟不派发）
+            if (outcome.Status != McpBridgeProtocol.StatusError && !IsReadOnlyTool(toolName))
+            {
+                McpResourceEvents.MarkDirty(McpResourceCatalog.SceneHierarchyUri);
+                McpResourceEvents.MarkDirty(McpResourceCatalog.AssetUriPrefix + "*");
+                McpResourceEvents.MarkDirty(McpResourceCatalog.VcsStatusUri);
+            }
+
             McpAuditLog.Append(clientName, toolName, arguments, outcome.Status, stopwatch.Elapsed.TotalMilliseconds,
                 outcome.Status == McpBridgeProtocol.StatusOk ? null : outcome.Text);
             return outcome;
+        }
+
+        private static bool IsReadOnlyTool(string toolName)
+        {
+            var metadata = ToolRegistry.Instance.GetTool(toolName)?.Metadata;
+            return metadata != null && metadata.RiskLevel == AgentCore.Editor.Tools.Safety.ToolRiskLevel.ReadOnly;
         }
 
         /// <summary>

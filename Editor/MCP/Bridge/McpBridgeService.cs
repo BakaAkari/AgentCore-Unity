@@ -91,6 +91,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
                 WriteEndpoint("ready");
                 LastError = null;
+                McpResourceEvents.Start(message => _server?.Broadcast(message));
                 AgentCoreLog.Info($"[AgentCore][MCP] Bridge listening on 127.0.0.1:{server.Port} ({_catalog.Tools.Count} tools).");
 
                 // relay 随包以源码分发：启用后在后台编译一次（源码不变则复用）
@@ -108,6 +109,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             if (_server == null)
                 return;
             _reloading = true;
+            McpResourceEvents.Stop();
             WriteEndpoint("reloading");
             SessionState.SetString(PendingKey, Ledger.Serialize());
             _server.Broadcast(new JObject { ["type"] = McpBridgeProtocol.Reloading });
@@ -117,6 +119,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
         private static void OnQuitting()
         {
+            McpResourceEvents.Stop();
             _server?.Dispose();
             _server = null;
             try
