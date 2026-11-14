@@ -1,15 +1,15 @@
 # AgentCore Unity 路线图
 
-> **版本**：以 `package.json` 为准（当前 1.19.0） | **更新**：2026-11-13
+> **版本**：以 `package.json` 为准（当前 1.20.0） | **更新**：2026-11-14
 > 本文只写三件事：现状、主线、搁置项。完成的工作记在 `CHANGELOG.md`；1.18.0 之前的完整路线图（Phase 1~10 历程、ADR-1~19、风险评估）已归档到 [`_archive/roadmap/ROADMAP-v1.18.0-full.md`](_archive/roadmap/ROADMAP-v1.18.0-full.md)。
 
 ## 现状
 
 - **定位**：Unity 编辑器内嵌的 agent。目标工程是企业级 Unity 2022.3 项目，版本控制以 SVN 为主（Git / Perforce 同样支持）；SVN 工作副本根是 WorkspaceRoot，Unity 工程是其下的子根。
-- **已有能力**：约 65 个原生工具；多供应商 LLM（OpenAI 兼容 / 原生 Anthropic、prompt 缓存、备用 profile）；风险策略 + allow / ask / deny 权限规则 + 按消息检查点回退；SVN 全流程（`.meta` 跟随、锁、移动、Project 窗口角标）；代码符号索引 + ripgrep 文本搜索；会话、记忆、Skills；MCP Server（Claude Code / Codex 经 MCP 使用全部工具，跨 Domain Reload 不丢调用）。
-- **质量**：Unity EditMode 测试 857 个，2026-11-13 结果为 856 通过 / 0 失败 / 1 个仅非 Windows 运行而跳过。MCP M1 已在真实编辑器上用 Claude Code 2.1.305、Codex CLI 0.167 与验收脚本跑通（含改脚本触发编译与重载）。
+- **已有能力**：约 65 个原生工具；多供应商 LLM（OpenAI 兼容 / 原生 Anthropic、prompt 缓存、备用 profile）；风险策略 + allow / ask / deny 权限规则 + 按消息检查点回退；SVN 全流程（`.meta` 跟随、锁、移动、Project 窗口角标）；代码符号索引 + ripgrep 文本搜索；会话、记忆、Skills；MCP Server（Claude Code / Codex 经 MCP 使用全部工具、资源与 Skills prompt；2026-07-28 与 2025 系列协议、客户端内确认、Tasks、本机 HTTP 端点；跨 Domain Reload 不丢调用）；MCP 客户端（Chat 使用外部 MCP 服务器的工具）。
+- **质量**：Unity EditMode 测试 905 个，2026-11-14 结果为 904 通过 / 0 失败 / 1 个仅非 Windows 运行而跳过。MCP M1~M3 与 MCP 客户端已在真实编辑器上用 Claude Code 2.1.305、Codex CLI 0.167 与验收脚本跑通（含改脚本触发编译与重载）。
 - **仍生效的原则**：ADR-17 极简（默认最优、少暴露选项）；审查级别完全由用户选择，YOLO 下不做任何阻断；有版本控制兜底，覆盖类操作执行而不报错；不打包第三方二进制。ADR 全文见归档文件 §4。
-- **未发布**：main 领先 origin 约 150 个提交，团队尚未拿到 1.18.0 / 1.19.0。
+- **未发布**：main 领先 origin 约 150 个提交，团队尚未拿到 1.18.0 ~ 1.20.0。
 
 ## 主线
 
@@ -19,13 +19,12 @@
 |------|------|----------|
 | 1 | **发布 1.18.0 并让团队试用** | 推送；重新打 tgz 并通过 `tools/verify-tarball`、`tools/verify-meta`；在真实 SVN 工作副本手测：他人持锁的红色角标、新建文件夹提交带 `.meta`、更新冲突报告为 partial、externals 内 needs-lock 角标、`move_files` 后引用不断 |
 | 2 | **按试用反馈修复** | 顺带完成：SVN 分支名格式统一；SVN 自由文本消息的路径改以 Unity 工程根为基准 |
-| 3 | **MCP Server M2** | M1 已完成（1.19.0，设计见 [`mcp-server-design.md`](mcp-server-design.md)）。M2：2026-07-28 无状态协议（`server/discover`、`_meta`、MRTR、`subscriptions/listen`）、Resources、Prompts（Skills）、Elicitation 确认通道、“信任客户端”审查级别、Chat 中的外部会话视图；M3：Tasks 扩展、本机 Streamable HTTP |
 
 ## 搁置项
 
 | 项 | 原因 | 何时重新考虑 |
 |----|------|--------------|
-| AgentCore 作为 MCP 客户端（接入外部 MCP 服务） | 先把服务端做稳 | MCP Server M2 完成后 |
+| MCP 客户端的 OAuth 授权、外部服务器的 resources / prompts | 当前用 headers 填令牌即可，Chat 只用工具 | 接入需要 OAuth 的服务时 |
 | `move_files` 扩展到 Git / Perforce、批量移动、移动后自动刷新 AssetDatabase | SVN 是主线，单路径已够用 | 试用中出现需求时 |
 | SQLite 索引存储 | 需要下载原生库并在 Unity 内验证 | JSONL 索引出现性能瓶颈时 |
 | `manage_file` 访问工程根以外的路径 | 是否放开未定 | 试用中出现需求时 |

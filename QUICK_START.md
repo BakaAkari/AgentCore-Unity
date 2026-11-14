@@ -113,11 +113,37 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 说明：
 
-- 审查级别跟随 AgentCore Chat 当前的设置（包括 YOLO）。需要确认时，确认卡片出现在 Unity 的 AgentCore 窗口里，并标明来自哪个客户端。权限规则对外部客户端同样生效。
-- 改脚本的调用会等 Unity 编译完再返回；有编译错误时错误会附在结果里。编译期间新的调用会排队，Unity 恢复后自动执行。
-- 每次调用记录在工程的 `Library/AgentCore/Mcp/audit.jsonl`。
+- **审查**：卡片的 Review level 默认“Follow AgentCore chat”——跟随 AgentCore Chat 当前的设置（包括 YOLO），权限规则对外部客户端同样生效；改为“Trust MCP clients”后外部调用不再在 Unity 里确认（客户端自己会问你）。
+- **在哪确认**：Confirm in 默认是 Unity 的 AgentCore 窗口（卡片标明来自哪个客户端，窗口没开会自动打开）；改为“MCP client when supported”后，支持的客户端会在自己的界面里问你，不支持的仍回到 Unity。
+- **资源与提示**：客户端还能读取工程上下文、场景层级、Console、版本控制状态和工程内文本文件（`unity://...`），以及把 AgentCore 的 Skills 当作 prompt 使用；订阅了的资源变化时会收到通知。
+- **改脚本**：调用会等 Unity 编译完再返回，有编译错误时错误附在结果里；编译期间新的调用排队，Unity 恢复后自动执行。支持 Tasks 扩展的客户端会把超过 3 秒的调用转为可轮询的任务。
+- **记录**：每次调用写进工程的 `Library/AgentCore/Mcp/audit.jsonl`；Chat 窗口底部显示外部客户端正在做什么，`Window > AgentCore External Activity` 可查看最近的调用和结果。
+- **协议**：同时支持 2026-07-28 新协议与 2025 系列旧协议，客户端升级不用改配置。
 - 换了 Unity 版本后卡片会提示，重新复制一次配置即可。
 - 编译较慢的大工程：Codex 配置已把工具超时设为 10 分钟；Claude Code 可设环境变量 `MCP_TOOL_TIMEOUT`（毫秒）调大。
+- **只能填 URL 的客户端**：卡片的 Local HTTP endpoint 打开后提供 `http://127.0.0.1:<端口>/mcp`（需要卡片给出的访问令牌，只接受本机连接），复制对应的 HTTP 配置即可；它运行在独立进程里，脚本重载不影响。
+
+---
+
+## 8. 在 AgentCore Chat 里使用外部 MCP 服务器
+
+让 AgentCore 自己的 Chat 调用外部 MCP 服务器（Jira、Figma、内部文档检索等）的工具。
+
+1. `Project Settings > AgentCore > Tools & Extensions` 的 **External MCP servers** 卡片里点 **Open personal config**（只给自己）或 **Open project config**（随工程进版本库，团队共享）。
+2. 按 Claude Desktop / Claude Code 相同的格式填写，可以直接粘贴：
+
+   ```json
+   {
+     "mcpServers": {
+       "everything": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything"] },
+       "docs": { "type": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer ..." } }
+     }
+   }
+   ```
+
+3. 点 **Reload**，卡片显示每个服务器的连接状态和工具数。
+
+服务器的工具以 `mcp__<服务器>__<工具>` 出现在 Chat 中（按需激活，分类 `MCP: <服务器>`），和 AgentCore 自带工具走同一套审查与权限规则；只有服务器标为只读的工具不需要确认。脚本重载后会自动重连。
 
 ---
 

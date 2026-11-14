@@ -10,7 +10,7 @@
 
 AgentCore Unity is an **Editor-only UPM package**, not a generic coding-agent wrapper. It's a native execution layer purpose-built for Unity projects: model reasoning, live Editor state, 50+ native tools, project knowledge, version control, code indexing, and verification feedback — wired into one governed loop.
 
-- **Package**: `com.agentcore.unity` · **Version**: `1.16.0` · **Unity**: `2021.3+`
+- **Package**: `com.agentcore.unity` · **Version**: `1.20.0` · **Unity**: `2021.3+`
 - Editor-only assembly — zero runtime footprint, never ships in your build
 - ~108K lines, 56 native tools covering scenes, GameObjects, components, prefabs, assets, materials, shaders, UI, physics, audio, cameras, Timeline, Cinemachine, ProBuilder, builds, tests, and more
 
@@ -79,7 +79,9 @@ Disabled by default, enabled via scripting define symbols:
 
 - **Version Control** (`AGENTCORE_VCS`) — Git / SVN / Perforce status, diff, log, commit workflows
 - **Code Indexing** (`AGENTCORE_INDEXING`) — Roslyn-based symbol search, background incremental indexing
-- **MCP Server** (`AGENTCORE_MCP`) — lets Claude Code, Codex and other MCP clients use AgentCore's Unity tools, with the same permission rules and review level as the chat; survives script reloads. See `QUICK_START.md` §7
+- **MCP Server** (`AGENTCORE_MCP`) — lets Claude Code, Codex and other MCP clients use AgentCore's Unity tools, resources (project context, scene, console, VCS status, files) and skills as prompts, with the same permission rules and review level as the chat. Supports MCP 2026-07-28 and the 2025 revisions, confirmation in the client (elicitation), the Tasks extension, and an optional local HTTP endpoint; survives script reloads. See `QUICK_START.md` §7
+
+The AgentCore chat can also use tools from external MCP servers (stdio or HTTP, same `mcpServers` config format as Claude Desktop). See `QUICK_START.md` §8.
 
 ## Documentation
 

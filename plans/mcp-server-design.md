@@ -143,3 +143,14 @@ Claude Code / Codex ──stdio──> relay.exe (Unity Mono, 每会话一个)
 - Claude Code 2.1.305（`--mcp-config`）：成功调用 find_gameobjects、read_console。
 - Codex CLI 0.167（`-c mcp_servers.agentcore...`）：成功调用同两个工具；`codex exec` 非交互模式下对未标只读的工具需要审批（交互模式会询问用户）。
 - EditMode 测试 857 个：856 通过、0 失败、1 个仅非 Windows 运行而跳过。
+
+## 11. M2 / M3 与 MCP 客户端实现记录（2026-11-14，1.20.0）
+
+- **Resources / Prompts**：内部 RPC 增加通用 request/response，`resources/*`、`prompts/*` 由 bridge 的 McpResourceCatalog / McpPromptCatalog 应答；资源变化经 `event { kind: resourceUpdated }` 推给 relay。写工具执行后主动标记场景、资产与版本控制资源为已变化（编辑器空闲时 Unity 事件可能迟迟不派发）。
+- **双协议**：relay 按请求判断协议时代——带 `_meta` 协议版本的走 2026-07-28 无状态路径（`server/discover`、`resultType`、`subscriptions/listen`），否则走 initialize 会话。错误码 -32022（不支持的版本）、-32020（头部与 `_meta` 不一致）。
+- **客户端确认**：bridge 发 `confirm`，relay 视客户端能力转成 `elicitation/create` 或 MRTR `input_required`；`requestState` 由 relay 用进程内密钥 HMAC 签名、单次有效。客户端不支持时回落到 Unity 确认卡片。
+- **Tasks**：超过 3 秒未完成的调用（客户端声明了 tasks 扩展时）返回 `resultType: task`；任务内需要确认时状态为 `input_required`，客户端用 `tasks/update` 答复。
+- **HTTP**：同一 relay 程序以 `--http` 守护进程方式运行（编辑器退出时随父进程结束），令牌在 `Library/AgentCore/Mcp/http-token`，只监听 127.0.0.1，校验 Origin；工具调用与 listen 用 SSE 返回，GET 返回 405。
+- **MCP 客户端**：配置为 Claude Desktop 的 `mcpServers` 格式；stdio（Windows 上 `.cmd` 经 cmd.exe，子进程挂 Job 随编辑器结束）与 HTTP；代理工具 OnDemand 可见、带 readOnlyHint 的为 ReadOnly，其余 High；代理工具不会再经 AgentCore MCP Server 导出。
+
+验收：真实编辑器上逐项跑通资源/提示、新协议与订阅、两种客户端确认、活动视图、Tasks（写脚本 3.1 s 转任务、4.1 s 完成）、HTTP（含重载期间）、MCP 客户端（`@modelcontextprotocol/server-everything`，13 个工具）；Claude Code 2.1.305 经 stdio 与 HTTP、Codex CLI 0.167 经 stdio 可用。

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-11-14
+
+MCP M2 / M3 与 MCP 客户端：MCP 能力补全。
+
+### Added
+- MCP Resources：工程上下文、场景层级、Console、版本控制状态、工程内文本文件（`unity://...` 模板）；Prompts：AgentCore Skills
+- 2026-07-28 无状态协议：per-request `_meta`、`server/discover`、`resultType`、缓存提示（`ttlMs` / `cacheScope`）、`subscriptions/listen`；旧协议同时保留（含 `resources/subscribe`）
+- 在客户端确认：旧协议 `elicitation/create`，新协议 MRTR（`input_required` + HMAC 签名、一次性 `requestState`）；MCP 卡片新增审查级别“Trust MCP clients”与确认位置选项
+- Tasks 扩展（`io.modelcontextprotocol/tasks`）：超过 3 秒的调用转为任务，支持 `tasks/get`、`tasks/update`（任务内确认）、`tasks/cancel`
+- 本机 Streamable HTTP 端点（可选）：独立 relay 进程，Bearer 令牌 + Origin 校验，SSE，旧协议 `Mcp-Session-Id` 会话；脚本重载期间仍在线
+- 外部活动视图：Chat 窗口底部活动条与 `Window > AgentCore External Activity`
+- AgentCore 作为 MCP 客户端：`ProjectSettings/AgentCore/McpServers.json`（团队）与 `UserSettings/AgentCore/McpServers.json`（个人），Claude Desktop 格式，stdio 与 HTTP；外部工具以 `mcp__<服务器>__<工具>` 按需出现在 Chat，走同一套审查与权限规则，只读工具免确认
+
+### Fixed
+- 编辑器空闲 / 失焦时 bridge 启动、确认超时与确认卡片卡住
+- 一个等待确认的 MCP 调用不再阻塞其他调用
+- 工具注册表为空时 MCP 调用先做工具发现
+
 ## [1.19.0] - 2026-11-13
 
 MCP Server（M1）：Claude Code、Codex 等 MCP 客户端可直接使用 AgentCore 的 Unity 工具。设计文档：`plans/mcp-server-design.md`。
