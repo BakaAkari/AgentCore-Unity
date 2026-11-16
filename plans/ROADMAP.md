@@ -1,12 +1,13 @@
 # AgentCore Unity 路线图
 
-> **版本**：以 `package.json` 为准（当前 1.20.1） | **更新**：2026-11-15
+> **版本**：以 `package.json` 为准（当前 1.20.2） | **更新**：2026-11-16
 > 本文只写三件事：现状、主线、搁置项。完成的工作记在 `CHANGELOG.md`；1.18.0 之前的完整路线图（Phase 1~10 历程、ADR-1~19、风险评估）已归档到 [`_archive/roadmap/ROADMAP-v1.18.0-full.md`](_archive/roadmap/ROADMAP-v1.18.0-full.md)。
 
 ## 现状
 
 - **定位**：Unity 编辑器内嵌的 agent。目标工程是企业级 Unity 2022.3 项目，版本控制以 SVN 为主（Git / Perforce 同样支持）；SVN 工作副本根是 WorkspaceRoot，Unity 工程是其下的子根。
 - **已有能力**：60 个内置工具声明（其中 Native 目录 52 个；运行时数量随组件与配置变化）；多供应商 LLM（OpenAI 兼容 / 原生 Anthropic、prompt 缓存、备用 profile）；风险策略 + allow / ask / deny 权限规则 + 按消息检查点回退；SVN 全流程（`.meta` 跟随、锁、移动、Project 窗口角标）；代码符号索引 + ripgrep 文本搜索；会话、记忆、Skills；MCP Server（Claude Code / Codex 经 MCP 使用已启用工具（排除 Chat 专用辅助工具与外部 MCP 代理）、资源与 Skills prompt；2026-07-28 与 2025 系列协议、客户端内确认、Tasks、本机 HTTP 端点；跨 Domain Reload 不丢调用）；MCP 客户端（Chat 使用外部 MCP 服务器的工具）。
+- **兼容修复**：1.20.2 将工具参数包装检测改用 `JObject.Property`，避免依赖宿主 Newtonsoft.Json 的 `ContainsKey` API；用户报错工程仍需安装后重新编译确认。
 - **只读并发**：1.20.1 为同轮相邻的 `manage_file` 读取、目录枚举、文件信息与内容搜索启用最多 4 个并发；写入和其他工具为顺序屏障。索引 / VCS / 外部 MCP 查询尚未声明后台并发安全，保持串行。
 - **质量**：Unity EditMode 测试 916 个，1.20.1 于 2026-11-14 的结果为 915 通过 / 0 失败 / 1 个仅非 Windows 运行而跳过。MCP M1~M3 与 MCP 客户端已在真实编辑器上用 Claude Code 2.1.305、Codex CLI 0.167 与验收脚本跑通（含改脚本触发编译与重载）。
 - **仍生效的原则**：ADR-17 极简（默认最优、少暴露选项）；审查级别由用户选择；YOLO 绕过确认与 ask/deny 权限规则，当前代码仍执行 Play Mode 预检、参数校验和工具自身约束；有版本控制兜底，覆盖类操作执行而不报错；不打包第三方二进制。ADR 全文见归档文件 §4。

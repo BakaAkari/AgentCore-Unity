@@ -58,7 +58,7 @@ namespace AgentCore.Editor.LLM
 
         public static bool IsRawArgumentsWrapper(JObject obj)
         {
-            return obj != null && obj.Count == 1 && obj.ContainsKey("_raw_arguments");
+            return obj != null && obj.Count == 1 && obj.Property("_raw_arguments") != null;
         }
     }
 
