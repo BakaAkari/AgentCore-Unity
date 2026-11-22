@@ -12,7 +12,7 @@ namespace AgentCore.Editor.Config
     /// <summary>
     /// AgentCore 插件的全局设置。
     /// 使用 ScriptableSingleton 存储在 Library/ 目录下，不进版本控制。
-    /// 通过 Project Settings > AgentCore 面板访问。
+    /// 通过 Preferences > AgentCore 面板访问。
     /// <para>
     /// ADR-17 极简即开即用哲学: 用户只感知必要字段, 其余内部化。
     /// 保留字段但 [HideInInspector] 的字段仅供内部代码引用, 不给用户 UI。
@@ -318,7 +318,7 @@ namespace AgentCore.Editor.Config
 
             // v22: v1.13.0 Provider Profile 架构收敛 — 删除 legacy llmEndpoint/llmModel 字段。
             // 无数据操作: 旧字段已从序列化结构中移除, 反序列化时自动丢弃其残留值。
-            // 用户需在 Project Settings > AgentCore > Model & Agent 重新配置(首次进入自动建 Default profile)。
+            // 用户需在 Preferences > AgentCore > Model & Agent 重新配置(首次进入自动建 Default profile)。
             if (settingsVersion < 22)
             {
                 AgentCoreLog.Info("[AgentCore] Settings migrated from v21 to v22 (legacy llm endpoint/model fields removed, use Provider Profiles instead)");

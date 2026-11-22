@@ -92,9 +92,9 @@ namespace AgentCore.Editor.Tools.Vision
                     {
                         // fail-closed: 视觉未启用/未配置 → 明确错误并引导配置
                         if (!VisionModelConfig.IsEnabled)
-                            return ToolResult.Fail("Vision model is not enabled. Enable it in Project Settings > AgentCore > Model & Agent (Vision Model card) — set 'Enable Vision Model', provide endpoint/model/apiKey, then retry.");
+                            return ToolResult.Fail("Vision model is not enabled. Enable it in Preferences > AgentCore > Model & Agent (Vision Model card) — set 'Enable Vision Model', provide endpoint/model/apiKey, then retry.");
                         if (!VisionModelConfig.IsConfigured)
-                            return ToolResult.Fail("Vision model is not fully configured (endpoint/model missing). Configure endpoint/model/apiKey in Project Settings > AgentCore > Model & Agent (Vision Model card), then retry.");
+                            return ToolResult.Fail("Vision model is not fully configured (endpoint/model missing). Configure endpoint/model/apiKey in Preferences > AgentCore > Model & Agent (Vision Model card), then retry.");
 
                         var defaultPrompt = "Describe this image in detail: visible objects and their arrangement, colors, any text, and any notable features or issues the user might care about.";
                         var prompt = ToolHelpers.GetOptionalString(parameters, "prompt") ?? defaultPrompt;

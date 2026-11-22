@@ -1,6 +1,7 @@
 using AgentCore.Editor.Components.MCP.Bridge;
 using AgentCore.Editor.Components.MCP.Relay;
 using AgentCore.Editor.Extensions;
+using AgentCore.Editor.L10n;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,36 +17,42 @@ namespace AgentCore.Editor.Components.MCP.Config
         private static string CopiedMonoKey => "AgentCore.Mcp.CopiedMonoPath." + McpPaths.ProjectRoot;
 
         public string Id => "mcp-settings";
-        public string Title => "MCP Server";
-        public string Description => "Expose AgentCore tools to MCP clients.";
+        public string Title => Loc.Tr("settings.mcp.title", "MCP Server");
+        public string Description => Loc.Tr("settings.mcp.description", "Expose AgentCore tools to MCP clients.");
         public int Order => 400;
         public string OwnerComponentId => "mcp";
 
         public void DrawGUI()
         {
-            EditorGUILayout.LabelField("Status", McpBridgeService.IsRunning ? "Ready" : "Not running");
+            EditorGUILayout.LabelField(
+                Loc.Tr("settings.mcp.status", "Status"),
+                McpBridgeService.IsRunning ? Loc.Tr("settings.mcp.status.ready", "Ready") : Loc.Tr("settings.mcp.status.notRunning", "Not running"));
 
             var clients = McpBridgeService.ConnectedClients;
-            EditorGUILayout.LabelField("Connected clients", clients.Length == 0 ? "None" : string.Join(", ", clients));
+            EditorGUILayout.LabelField(
+                Loc.Tr("settings.mcp.clients", "Connected clients"),
+                clients.Length == 0 ? Loc.Tr("settings.mcp.clients.none", "None") : string.Join(", ", clients));
 
             if (!string.IsNullOrEmpty(McpBridgeService.LastCallSummary))
-                EditorGUILayout.LabelField("Last call", McpBridgeService.LastCallSummary);
-            if (GUILayout.Button(new GUIContent("Open activity", "What MCP clients have done in this editor: tools, arguments and results.")))
+                EditorGUILayout.LabelField(Loc.Tr("settings.mcp.lastCall", "Last call"), McpBridgeService.LastCallSummary);
+            if (GUILayout.Button(new GUIContent(
+                    Loc.Tr("settings.mcp.openActivity", "Open activity"),
+                    Loc.Tr("settings.mcp.openActivityTooltip", "What MCP clients have done in this editor: tools, arguments and results."))))
                 AgentCore.Editor.UI.ExternalActivityWindow.ShowWindow();
 
             if (!string.IsNullOrEmpty(McpBridgeService.LastError))
                 EditorGUILayout.HelpBox(McpBridgeService.LastError, MessageType.Warning);
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Connect a client", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Loc.Tr("settings.mcp.connect.title", "Connect a client"), EditorStyles.boldLabel);
             DrawClientConfig();
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Review", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Loc.Tr("settings.mcp.review.title", "Review"), EditorStyles.boldLabel);
             DrawReviewSettings();
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Local HTTP endpoint", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Loc.Tr("settings.mcp.http.title", "Local HTTP endpoint"), EditorStyles.boldLabel);
             DrawHttpEndpoint();
         }
 
@@ -53,8 +60,9 @@ namespace AgentCore.Editor.Components.MCP.Config
         {
             EditorGUI.BeginChangeCheck();
             var enabled = EditorGUILayout.ToggleLeft(
-                new GUIContent("Enable (for clients that connect by URL)",
-                    "Runs an HTTP endpoint on 127.0.0.1 in a separate process that survives script reloads. Most users only need the stdio setup above."),
+                new GUIContent(
+                    Loc.Tr("settings.mcp.http.enable", "Enable (for clients that connect by URL)"),
+                    Loc.Tr("settings.mcp.http.enableTooltip", "Runs an HTTP endpoint on 127.0.0.1 in a separate process that survives script reloads. Most users only need the stdio setup above.")),
                 McpSettings.HttpEnabled);
             if (EditorGUI.EndChangeCheck())
             {
@@ -65,55 +73,72 @@ namespace AgentCore.Editor.Components.MCP.Config
             if (!McpSettings.HttpEnabled)
                 return;
 
-            EditorGUILayout.LabelField("URL", McpHttpEndpoint.Url);
-            EditorGUILayout.LabelField("Status", McpHttpEndpoint.IsRunning ? "Running" : "Starting / stopped");
+            EditorGUILayout.LabelField(Loc.Tr("settings.mcp.http.url", "URL"), McpHttpEndpoint.Url);
+            EditorGUILayout.LabelField(
+                Loc.Tr("settings.mcp.status", "Status"),
+                McpHttpEndpoint.IsRunning ? Loc.Tr("settings.mcp.http.running", "Running") : Loc.Tr("settings.mcp.http.stopped", "Starting / stopped"));
             if (!string.IsNullOrEmpty(McpHttpEndpoint.LastError))
                 EditorGUILayout.HelpBox(McpHttpEndpoint.LastError, MessageType.Warning);
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Copy Claude Code command (HTTP)"))
+            if (GUILayout.Button(Loc.Tr("settings.mcp.http.copyClaude", "Copy Claude Code command (HTTP)")))
                 Copy(McpHttpEndpoint.ClaudeCodeCommand(McpHttpEndpoint.Url, McpHttpEndpoint.Token), null);
-            if (GUILayout.Button("Copy Codex config (HTTP)"))
+            if (GUILayout.Button(Loc.Tr("settings.mcp.http.copyCodex", "Copy Codex config (HTTP)")))
                 Copy(McpHttpEndpoint.CodexToml(McpHttpEndpoint.Url, McpHttpEndpoint.Token), null);
-            if (!McpHttpEndpoint.IsRunning && GUILayout.Button("Restart", GUILayout.Width(70)))
+            if (!McpHttpEndpoint.IsRunning && GUILayout.Button(Loc.Tr("settings.mcp.http.restart", "Restart"), GUILayout.MinWidth(70)))
                 McpHttpEndpoint.Apply();
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.LabelField(
-                "The copied configuration contains an access token for this project. Anyone with it can use AgentCore's tools on this machine; do not share it.",
+                Loc.Tr(
+                    "settings.mcp.http.tokenWarning",
+                    "The copied configuration contains an access token for this project. Anyone with it can use AgentCore's tools on this machine; do not share it."),
                 EditorStyles.wordWrappedMiniLabel);
         }
 
-        private static readonly GUIContent[] ReviewLevelOptions =
+        // Built per draw so a UI language switch applies immediately (no cached localized text).
+        private static GUIContent[] BuildReviewLevelOptions() => new[]
         {
-            new GUIContent("Follow AgentCore chat", "Same review level as the AgentCore chat, including YOLO and permission rules."),
-            new GUIContent("Trust MCP clients", "Calls from MCP clients run without confirmation (the client asks you itself). Permission deny rules are skipped, like YOLO."),
+            new GUIContent(
+                Loc.Tr("settings.mcp.review.follow", "Follow AgentCore chat"),
+                Loc.Tr("settings.mcp.review.followTooltip", "Same review level as the AgentCore chat, including YOLO and permission rules.")),
+            new GUIContent(
+                Loc.Tr("settings.mcp.review.trust", "Trust MCP clients"),
+                Loc.Tr("settings.mcp.review.trustTooltip", "Calls from MCP clients run without confirmation (the client asks you itself). Permission deny rules are skipped, like YOLO.")),
         };
 
-        private static readonly GUIContent[] ConfirmLocationOptions =
+        private static GUIContent[] BuildConfirmLocationOptions() => new[]
         {
-            new GUIContent("AgentCore window in Unity", "Confirmation cards appear in the AgentCore window, labelled with the client."),
-            new GUIContent("MCP client when supported", "Ask in the client (MCP elicitation). Clients without support fall back to the AgentCore window."),
+            new GUIContent(
+                Loc.Tr("settings.mcp.review.inUnity", "AgentCore window in Unity"),
+                Loc.Tr("settings.mcp.review.inUnityTooltip", "Confirmation cards appear in the AgentCore window, labelled with the client.")),
+            new GUIContent(
+                Loc.Tr("settings.mcp.review.inClient", "MCP client when supported"),
+                Loc.Tr("settings.mcp.review.inClientTooltip", "Ask in the client (MCP elicitation). Clients without support fall back to the AgentCore window.")),
         };
 
         private static void DrawReviewSettings()
         {
             EditorGUI.BeginChangeCheck();
-            var level = EditorGUILayout.Popup(new GUIContent("Review level"), (int)McpSettings.ReviewLevel, ReviewLevelOptions);
+            var level = EditorGUILayout.Popup(new GUIContent(Loc.Tr("settings.mcp.review.level", "Review level")), (int)McpSettings.ReviewLevel, BuildReviewLevelOptions());
             if (EditorGUI.EndChangeCheck())
                 McpSettings.ReviewLevel = (McpReviewLevel)level;
 
             using (new EditorGUI.DisabledScope(McpSettings.ReviewLevel == McpReviewLevel.TrustClient))
             {
                 EditorGUI.BeginChangeCheck();
-                var location = EditorGUILayout.Popup(new GUIContent("Confirm in"), (int)McpSettings.ConfirmLocation, ConfirmLocationOptions);
+                var location = EditorGUILayout.Popup(new GUIContent(Loc.Tr("settings.mcp.review.confirmIn", "Confirm in")), (int)McpSettings.ConfirmLocation, BuildConfirmLocationOptions());
                 if (EditorGUI.EndChangeCheck())
                     McpSettings.ConfirmLocation = (McpConfirmLocation)location;
             }
 
             if (McpSettings.ReviewLevel == McpReviewLevel.TrustClient)
             {
-                EditorGUILayout.HelpBox("MCP clients run every tool without asking here, including deletes and script changes. Version control is your safety net.", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    Loc.Tr(
+                        "settings.mcp.review.trustWarning",
+                        "MCP clients run every tool without asking here, including deletes and script changes. Version control is your safety net."),
+                    MessageType.Info);
             }
         }
 
@@ -122,16 +147,18 @@ namespace AgentCore.Editor.Components.MCP.Config
             var build = McpRelayBuilder.Last;
             if (build == null)
             {
-                EditorGUILayout.LabelField("Preparing the relay...", EditorStyles.miniLabel);
-                if (GUILayout.Button("Retry"))
+                EditorGUILayout.LabelField(Loc.Tr("settings.mcp.relay.preparing", "Preparing the relay..."), EditorStyles.miniLabel);
+                if (GUILayout.Button(Loc.Tr("settings.mcp.relay.retry", "Retry")))
                     McpRelayBuilder.EnsureBuiltAsync();
                 return;
             }
 
             if (!build.Success)
             {
-                EditorGUILayout.HelpBox("The AgentCore relay could not be built:\n" + build.Error, MessageType.Error);
-                if (GUILayout.Button("Retry"))
+                EditorGUILayout.HelpBox(
+                    Loc.Tr("settings.mcp.relay.buildFailed", "The AgentCore relay could not be built:\n{0}", build.Error),
+                    MessageType.Error);
+                if (GUILayout.Button(Loc.Tr("settings.mcp.relay.retry", "Retry")))
                     McpRelayBuilder.EnsureBuiltAsync();
                 return;
             }
@@ -143,26 +170,32 @@ namespace AgentCore.Editor.Components.MCP.Config
             if (!string.IsNullOrEmpty(copiedMono) && copiedMono != build.MonoPath)
             {
                 EditorGUILayout.HelpBox(
-                    "The Unity editor path changed since the configuration was copied (different Unity version). Copy it again and re-add it to your client.",
+                    Loc.Tr(
+                        "settings.mcp.relay.monoChanged",
+                        "The Unity editor path changed since the configuration was copied (different Unity version). Copy it again and re-add it to your client."),
                     MessageType.Warning);
             }
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent("Copy Claude Code command",
-                    "Run the copied command once in a terminal. Adds the 'agentcore' MCP server for your user account.")))
+            if (GUILayout.Button(new GUIContent(
+                    Loc.Tr("settings.mcp.connect.copyClaude", "Copy Claude Code command"),
+                    Loc.Tr("settings.mcp.connect.copyClaudeTooltip", "Run the copied command once in a terminal. Adds the 'agentcore' MCP server for your user account."))))
             {
                 Copy(McpClientConfig.ClaudeCodeCommand(build.MonoPath, build.RelayPath, McpPaths.ProjectRoot), build.MonoPath);
             }
 
-            if (GUILayout.Button(new GUIContent("Copy Codex config",
-                    "Paste the copied block into ~/.codex/config.toml (replace an existing [mcp_servers.agentcore] block).")))
+            if (GUILayout.Button(new GUIContent(
+                    Loc.Tr("settings.mcp.connect.copyCodex", "Copy Codex config"),
+                    Loc.Tr("settings.mcp.connect.copyCodexTooltip", "Paste the copied block into ~/.codex/config.toml (replace an existing [mcp_servers.agentcore] block)."))))
             {
                 Copy(McpClientConfig.CodexToml(build.MonoPath, build.RelayPath, McpPaths.ProjectRoot), build.MonoPath);
             }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.LabelField(
-                "Claude Code: paste the command into a terminal. Codex: paste the block into ~/.codex/config.toml. Restart the client afterwards.",
+                Loc.Tr(
+                    "settings.mcp.connect.help",
+                    "Claude Code: paste the command into a terminal. Codex: paste the block into ~/.codex/config.toml. Restart the client afterwards."),
                 EditorStyles.wordWrappedMiniLabel);
         }
 

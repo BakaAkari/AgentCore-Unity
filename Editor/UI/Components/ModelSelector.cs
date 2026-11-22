@@ -25,7 +25,6 @@ namespace AgentCore.Editor.UI.Components
     /// </summary>
     public sealed class ModelSelector : VisualElement
     {
-        internal const string SettingsPath = "Preferences/AgentCore";
         internal const string StyleSheetPath = "Packages/com.agentcore.unity/Editor/UI/Components/ModelSelector.uss";
 
         private readonly VisualElement _dot;
@@ -121,7 +120,7 @@ namespace AgentCore.Editor.UI.Components
         {
             if (AgentCoreProviderProfiles.instance.GetActive() == null)
             {
-                SettingsService.OpenUserPreferences(SettingsPath);
+                AgentCoreSettingsProvider.OpenPreferences(AgentCoreSettingsProvider.ModelAgentSectionId);
                 return;
             }
             AddToClassList("is-open");
@@ -361,7 +360,7 @@ namespace AgentCore.Editor.UI.Components
             AddNavigable(footer, row, () =>
             {
                 editorWindow.Close();
-                SettingsService.OpenUserPreferences(ModelSelector.SettingsPath);
+                AgentCoreSettingsProvider.OpenPreferences(AgentCoreSettingsProvider.ModelAgentSectionId);
             });
             return footer;
         }

@@ -19,7 +19,7 @@ namespace AgentCore.Editor.Config
     public static class ActiveModelConfig
     {
         private const string NoProfileMessage =
-            "No active Provider Profile. Configure one in Project Settings > AgentCore > Model & Agent.";
+            "No active Provider Profile. Configure one in Preferences > AgentCore > Model & Agent.";
 
         private static readonly AsyncLocal<ProviderProfile> ScopedProfile = new();
 

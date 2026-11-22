@@ -206,7 +206,7 @@ namespace AgentCore.Editor.Config
                     if (WarnedKeys.Add(prefKey))
                     {
                         AgentCoreLog.Warning($"[AgentCore] Stored secret '{prefKey}' could not be decrypted for the current Windows user. " +
-                            "The stored value is kept untouched; set the key again in Project Settings > AgentCore if needed.");
+                            "The stored value is kept untouched; set the key again in Preferences > AgentCore if needed.");
                     }
                 }
             }

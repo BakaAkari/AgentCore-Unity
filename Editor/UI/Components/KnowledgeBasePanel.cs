@@ -394,7 +394,7 @@ namespace AgentCore.Editor.UI.Components
 
         private static void OnOpenSettingsClicked()
         {
-            SettingsService.OpenUserPreferences("Preferences/AgentCore");
+            AgentCore.Editor.Config.AgentCoreSettingsProvider.OpenPreferences(AgentCore.Editor.Config.AgentCoreSettingsProvider.ContextMemorySectionId);
         }
 
         // ─────────────────────────────────────────────

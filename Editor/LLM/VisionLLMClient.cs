@@ -36,9 +36,9 @@ namespace AgentCore.Editor.LLM
             string imageBase64DataUrl, string prompt, CancellationToken ct = default)
         {
             if (!VisionModelConfig.IsEnabled)
-                throw new InvalidOperationException("Vision model is not enabled. Enable it in Project Settings > AgentCore > Model & Agent (Vision Model).");
+                throw new InvalidOperationException("Vision model is not enabled. Enable it in Preferences > AgentCore > Model & Agent (Vision Model).");
             if (!VisionModelConfig.IsConfigured)
-                throw new InvalidOperationException("Vision model is not fully configured (endpoint/model missing). Configure it in Project Settings > AgentCore > Model & Agent (Vision Model).");
+                throw new InvalidOperationException("Vision model is not fully configured (endpoint/model missing). Configure it in Preferences > AgentCore > Model & Agent (Vision Model).");
             if (string.IsNullOrWhiteSpace(imageBase64DataUrl))
                 throw new ArgumentException("imageBase64DataUrl is empty.", nameof(imageBase64DataUrl));
 

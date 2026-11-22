@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using AgentCore.Editor.Tools.Safety;
+using AgentCore.Editor.L10n;
 using UnityEditor;
 using UnityEngine;
 
@@ -9,8 +10,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
     /// <summary>
     /// 权限规则设置页（P2）：列出 / 新增 / 编辑 / 删除 / 启停 allow · ask · deny 规则。
     /// <para>
-    /// 编辑在内存工作副本上进行，点击"保存"才写用户文件（UserSettings）；
-    /// 遗留项目规则文件（ProjectSettings）仅在已存在时只读展示，"本地停用"立即写入用户文件，绝不修改项目文件。
+    /// 编辑在内存工作副本上进行，点击"Save"才写用户文件（UserSettings）；
+    /// 遗留项目规则文件（ProjectSettings）仅在已存在时只读展示，"Disable locally"立即写入用户文件，绝不修改项目文件。
     /// </para>
     /// </summary>
     public sealed class PermissionsSettingsPage : IAgentCoreSettingsPage
@@ -42,12 +43,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Id => "permissions";
 
         /// <inheritdoc />
-        public string Title => AgentCore.Editor.L10n.Loc.Tr("settings.permissions.title", "Permissions");
+        public string Title => Loc.Tr("settings.permissions.title", "Permissions");
 
         /// <inheritdoc />
-        public string Description => AgentCore.Editor.L10n.Loc.Tr(
+        public string Description => Loc.Tr(
             "settings.permissions.description",
-            "按工具 / action / 路径配置 allow · ask · deny 规则，细化工具确认行为。");
+            "Configure allow · ask · deny rules by tool / action / path to fine-tune tool confirmation.");
 
         /// <inheritdoc />
         public int Order => 450;
@@ -80,27 +81,27 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             var store = PermissionRulesStore.Default;
             context.Ui.DrawCard(
-                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.overview.title", "How rules work"),
+                Loc.Tr("settings.permissions.overview.title", "How rules work"),
                 null,
                 () =>
                 {
-                    context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
+                    context.Ui.DrawHelpText(Loc.Tr(
                         "settings.permissions.overview.precedence",
-                        "优先级 deny > ask > allow（任一 deny 命中即拒绝，其次 ask，最后 allow）。用户规则与遗留项目规则一起按同一优先级评估；未命中任何规则时行为与没有规则完全一致。"));
-                    context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
+                        "Precedence: deny > ask > allow (any matching deny rejects, then ask, then allow). User rules and legacy project rules are evaluated together with the same precedence; when no rule matches, behavior is identical to having no rules."));
+                    context.Ui.DrawHelpText(Loc.Tr(
                         "settings.permissions.overview.effects",
-                        "allow：跳过确认（含删除 / 执行代码等高影响操作）。ask：总是弹确认，Trust Low/Med 不会自动放行。deny：拒绝执行，作为普通工具失败返回给模型。"));
-                    context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
+                        "allow: skip confirmation (including high-impact operations such as delete / execute code). ask: always prompt; Trust Low/Med will not auto-approve. deny: refuse to run and return an ordinary tool failure to the model."));
+                    context.Ui.DrawHelpText(Loc.Tr(
                         "settings.permissions.overview.yolo",
-                        "YOLO（All）会话忽略全部规则，包括 deny。batch_execute 按子操作逐条匹配。"));
-                    context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
+                        "YOLO (All) sessions ignore all rules, including deny. batch_execute matches each sub-operation individually."));
+                    context.Ui.DrawHelpText(Loc.Tr(
                         "settings.permissions.overview.syntax",
-                        "工具：精确名或 * 通配，可写 manage_asset.delete / manage_script.* 简写；路径：项目相对、正斜杠，支持 **（如 Assets/Plugins/**）。deny/ask 任一路径命中即生效，allow 需全部路径命中。"));
+                        "Tool: exact name or * wildcard; shorthand such as manage_asset.delete / manage_script.* is allowed. Path: project-relative with forward slashes, ** supported (e.g. Assets/Plugins/**). For deny/ask any matching path takes effect; allow requires all paths to match."));
 
                     EditorGUILayout.Space(4);
-                    DrawFileRow(context, "User", store.UserFilePath, store.UserLoadError);
+                    DrawFileRow(context, Loc.Tr("settings.permissions.file.user", "User"), store.UserFilePath, store.UserLoadError);
                     if (store.ProjectFileExists)
-                        DrawFileRow(context, "Project (legacy, read-only)", store.ProjectFilePath, store.ProjectLoadError);
+                        DrawFileRow(context, Loc.Tr("settings.permissions.file.projectLegacy", "Project (legacy, read-only)"), store.ProjectFilePath, store.ProjectLoadError);
                 });
         }
 
@@ -110,7 +111,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUILayout.LabelField(label, path, EditorStyles.miniLabel);
             using (new EditorGUI.DisabledScope(!System.IO.File.Exists(path)))
             {
-                if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.reveal", "显示"), GUILayout.Width(60)))
+                if (GUILayout.Button(Loc.Tr("settings.permissions.reveal", "Show"), GUILayout.MinWidth(60)))
                     EditorUtility.RevealInFinder(path);
             }
             EditorGUILayout.EndHorizontal();
@@ -118,9 +119,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
             if (!string.IsNullOrEmpty(error))
             {
                 context.Ui.DrawStatusLabel(
-                    string.Format(AgentCore.Editor.L10n.Loc.Tr(
+                    string.Format(Loc.Tr(
                         "settings.permissions.loadError",
-                        "文件解析失败，其中的规则被忽略：{0}"), error),
+                        "Failed to parse file; its rules are ignored: {0}"), error),
                     SettingsStatusLevel.Error,
                     miniLabel: true);
             }
@@ -131,10 +132,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private void DrawRulesCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.rules.title", "Rules"),
-                AgentCore.Editor.L10n.Loc.Tr(
+                Loc.Tr("settings.permissions.rules.title", "Rules"),
+                Loc.Tr(
                     "settings.permissions.rules.description",
-                    "规则只保存在本地 UserSettings/AgentCore/PermissionRules.json，不写入 ProjectSettings。"),
+                    "Rules are stored only in local UserSettings/AgentCore/PermissionRules.json and are never written to ProjectSettings."),
                 () =>
                 {
                     DrawUserRuleSection(context);
@@ -152,10 +153,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(
-                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.userRules", "User rules"),
+                Loc.Tr("settings.permissions.userRules", "User rules"),
                 EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.add", "+ 添加规则"), GUILayout.Width(100)))
+            if (GUILayout.Button(Loc.Tr("settings.permissions.add", "+ Add rule"), GUILayout.MinWidth(100)))
             {
                 var rule = new PermissionRule
                 {
@@ -184,7 +185,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             if (!any)
             {
-                context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.empty", "（无规则）"));
+                context.Ui.DrawHelpText(Loc.Tr("settings.permissions.empty", "(no rules)"));
             }
         }
 
@@ -192,16 +193,16 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             var store = PermissionRulesStore.Default;
             EditorGUILayout.LabelField(
-                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.projectRules", "Project rules (legacy, read-only)"),
+                Loc.Tr("settings.permissions.projectRules", "Project rules (legacy, read-only)"),
                 EditorStyles.boldLabel);
-            context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
+            context.Ui.DrawHelpText(Loc.Tr(
                 "settings.permissions.projectRulesHint",
-                "检测到遗留的 ProjectSettings/AgentCore/PermissionRules.json：其中规则只读生效，可在本地单独停用；AgentCore 不会修改该文件。"));
+                "Legacy ProjectSettings/AgentCore/PermissionRules.json detected: its rules apply read-only and can be disabled locally; AgentCore never modifies that file."));
 
             var rules = store.GetRules(PermissionRuleScope.Project);
             if (rules.Count == 0)
             {
-                context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.empty", "（无规则）"));
+                context.Ui.DrawHelpText(Loc.Tr("settings.permissions.empty", "(no rules)"));
                 return;
             }
 
@@ -218,12 +219,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     bool locallyDisabled = store.IsProjectRuleDisabledLocally(rule.id);
                     bool newLocallyDisabled = EditorGUILayout.ToggleLeft(
                         new GUIContent(
-                            AgentCore.Editor.L10n.Loc.Tr("settings.permissions.disableLocally", "本地停用"),
-                            AgentCore.Editor.L10n.Loc.Tr(
+                            Loc.Tr("settings.permissions.disableLocally", "Disable locally"),
+                            Loc.Tr(
                                 "settings.permissions.disableLocallyTooltip",
-                                "仅对你生效（写入用户文件），不修改项目规则文件")),
+                                "Only affects you (written to the user file); the project rules file is not modified")),
                         locallyDisabled,
-                        GUILayout.Width(80));
+                        GUILayout.MinWidth(110), GUILayout.ExpandWidth(false));
                     if (newLocallyDisabled != locallyDisabled)
                     {
                         var id = rule.id;
@@ -244,9 +245,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.BeginHorizontal();
             rule.enabled = EditorGUILayout.ToggleLeft(
-                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.enabled", "启用"),
+                Loc.Tr("settings.permissions.enabled", "Enabled"),
                 rule.enabled,
-                GUILayout.Width(60));
+                GUILayout.MinWidth(70), GUILayout.ExpandWidth(false));
 
             int effectIndex = Array.IndexOf(EffectOptions, (rule.effect ?? string.Empty).Trim().ToLowerInvariant());
             if (effectIndex < 0) effectIndex = 1;
@@ -256,7 +257,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             GUILayout.FlexibleSpace();
 
-            if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.delete", "删除"), GUILayout.Width(50)))
+            if (GUILayout.Button(Loc.Tr("settings.permissions.delete", "Delete"), GUILayout.MinWidth(60)))
             {
                 // 只做标记（遍历中不能删列表元素）；未保存的新行被标记后直接不再显示、也不会写盘
                 row.Deleted = true;
@@ -265,26 +266,26 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             rule.tool = EditorGUILayout.TextField(
                 new GUIContent(
-                    AgentCore.Editor.L10n.Loc.Tr("settings.permissions.tool", "工具"),
-                    AgentCore.Editor.L10n.Loc.Tr("settings.permissions.toolTooltip", "工具名，支持 * 通配；也可写 tool.action 简写")),
+                    Loc.Tr("settings.permissions.tool", "Tool"),
+                    Loc.Tr("settings.permissions.toolTooltip", "Tool name, * wildcard supported; tool.action shorthand also works")),
                 rule.tool ?? string.Empty);
             rule.action = EditorGUILayout.TextField(
                 new GUIContent(
-                    AgentCore.Editor.L10n.Loc.Tr("settings.permissions.action", "Action"),
-                    AgentCore.Editor.L10n.Loc.Tr("settings.permissions.actionTooltip", "可选；为空表示任意 action，支持 * 通配")),
+                    Loc.Tr("settings.permissions.action", "Action"),
+                    Loc.Tr("settings.permissions.actionTooltip", "Optional; empty means any action, * wildcard supported")),
                 rule.action ?? string.Empty);
             rule.path = EditorGUILayout.TextField(
                 new GUIContent(
-                    AgentCore.Editor.L10n.Loc.Tr("settings.permissions.path", "路径"),
-                    AgentCore.Editor.L10n.Loc.Tr("settings.permissions.pathTooltip", "可选；项目相对路径 glob，如 Assets/Plugins/**")),
+                    Loc.Tr("settings.permissions.path", "Path"),
+                    Loc.Tr("settings.permissions.pathTooltip", "Optional; project-relative path glob, e.g. Assets/Plugins/**")),
                 rule.path ?? string.Empty);
             rule.note = EditorGUILayout.TextField(
-                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.note", "备注"),
+                Loc.Tr("settings.permissions.note", "Note"),
                 rule.note ?? string.Empty);
 
             if (row.IsDirty)
             {
-                EditorGUILayout.LabelField(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.unsaved", "（未保存）"), EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(Loc.Tr("settings.permissions.unsaved", "(unsaved)"), EditorStyles.miniLabel);
             }
 
             EditorGUILayout.EndVertical();
@@ -305,13 +306,13 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUILayout.BeginHorizontal();
             using (new EditorGUI.DisabledScope(!dirty))
             {
-                if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.save", "保存"), GUILayout.Width(90)))
+                if (GUILayout.Button(Loc.Tr("settings.permissions.save", "Save"), GUILayout.MinWidth(90)))
                     SaveRows();
-                if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.revert", "撤销修改"), GUILayout.Width(90)))
+                if (GUILayout.Button(Loc.Tr("settings.permissions.revert", "Revert changes"), GUILayout.MinWidth(110)))
                     ReloadRows();
             }
 
-            if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.reload", "从磁盘重新加载"), GUILayout.Width(120)))
+            if (GUILayout.Button(Loc.Tr("settings.permissions.reload", "Reload from disk"), GUILayout.MinWidth(120)))
             {
                 PermissionRulesStore.Default.Reload();
                 ReloadRows();
@@ -327,15 +328,15 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private void DrawTestCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.test.title", "Test a call"),
-                AgentCore.Editor.L10n.Loc.Tr(
+                Loc.Tr("settings.permissions.test.title", "Test a call"),
+                Loc.Tr(
                     "settings.permissions.test.description",
-                    "输入工具名 / action / 路径，查看当前（已保存的）规则会如何处理这次调用。"),
+                    "Enter a tool name / action / path to see how the current (saved) rules would handle that call."),
                 () =>
                 {
-                    _testTool = EditorGUILayout.TextField(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.tool", "工具"), _testTool ?? string.Empty);
-                    _testAction = EditorGUILayout.TextField(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.action", "Action"), _testAction ?? string.Empty);
-                    _testPath = EditorGUILayout.TextField(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.path", "路径"), _testPath ?? string.Empty);
+                    _testTool = EditorGUILayout.TextField(Loc.Tr("settings.permissions.tool", "Tool"), _testTool ?? string.Empty);
+                    _testAction = EditorGUILayout.TextField(Loc.Tr("settings.permissions.action", "Action"), _testAction ?? string.Empty);
+                    _testPath = EditorGUILayout.TextField(Loc.Tr("settings.permissions.path", "Path"), _testPath ?? string.Empty);
 
                     if (string.IsNullOrWhiteSpace(_testTool))
                         return;
@@ -354,7 +355,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     if (!match.HasMatch)
                     {
                         context.Ui.DrawStatusLabel(
-                            AgentCore.Editor.L10n.Loc.Tr("settings.permissions.test.none", "未命中规则：按默认风险策略处理。"),
+                            Loc.Tr("settings.permissions.test.none", "No rule matched: handled by the default risk policy."),
                             SettingsStatusLevel.None,
                             miniLabel: true);
                         return;
@@ -443,7 +444,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             catch (Exception ex)
             {
                 _saveError = string.Format(
-                    AgentCore.Editor.L10n.Loc.Tr("settings.permissions.saveError", "保存失败：{0}"),
+                    Loc.Tr("settings.permissions.saveError", "Save failed: {0}"),
                     ex.Message);
                 return false;
             }

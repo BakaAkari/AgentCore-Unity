@@ -1,7 +1,7 @@
 namespace AgentCore.Editor.Config.Settings.Pages
 {
     /// <summary>
-    /// Describes a settings page rendered inside the AgentCore Project Settings hub.
+    /// Describes a settings page rendered inside the AgentCore Preferences hub.
     /// </summary>
     public interface IAgentCoreSettingsPage
     {

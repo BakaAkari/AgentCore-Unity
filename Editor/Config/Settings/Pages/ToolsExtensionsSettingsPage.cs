@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using AgentCore.Editor.Extensions;
+using AgentCore.Editor.L10n;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.Tools.Infrastructure;
 using UnityEditor;
@@ -21,10 +22,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Id => "tools-extensions";
 
         /// <inheritdoc />
-        public string Title => "Tools & Extensions";
+        public string Title => Loc.Tr("settings.tools.title", "Tools & Extensions");
 
         /// <inheritdoc />
-        public string Description => "Control which tools are exposed to the LLM and manage optional components.";
+        public string Description => Loc.Tr(
+            "settings.tools.description",
+            "Control which tools are exposed to the LLM and manage optional components.");
 
         /// <inheritdoc />
         public int Order => 400;
@@ -55,22 +58,27 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             var settings = context.Settings;
 
-            context.Ui.DrawCard("Capability Overview", "Summary of currently available agent capabilities.", () =>
+            context.Ui.DrawCard(
+                Loc.Tr("settings.tools.overview.title", "Capability Overview"),
+                Loc.Tr("settings.tools.overview.description", "Summary of currently available agent capabilities."),
+                () =>
             {
                 var allTools = ToolRegistry.Instance.GetAllTools();
                 if (allTools != null && allTools.Count > 0)
                 {
                     var enabledCount = allTools.Count(tool =>
                         tool?.Metadata != null && !settings.IsToolDisabled(tool.Metadata.Name, tool.Metadata.Category));
-                    EditorGUILayout.LabelField($"Tools enabled: {enabledCount}/{allTools.Count}", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField(Loc.Tr("settings.tools.overview.toolsEnabled", "Tools enabled: {0}/{1}", enabledCount, allTools.Count), EditorStyles.miniLabel);
                 }
                 else
                 {
-                    EditorGUILayout.LabelField("Tools not initialized yet.", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField(Loc.Tr("settings.tools.overview.notInitialized", "Tools not initialized yet."), EditorStyles.miniLabel);
                 }
 
                 var vcsEnabled = OptionalComponentManager.IsVcsEnabled();
-                EditorGUILayout.LabelField($"VCS component: {(vcsEnabled ? "enabled" : "disabled")}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(vcsEnabled
+                    ? Loc.Tr("settings.tools.overview.vcsEnabled", "VCS component: enabled")
+                    : Loc.Tr("settings.tools.overview.vcsDisabled", "VCS component: disabled"), EditorStyles.miniLabel);
             });
         }
 
@@ -79,8 +87,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawToolVisibilityCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "Tool Visibility",
-                "Toggle tool categories to reduce prompt size.",
+                Loc.Tr("settings.tools.visibility.title", "Tool Visibility"),
+                Loc.Tr("settings.tools.visibility.description", "Toggle tool categories to reduce prompt size."),
                 () => DrawToolManagement(context));
         }
 
@@ -92,19 +100,30 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var allTools = ToolRegistry.Instance.GetAllTools();
             if (allTools == null || allTools.Count == 0)
             {
-                EditorGUILayout.HelpBox("No registered tools are available yet. Tools become available after AgentLoop initialization.", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    Loc.Tr(
+                        "settings.tools.visibility.noTools",
+                        "No registered tools are available yet. Tools become available after AgentLoop initialization."),
+                    MessageType.Info);
                 return;
             }
 
             var totalCount = allTools.Count;
             var enabledCount = allTools.Count(tool => IsToolEnabled(settings, tool));
             EditorGUILayout.LabelField(
-                $"Registered {totalCount} tools, {enabledCount} enabled, {totalCount - enabledCount} disabled",
+                Loc.Tr(
+                    "settings.tools.visibility.summary",
+                    "Registered {0} tools, {1} enabled, {2} disabled",
+                    totalCount,
+                    enabledCount,
+                    totalCount - enabledCount),
                 EditorStyles.miniLabel);
 
             EditorGUILayout.Space(3);
             DrawPresetActions(context, allTools);
-            context.Ui.DrawHelpText("Safe Mode disables FileSystem and Scripting tools. Full Mode clears all disable rules.");
+            context.Ui.DrawHelpText(Loc.Tr(
+                "settings.tools.visibility.presetHelp",
+                "Safe Mode disables FileSystem and Scripting tools. Full Mode clears all disable rules."));
             EditorGUILayout.Space(3);
 
             var groupedTools = allTools
@@ -124,14 +143,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var settings = context.Settings;
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Enable All", GUILayout.Width(90)))
+            if (GUILayout.Button(Loc.Tr("settings.tools.visibility.enableAll", "Enable All"), GUILayout.MinWidth(90)))
             {
                 settings.disabledToolCategories.Clear();
                 settings.disabledTools.Clear();
                 settings.SaveSettings();
             }
 
-            if (GUILayout.Button("Disable All", GUILayout.Width(90)))
+            if (GUILayout.Button(Loc.Tr("settings.tools.visibility.disableAll", "Disable All"), GUILayout.MinWidth(90)))
             {
                 settings.disabledToolCategories.Clear();
                 settings.disabledTools.Clear();
@@ -147,12 +166,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 settings.SaveSettings();
             }
 
-            if (GUILayout.Button("Safe Mode", GUILayout.Width(90)))
+            if (GUILayout.Button(Loc.Tr("settings.tools.visibility.safeMode", "Safe Mode"), GUILayout.MinWidth(90)))
             {
                 ApplyToolPreset(settings, allTools, "Safe");
             }
 
-            if (GUILayout.Button("Full Mode", GUILayout.Width(90)))
+            if (GUILayout.Button(Loc.Tr("settings.tools.visibility.fullMode", "Full Mode"), GUILayout.MinWidth(90)))
             {
                 ApplyToolPreset(settings, allTools, "Full");
             }
@@ -188,7 +207,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
             EditorGUI.indentLevel++;
             if (categoryDisabled)
             {
-                EditorGUILayout.HelpBox("This category is disabled as a whole. Enable the category before managing individual tools.", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    Loc.Tr(
+                        "settings.tools.visibility.categoryDisabled",
+                        "This category is disabled as a whole. Enable the category before managing individual tools."),
+                    MessageType.Info);
             }
 
             var previousEnabled = GUI.enabled;
@@ -311,8 +334,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawTextSearchCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "Text Search (ripgrep)",
-                "manage_file search_content and search_code search_text use ripgrep when it is installed (fast, no regex backtracking, honours .gitignore); otherwise the built-in .NET scanner.",
+                Loc.Tr("settings.tools.rg.title", "Text Search (ripgrep)"),
+                Loc.Tr(
+                    "settings.tools.rg.description",
+                    "manage_file search_content and search_code search_text use ripgrep when it is installed (fast, no regex backtracking, honours .gitignore); otherwise the built-in .NET scanner."),
                 () =>
                 {
                     var availability = RgLocator.Availability;
@@ -327,20 +352,28 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                     EditorGUILayout.BeginHorizontal();
                     var customPath = EditorGUILayout.DelayedTextField(
-                        new GUIContent("rg path (optional)", "Full path to rg / rg.exe, or the folder containing it. Leave empty to search PATH and common install folders. Saved per user (EditorPrefs)."),
+                        new GUIContent(
+                            Loc.Tr("settings.tools.rg.path", "rg path (optional)"),
+                            Loc.Tr(
+                                "settings.tools.rg.pathTooltip",
+                                "Full path to rg / rg.exe, or the folder containing it. Leave empty to search PATH and common install folders. Saved per user (EditorPrefs).")),
                         RgLocator.CustomPath);
                     if (customPath != RgLocator.CustomPath)
                         RgLocator.CustomPath = customPath;
 
-                    if (GUILayout.Button("Browse", GUILayout.Width(64)))
+                    if (GUILayout.Button(Loc.Tr("settings.tools.rg.browse", "Browse"), GUILayout.MinWidth(64)))
                     {
-                        var picked = EditorUtility.OpenFilePanel("Select ripgrep executable", string.Empty, Application.platform == RuntimePlatform.WindowsEditor ? "exe" : string.Empty);
+                        var picked = EditorUtility.OpenFilePanel(Loc.Tr("settings.tools.rg.selectExe", "Select ripgrep executable"), string.Empty, Application.platform == RuntimePlatform.WindowsEditor ? "exe" : string.Empty);
                         if (!string.IsNullOrEmpty(picked))
                             RgLocator.CustomPath = picked;
                     }
                     EditorGUILayout.EndHorizontal();
 
-                    if (GUILayout.Button(new GUIContent("Re-detect", "Check for ripgrep again in the background (custom path, package Plugins/rg, PATH, common install folders).")))
+                    if (GUILayout.Button(new GUIContent(
+                        Loc.Tr("settings.tools.rg.redetect", "Re-detect"),
+                        Loc.Tr(
+                            "settings.tools.rg.redetectTooltip",
+                            "Check for ripgrep again in the background (custom path, package Plugins/rg, PATH, common install folders)."))))
                     {
                         _ = RgLocator.Refresh();
                     }
@@ -352,8 +385,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawOptionalComponentsCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "Optional Components",
-                "Enable/disable optional components for this project on this machine. Takes effect immediately: no recompile, ProjectSettings are not modified.",
+                Loc.Tr("settings.tools.components.title", "Optional Components"),
+                Loc.Tr(
+                    "settings.tools.components.description",
+                    "Enable/disable optional components for this project on this machine. Takes effect immediately: no recompile, ProjectSettings are not modified."),
                 () =>
                 {
                     DrawLegacyDefinesNotice();
@@ -372,9 +407,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 return;
 
             EditorGUILayout.HelpBox(
-                "ProjectSettings still contain legacy AGENTCORE_VCS / AGENTCORE_INDEXING / AGENTCORE_MCP scripting defines from an older AgentCore version. They no longer control anything and can be removed.",
+                Loc.Tr(
+                    "settings.tools.legacy.notice",
+                    "ProjectSettings still contain legacy AGENTCORE_VCS / AGENTCORE_INDEXING / AGENTCORE_MCP scripting defines from an older AgentCore version. They no longer control anything and can be removed."),
                 MessageType.Info);
-            if (GUILayout.Button("Remove Legacy Scripting Defines from ProjectSettings"))
+            if (GUILayout.Button(Loc.Tr("settings.tools.legacy.remove", "Remove Legacy Scripting Defines from ProjectSettings")))
             {
                 // Deferred out of the IMGUI pass: the dialog and the resulting ProjectSettings write
                 // must not run between Layout and Repaint.
@@ -386,10 +423,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void ConfirmRemoveLegacyDefines()
         {
             if (!EditorUtility.DisplayDialog(
-                    "Remove Legacy Scripting Defines",
-                    "Remove AGENTCORE_VCS, AGENTCORE_INDEXING and AGENTCORE_MCP from the Scripting Define Symbols of every build target and save ProjectSettings?\n\nOther defines are left untouched. This modifies ProjectSettings/ProjectSettings.asset and triggers a script recompile.",
-                    "Remove",
-                    "Cancel"))
+                    Loc.Tr("settings.tools.legacy.dialogTitle", "Remove Legacy Scripting Defines"),
+                    Loc.Tr(
+                        "settings.tools.legacy.dialogMessage",
+                        "Remove AGENTCORE_VCS, AGENTCORE_INDEXING and AGENTCORE_MCP from the Scripting Define Symbols of every build target and save ProjectSettings?\n\nOther defines are left untouched. This modifies ProjectSettings/ProjectSettings.asset and triggers a script recompile."),
+                    Loc.Tr("settings.tools.legacy.dialogRemove", "Remove"),
+                    Loc.Tr("common.cancel", "Cancel")))
                 return;
 
             OptionalComponentManager.RemoveLegacyScriptingDefines();
@@ -406,7 +445,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             // ADR-17: Hide "Define: AGENTCORE_XXX" — scripting define symbols are engineering detail
 
             EditorGUI.BeginChangeCheck();
-            var enabled = EditorGUILayout.ToggleLeft("Enabled", component.Enabled);
+            var enabled = EditorGUILayout.ToggleLeft(Loc.Tr("settings.tools.components.enabled", "Enabled"), component.Enabled);
             if (EditorGUI.EndChangeCheck())
             {
                 // Toggling rebuilds the extension registry this page draws from; apply it after the IMGUI pass.
@@ -431,7 +470,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     // Component enabled but contributes no in-page settings (e.g. Indexing — configured in Hub panel).
                     EditorGUILayout.Space(4);
-                    EditorGUILayout.LabelField("No in-page settings. Configure via the AgentCore Hub panel if available.", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField(Loc.Tr(
+                            "settings.tools.components.noInPage",
+                            "No in-page settings. Configure via the AgentCore Hub panel if available."), EditorStyles.miniLabel);
                 }
                 return;
             }
@@ -439,14 +480,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
             if (!component.Enabled)
             {
                 EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField("Settings appear after enabling this component.", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(Loc.Tr("settings.tools.components.afterEnable", "Settings appear after enabling this component."), EditorStyles.miniLabel);
                 return;
             }
 
             EditorGUILayout.Space(4);
             var foldoutKey = ComponentSettingsFoldoutPrefix + component.Id;
             var expanded = context.State.GetFoldout(foldoutKey, true);
-            expanded = EditorGUILayout.Foldout(expanded, "Settings", true);
+            expanded = EditorGUILayout.Foldout(expanded, Loc.Tr("settings.tools.components.settings", "Settings"), true);
             context.State.SetFoldout(foldoutKey, expanded);
 
             if (!expanded)
@@ -471,7 +512,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
             catch (Exception ex)
             {
-                EditorGUILayout.HelpBox($"Failed to draw extension settings '{contribution.Id}': {ex.Message}", MessageType.Warning);
+                EditorGUILayout.HelpBox(Loc.Tr(
+                        "settings.tools.extensionDrawFailed",
+                        "Failed to draw extension settings '{0}': {1}",
+                        contribution.Id,
+                        ex.Message), MessageType.Warning);
             }
         }
 
@@ -486,9 +531,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     break;
                 default:
                     EditorUtility.DisplayDialog(
-                        "Unsupported Optional Component",
-                        $"AgentCore does not know how to toggle optional component '{component.Id}'.",
-                        "OK");
+                        Loc.Tr("settings.tools.components.unsupportedTitle", "Unsupported Optional Component"),
+                        Loc.Tr(
+                            "settings.tools.components.unsupportedMessage",
+                            "AgentCore does not know how to toggle optional component '{0}'.",
+                            component.Id),
+                        Loc.Tr("common.ok", "OK"));
                     break;
             }
         }
@@ -513,8 +561,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
 
             context.Ui.DrawCard(
-                "Other Extension Settings",
-                "Settings contributed by extensions that are not bound to a specific optional component.",
+                Loc.Tr("settings.tools.other.title", "Other Extension Settings"),
+                Loc.Tr(
+                    "settings.tools.other.description",
+                    "Settings contributed by extensions that are not bound to a specific optional component."),
                 () =>
                 {
                     foreach (var contribution in orphanContributions)
@@ -545,7 +595,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
             }
             catch (Exception ex)
             {
-                EditorGUILayout.HelpBox($"Failed to draw extension settings '{contribution.Id}': {ex.Message}", MessageType.Warning);
+                EditorGUILayout.HelpBox(Loc.Tr(
+                        "settings.tools.extensionDrawFailed",
+                        "Failed to draw extension settings '{0}': {1}",
+                        contribution.Id,
+                        ex.Message), MessageType.Warning);
             }
 
             EditorGUILayout.EndVertical();

@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using AgentCore.Editor.Extensions;
+using AgentCore.Editor.L10n;
 using AgentCore.Editor.Tools;
 using AgentCore.Editor.UI;
 using AgentCore.Editor.Utils;
@@ -19,10 +20,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Id => "dashboard";
 
         /// <inheritdoc />
-        public string Title => "Dashboard";
+        public string Title => Loc.Tr("settings.dashboard.title", "Dashboard");
 
         /// <inheritdoc />
-        public string Description => "Overview of AgentCore configuration status and quick actions.";
+        public string Description => Loc.Tr(
+            "settings.dashboard.description",
+            "Overview of AgentCore configuration status and quick actions.");
 
         /// <inheritdoc />
         public int Order => 100;
@@ -109,16 +112,20 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawLogVerbosityCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "Log Verbosity",
-                "Controls the verbosity of [AgentCore]-prefixed logs. If heavy logging during responses lags the Editor, switch to Warning or Error.",
+                Loc.Tr("settings.dashboard.logCard.title", "Log Verbosity"),
+                Loc.Tr(
+                    "settings.dashboard.logCard.description",
+                    "Controls the verbosity of [AgentCore]-prefixed logs. If heavy logging during responses lags the Editor, switch to Warning or Error."),
                 () =>
                 {
                     var settings = context.Settings;
                     var current = settings.logLevel;
                     var newLevel = (AgentCore.Editor.Utils.LogLevel)EditorGUILayout.EnumPopup(
                         new GUIContent(
-                            "Log Level",
-                            "Silent: fully silent (use with caution) · Error: errors only · Warning: default, warnings + errors · Info: key business events · Debug: everything, incl. streaming token / per-event high-frequency logs"),
+                            Loc.Tr("settings.dashboard.logLevel", "Log Level"),
+                            Loc.Tr(
+                                "settings.dashboard.logLevelTooltip",
+                                "Silent: fully silent (use with caution) · Error: errors only · Warning: default, warnings + errors · Info: key business events · Debug: everything, incl. streaming token / per-event high-frequency logs")),
                         current);
                     if (newLevel != current)
                     {
@@ -134,32 +141,35 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             var settings = context.Settings;
 
-            context.Ui.DrawCard("Setup Status", "Current configuration state for core services.", () =>
+            context.Ui.DrawCard(
+                Loc.Tr("settings.dashboard.setup.title", "Setup Status"),
+                Loc.Tr("settings.dashboard.setup.description", "Current configuration state for core services."),
+                () =>
             {
                 // LLM — required, so missing active profile is an Error.
                 DrawServiceStatusRow(context,
-                    "LLM",
+                    Loc.Tr("settings.dashboard.service.llm", "LLM"),
                     isEnabled: ActiveModelConfig.IsUsingProfile,
                     enabledDetail: ActiveModelConfig.IsUsingProfile ? ActiveModelConfig.ModelName : "",
                     disabledIsError: true);
 
                 // Memory (mem0) — optional.
                 DrawServiceStatusRow(context,
-                    "Memory",
+                    Loc.Tr("settings.dashboard.service.memory", "Memory"),
                     isEnabled: settings.mem0Enabled,
                     enabledDetail: settings.mem0Endpoint,
                     disabledIsError: false);
 
                 // Knowledge (LightRAG) — optional.
                 DrawServiceStatusRow(context,
-                    "Knowledge",
+                    Loc.Tr("settings.dashboard.service.knowledge", "Knowledge"),
                     isEnabled: settings.lightragEnabled,
                     enabledDetail: settings.lightragEndpoint,
                     disabledIsError: false);
 
                 // VCS — optional component.
                 DrawServiceStatusRow(context,
-                    "VCS",
+                    Loc.Tr("settings.dashboard.service.vcs", "VCS"),
                     isEnabled: OptionalComponentManager.IsVcsEnabled(),
                     enabledDetail: null,
                     disabledIsError: false);
@@ -171,14 +181,14 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     var enabledCount = allTools.Count(tool =>
                         tool?.Metadata != null && !settings.IsToolDisabled(tool.Metadata.Name, tool.Metadata.Category));
                     context.Ui.DrawStatusLabel(
-                        $"Tools: {enabledCount}/{allTools.Count} enabled",
+                        Loc.Tr("settings.dashboard.toolsEnabled", "Tools: {0}/{1} enabled", enabledCount, allTools.Count),
                         SettingsStatusLevel.None,
                         miniLabel: true);
                 }
                 else
                 {
                     context.Ui.DrawStatusLabel(
-                        "Tools: not initialized yet",
+                        Loc.Tr("settings.dashboard.toolsNotInitialized", "Tools: not initialized yet"),
                         SettingsStatusLevel.Warning,
                         miniLabel: true);
                 }
@@ -211,18 +221,18 @@ namespace AgentCore.Editor.Config.Settings.Pages
             if (isEnabled)
             {
                 text = string.IsNullOrEmpty(enabledDetail)
-                    ? $"[ON]  {serviceName}: Enabled"
-                    : $"[ON]  {serviceName}: Enabled ({enabledDetail})";
+                    ? Loc.Tr("settings.dashboard.status.enabled", "[ON]  {0}: Enabled", serviceName)
+                    : Loc.Tr("settings.dashboard.status.enabledDetail", "[ON]  {0}: Enabled ({1})", serviceName, enabledDetail);
                 level = SettingsStatusLevel.Success;
             }
             else if (disabledIsError)
             {
-                text = $"[FAIL] {serviceName}: Missing configuration";
+                text = Loc.Tr("settings.dashboard.status.missing", "[FAIL] {0}: Missing configuration", serviceName);
                 level = SettingsStatusLevel.Error;
             }
             else
             {
-                text = $"[OFF] {serviceName}: Disabled";
+                text = Loc.Tr("settings.dashboard.status.disabled", "[OFF] {0}: Disabled", serviceName);
                 level = SettingsStatusLevel.None;
             }
 
@@ -234,16 +244,19 @@ namespace AgentCore.Editor.Config.Settings.Pages
             // 所有 Quick Actions 按钮统一宽度，避免每行按钮宽度不一致（此前混用 140/150）
             const float ButtonWidth = 150f;
 
-            context.Ui.DrawCard("Quick Actions", "Common shortcuts and maintenance actions.", () =>
+            context.Ui.DrawCard(
+                Loc.Tr("settings.dashboard.quick.title", "Quick Actions"),
+                Loc.Tr("settings.dashboard.quick.description", "Common shortcuts and maintenance actions."),
+                () =>
             {
                 EditorGUILayout.BeginHorizontal();
 
-                if (GUILayout.Button("Open Chat Window", GUILayout.Width(ButtonWidth)))
+                if (GUILayout.Button(Loc.Tr("settings.dashboard.quick.openChat", "Open Chat Window"), GUILayout.Width(ButtonWidth)))
                 {
                     ChatWindow.ShowWindow();
                 }
 
-                if (GUILayout.Button("Refresh Tool Registry", GUILayout.Width(ButtonWidth)))
+                if (GUILayout.Button(Loc.Tr("settings.dashboard.quick.refreshTools", "Refresh Tool Registry"), GUILayout.Width(ButtonWidth)))
                 {
                     AgentCore.Editor.Tools.Infrastructure.ToolAutoDiscovery.DiscoverAndRegisterAll();
                     AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Tool registry refreshed.");
@@ -254,7 +267,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                 EditorGUILayout.BeginHorizontal();
 
-                if (GUILayout.Button("Open Logs", GUILayout.Width(ButtonWidth)))
+                if (GUILayout.Button(Loc.Tr("settings.dashboard.quick.openLogs", "Open Logs"), GUILayout.Width(ButtonWidth)))
                 {
                     var logPath = GetEditorLogPath();
                     if (!string.IsNullOrEmpty(logPath) && File.Exists(logPath))
@@ -263,17 +276,20 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     }
                     else
                     {
-                        EditorUtility.DisplayDialog("Open Logs", "Could not locate the Unity Editor log file.", "OK");
+                        EditorUtility.DisplayDialog(
+                            Loc.Tr("settings.dashboard.quick.openLogs", "Open Logs"),
+                            Loc.Tr("settings.dashboard.logs.notFound", "Could not locate the Unity Editor log file."),
+                            Loc.Tr("common.ok", "OK"));
                     }
                 }
 
-                if (GUILayout.Button("Reset Settings", GUILayout.Width(ButtonWidth)))
+                if (GUILayout.Button(Loc.Tr("settings.dashboard.reset.button", "Reset Settings"), GUILayout.Width(ButtonWidth)))
                 {
                     if (EditorUtility.DisplayDialog(
-                        "Reset Settings",
-                        "This will reset all AgentCore settings to their default values.\n\nThis action cannot be undone.",
-                        "Reset",
-                        "Cancel"))
+                        Loc.Tr("settings.dashboard.reset.title", "Reset Settings"),
+                        Loc.Tr("settings.dashboard.reset.message", "This will reset all AgentCore settings to their default values.\n\nThis action cannot be undone."),
+                        Loc.Tr("settings.dashboard.reset.confirm", "Reset"),
+                        Loc.Tr("common.cancel", "Cancel")))
                     {
                         context.Settings.ResetToDefaults();
                         AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] Settings reset to defaults.");
@@ -285,27 +301,29 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                 EditorGUILayout.BeginHorizontal();
 
-                if (GUILayout.Button("Clear Secure Keys", GUILayout.Width(ButtonWidth)))
+                if (GUILayout.Button(Loc.Tr("settings.dashboard.clearKeys.button", "Clear Secure Keys"), GUILayout.Width(ButtonWidth)))
                 {
                     if (EditorUtility.DisplayDialog(
-                        "Clear Secure Keys",
-                        "This will clear all stored API keys (LLM, mem0, LightRAG).\n\nThis action cannot be undone.",
-                        "Clear",
-                        "Cancel"))
+                        Loc.Tr("settings.dashboard.clearKeys.title", "Clear Secure Keys"),
+                        Loc.Tr("settings.dashboard.clearKeys.message", "This will clear all stored API keys (LLM, mem0, LightRAG).\n\nThis action cannot be undone."),
+                        Loc.Tr("settings.dashboard.clearKeys.confirm", "Clear"),
+                        Loc.Tr("common.cancel", "Cancel")))
                     {
                         SecureKeyStorage.ClearAll();
                         AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] All secure keys cleared.");
                     }
                 }
 
-                if (GUILayout.Button("Clear Learned Rules", GUILayout.Width(ButtonWidth)))
+                if (GUILayout.Button(Loc.Tr("settings.dashboard.clearRules.button", "Clear Learned Rules"), GUILayout.Width(ButtonWidth)))
                 {
                     if (EditorUtility.DisplayDialog(
-                        "Clear Learned Request Rules",
-                        "This will forget all auto-learned request field restrictions (e.g. which endpoints reject 'reasoning' or 'temperature').\n\n" +
-                        "Each affected model will re-learn on its next call (one recoverable 400 retry).",
-                        "Clear",
-                        "Cancel"))
+                        Loc.Tr("settings.dashboard.clearRules.title", "Clear Learned Request Rules"),
+                        Loc.Tr(
+                            "settings.dashboard.clearRules.message",
+                            "This will forget all auto-learned request field restrictions (e.g. which endpoints reject 'reasoning' or 'temperature').\n\n" +
+                            "Each affected model will re-learn on its next call (one recoverable 400 retry)."),
+                        Loc.Tr("settings.dashboard.clearRules.confirm", "Clear"),
+                        Loc.Tr("common.cancel", "Cancel")))
                     {
                         AgentCore.Editor.LLM.RequestPruningRegistry.ClearAll();
                     }

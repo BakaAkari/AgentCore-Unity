@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using AgentCore.Editor.Bootstrap;
 using AgentCore.Editor.Cloud;
+using AgentCore.Editor.L10n;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -37,10 +38,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         public string Id => "context-memory";
 
         /// <inheritdoc />
-        public string Title => "Context & Memory";
+        public string Title => Loc.Tr("settings.contextMemory.title", "Context & Memory");
 
         /// <inheritdoc />
-        public string Description => "Configure context sources, budget, compression, memory service, and knowledge base.";
+        public string Description => Loc.Tr(
+            "settings.contextMemory.description",
+            "Configure context sources, budget, compression, memory service, and knowledge base.");
 
         /// <inheritdoc />
         public int Order => 300;
@@ -78,12 +81,18 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void DrawProjectFilesCard(AgentCoreSettingsContext context)
         {
             context.Ui.DrawCard(
-                "Project Files",
-                "PROJECT.md describes project conventions; SOUL.ext.md adds behavior rules. Both are auto-loaded by the agent and stored locally in UserSettings/AgentCore/ (personal, not in version control). Legacy copies in the project root or AgentCore/ are read as a fallback only.",
+                Loc.Tr("settings.contextMemory.projectFiles.title", "Project Files"),
+                Loc.Tr(
+                    "settings.contextMemory.projectFiles.description",
+                    "PROJECT.md describes project conventions; SOUL.ext.md adds behavior rules. Both are auto-loaded by the agent and stored locally in UserSettings/AgentCore/ (personal, not in version control). Legacy copies in the project root or AgentCore/ are read as a fallback only."),
                 () =>
                 {
-                    DrawUserFileRow("PROJECT.md", "Project conventions and personal preferences — stored locally in UserSettings/AgentCore/. Agent can edit this file directly.");
-                    DrawUserFileRow("SOUL.ext.md", "Agent behavior rule extensions — appended to built-in SOUL, stored locally in UserSettings/AgentCore/.");
+                    DrawUserFileRow("PROJECT.md", Loc.Tr(
+                        "settings.contextMemory.projectFiles.projectMdDesc",
+                        "Project conventions and personal preferences — stored locally in UserSettings/AgentCore/. Agent can edit this file directly."));
+                    DrawUserFileRow("SOUL.ext.md", Loc.Tr(
+                        "settings.contextMemory.projectFiles.soulExtDesc",
+                        "Agent behavior rule extensions — appended to built-in SOUL, stored locally in UserSettings/AgentCore/."));
                 });
         }
 
@@ -101,14 +110,20 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var settings = context.Settings;
 
             context.Ui.DrawCard(
-                "Context Compression",
-                "Auto-compress conversation history when context window fills up. Enabled by default.",
+                Loc.Tr("settings.contextMemory.compression.title", "Context Compression"),
+                Loc.Tr(
+                    "settings.contextMemory.compression.description",
+                    "Auto-compress conversation history when context window fills up. Enabled by default."),
                 () =>
                 {
                     EditorGUI.BeginChangeCheck();
 
                     settings.compressionEnabled = EditorGUILayout.Toggle(
-                        new GUIContent("Enable Compression", "Compress tool results and history instead of truncating."),
+                        new GUIContent(
+                            Loc.Tr("settings.contextMemory.compression.enable", "Enable Compression"),
+                            Loc.Tr(
+                                "settings.contextMemory.compression.enableTooltip",
+                                "Compress tool results and history instead of truncating.")),
                         settings.compressionEnabled);
 
                     if (EditorGUI.EndChangeCheck())
@@ -123,8 +138,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var settings = context.Settings;
 
             context.Ui.DrawServiceCard(
-                title: "Long-Term Memory (mem0)",
-                description: "Cross-session persistent memory. Agent extracts key info from conversations and recalls in later sessions. Requires self-hosted mem0.",
+                title: Loc.Tr("settings.contextMemory.memory.title", "Long-Term Memory (mem0)"),
+                description: Loc.Tr(
+                    "settings.contextMemory.memory.description",
+                    "Cross-session persistent memory. Agent extracts key info from conversations and recalls in later sessions. Requires self-hosted mem0."),
                 enabled: settings.mem0Enabled,
                 onEnabledChanged: value =>
                 {
@@ -139,29 +156,37 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     EditorGUI.BeginChangeCheck();
 
                     settings.mem0Endpoint = EditorGUILayout.TextField(
-                        new GUIContent("Endpoint", "mem0 service URL"),
+                        new GUIContent(
+                            Loc.Tr("settings.contextMemory.memory.endpoint", "Endpoint"),
+                            Loc.Tr("settings.contextMemory.memory.endpointTooltip", "mem0 service URL")),
                         settings.mem0Endpoint);
 
                     context.Ui.DrawApiKeyRow(
-                        "API Key",
-                        "mem0 service API key",
+                        Loc.Tr("settings.contextMemory.memory.apiKey", "API Key"),
+                        Loc.Tr("settings.contextMemory.memory.apiKeyTooltip", "mem0 service API key"),
                         context.State.StringValues[Mem0ApiKeyDisplayKey],
-                        "Set mem0 API Key",
-                        "Enter your mem0 API Key:",
+                        Loc.Tr("settings.contextMemory.memory.setApiKey", "Set mem0 API Key"),
+                        Loc.Tr("settings.contextMemory.memory.enterApiKey", "Enter your mem0 API Key:"),
                         newKey =>
                         {
                             SecureKeyStorage.SetMem0ApiKey(newKey);
-                            context.State.StringValues[Mem0ApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
+                            context.State.StringValues[Mem0ApiKeyDisplayKey] = string.IsNullOrEmpty(newKey)
+                                ? Loc.Tr("settings.ui.notSet", "(not set)")
+                                : "••••••••••••";
                         },
                         () =>
                         {
                             SecureKeyStorage.SetMem0ApiKey(string.Empty);
-                            context.State.StringValues[Mem0ApiKeyDisplayKey] = "(not set)";
+                            context.State.StringValues[Mem0ApiKeyDisplayKey] = Loc.Tr("settings.ui.notSet", "(not set)");
                         });
 
                     GUI.enabled = false;
                     EditorGUILayout.TextField(
-                        new GUIContent("User ID", "Auto-generated unique user identifier for memory isolation"),
+                        new GUIContent(
+                            Loc.Tr("settings.contextMemory.memory.userId", "User ID"),
+                            Loc.Tr(
+                                "settings.contextMemory.memory.userIdTooltip",
+                                "Auto-generated unique user identifier for memory isolation")),
                         settings.EffectiveUserId);
                     GUI.enabled = true;
 
@@ -176,7 +201,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     // Auto Memory — advanced, collapsed by default.
                     EditorGUILayout.Space(4);
                     var autoExpanded = context.State.GetFoldout(AutoMemoryFoldoutKey, FoldoutDefaults.Advanced);
-                    autoExpanded = EditorGUILayout.Foldout(autoExpanded, "Auto Memory (advanced)", true);
+                    autoExpanded = EditorGUILayout.Foldout(autoExpanded, Loc.Tr("settings.contextMemory.memory.autoMemory", "Auto Memory (advanced)"), true);
                     context.State.SetFoldout(AutoMemoryFoldoutKey, autoExpanded);
 
                     if (autoExpanded)
@@ -185,12 +210,19 @@ namespace AgentCore.Editor.Config.Settings.Pages
                         EditorGUI.BeginChangeCheck();
 
                         settings.autoMemoryEnabled = EditorGUILayout.Toggle(
-                            new GUIContent("Auto-Extract at Session End",
-                                "Automatically extract key information to mem0 at session end"),
+                            new GUIContent(
+                                Loc.Tr("settings.contextMemory.memory.autoExtract", "Auto-Extract at Session End"),
+                                Loc.Tr(
+                                    "settings.contextMemory.memory.autoExtractTooltip",
+                                    "Automatically extract key information to mem0 at session end")),
                             settings.autoMemoryEnabled);
 
                         settings.autoMemoryMinTurns = EditorGUILayout.IntSlider(
-                            new GUIContent("Min Turns", "Minimum user turns before triggering auto-memory"),
+                            new GUIContent(
+                                Loc.Tr("settings.contextMemory.memory.minTurns", "Min Turns"),
+                                Loc.Tr(
+                                    "settings.contextMemory.memory.minTurnsTooltip",
+                                    "Minimum user turns before triggering auto-memory")),
                             settings.autoMemoryMinTurns, 1, 20);
 
                         if (EditorGUI.EndChangeCheck())
@@ -207,8 +239,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var settings = context.Settings;
 
             context.Ui.DrawServiceCard(
-                title: "Knowledge Base (LightRAG)",
-                description: "Project doc vector search. Indexes project docs and returns semantically relevant snippets. Requires self-hosted LightRAG.",
+                title: Loc.Tr("settings.contextMemory.knowledge.title", "Knowledge Base (LightRAG)"),
+                description: Loc.Tr(
+                    "settings.contextMemory.knowledge.description",
+                    "Project doc vector search. Indexes project docs and returns semantically relevant snippets. Requires self-hosted LightRAG."),
                 enabled: settings.lightragEnabled,
                 onEnabledChanged: value =>
                 {
@@ -223,24 +257,28 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     EditorGUI.BeginChangeCheck();
 
                     settings.lightragEndpoint = EditorGUILayout.TextField(
-                        new GUIContent("Endpoint", "LightRAG service URL"),
+                        new GUIContent(
+                            Loc.Tr("settings.contextMemory.knowledge.endpoint", "Endpoint"),
+                            Loc.Tr("settings.contextMemory.knowledge.endpointTooltip", "LightRAG service URL")),
                         settings.lightragEndpoint);
 
                     context.Ui.DrawApiKeyRow(
-                        "API Key",
-                        "LightRAG service API key",
+                        Loc.Tr("settings.contextMemory.knowledge.apiKey", "API Key"),
+                        Loc.Tr("settings.contextMemory.knowledge.apiKeyTooltip", "LightRAG service API key"),
                         context.State.StringValues[LightRagApiKeyDisplayKey],
-                        "Set LightRAG API Key",
-                        "Enter your LightRAG API Key:",
+                        Loc.Tr("settings.contextMemory.knowledge.setApiKey", "Set LightRAG API Key"),
+                        Loc.Tr("settings.contextMemory.knowledge.enterApiKey", "Enter your LightRAG API Key:"),
                         newKey =>
                         {
                             SecureKeyStorage.SetLightRAGApiKey(newKey);
-                            context.State.StringValues[LightRagApiKeyDisplayKey] = string.IsNullOrEmpty(newKey) ? "(not set)" : "••••••••••••";
+                            context.State.StringValues[LightRagApiKeyDisplayKey] = string.IsNullOrEmpty(newKey)
+                                ? Loc.Tr("settings.ui.notSet", "(not set)")
+                                : "••••••••••••";
                         },
                         () =>
                         {
                             SecureKeyStorage.SetLightRAGApiKey(string.Empty);
-                            context.State.StringValues[LightRagApiKeyDisplayKey] = "(not set)";
+                            context.State.StringValues[LightRagApiKeyDisplayKey] = Loc.Tr("settings.ui.notSet", "(not set)");
                         });
 
                     if (EditorGUI.EndChangeCheck())
@@ -261,7 +299,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = !IsRunning(context, TestMem0RunningKey);
-            if (GUILayout.Button(IsRunning(context, TestMem0RunningKey) ? "Testing..." : "Test mem0",
+            if (GUILayout.Button(IsRunning(context, TestMem0RunningKey)
+                    ? Loc.Tr("settings.common.testing", "Testing...")
+                    : Loc.Tr("settings.contextMemory.memory.test", "Test mem0"),
                 GUILayout.MinWidth(120), GUILayout.MaxWidth(160)))
             {
                 TestMem0Connection(context);
@@ -279,7 +319,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = !IsRunning(context, TestLightRAGRunningKey);
-            if (GUILayout.Button(IsRunning(context, TestLightRAGRunningKey) ? "Testing..." : "Test LightRAG",
+            if (GUILayout.Button(IsRunning(context, TestLightRAGRunningKey)
+                    ? Loc.Tr("settings.common.testing", "Testing...")
+                    : Loc.Tr("settings.contextMemory.knowledge.test", "Test LightRAG"),
                 GUILayout.MinWidth(140), GUILayout.MaxWidth(180)))
             {
                 TestLightRAGConnection(context);
@@ -296,7 +338,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void TestMem0Connection(AgentCoreSettingsContext context)
         {
             SetRunning(context, TestMem0RunningKey, true);
-            context.State.SetStatus(TestMem0StatusKey, "Testing...", SettingsStatusLevel.Loading);
+            context.State.SetStatus(TestMem0StatusKey, Loc.Tr("settings.common.testing", "Testing..."), SettingsStatusLevel.Loading);
             var endpoint = context.Settings.mem0Endpoint;
             var apiKey = SecureKeyStorage.GetMem0ApiKey();
             var userId = context.Settings.EffectiveUserId;
@@ -311,7 +353,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     {
                         context.State.SetStatus(
                             TestMem0StatusKey,
-                            success ? $"[OK] {message}" : $"[FAIL] {message}",
+                            success
+                                ? Loc.Tr("settings.contextMemory.test.ok", "[OK] {0}", message)
+                                : Loc.Tr("settings.contextMemory.test.fail", "[FAIL] {0}", message),
                             success ? SettingsStatusLevel.Success : SettingsStatusLevel.Error);
                         SetRunning(context, TestMem0RunningKey, false);
                     });
@@ -320,7 +364,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     AsyncHelper.RunOnMainThread(() =>
                     {
-                        context.State.SetStatus(TestMem0StatusKey, $"[FAIL] {ex.Message}", SettingsStatusLevel.Error);
+                        context.State.SetStatus(TestMem0StatusKey,
+                            Loc.Tr("settings.contextMemory.test.fail", "[FAIL] {0}", ex.Message), SettingsStatusLevel.Error);
                         SetRunning(context, TestMem0RunningKey, false);
                     });
                 }
@@ -330,7 +375,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
         private static void TestLightRAGConnection(AgentCoreSettingsContext context)
         {
             SetRunning(context, TestLightRAGRunningKey, true);
-            context.State.SetStatus(TestLightRAGStatusKey, "Testing...", SettingsStatusLevel.Loading);
+            context.State.SetStatus(TestLightRAGStatusKey, Loc.Tr("settings.common.testing", "Testing..."), SettingsStatusLevel.Loading);
             var endpoint = context.Settings.lightragEndpoint;
             var apiKey = SecureKeyStorage.GetLightRAGApiKey();
 
@@ -344,7 +389,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     {
                         context.State.SetStatus(
                             TestLightRAGStatusKey,
-                            success ? "[OK] Connected" : "[FAIL] Unhealthy",
+                            success
+                                ? Loc.Tr("settings.contextMemory.knowledge.connected", "[OK] Connected")
+                                : Loc.Tr("settings.contextMemory.knowledge.unhealthy", "[FAIL] Unhealthy"),
                             success ? SettingsStatusLevel.Success : SettingsStatusLevel.Error);
                         SetRunning(context, TestLightRAGRunningKey, false);
                     });
@@ -353,7 +400,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     AsyncHelper.RunOnMainThread(() =>
                     {
-                        context.State.SetStatus(TestLightRAGStatusKey, $"[FAIL] {ex.Message}", SettingsStatusLevel.Error);
+                        context.State.SetStatus(TestLightRAGStatusKey,
+                            Loc.Tr("settings.contextMemory.test.fail", "[FAIL] {0}", ex.Message), SettingsStatusLevel.Error);
                         SetRunning(context, TestLightRAGRunningKey, false);
                     });
                 }
@@ -399,22 +447,24 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     Path.GetFullPath(filePath),
                     Path.GetFullPath(BootstrapLoader.GetDefaultUserFilePath(fileName) ?? filePath),
                     StringComparison.OrdinalIgnoreCase);
-                EditorGUILayout.LabelField(legacy ? relativePath + "  (legacy fallback)" : relativePath, EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(legacy
+                    ? relativePath + "  " + Loc.Tr("settings.contextMemory.files.legacyFallback", "(legacy fallback)")
+                    : relativePath, EditorStyles.miniLabel);
 
-                if (GUILayout.Button("Edit", GUILayout.Width(50)))
+                if (GUILayout.Button(Loc.Tr("settings.contextMemory.files.edit", "Edit"), GUILayout.MinWidth(50)))
                 {
                     System.Diagnostics.Process.Start(filePath);
                 }
 
-                if (GUILayout.Button("Show", GUILayout.Width(50)))
+                if (GUILayout.Button(Loc.Tr("settings.contextMemory.files.show", "Show"), GUILayout.MinWidth(50)))
                 {
                     EditorUtility.RevealInFinder(filePath);
                 }
             }
             else
             {
-                EditorGUILayout.LabelField("(not created)", EditorStyles.miniLabel);
-                if (GUILayout.Button("Create", GUILayout.Width(60)))
+                EditorGUILayout.LabelField(Loc.Tr("settings.contextMemory.files.notCreated", "(not created)"), EditorStyles.miniLabel);
+                if (GUILayout.Button(Loc.Tr("settings.contextMemory.files.create", "Create"), GUILayout.MinWidth(60)))
                 {
                     CreateUserFile(fileName);
                 }
@@ -456,12 +506,12 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             if (!context.State.StringValues.ContainsKey(Mem0ApiKeyDisplayKey))
             {
-                context.State.StringValues[Mem0ApiKeyDisplayKey] = SecureKeyStorage.HasMem0ApiKey() ? "••••••••••••" : "(not set)";
+                context.State.StringValues[Mem0ApiKeyDisplayKey] = SecureKeyStorage.HasMem0ApiKey() ? "••••••••••••" : Loc.Tr("settings.ui.notSet", "(not set)");
             }
 
             if (!context.State.StringValues.ContainsKey(LightRagApiKeyDisplayKey))
             {
-                context.State.StringValues[LightRagApiKeyDisplayKey] = SecureKeyStorage.HasLightRAGApiKey() ? "••••••••••••" : "(not set)";
+                context.State.StringValues[LightRagApiKeyDisplayKey] = SecureKeyStorage.HasLightRAGApiKey() ? "••••••••••••" : Loc.Tr("settings.ui.notSet", "(not set)");
             }
         }
     }

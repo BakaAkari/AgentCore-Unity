@@ -31,7 +31,7 @@ namespace AgentCore.Editor.Utils
     /// AgentCore 统一日志封装 (v1.6.5+)。
     /// <para>
     /// 通过 <see cref="AgentCore.Editor.Config.AgentCoreSettings.logLevel"/> 控制输出级别,
-    /// 用户可在 Project Settings > AgentCore > Dashboard 里选择档位。
+    /// 用户可在 Preferences > AgentCore > Dashboard 里选择档位。
     /// </para>
     /// <para>
     /// 迁移指引:

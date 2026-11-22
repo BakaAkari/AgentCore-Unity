@@ -212,7 +212,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
             var helpText = new Label(endpointConfigured && modelConfigured
                 ? "LLM is configured. The indexer itself does not call the LLM."
-                : "LLM endpoint or model is missing — configure them in Project Settings > AgentCore > Model & Agent.");
+                : "LLM endpoint or model is missing — configure them in Preferences > AgentCore > Model & Agent.");
             helpText.AddToClassList(HelpTextClass);
             if (!endpointConfigured || !modelConfigured)
                 helpText.AddToClassList(StatusErrorClass);
@@ -231,7 +231,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 var workspace = IndexWorkspaceResolver.ResolveFromCurrent();
                 if (workspace == null)
                 {
-                    var warn = new Label("No workspace detected. Configure a workspace root in Project Settings > AgentCore > Workspace.");
+                    var warn = new Label("No workspace detected. Configure a workspace root in Preferences > AgentCore > Workspace.");
                     warn.AddToClassList(HelpTextClass);
                     warn.AddToClassList(StatusErrorClass);
                     content.Add(warn);
@@ -297,7 +297,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
                 if (roots == null || roots.Count == 0)
                 {
-                    var empty = new Label("No indexing roots resolved. Configure workspace scope roots in Project Settings > AgentCore > Workspace.");
+                    var empty = new Label("No indexing roots resolved. Configure workspace scope roots in Preferences > AgentCore > Workspace.");
                     empty.AddToClassList(HelpTextClass);
                     empty.AddToClassList(StatusErrorClass);
                     content.Add(empty);

@@ -1,4 +1,5 @@
 using System;
+using AgentCore.Editor.L10n;
 using UnityEditor;
 using UnityEngine;
 
@@ -79,7 +80,7 @@ namespace AgentCore.Editor.Config.Settings
                     // Defensive handling: exception in content callback must not break outer layout balance.
                     UnityEngine.Debug.LogException(ex);
                     EditorGUILayout.HelpBox(
-                        $"Error drawing this card content: {ex.Message}\nSee Console for details.",
+                        Loc.Tr("settings.ui.cardError", "Error drawing this card content: {0}\nSee Console for details.", ex.Message),
                         UnityEditor.MessageType.Error);
                 }
             }
@@ -144,7 +145,9 @@ namespace AgentCore.Editor.Config.Settings
                 // Enable toggle — always visible
                 EditorGUI.BeginChangeCheck();
                 var newEnabled = EditorGUILayout.ToggleLeft(
-                    new GUIContent(enabled ? "Enabled" : "Enable this service"),
+                    new GUIContent(enabled
+                        ? Loc.Tr("settings.ui.enabled", "Enabled")
+                        : Loc.Tr("settings.ui.enableService", "Enable this service")),
                     enabled);
                 if (EditorGUI.EndChangeCheck())
                 {
@@ -163,7 +166,7 @@ namespace AgentCore.Editor.Config.Settings
                     {
                         UnityEngine.Debug.LogException(ex);
                         EditorGUILayout.HelpBox(
-                            $"Error drawing this service card content: {ex.Message}\nSee Console for details.",
+                            Loc.Tr("settings.ui.serviceCardError", "Error drawing this service card content: {0}\nSee Console for details.", ex.Message),
                             UnityEditor.MessageType.Error);
                     }
                 }
@@ -179,9 +182,11 @@ namespace AgentCore.Editor.Config.Settings
         /// </summary>
         /// <param name="enabled">Whether the target is enabled.</param>
         /// <param name="width">Badge width in pixels.</param>
-        public void DrawServiceStatusBadge(bool enabled, float width = 74f)
+        public void DrawServiceStatusBadge(bool enabled, float width = 92f)
         {
-            var text = enabled ? "[ON] Enabled" : "[OFF] Disabled";
+            var text = enabled
+                ? Loc.Tr("settings.ui.badgeEnabled", "[ON] Enabled")
+                : Loc.Tr("settings.ui.badgeDisabled", "[OFF] Disabled");
             var style = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
             style.normal.textColor = enabled ? GetStatusColor(SettingsStatusLevel.Success) : new Color(0.55f, 0.55f, 0.55f);
             EditorGUILayout.LabelField(text, style, GUILayout.Width(width));
@@ -210,7 +215,7 @@ namespace AgentCore.Editor.Config.Settings
             EditorGUILayout.PrefixLabel(new GUIContent(label, tooltip));
             EditorGUILayout.LabelField(displayValue, GUILayout.Width(120));
 
-            if (GUILayout.Button("Set", GUILayout.Width(44)))
+            if (GUILayout.Button(Loc.Tr("settings.ui.set", "Set"), GUILayout.Width(44)))
             {
                 var newKey = AgentCore.Editor.Config.EditorInputDialog.Show(dialogTitle, dialogPrompt, string.Empty);
                 if (newKey != null)
@@ -219,7 +224,7 @@ namespace AgentCore.Editor.Config.Settings
                 }
             }
 
-            if (GUILayout.Button("Clear", GUILayout.Width(54)))
+            if (GUILayout.Button(Loc.Tr("settings.ui.clear", "Clear"), GUILayout.Width(54)))
             {
                 clearAction?.Invoke();
             }

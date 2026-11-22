@@ -85,20 +85,32 @@ namespace AgentCore.Editor.Extensions
             {
                 new OptionalComponentInfo(
                     VcsComponentId,
-                    "Version Control",
-                    "Git / SVN / Perforce panel in Chat window.",
+                    AgentCore.Editor.L10n.Loc.Tr(
+                        "settings.component.vcs.name",
+                        "Version Control"),
+                    AgentCore.Editor.L10n.Loc.Tr(
+                        "settings.component.vcs.description",
+                        "Git / SVN / Perforce panel in Chat window."),
                     VcsDefine,
                     IsVcsEnabled()),
                 new OptionalComponentInfo(
                     IndexingComponentId,
-                    "Code Indexing (experimental)",
-                    "Roslyn-based C# symbol index for search_code tool. May impact Editor performance on large projects.",
+                    AgentCore.Editor.L10n.Loc.Tr(
+                        "settings.component.indexing.name",
+                        "Code Indexing (experimental)"),
+                    AgentCore.Editor.L10n.Loc.Tr(
+                        "settings.component.indexing.description",
+                        "Roslyn-based C# symbol index for search_code tool. May impact Editor performance on large projects."),
                     IndexingDefine,
                     IsIndexingEnabled()),
                 new OptionalComponentInfo(
                     McpComponentId,
-                    "MCP Server",
-                    "Let external AI clients (Claude Code, Codex) use AgentCore's Unity tools over MCP. Same permission rules and review level as the Chat window.",
+                    AgentCore.Editor.L10n.Loc.Tr(
+                        "settings.component.mcp.name",
+                        "MCP Server"),
+                    AgentCore.Editor.L10n.Loc.Tr(
+                        "settings.component.mcp.description",
+                        "Let external AI clients (Claude Code, Codex) use AgentCore's Unity tools over MCP. Same permission rules and review level as the Chat window."),
                     McpDefine,
                     IsMcpEnabled())
             };

@@ -290,7 +290,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             if (hello == null || (string)hello["type"] != McpBridgeProtocol.Hello)
                 return Reject(connection, "Expected hello.");
             if (!FixedTimeEquals((string)hello["token"], _token))
-                return Reject(connection, "Invalid token. Copy the MCP configuration again from Unity (Project Settings > AgentCore > Tools & Extensions > MCP Server).");
+                return Reject(connection, "Invalid token. Copy the MCP configuration again from Unity (Preferences > AgentCore > Tools & Extensions > MCP Server).");
             var version = hello["bridgeProtocol"]?.Type == JTokenType.Integer ? (int)hello["bridgeProtocol"] : -1;
             if (version != McpBridgeProtocol.Version)
                 return Reject(connection, $"AgentCore relay protocol {version} does not match the Unity side ({McpBridgeProtocol.Version}). Copy the MCP configuration again from Unity.");

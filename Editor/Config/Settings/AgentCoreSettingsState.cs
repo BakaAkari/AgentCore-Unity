@@ -45,7 +45,7 @@ namespace AgentCore.Editor.Config.Settings
         /// <summary>
         /// Gets or sets the selected settings section identifier.
         /// </summary>
-        public string SelectedSectionId { get; set; } = "general";
+        public string SelectedSectionId { get; set; } = "dashboard";
 
         /// <summary>
         /// Gets section-scoped foldout states.

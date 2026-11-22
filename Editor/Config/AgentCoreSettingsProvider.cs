@@ -4,6 +4,7 @@ using System.Linq;
 using AgentCore.Editor.Config.Settings;
 using AgentCore.Editor.Config.Settings.Pages;
 using AgentCore.Editor.Extensions;
+using AgentCore.Editor.L10n;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -15,6 +16,31 @@ namespace AgentCore.Editor.Config
     /// </summary>
     public class AgentCoreSettingsProvider : SettingsProvider
     {
+        /// <summary>Preferences path of the AgentCore settings hub.</summary>
+        public const string SettingsPath = "Preferences/AgentCore";
+
+        /// <summary>Section id of the Dashboard page.</summary>
+        public const string DashboardSectionId = "dashboard";
+
+        /// <summary>Section id of the Model &amp; Agent page.</summary>
+        public const string ModelAgentSectionId = "model-agent";
+
+        /// <summary>Section id of the Context &amp; Memory page.</summary>
+        public const string ContextMemorySectionId = "context-memory";
+
+        /// <summary>Section id of the Tools &amp; Extensions page.</summary>
+        public const string ToolsExtensionsSectionId = "tools-extensions";
+
+        /// <summary>Section id of the Permissions page.</summary>
+        public const string PermissionsSectionId = "permissions";
+
+        /// <summary>Section id of the Workspace page.</summary>
+        public const string WorkspaceSectionId = "workspace";
+
+        // Pending deep-link target. Static so it survives a provider instance being recreated
+        // when Unity focuses an already-open Preferences window.
+        private static string _pendingSectionId;
+
         private AgentCoreSettingsContext _settingsContext;
         private IAgentCoreSettingsPage[] _pages;
 
@@ -23,6 +49,98 @@ namespace AgentCore.Editor.Config
         {
             _pages = BuildPageList();
         }
+
+        /// <summary>
+        /// Test-only constructor that injects the page list so lifecycle transitions can be observed.
+        /// </summary>
+        /// <param name="path">Settings path.</param>
+        /// <param name="scope">Settings scope.</param>
+        /// <param name="pages">Pages to use; when null the built-in list is used.</param>
+        internal AgentCoreSettingsProvider(string path, SettingsScope scope, IAgentCoreSettingsPage[] pages)
+            : base(path, scope)
+        {
+            _pages = pages ?? BuildPageList();
+        }
+
+        /// <summary>
+        /// Opens the AgentCore Preferences window, optionally selecting a specific section.
+        /// </summary>
+        /// <param name="sectionId">
+        /// Target section id (one of the <c>*SectionId</c> constants), or null to keep the current section.
+        /// Unknown ids fall back to the current/first page.
+        /// </param>
+        public static void OpenPreferences(string sectionId = null)
+        {
+            if (!string.IsNullOrWhiteSpace(sectionId))
+            {
+                _pendingSectionId = sectionId;
+            }
+
+            SettingsService.OpenUserPreferences(SettingsPath);
+        }
+
+        /// <summary>
+        /// Sets the pending section id. Intended for EditMode tests.
+        /// </summary>
+        /// <param name="sectionId">Section id to queue.</param>
+        internal static void SetPendingSectionForTests(string sectionId)
+        {
+            _pendingSectionId = sectionId;
+        }
+
+        /// <summary>
+        /// Returns and clears the pending section id (one-shot consumption).
+        /// </summary>
+        /// <returns>The queued section id, or null when none is pending.</returns>
+        internal static string ConsumePendingSectionId()
+        {
+            var pending = _pendingSectionId;
+            _pendingSectionId = null;
+            return pending;
+        }
+
+        /// <summary>
+        /// Resolves a requested section id to an existing page id, falling back to the current
+        /// selection or the first page when the request is null or unknown.
+        /// </summary>
+        /// <param name="sectionId">Requested section id.</param>
+        /// <returns>A valid page id.</returns>
+        internal string ResolveTargetSectionId(string sectionId)
+        {
+            if (!string.IsNullOrWhiteSpace(sectionId) && _pages.Any(p => p.Id == sectionId))
+            {
+                return sectionId;
+            }
+
+            var currentId = _settingsContext?.State?.SelectedSectionId;
+            if (!string.IsNullOrWhiteSpace(currentId) && _pages.Any(p => p.Id == currentId))
+            {
+                return currentId;
+            }
+
+            return _pages.Length > 0 ? _pages[0].Id : null;
+        }
+
+        /// <summary>
+        /// Applies a pending deep-link section to an already-initialized shell. Used when Unity
+        /// focuses or repaints an open Preferences window without re-invoking <see cref="OnActivate"/>.
+        /// </summary>
+        internal void ApplyPendingSectionIfAny()
+        {
+            var pending = ConsumePendingSectionId();
+            if (string.IsNullOrWhiteSpace(pending))
+            {
+                return;
+            }
+
+            if (_pages.Any(p => p.Id == pending))
+            {
+                SelectPage(pending);
+            }
+        }
+
+        /// <summary>Gets the currently selected section id. Intended for tests.</summary>
+        internal string SelectedSectionId => _settingsContext?.State?.SelectedSectionId;
 
         /// <summary>
         /// Builds the ordered page list by merging built-in pages with dynamically discovered
@@ -63,7 +181,7 @@ namespace AgentCore.Editor.Config
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
         {
-            return new AgentCoreSettingsProvider("Preferences/AgentCore", SettingsScope.User)
+            return new AgentCoreSettingsProvider(SettingsPath, SettingsScope.User)
             {
                 label = "AgentCore",
                 keywords = new[] { "agent", "ai", "llm", "chat", "agentcore", "mem0", "lightrag", "tools", "extensions", "permissions", "rules" }
@@ -80,10 +198,13 @@ namespace AgentCore.Editor.Config
         public override void OnGUI(string searchContext)
         {
             EnsureSettingsShell();
+            ApplyPendingSectionIfAny();
 
             EditorGUILayout.Space(10);
-            EditorGUILayout.LabelField("AgentCore Settings", EditorStyles.boldLabel);
-            _settingsContext.Ui.DrawHelpText("Configure AgentCore through modular settings pages.");
+            EditorGUILayout.LabelField(Loc.Tr("settings.provider.title", "AgentCore Settings"), EditorStyles.boldLabel);
+            _settingsContext.Ui.DrawHelpText(Loc.Tr(
+                "settings.provider.subtitle",
+                "Configure AgentCore through modular settings pages."));
             EditorGUILayout.Space(8);
 
             DrawSettingsShell();
@@ -93,8 +214,8 @@ namespace AgentCore.Editor.Config
         {
             _settingsContext = AgentCoreSettingsContext.Create();
 
-            var selectedId = _settingsContext.State.SelectedSectionId;
-            var firstPage = _pages.FirstOrDefault(p => p.Id == selectedId) ?? _pages[0];
+            var targetId = ResolveTargetSectionId(ConsumePendingSectionId());
+            var firstPage = _pages.FirstOrDefault(p => p.Id == targetId) ?? _pages[0];
             _settingsContext.State.SelectedSectionId = firstPage.Id;
             firstPage.OnActivate(_settingsContext);
         }
@@ -152,7 +273,9 @@ namespace AgentCore.Editor.Config
             }
             catch (Exception ex)
             {
-                EditorGUILayout.HelpBox($"Failed to draw settings page '{selected.Id}': {ex.Message}", MessageType.Error);
+                EditorGUILayout.HelpBox(
+                    Loc.Tr("settings.provider.pageError", "Failed to draw settings page '{0}': {1}", selected.Id, ex.Message),
+                    MessageType.Error);
             }
         }
 
@@ -244,13 +367,13 @@ namespace AgentCore.Editor.Config
             EditorGUILayout.Space(8);
             EditorGUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button("OK", GUILayout.Width(80)))
+            if (GUILayout.Button(Loc.Tr("common.ok", "OK"), GUILayout.Width(80)))
             {
                 _confirmed = true;
                 Close();
             }
 
-            if (GUILayout.Button("Cancel", GUILayout.Width(80)))
+            if (GUILayout.Button(Loc.Tr("common.cancel", "Cancel"), GUILayout.Width(80)))
             {
                 _confirmed = false;
                 Close();

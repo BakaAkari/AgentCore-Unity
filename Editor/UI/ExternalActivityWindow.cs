@@ -1,5 +1,7 @@
 using System;
+using AgentCore.Editor.Config;
 using AgentCore.Editor.Core;
+using AgentCore.Editor.L10n;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -21,7 +23,7 @@ namespace AgentCore.Editor.UI
         public static void ShowWindow()
         {
             var window = GetWindow<ExternalActivityWindow>();
-            window.titleContent = new GUIContent("AgentCore External Activity");
+            window.titleContent = new GUIContent(Loc.Tr("extActivity.windowTitle", "AgentCore External Activity"));
             window.minSize = new Vector2(420, 240);
             window.Show();
         }
@@ -54,17 +56,21 @@ namespace AgentCore.Editor.UI
                     if (r.IsRunning)
                         running++;
                 }
-                GUILayout.Label(running > 0 ? $"{running} running · {records.Count} recent" : $"{records.Count} recent calls", EditorStyles.miniLabel);
+                GUILayout.Label(
+                    running > 0
+                        ? Loc.Tr("extActivity.runningSummary", "{0} running · {1} recent", running, records.Count)
+                        : Loc.Tr("extActivity.recentCalls", "{0} recent calls", records.Count),
+                    EditorStyles.miniLabel);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Open audit log", EditorStyles.toolbarButton))
+                if (GUILayout.Button(Loc.Tr("extActivity.openAuditLog", "Open audit log"), EditorStyles.toolbarButton))
                 {
                     var path = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "Library", "AgentCore", "Mcp", "audit.jsonl");
                     if (System.IO.File.Exists(path))
                         EditorUtility.RevealInFinder(path);
                     else
-                        ShowNotification(new GUIContent("No audit log yet"));
+                        ShowNotification(new GUIContent(Loc.Tr("extActivity.noAuditLog", "No audit log yet")));
                 }
-                if (GUILayout.Button("Clear", EditorStyles.toolbarButton))
+                if (GUILayout.Button(Loc.Tr("extActivity.clear", "Clear"), EditorStyles.toolbarButton))
                 {
                     ExternalToolActivity.Clear();
                     _selectedId = null;
@@ -73,7 +79,15 @@ namespace AgentCore.Editor.UI
 
             if (records.Count == 0)
             {
-                EditorGUILayout.HelpBox("No calls from external clients yet. Enable MCP Server in Project Settings > AgentCore > Tools & Extensions and connect Claude Code or Codex.", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    Loc.Tr(
+                        "extActivity.emptyHint",
+                        "No calls from external clients yet. Enable MCP Server in Preferences > AgentCore > Tools & Extensions and connect Claude Code or Codex."),
+                    MessageType.Info);
+                if (GUILayout.Button(Loc.Tr("extActivity.openSettings", "Open Tools & Extensions")))
+                {
+                    AgentCoreSettingsProvider.OpenPreferences(AgentCoreSettingsProvider.ToolsExtensionsSectionId);
+                }
                 return;
             }
 
@@ -96,10 +110,10 @@ namespace AgentCore.Editor.UI
             {
                 EditorGUILayout.Space();
                 _detailScroll = EditorGUILayout.BeginScrollView(_detailScroll, GUILayout.Height(140));
-                EditorGUILayout.LabelField("Arguments", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(Loc.Tr("extActivity.arguments", "Arguments"), EditorStyles.boldLabel);
                 EditorGUILayout.SelectableLabel(selected.ArgumentsSummary ?? string.Empty, EditorStyles.wordWrappedLabel, GUILayout.MinHeight(30));
-                EditorGUILayout.LabelField("Result", EditorStyles.boldLabel);
-                EditorGUILayout.SelectableLabel(selected.IsRunning ? "(running)" : selected.ResultPreview ?? string.Empty, EditorStyles.wordWrappedLabel, GUILayout.MinHeight(50));
+                EditorGUILayout.LabelField(Loc.Tr("extActivity.result", "Result"), EditorStyles.boldLabel);
+                EditorGUILayout.SelectableLabel(selected.IsRunning ? Loc.Tr("extActivity.running", "(running)") : selected.ResultPreview ?? string.Empty, EditorStyles.wordWrappedLabel, GUILayout.MinHeight(50));
                 EditorGUILayout.EndScrollView();
             }
 

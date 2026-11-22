@@ -243,7 +243,7 @@ namespace AgentCore.Editor.UI
                 alwaysAllow.tooltip = string.Format(
                     AgentCore.Editor.L10n.Loc.Tr(
                         "toolConfirmation.alwaysAllowTooltip",
-                        "新建一条用户 allow 规则（{0}），以后不再询问；可在 Project Settings > AgentCore > Permissions 中修改或删除"),
+                        "新建一条用户 allow 规则（{0}），以后不再询问；可在 Preferences > AgentCore > Permissions 中修改或删除"),
                     PermissionRulesStore.UserRelativePath);
                 alwaysAllow.AddToClassList("tool-confirmation-button");
                 alwaysAllow.AddToClassList("tool-confirmation-button--trust");

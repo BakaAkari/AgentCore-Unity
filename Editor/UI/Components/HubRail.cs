@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AgentCore.Editor.Config;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -219,7 +220,7 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         private static void OnSettingsClicked()
         {
-            SettingsService.OpenUserPreferences("Preferences/AgentCore");
+            AgentCoreSettingsProvider.OpenPreferences();
         }
 
         /// <summary>

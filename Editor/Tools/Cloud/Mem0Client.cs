@@ -204,7 +204,7 @@ namespace AgentCore.Editor.Cloud
             if (string.IsNullOrWhiteSpace(settings.mem0Endpoint))
             {
                 throw new InvalidOperationException(
-                    "mem0 Endpoint URL 未配置，请在 Project Settings > AgentCore 中设置");
+                    "mem0 Endpoint URL 未配置，请在 Preferences > AgentCore > Context & Memory 中设置");
             }
 
             return new Mem0Client(
