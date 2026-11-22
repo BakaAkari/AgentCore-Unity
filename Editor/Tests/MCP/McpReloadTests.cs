@@ -1,4 +1,3 @@
-#if AGENTCORE_MCP
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -249,4 +248,3 @@ namespace AgentCore.Tests.Editor.MCP
         }
     }
 }
-#endif

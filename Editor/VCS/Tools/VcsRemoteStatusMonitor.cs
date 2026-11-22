@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.VCS.Config;
+using AgentCore.Editor.Extensions;
 using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Utils;
@@ -114,6 +115,28 @@ namespace AgentCore.Editor.Components.VCS.Tools
         {
             RestoreFromSession();
             EditorApplication.update += OnEditorUpdate;
+            OptionalComponentManager.ComponentStateChanged += OnComponentStateChanged;
+        }
+
+        private static void OnComponentStateChanged(string componentId, bool enabled)
+        {
+            if (componentId != OptionalComponentManager.VcsComponentId)
+                return;
+
+            if (enabled)
+            {
+                // 按原计划续算；已过期则下一帧检查。通知订阅者（角标等）重新发布当前状态。
+                NotifyStatusChanged(LastStatus);
+                return;
+            }
+
+            // 禁用：取消进行中的远端检查，定时器由 OnEditorUpdate 的门控停住
+            var cts = Interlocked.Exchange(ref _cts, null);
+            if (cts != null)
+            {
+                try { cts.Cancel(); } catch (ObjectDisposedException) { /* 已释放 */ }
+                try { cts.Dispose(); } catch (ObjectDisposedException) { /* 幂等 */ }
+            }
         }
 
         /// <summary>
@@ -171,6 +194,9 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// <param name="force">true = 立即检查（手动触发）；false = 仅在定时间隔到期时检查。</param>
         public static async Task<VcsSyncStatus> CheckRemoteStatusAsync(bool force, CancellationToken ct = default)
         {
+            if (!OptionalComponentManager.IsVcsEnabled())
+                return LastStatus;
+
             // 先判定定时间隔，再抢运行权（旧实现先抢运行权再判定，导致定时检查永远被自己的 flag 拦下）
             if (!force && !IsPeriodicCheckDue())
                 return LastStatus;
@@ -189,6 +215,8 @@ namespace AgentCore.Editor.Components.VCS.Tools
                 NotifyStatusChanged(LastStatus); // 让 UI 显示 "Checking remote..."
 
                 var adapter = await CreateAdapterAsync().ConfigureAwait(false);
+                if (!OptionalComponentManager.IsVcsEnabled())
+                    return LastStatus;
                 if (adapter == null)
                 {
                     // 以前直接 return：UI 停在 "Checking remote..."，也不记录检查时间。
@@ -355,7 +383,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         private static void OnEditorUpdate()
         {
             // 每帧只比较时间戳，不做任何 VCS 探测
-            if (!IsPeriodicCheckDue())
+            if (!OptionalComponentManager.IsVcsEnabled() || !IsPeriodicCheckDue())
                 return;
 
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)

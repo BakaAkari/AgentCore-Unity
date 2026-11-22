@@ -34,7 +34,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
     /// </summary>
     [AgentTool("search_code",
         Description = "Codebase indexing and C# symbol search: a local index of Roslyn-extracted C# symbols stored as JSONL " +
-                      "under {workspaceRoot}/.agentcore/index (not committed to VCS), plus ripgrep literal source-text search when rg is installed. " +
+                      "under {unityRoot}/Library/AgentCore/Index/<hash> (local cache, not committed to VCS), plus ripgrep literal source-text search when rg is installed. " +
                       "Actions: status (index state), diagnose (full diagnostic: background service + per-root state + advice), " +
                       "list_root_states (per-root Ready/Indexing/Stale/NotIndexed/Failed with counts), " +
                       "mark_stale (force re-index of a root/scope on next background pass), " +
@@ -53,7 +53,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         RequiresMainThread = false,
         MayModifyScripts = false,
         RiskLevel = ToolRiskLevel.Low,
-        // 写类 action (mark_stale / index_* / clear_index) 只读写 {workspaceRoot}/.agentcore/index 派生缓存,
+        // 写类 action (mark_stale / index_* / clear_index) 只读写 {unityRoot}/Library/AgentCore/Index/<hash> 本地派生缓存,
         // 不触达工程内容, 因此仅声明 ReadProject。
         Capabilities = ToolCapability.ReadProject,
         ReadOnlyActions = new[] { "status", "diagnose", "list_root_states", "resolve_workspace", "list_roots", "search_symbol", "search_text", "list_namespaces", "get_file_symbols", "get_stats", "get_dependencies", "find_usages", "get_symbol_context", "get_backend_info" })]
@@ -161,7 +161,7 @@ namespace AgentCore.Editor.Components.Indexing.Tools
         /// <inheritdoc/>
         public ToolMetadata Metadata => new ToolMetadata(
             name: "search_code",
-            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量/按 Scope 索引 C# 符号（Roslyn 提取）、按名称/类型/命名空间/Scope 搜索符号、符号名全文搜索（安装 ripgrep 时附带 *.cs 源码字面量命中）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据以 JSONL 本地存储于 {workspaceRoot}/.agentcore/index，不提交 VCS。",
+            description: "代码库索引与符号搜索工具。支持解析 SVN WorkspaceRoot、全量/增量/按 Scope 索引 C# 符号（Roslyn 提取）、按名称/类型/命名空间/Scope 搜索符号、符号名全文搜索（安装 ripgrep 时附带 *.cs 源码字面量命中）、依赖图查询（get_dependencies/find_usages）、符号上下文聚合（get_symbol_context）、列出命名空间、获取文件符号列表和索引统计。索引数据以 JSONL 本地存储于 {unityRoot}/Library/AgentCore/Index/<hash>，不提交 VCS。",
             category: "Indexing",
             parametersSchema: _parametersSchema,
             requiresMainThread: false

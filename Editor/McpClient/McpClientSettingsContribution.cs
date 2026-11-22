@@ -56,9 +56,7 @@ namespace AgentCore.Editor.McpClient
 
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(new GUIContent("Open personal config", McpServerConfigStore.UserRelativePath + " (not in version control)")))
-                EditorUtility.OpenWithDefaultApp(McpServerConfigStore.EnsureFile(McpServerConfigStore.UserFile));
-            if (GUILayout.Button(new GUIContent("Open project config", McpServerConfigStore.ProjectRelativePath + " (shared with the team)")))
-                EditorUtility.OpenWithDefaultApp(McpServerConfigStore.EnsureFile(McpServerConfigStore.ProjectFile));
+                EditorUtility.OpenWithDefaultApp(McpServerConfigStore.EnsureUserFile());
             if (GUILayout.Button("Reload", GUILayout.Width(70)))
                 McpClientManager.Reload();
             EditorGUILayout.EndHorizontal();

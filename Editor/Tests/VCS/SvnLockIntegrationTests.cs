@@ -1,4 +1,3 @@
-#if AGENTCORE_VCS
 using System;
 using System.IO;
 using System.Linq;
@@ -218,4 +217,3 @@ namespace AgentCore.Tests.Editor.VCS
         }
     }
 }
-#endif

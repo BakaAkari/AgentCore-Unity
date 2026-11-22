@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Components.Indexing.Query;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 
@@ -31,12 +32,50 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private IndexWriteQueue _writer;
         private string _indexDir;
         private bool _shutdown;
+        private int _componentGeneration;
 
         static IndexService()
         {
             Instance = new IndexService();
             AssemblyReloadEvents.beforeAssemblyReload += Instance.Shutdown;
             EditorApplication.quitting += Instance.Shutdown;
+            OptionalComponentManager.ComponentStateChanged += OnComponentStateChanged;
+        }
+
+        private static void OnComponentStateChanged(string componentId, bool enabled)
+        {
+            if (componentId != OptionalComponentManager.IndexingComponentId)
+                return;
+
+            int generation = Interlocked.Increment(ref Instance._componentGeneration);
+            if (enabled)
+                return;
+
+            // Draining the writer can take seconds; release the backend off the main thread.
+            Task.Run(() => Instance.ReleaseBackendIfGeneration(generation));
+        }
+
+        /// <summary>
+        /// 排空写队列并关闭当前后端，但服务保持可用（之后 <see cref="GetStore"/> 会重新创建后端）。
+        /// 组件禁用时调用，释放内存与文件句柄。
+        /// </summary>
+        public void ReleaseBackend()
+        {
+            lock (_gate)
+            {
+                if (_shutdown) return;
+                CloseLocked();
+            }
+        }
+
+        private void ReleaseBackendIfGeneration(int expectedGeneration)
+        {
+            lock (_gate)
+            {
+                if (_shutdown || Volatile.Read(ref _componentGeneration) != expectedGeneration)
+                    return;
+                CloseLocked();
+            }
         }
 
         private IndexService()
@@ -75,6 +114,9 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// </summary>
         public IIndexStore GetStoreForCurrent()
         {
+            if (!OptionalComponentManager.IsIndexingEnabled())
+                return null;
+
             try
             {
                 var workspace = IndexWorkspaceResolver.ResolveFromCurrent();

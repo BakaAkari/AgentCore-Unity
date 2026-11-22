@@ -21,7 +21,7 @@ namespace AgentCore.Editor.Bootstrap
     /// 1+. SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL）
     /// 2. TOOLS.md — 工具使用指南（从模板生成）
     /// 3. PROJECT.md — 项目上下文（自动收集）
-    /// 3+. PROJECT.md（用户） — 项目约定与个人偏好（用户可编辑，建议 VCS 提交）
+    /// 3+. PROJECT.md（用户） — 项目约定与个人偏好（用户可编辑，个人本地 UserSettings/AgentCore/）
     /// </summary>
     // ReSharper disable once ClassNeverInstantiated.Global
     public class BootstrapLoader
@@ -484,28 +484,12 @@ namespace AgentCore.Editor.Bootstrap
 
         /// <summary>
         /// 加载用户可编辑的文件（PROJECT.md、SOUL.ext.md 等）（#10）。文件读取走 <c>ReadAllTextAsync</c>。
-        /// 按优先级查找：
-        /// 1. 项目根目录（Application.dataPath 的父目录）
-        /// 2. 项目根目录下的 AgentCore/ 子目录
+        /// 按 <see cref="FindUserFilePath(string, string)"/> 的优先级查找。
         /// <paramref name="projectRoot"/> 由调用方在主线程预取（<c>Application.dataPath</c> 依赖）。
         /// </summary>
         private async Task<string> LoadUserFileAsync(string fileName, string projectRoot, CancellationToken ct)
         {
-            if (projectRoot == null) return null;
-
-            var rootPath = Path.Combine(projectRoot, fileName);
-            var agentCorePath = Path.Combine(projectRoot, "AgentCore", fileName);
-
-            string filePath = null;
-            if (File.Exists(rootPath))
-            {
-                filePath = rootPath;
-            }
-            else if (File.Exists(agentCorePath))
-            {
-                filePath = agentCorePath;
-            }
-
+            var filePath = FindUserFilePath(fileName, projectRoot);
             if (filePath == null)
             {
                 return null;
@@ -527,42 +511,50 @@ namespace AgentCore.Editor.Bootstrap
             }
         }
 
+        /// <summary>用户文件主目录（相对项目根目录，个人本地，不进版本库）。</summary>
+        public const string UserFileRelativeDir = "UserSettings/AgentCore";
+
         /// <summary>
         /// 查找用户文件的实际路径。
-        /// 按优先级查找：项目根目录 → AgentCore/ 子目录。
+        /// 按优先级查找：<c>UserSettings/AgentCore/</c> → 项目根目录（遗留，只读回退）→ <c>AgentCore/</c> 子目录（遗留，只读回退）。
         /// 如果文件不存在，返回 null。
         /// </summary>
         /// <param name="fileName">文件名（如 PROJECT.md 或 SOUL.ext.md）</param>
         /// <returns>文件的完整路径，或 null（如果不存在）</returns>
         public static string FindUserFilePath(string fileName)
         {
-            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            return FindUserFilePath(fileName, Directory.GetParent(Application.dataPath)?.FullName);
+        }
+
+        private static string FindUserFilePath(string fileName, string projectRoot)
+        {
             if (projectRoot == null) return null;
 
-            var rootPath = Path.Combine(projectRoot, fileName);
-            if (File.Exists(rootPath)) return rootPath;
-
-            var agentCorePath = Path.Combine(projectRoot, "AgentCore", fileName);
-            if (File.Exists(agentCorePath)) return agentCorePath;
-
+            var candidates = new[]
+            {
+                Path.Combine(projectRoot, UserFileRelativeDir, fileName),
+                Path.Combine(projectRoot, fileName),
+                Path.Combine(projectRoot, "AgentCore", fileName)
+            };
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path)) return path;
+            }
             return null;
         }
 
         /// <summary>
-        /// 获取用户文件的默认创建路径（项目根目录下的 AgentCore/ 子目录）。
-        /// 如果文件已存在，返回已存在的路径；否则返回默认路径。
+        /// 获取用户文件的写入路径：始终为 <c>{projectRoot}/UserSettings/AgentCore/{fileName}</c>。
+        /// 即使遗留位置（项目根目录或 <c>AgentCore/</c>）已有同名文件也不返回遗留路径，避免改写受版本控制的文件。
         /// </summary>
         /// <param name="fileName">文件名（如 PROJECT.md 或 SOUL.ext.md）</param>
-        /// <returns>文件的完整路径</returns>
+        /// <returns>文件的完整路径；无法确定项目根目录时返回 null。</returns>
         public static string GetDefaultUserFilePath(string fileName)
         {
-            var existing = FindUserFilePath(fileName);
-            if (existing != null) return existing;
-
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (projectRoot == null) return null;
 
-            return Path.Combine(projectRoot, "AgentCore", fileName);
+            return Path.Combine(projectRoot, UserFileRelativeDir, fileName);
         }
 
         /// <summary>
@@ -578,12 +570,11 @@ namespace AgentCore.Editor.Bootstrap
                 return
                     "# AgentCore Project Configuration\n" +
                     "<!--\n" +
-                    "  此文件由 AgentCore 生成，供团队维护。\n" +
-                    "  建议提交到 VCS（Git/SVN/Perforce）以便团队共享。\n" +
+                    "  此文件由 AgentCore 生成，个人本地存储于 UserSettings/AgentCore/，不进版本库。\n" +
                     "-->\n\n" +
                     "## Project Conventions\n" +
                     "<!--\n" +
-                    "  团队约定：命名规范、架构决策、禁止事项、工作流程等。\n" +
+                    "  项目约定：命名规范、架构决策、禁止事项、工作流程等。\n" +
                     "  这里的内容会在每次会话的**首轮用户消息前**作为 Deferred Context 注入（一次性），\n" +
                     "  长对话中若上下文触发压缩摘要，AI 可能只保留摘要版本。重要约束务必写得简洁醒目。\n\n" +
                     "  示例：\n" +
@@ -593,8 +584,7 @@ namespace AgentCore.Editor.Bootstrap
                     "-->\n\n\n" +
                     "## Personal Preferences\n" +
                     "<!--\n" +
-                    "  个人偏好：回复语言、代码风格偏好、工作习惯等。\n" +
-                    "  建议不提交到 VCS（在 .gitignore 中排除此 section 或整个文件）。\n\n" +
+                    "  个人偏好：回复语言、代码风格偏好、工作习惯等。\n\n" +
                     "  示例：\n" +
                     "  - 请用英文回复\n" +
                     "  - 代码注释使用中文\n" +
@@ -609,7 +599,7 @@ namespace AgentCore.Editor.Bootstrap
                     "<!--\n" +
                     "  此文件追加到内置 SOUL.md 之后，不替换内置规则。\n" +
                     "  适合添加项目特定的 Agent 行为约束。\n" +
-                    "  建议提交到 VCS（团队共享的行为规则扩展）。\n\n" +
+                    "  个人本地存储于 UserSettings/AgentCore/，不进版本库。\n\n" +
                     "  适合放在这里的内容：\n" +
                     "  - 追加新的 Unity Hard Rules（如禁止使用特定 API）\n" +
                     "  - 追加工具使用约束\n" +

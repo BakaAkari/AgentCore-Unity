@@ -28,7 +28,7 @@ namespace AgentCore.Editor.McpClient
         public Dictionary<string, string> Headers = new Dictionary<string, string>();
         public bool Disabled;
 
-        /// <summary>来源：user（个人，UserSettings）或 project（团队共享，ProjectSettings）。</summary>
+        /// <summary>来源：user（个人，UserSettings）或 project（遗留 ProjectSettings 文件，只读）。</summary>
         public string Scope;
 
         public bool IsHttp => !string.IsNullOrEmpty(Url);
@@ -37,8 +37,8 @@ namespace AgentCore.Editor.McpClient
     }
 
     /// <summary>
-    /// 读取外部 MCP 服务器配置：工程级 <c>ProjectSettings/AgentCore/McpServers.json</c>（进版本库，团队共享）
-    /// 与个人级 <c>UserSettings/AgentCore/McpServers.json</c>（不进版本库，同名时覆盖工程级）。
+    /// 读取外部 MCP 服务器配置：个人级 <c>UserSettings/AgentCore/McpServers.json</c>（唯一可写，同名时优先）；
+    /// 遗留工程级 <c>ProjectSettings/AgentCore/McpServers.json</c> 仅在已存在时只读合并，AgentCore 永不创建或写入。
     /// </summary>
     public static class McpServerConfigStore
     {
@@ -120,9 +120,10 @@ namespace AgentCore.Editor.McpClient
             return result;
         }
 
-        /// <summary>配置文件不存在时创建一个带示例注释说明的空配置，返回路径（设置页“打开配置”使用）。</summary>
-        public static string EnsureFile(string path)
+        /// <summary>个人配置文件不存在时创建一个空配置，返回路径（设置页“打开配置”使用）。遗留工程级文件永不创建。</summary>
+        public static string EnsureUserFile()
         {
+            var path = UserFile;
             if (!File.Exists(path))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path));

@@ -7,7 +7,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
     /// <summary>
     /// Built-in AgentCore Hub contribution for the Code Indexing panel.
     /// Discovered automatically by <see cref="AgentCoreExtensionRegistry"/> when the
-    /// <c>AGENTCORE_INDEXING</c> define is active.
+    /// Indexing component is enabled in <see cref="OptionalComponentManager"/>.
     /// </summary>
     public sealed class IndexingPanelContribution : IAgentCorePanelContribution
     {

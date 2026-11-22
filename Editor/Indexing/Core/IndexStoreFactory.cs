@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Workspace;
+using AgentCore.Editor.Workspace.Resolution;
 using AgentCore.Editor.Utils;
 
 namespace AgentCore.Editor.Components.Indexing.Core
@@ -15,15 +16,16 @@ namespace AgentCore.Editor.Components.Indexing.Core
     /// 默认使用 <see cref="JsonlIndexStore"/> 后端。
     /// 若定义了 AGENTCORE_SQLITE scripting define，则优先尝试 SQLite 后端，失败时降级为 JSONL。
     ///
-    /// Jsonl 路径：{workspaceRoot}/.agentcore/index/
-    /// SQLite 路径（仅 AGENTCORE_SQLITE）：{workspaceRoot}/.agentcore/index/codebase.db
+    /// Jsonl 路径：{unityRoot}/Library/AgentCore/Index/{workspaceHash}/
+    /// SQLite 路径（仅 AGENTCORE_SQLITE）：{unityRoot}/Library/AgentCore/Index/{workspaceHash}/codebase.db
+    /// 绝不在 workspaceRoot 下创建任何目录。
     /// </summary>
     public static class IndexStoreFactory
     {
         // ── 常量 ────────────────────────────────────────────────────────────────
 
-        /// <summary>索引数据目录（相对于 WorkspaceRoot）。</summary>
-        public const string IndexSubDir = ".agentcore/index";
+        /// <summary>索引数据根目录（相对于 Unity 工程根目录）。</summary>
+        public const string IndexSubDir = "Library/AgentCore/Index";
 
         /// <summary>SQLite 数据库文件名。</summary>
         public const string SqliteFileName = "codebase.db";
@@ -50,11 +52,53 @@ namespace AgentCore.Editor.Components.Indexing.Core
         }
 
         /// <summary>
-        /// 索引数据目录绝对路径。
+        /// 索引数据目录绝对路径：<c>{unityRoot}/Library/AgentCore/Index/{workspaceHash}</c>。
         /// </summary>
         public static string GetIndexDir(string workspaceRoot)
         {
-            return Path.GetFullPath(Path.Combine(workspaceRoot, IndexSubDir.Replace('/', Path.DirectorySeparatorChar)));
+            if (string.IsNullOrEmpty(workspaceRoot))
+                throw new ArgumentNullException(nameof(workspaceRoot));
+            return Path.GetFullPath(Path.Combine(
+                ResolveLocalRoot(),
+                IndexSubDir.Replace('/', Path.DirectorySeparatorChar),
+                HashWorkspaceRoot(workspaceRoot)));
+        }
+
+        /// <summary>规范化 workspaceRoot 后取 SHA256 前 16 位 hex。</summary>
+        internal static string HashWorkspaceRoot(string workspaceRoot)
+        {
+            var normalized = Path.GetFullPath(workspaceRoot).Replace('\\', '/').TrimEnd('/').ToLowerInvariant();
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(normalized));
+                var sb = new System.Text.StringBuilder(16);
+                for (int i = 0; i < 8; i++)
+                    sb.Append(bytes[i].ToString("x2"));
+                return sb.ToString();
+            }
+        }
+
+        // 优先使用 UnityRootResolver 主线程预热缓存，避免受其它插件修改 cwd 的影响；仅缓存不可用时回退检查 cwd。
+        // 两者均不像 Unity 工程（无 Library/ 与 Assets/）时退回临时目录，避免在陌生位置建 Library。
+        private static string ResolveLocalRoot()
+        {
+            var unityRoot = UnityRootResolver.GetCachedOrResolve();
+            if (!string.IsNullOrEmpty(unityRoot)
+                && Directory.Exists(Path.Combine(unityRoot, "Library"))
+                && Directory.Exists(Path.Combine(unityRoot, "Assets")))
+                return unityRoot;
+
+            try
+            {
+                var cwd = Directory.GetCurrentDirectory();
+                if (Directory.Exists(Path.Combine(cwd, "Library")) && Directory.Exists(Path.Combine(cwd, "Assets")))
+                    return cwd;
+            }
+            catch (Exception)
+            {
+                // 退回临时目录
+            }
+            return Path.Combine(Path.GetTempPath(), "AgentCore");
         }
 
         /// <summary>
@@ -108,8 +152,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <returns>数据库文件绝对路径。</returns>
         public static string GetDbPath(string workspaceRoot)
         {
-            var indexDir = Path.Combine(workspaceRoot, IndexSubDir.Replace('/', Path.DirectorySeparatorChar));
-            return Path.Combine(indexDir, SqliteFileName);
+            return Path.Combine(GetIndexDir(workspaceRoot), SqliteFileName);
         }
     }
 }

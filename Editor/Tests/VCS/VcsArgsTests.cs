@@ -1,4 +1,3 @@
-#if AGENTCORE_VCS
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
@@ -82,4 +81,3 @@ namespace AgentCore.Tests.Editor.VCS
         #endregion
     }
 }
-#endif

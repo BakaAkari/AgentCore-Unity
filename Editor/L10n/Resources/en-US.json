@@ -69,7 +69,7 @@
   "chat.model.noneTooltip": "No provider profile configured. Click to manage profiles.",
   "chat.model.unset": "(no model)",
   "chat.model.tooltip": "Model: {0}\nProfile: {1}\nClick to switch model or profile",
-  "chat.model.personalTooltip": "Your personal choice (team default: {0})",
+  "chat.model.localTooltip": "Saved locally in UserSettings (personal only)",
   "chat.model.busy": "Can't switch while the agent is running",
   "chat.model.loading": "Loading model list…",
   "chat.model.empty": "No models returned by the endpoint",
@@ -406,5 +406,6 @@
   "settings.model.connection.invalidUrl": "Enter a valid HTTP(S) endpoint.",
   "settings.model.connection.unverified": "Connection not verified. Check the endpoint, model and API key, or select API Format manually.",
   "settings.model.connection.serviceError": "Service returned HTTP {0}. Connection not verified; retry later.",
+  "settings.model.localHint": "All connection configs and model selections are stored locally in UserSettings/AgentCore/ProviderProfiles.json and will not modify ProjectSettings.",
   "contextUsage.cost.notAvailable": "Unknown"
 }

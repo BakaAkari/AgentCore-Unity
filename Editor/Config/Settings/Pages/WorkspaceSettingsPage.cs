@@ -282,22 +282,22 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             GUI.enabled = hasWorkspaceRoot;
 
-            if (GUILayout.Button("Open workspace.json", GUILayout.Width(160)))
+            if (GUILayout.Button(new GUIContent("Open workspace config", WorkspaceConfigStorage.RelativePath + " (local only)"), GUILayout.Width(160)))
             {
                 var configPath = WorkspaceConfigStorage.GetConfigPath(workspaceRoot);
                 if (!File.Exists(configPath))
                 {
-                    // Create default config
-                    WorkspaceConfigStorage.Save(workspaceRoot, new WorkspaceConfig());
+                    // Load 在主路径缺失时回退遗留 .agentcore/workspace.json：复制其内容到 UserSettings，遗留文件保持不变
+                    WorkspaceConfigStorage.Save(workspaceRoot, WorkspaceConfigStorage.Load(workspaceRoot));
                 }
                 EditorUtility.RevealInFinder(configPath);
             }
 
-            if (GUILayout.Button("Reset workspace.json", GUILayout.Width(160)))
+            if (GUILayout.Button("Reset workspace config", GUILayout.Width(160)))
             {
                 if (EditorUtility.DisplayDialog(
-                    "Reset workspace.json",
-                    $"This will overwrite .agentcore/workspace.json in:\n{workspaceRoot}\n\nContinue?",
+                    "Reset workspace config",
+                    $"This will overwrite your local workspace config:\n{WorkspaceConfigStorage.GetConfigPath(workspaceRoot)}\n\nAny legacy .agentcore/workspace.json is left untouched but will no longer be used.\n\nContinue?",
                     "Reset", "Cancel"))
                 {
                     WorkspaceConfigStorage.Save(workspaceRoot, new WorkspaceConfig());

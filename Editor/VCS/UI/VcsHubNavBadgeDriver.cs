@@ -1,4 +1,5 @@
 using AgentCore.Editor.Components.VCS.Tools;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.UI.Components;
 using UnityEditor;
 
@@ -30,6 +31,13 @@ namespace AgentCore.Editor.Components.VCS.UI
             VcsDetector.DetectionChanged += () => PublishCurrent(VcsRemoteStatusMonitor.LastStatus);
             // 推迟到首帧之后再检测，避免在 InitializeOnLoad 阶段做文件系统 / WorkspaceContext 解析拖慢域重载
             EditorApplication.delayCall += () => PublishCurrent(VcsRemoteStatusMonitor.LastStatus);
+            OptionalComponentManager.ComponentStateChanged += OnComponentStateChanged;
+        }
+
+        private static void OnComponentStateChanged(string componentId, bool enabled)
+        {
+            if (componentId == OptionalComponentManager.VcsComponentId)
+                PublishCurrent(VcsRemoteStatusMonitor.LastStatus);
         }
 
         private static void OnRemoteStatusChanged(VcsSyncStatus status)
@@ -42,6 +50,13 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         private static void PublishCurrent(VcsSyncStatus status)
         {
+            // HubNavBadgeBus 没有移除接口：禁用时发布中性状态（默认标签、无告警）覆盖旧快照
+            if (!OptionalComponentManager.IsVcsEnabled())
+            {
+                HubNavBadgeBus.Publish(new HubNavBadgeState { ModuleId = ModuleId, LabelOverride = null, Alert = false });
+                return;
+            }
+
             var vcsType = VcsDetector.DetectVcs();
             var label = ResolveLabel(vcsType);
 

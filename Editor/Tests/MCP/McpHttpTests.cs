@@ -1,4 +1,3 @@
-#if AGENTCORE_MCP
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -301,4 +300,3 @@ namespace AgentCore.Tests.Editor.MCP
         }
     }
 }
-#endif

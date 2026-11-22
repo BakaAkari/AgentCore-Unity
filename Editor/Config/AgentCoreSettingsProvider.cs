@@ -11,7 +11,7 @@ using UnityEngine.UIElements;
 namespace AgentCore.Editor.Config
 {
     /// <summary>
-    /// Provides the AgentCore Project Settings hub with top-tab navigation.
+    /// Provides the AgentCore Preferences hub with top-tab navigation.
     /// </summary>
     public class AgentCoreSettingsProvider : SettingsProvider
     {
@@ -57,13 +57,13 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
-        /// Creates the AgentCore Project Settings provider.
+        /// Creates the AgentCore Preferences provider.
         /// </summary>
         /// <returns>The configured settings provider instance.</returns>
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
         {
-            return new AgentCoreSettingsProvider("Project/AgentCore", SettingsScope.Project)
+            return new AgentCoreSettingsProvider("Preferences/AgentCore", SettingsScope.User)
             {
                 label = "AgentCore",
                 keywords = new[] { "agent", "ai", "llm", "chat", "agentcore", "mem0", "lightrag", "tools", "extensions", "permissions", "rules" }

@@ -7,29 +7,26 @@ using UnityEngine;
 namespace AgentCore.Editor.Config.Settings.Pages
 {
     /// <summary>
-    /// 权限规则设置页（P2）：列出 / 新增 / 编辑 / 删除 / 启停 allow · ask · deny 规则，区分用户与项目来源。
+    /// 权限规则设置页（P2）：列出 / 新增 / 编辑 / 删除 / 启停 allow · ask · deny 规则。
     /// <para>
-    /// 编辑在内存工作副本上进行，点击"保存"才写盘（只写有变化的文件）；
-    /// 项目规则的"本地停用"是个人选择，立即写入用户文件，不改团队文件。
+    /// 编辑在内存工作副本上进行，点击"保存"才写用户文件（UserSettings）；
+    /// 遗留项目规则文件（ProjectSettings）仅在已存在时只读展示，"本地停用"立即写入用户文件，绝不修改项目文件。
     /// </para>
     /// </summary>
     public sealed class PermissionsSettingsPage : IAgentCoreSettingsPage
     {
         private static readonly string[] EffectOptions = { "allow", "ask", "deny" };
-        private static readonly string[] ScopeOptions = { "User", "Project" };
 
-        /// <summary>编辑中的一行。</summary>
+        /// <summary>编辑中的一行（仅用户规则）。</summary>
         private sealed class RowState
         {
             public PermissionRule Rule;
             public PermissionRule Original;
-            public PermissionRuleScope OriginalScope;
-            public PermissionRuleScope Scope;
             public bool IsNew;
             public bool Deleted;
 
             public bool IsDirty =>
-                IsNew ? !Deleted : (Deleted || Scope != OriginalScope || !RuleEquals(Rule, Original));
+                IsNew ? !Deleted : (Deleted || !RuleEquals(Rule, Original));
         }
 
         private readonly List<RowState> _rows = new List<RowState>();
@@ -89,7 +86,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
                         "settings.permissions.overview.precedence",
-                        "优先级 deny > ask > allow（任一 deny 命中即拒绝，其次 ask，最后 allow）。用户规则与项目规则一起按同一优先级评估；未命中任何规则时行为与没有规则完全一致。"));
+                        "优先级 deny > ask > allow（任一 deny 命中即拒绝，其次 ask，最后 allow）。用户规则与遗留项目规则一起按同一优先级评估；未命中任何规则时行为与没有规则完全一致。"));
                     context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
                         "settings.permissions.overview.effects",
                         "allow：跳过确认（含删除 / 执行代码等高影响操作）。ask：总是弹确认，Trust Low/Med 不会自动放行。deny：拒绝执行，作为普通工具失败返回给模型。"));
@@ -102,7 +99,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
                     EditorGUILayout.Space(4);
                     DrawFileRow(context, "User", store.UserFilePath, store.UserLoadError);
-                    DrawFileRow(context, "Project", store.ProjectFilePath, store.ProjectLoadError);
+                    if (store.ProjectFileExists)
+                        DrawFileRow(context, "Project (legacy, read-only)", store.ProjectFilePath, store.ProjectLoadError);
                 });
         }
 
@@ -136,24 +134,25 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 AgentCore.Editor.L10n.Loc.Tr("settings.permissions.rules.title", "Rules"),
                 AgentCore.Editor.L10n.Loc.Tr(
                     "settings.permissions.rules.description",
-                    "User 规则只属于你（UserSettings，不进版本库）；Project 规则是团队默认（ProjectSettings，提交到版本库），可在本地单独停用。"),
+                    "规则只保存在本地 UserSettings/AgentCore/PermissionRules.json，不写入 ProjectSettings。"),
                 () =>
                 {
-                    DrawRuleSection(context, PermissionRuleScope.User);
-                    EditorGUILayout.Space(6);
-                    DrawRuleSection(context, PermissionRuleScope.Project);
+                    DrawUserRuleSection(context);
+                    if (PermissionRulesStore.Default.ProjectFileExists)
+                    {
+                        EditorGUILayout.Space(6);
+                        DrawLegacyProjectSection(context);
+                    }
                     EditorGUILayout.Space(6);
                     DrawSaveBar(context);
                 });
         }
 
-        private void DrawRuleSection(AgentCoreSettingsContext context, PermissionRuleScope scope)
+        private void DrawUserRuleSection(AgentCoreSettingsContext context)
         {
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(
-                scope == PermissionRuleScope.User
-                    ? AgentCore.Editor.L10n.Loc.Tr("settings.permissions.userRules", "User rules")
-                    : AgentCore.Editor.L10n.Loc.Tr("settings.permissions.projectRules", "Project rules"),
+                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.userRules", "User rules"),
                 EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.add", "+ 添加规则"), GUILayout.Width(100)))
@@ -169,8 +168,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 {
                     Rule = rule,
                     Original = rule.Clone(),
-                    OriginalScope = scope,
-                    Scope = scope,
                     IsNew = true
                 });
             }
@@ -179,7 +176,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             bool any = false;
             foreach (var row in _rows)
             {
-                if (row.Scope != scope || row.Deleted)
+                if (row.Deleted)
                     continue;
                 any = true;
                 DrawRuleRow(row);
@@ -188,6 +185,55 @@ namespace AgentCore.Editor.Config.Settings.Pages
             if (!any)
             {
                 context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.empty", "（无规则）"));
+            }
+        }
+
+        private void DrawLegacyProjectSection(AgentCoreSettingsContext context)
+        {
+            var store = PermissionRulesStore.Default;
+            EditorGUILayout.LabelField(
+                AgentCore.Editor.L10n.Loc.Tr("settings.permissions.projectRules", "Project rules (legacy, read-only)"),
+                EditorStyles.boldLabel);
+            context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr(
+                "settings.permissions.projectRulesHint",
+                "检测到遗留的 ProjectSettings/AgentCore/PermissionRules.json：其中规则只读生效，可在本地单独停用；AgentCore 不会修改该文件。"));
+
+            var rules = store.GetRules(PermissionRuleScope.Project);
+            if (rules.Count == 0)
+            {
+                context.Ui.DrawHelpText(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.empty", "（无规则）"));
+                return;
+            }
+
+            foreach (var rule in rules)
+            {
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                EditorGUILayout.BeginHorizontal();
+                var effect = rule.TryGetEffect(out var e) ? PermissionRule.EffectToString(e) : "?";
+                EditorGUILayout.LabelField(
+                    (rule.enabled ? string.Empty : "[off] ") + effect + "  " + rule.DescribeMatcher());
+                GUILayout.FlexibleSpace();
+                if (!string.IsNullOrEmpty(rule.id))
+                {
+                    bool locallyDisabled = store.IsProjectRuleDisabledLocally(rule.id);
+                    bool newLocallyDisabled = EditorGUILayout.ToggleLeft(
+                        new GUIContent(
+                            AgentCore.Editor.L10n.Loc.Tr("settings.permissions.disableLocally", "本地停用"),
+                            AgentCore.Editor.L10n.Loc.Tr(
+                                "settings.permissions.disableLocallyTooltip",
+                                "仅对你生效（写入用户文件），不修改项目规则文件")),
+                        locallyDisabled,
+                        GUILayout.Width(80));
+                    if (newLocallyDisabled != locallyDisabled)
+                    {
+                        var id = rule.id;
+                        TryRun(() => store.SetProjectRuleDisabledLocally(id, newLocallyDisabled));
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+                if (!string.IsNullOrWhiteSpace(rule.note))
+                    EditorGUILayout.LabelField(rule.note.Trim(), EditorStyles.miniLabel);
+                EditorGUILayout.EndVertical();
             }
         }
 
@@ -208,30 +254,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             if (newEffect != effectIndex || !rule.TryGetEffect(out _))
                 rule.effect = EffectOptions[newEffect];
 
-            int scopeIndex = (int)row.Scope;
-            int newScope = EditorGUILayout.Popup(scopeIndex, ScopeOptions, GUILayout.Width(80));
-            if (newScope != scopeIndex)
-                row.Scope = (PermissionRuleScope)newScope;
-
             GUILayout.FlexibleSpace();
-
-            if (row.OriginalScope == PermissionRuleScope.Project && !row.IsNew && !string.IsNullOrEmpty(rule.id))
-            {
-                var store = PermissionRulesStore.Default;
-                bool locallyDisabled = store.IsProjectRuleDisabledLocally(rule.id);
-                bool newLocallyDisabled = EditorGUILayout.ToggleLeft(
-                    new GUIContent(
-                        AgentCore.Editor.L10n.Loc.Tr("settings.permissions.disableLocally", "本地停用"),
-                        AgentCore.Editor.L10n.Loc.Tr(
-                            "settings.permissions.disableLocallyTooltip",
-                            "仅对你生效（写入用户文件），不修改团队共享的项目规则")),
-                    locallyDisabled,
-                    GUILayout.Width(80));
-                if (newLocallyDisabled != locallyDisabled)
-                {
-                    TryRun(() => store.SetProjectRuleDisabledLocally(rule.id, newLocallyDisabled));
-                }
-            }
 
             if (GUILayout.Button(AgentCore.Editor.L10n.Loc.Tr("settings.permissions.delete", "删除"), GUILayout.Width(50)))
             {
@@ -350,21 +373,15 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             _rows.Clear();
             _saveError = null;
-            var store = PermissionRulesStore.Default;
-            foreach (var scope in new[] { PermissionRuleScope.User, PermissionRuleScope.Project })
+            foreach (var rule in PermissionRulesStore.Default.GetRules(PermissionRuleScope.User))
             {
-                foreach (var rule in store.GetRules(scope))
+                if (string.IsNullOrEmpty(rule.id))
+                    rule.id = PermissionRule.NewId();
+                _rows.Add(new RowState
                 {
-                    if (string.IsNullOrEmpty(rule.id))
-                        rule.id = PermissionRule.NewId();
-                    _rows.Add(new RowState
-                    {
-                        Rule = rule,
-                        Original = rule.Clone(),
-                        OriginalScope = scope,
-                        Scope = scope
-                    });
-                }
+                    Rule = rule,
+                    Original = rule.Clone()
+                });
             }
             _loaded = true;
         }
@@ -384,16 +401,16 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     if (r.Deleted)
                     {
                         if (!r.IsNew)
-                            store.RemoveRule(r.OriginalScope, r.Original.id);
+                            store.RemoveRule(PermissionRuleScope.User, r.Original.id);
                     }
                     else if (r.IsNew)
                     {
-                        store.AddRule(r.Scope, Sanitize(r.Rule));
+                        store.AddRule(PermissionRuleScope.User, Sanitize(r.Rule));
                     }
-                    else if (!store.UpdateRule(r.OriginalScope, Sanitize(r.Rule), r.Scope))
+                    else if (!store.UpdateRule(PermissionRuleScope.User, Sanitize(r.Rule)))
                     {
                         // 文件在外部被改动、原规则已不存在：按新增处理
-                        store.AddRule(r.Scope, Sanitize(r.Rule));
+                        store.AddRule(PermissionRuleScope.User, Sanitize(r.Rule));
                     }
                 });
                 if (!ok)

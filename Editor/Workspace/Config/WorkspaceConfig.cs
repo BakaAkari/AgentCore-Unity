@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace AgentCore.Editor.Workspace.Config
 {
     /// <summary>
-    /// 项目级 Workspace 配置，存储在 WorkspaceRoot/.agentcore/workspace.json。
-    /// 由团队通过 VCS 共享，覆盖自动发现的 Scope Root 配置。
+    /// 个人本地 Workspace 配置，存储在 <c>UserSettings/AgentCore/WorkspaceConfig.json</c>
+    /// （遗留 <c>WorkspaceRoot/.agentcore/workspace.json</c> 仅只读回退），覆盖自动发现的 Scope Root 配置。
     /// </summary>
     [Serializable]
     public sealed class WorkspaceConfig

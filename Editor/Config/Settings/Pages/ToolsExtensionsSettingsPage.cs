@@ -353,15 +353,46 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             context.Ui.DrawCard(
                 "Optional Components",
-                "Enable/disable optional components. Toggling triggers script recompile.",
+                "Enable/disable optional components for this project on this machine. Takes effect immediately: no recompile, ProjectSettings are not modified.",
                 () =>
                 {
+                    DrawLegacyDefinesNotice();
+
                     foreach (var component in OptionalComponentManager.GetComponents())
                     {
                         DrawOptionalComponentCard(context, component);
                         EditorGUILayout.Space(4);
                     }
                 });
+        }
+
+        private static void DrawLegacyDefinesNotice()
+        {
+            if (!OptionalComponentManager.HasLegacyScriptingDefines())
+                return;
+
+            EditorGUILayout.HelpBox(
+                "ProjectSettings still contain legacy AGENTCORE_VCS / AGENTCORE_INDEXING / AGENTCORE_MCP scripting defines from an older AgentCore version. They no longer control anything and can be removed.",
+                MessageType.Info);
+            if (GUILayout.Button("Remove Legacy Scripting Defines from ProjectSettings"))
+            {
+                // Deferred out of the IMGUI pass: the dialog and the resulting ProjectSettings write
+                // must not run between Layout and Repaint.
+                EditorApplication.delayCall += ConfirmRemoveLegacyDefines;
+            }
+            EditorGUILayout.Space(4);
+        }
+
+        private static void ConfirmRemoveLegacyDefines()
+        {
+            if (!EditorUtility.DisplayDialog(
+                    "Remove Legacy Scripting Defines",
+                    "Remove AGENTCORE_VCS, AGENTCORE_INDEXING and AGENTCORE_MCP from the Scripting Define Symbols of every build target and save ProjectSettings?\n\nOther defines are left untouched. This modifies ProjectSettings/ProjectSettings.asset and triggers a script recompile.",
+                    "Remove",
+                    "Cancel"))
+                return;
+
+            OptionalComponentManager.RemoveLegacyScriptingDefines();
         }
 
         private static void DrawOptionalComponentCard(AgentCoreSettingsContext context, OptionalComponentInfo component)
@@ -378,7 +409,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var enabled = EditorGUILayout.ToggleLeft("Enabled", component.Enabled);
             if (EditorGUI.EndChangeCheck())
             {
-                SetComponentEnabled(component, enabled);
+                // Toggling rebuilds the extension registry this page draws from; apply it after the IMGUI pass.
+                EditorApplication.delayCall += () => SetComponentEnabled(component, enabled);
             }
 
             DrawInlineComponentSettings(context, component);
@@ -447,17 +479,10 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             switch (component.Id)
             {
-                case "vcs":
-                    OptionalComponentManager.SetVcsEnabled(enabled);
-                    // v1.4.3: 记录用户手动意图，避免下次 Editor 启动时项目级 auto-enable
-                    // 逻辑覆盖用户选择（尤其重要：用户主动禁用后不希望被自动重新启用）。
-                    OptionalComponentManager.RecordVcsUserIntent(enabled);
-                    break;
-                case "indexing":
-                    OptionalComponentManager.SetIndexingEnabled(enabled);
-                    break;
-                case "mcp":
-                    OptionalComponentManager.SetMcpEnabled(enabled);
+                case OptionalComponentManager.VcsComponentId:
+                case OptionalComponentManager.IndexingComponentId:
+                case OptionalComponentManager.McpComponentId:
+                    OptionalComponentManager.SetComponentEnabled(component.Id, enabled);
                     break;
                 default:
                     EditorUtility.DisplayDialog(

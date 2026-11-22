@@ -31,6 +31,19 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private static volatile CSharpParseOptions s_parseOptions = CreateParseOptions(null);
 
         [UnityEditor.InitializeOnLoadMethod]
+        private static void InitializeOnLoad()
+        {
+            AgentCore.Editor.Extensions.OptionalComponentManager.ComponentStateChanged += (componentId, enabled) =>
+            {
+                if (enabled && componentId == AgentCore.Editor.Extensions.OptionalComponentManager.IndexingComponentId)
+                    CaptureEditorDefines();
+            };
+
+            // 组件禁用时跳过预热；启用时再取
+            if (AgentCore.Editor.Extensions.OptionalComponentManager.IsIndexingEnabled())
+                CaptureEditorDefines();
+        }
+
         private static void CaptureEditorDefines()
         {
             try

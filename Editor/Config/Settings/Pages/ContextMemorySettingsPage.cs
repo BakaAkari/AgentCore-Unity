@@ -79,11 +79,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
         {
             context.Ui.DrawCard(
                 "Project Files",
-                "PROJECT.md describes project conventions; SOUL.ext.md adds behavior rules. Both are auto-loaded by the agent; recommended to commit to VCS.",
+                "PROJECT.md describes project conventions; SOUL.ext.md adds behavior rules. Both are auto-loaded by the agent and stored locally in UserSettings/AgentCore/ (personal, not in version control). Legacy copies in the project root or AgentCore/ are read as a fallback only.",
                 () =>
                 {
-                    DrawUserFileRow("PROJECT.md", "Project conventions and personal preferences — team-shared, recommended for VCS commit. Agent can edit this file directly.");
-                    DrawUserFileRow("SOUL.ext.md", "Agent behavior rule extensions — appended to built-in SOUL, recommended for VCS commit.");
+                    DrawUserFileRow("PROJECT.md", "Project conventions and personal preferences — stored locally in UserSettings/AgentCore/. Agent can edit this file directly.");
+                    DrawUserFileRow("SOUL.ext.md", "Agent behavior rule extensions — appended to built-in SOUL, stored locally in UserSettings/AgentCore/.");
                 });
         }
 
@@ -395,7 +395,11 @@ namespace AgentCore.Editor.Config.Settings.Pages
                 var relativePath = filePath.StartsWith(projectRoot, StringComparison.Ordinal)
                     ? filePath.Substring(projectRoot.Length + 1).Replace('\\', '/')
                     : filePath;
-                EditorGUILayout.LabelField(relativePath, EditorStyles.miniLabel);
+                bool legacy = !string.Equals(
+                    Path.GetFullPath(filePath),
+                    Path.GetFullPath(BootstrapLoader.GetDefaultUserFilePath(fileName) ?? filePath),
+                    StringComparison.OrdinalIgnoreCase);
+                EditorGUILayout.LabelField(legacy ? relativePath + "  (legacy fallback)" : relativePath, EditorStyles.miniLabel);
 
                 if (GUILayout.Button("Edit", GUILayout.Width(50)))
                 {
@@ -437,7 +441,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
             try
             {
                 File.WriteAllText(filePath, BootstrapLoader.GenerateUserFileTemplate(fileName), System.Text.Encoding.UTF8);
-                AssetDatabase.Refresh();
             }
             catch (Exception ex)
             {

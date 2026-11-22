@@ -215,11 +215,11 @@ namespace AgentCore.Editor.UI.Components
 
         /// <summary>
         /// Settings 按钮点击处理。
-        /// 打开 AgentCore 的 Project Settings 页面。
+        /// 打开 AgentCore 的 Preferences 页面。
         /// </summary>
         private static void OnSettingsClicked()
         {
-            SettingsService.OpenProjectSettings("Project/AgentCore");
+            SettingsService.OpenUserPreferences("Preferences/AgentCore");
         }
 
         /// <summary>

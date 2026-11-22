@@ -1,4 +1,3 @@
-#if AGENTCORE_MCP
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -57,4 +56,3 @@ namespace AgentCore.Tests.Editor.MCP
         }
     }
 }
-#endif

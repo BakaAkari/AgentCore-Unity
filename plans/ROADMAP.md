@@ -1,6 +1,6 @@
 # AgentCore Unity 路线图
 
-> **版本**：以 `package.json` 为准（当前 1.20.2） | **更新**：2026-11-16
+> **版本**：以 `package.json` 为准（当前 1.21.0） | **更新**：2026-11-22
 > 本文只写三件事：现状、主线、搁置项。完成的工作记在 `CHANGELOG.md`；1.18.0 之前的完整路线图（Phase 1~10 历程、ADR-1~19、风险评估）已归档到 [`_archive/roadmap/ROADMAP-v1.18.0-full.md`](_archive/roadmap/ROADMAP-v1.18.0-full.md)。
 
 ## 现状
@@ -9,9 +9,10 @@
 - **已有能力**：60 个内置工具声明（其中 Native 目录 52 个；运行时数量随组件与配置变化）；多供应商 LLM（OpenAI 兼容 / 原生 Anthropic、prompt 缓存、备用 profile）；风险策略 + allow / ask / deny 权限规则 + 按消息检查点回退；SVN 全流程（`.meta` 跟随、锁、移动、Project 窗口角标）；代码符号索引 + ripgrep 文本搜索；会话、记忆、Skills；MCP Server（Claude Code / Codex 经 MCP 使用已启用工具（排除 Chat 专用辅助工具与外部 MCP 代理）、资源与 Skills prompt；2026-07-28 与 2025 系列协议、客户端内确认、Tasks、本机 HTTP 端点；跨 Domain Reload 不丢调用）；MCP 客户端（Chat 使用外部 MCP 服务器的工具）。
 - **兼容修复**：1.20.2 将工具参数包装检测改用 `JObject.Property`，避免依赖宿主 Newtonsoft.Json 的 `ContainsKey` API；用户报错工程仍需安装后重新编译确认。
 - **只读并发**：1.20.1 为同轮相邻的 `manage_file` 读取、目录枚举、文件信息与内容搜索启用最多 4 个并发；写入和其他工具为顺序屏障。索引 / VCS / 外部 MCP 查询尚未声明后台并发安全，保持串行。
-- **质量**：Unity EditMode 测试 916 个，1.20.1 于 2026-11-14 的结果为 915 通过 / 0 失败 / 1 个仅非 Windows 运行而跳过。MCP M1~M3 与 MCP 客户端已在真实编辑器上用 Claude Code 2.1.305、Codex CLI 0.167 与验收脚本跑通（含改脚本触发编译与重载）。
+- **零团队侵入（1.21.0）**：设置迁至 `Preferences/AgentCore`，可选组件改为运行时门控并彻底移除 `AGENTCORE_*` 自动写宏，Provider Profiles / 权限规则 / MCP Server / Workspace / 引导文档 / 索引 / 相机截图统一落至 `UserSettings/AgentCore/` 或 `Library/AgentCore/`，旧项目文件仅保留只读回退。
+- **质量**：Unity EditMode 测试 917 个，1.21.0 于 2026-11-22 在 Unity 2022.3.50f1（`test-framework@1.3.9`）实跑结果为 900 通过 / 0 失败 / 17 个预期 `[Ignore]` 跳过（16 个缺 ProBuilder + 1 个非 Windows）。MCP M1~M3 与 MCP 客户端已在真实编辑器上用 Claude Code 2.1.305、Codex CLI 0.167 与验收脚本跑通（含改脚本触发编译与重载）。
 - **仍生效的原则**：ADR-17 极简（默认最优、少暴露选项）；审查级别由用户选择；YOLO 绕过确认与 ask/deny 权限规则，当前代码仍执行 Play Mode 预检、参数校验和工具自身约束；有版本控制兜底，覆盖类操作执行而不报错；不打包第三方二进制。ADR 全文见归档文件 §4。
-- **发布记录**：1.20.1 于 2026-11-15 推送至 origin/main（实现提交 `4d0ec4d`）；`com.agentcore.unity-1.20.1.tgz` 已生成，通过 verify-meta 与 verify-tarball（971 个条目）。此前 1.18.0 ~ 1.20.0 亦已推送。团队实际安装、大型工程试用与 SVN 工作副本验收仍待反馈，不能由“已推送”推断为已完成试用。
+- **发布记录**：1.21.0 于 2026-11-22 完成本地提交并生成 `com.agentcore.unity-1.21.0.tgz`（通过 `verify-meta` 与 `verify-tarball`）。此前 1.18.0 ~ 1.20.2 已推送至 origin/main。团队实际安装、大型工程试用与 SVN 工作副本验收仍待反馈，不能由“已推送”推断为已完成试用。
 
 ## 主线
 

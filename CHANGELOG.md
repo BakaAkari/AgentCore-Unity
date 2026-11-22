@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-11-22
+
+全面本地化与零团队侵入重构：个人配置、运行时状态、索引、权限与临时产物均不再写入受版本控制的团队项目文件。
+
+### Changed
+- **Preferences 设置入口**：将 `AgentCoreSettingsProvider` 从 `ProjectSettings/AgentCore`（`SettingsScope.Project`）迁至 `Edit > Preferences > AgentCore`（`SettingsScope.User`），所有设置跳转与文档同步更新
+- **Provider Profiles 全本地化**：`AgentCoreProviderProfiles` 停止使用 `[FilePath(..., ProjectFolder)]`，改为按需/域加载时直接读写 `UserSettings/AgentCore/ProviderProfiles.json`（原子写 + `.bak`/`.corrupt` 恢复）；若本地配置缺失且存在旧版 `ProjectSettings/AgentCoreProviderProfiles.asset` 与 `ProviderProfilesState.json`，仅执行一次只读合并迁移，不改写或删除旧文件
+- **可选组件去宏与运行时门控**：移除 `AGENTCORE_VCS`、`AGENTCORE_INDEXING`、`AGENTCORE_MCP` 编译期宏约束与自动写入 `PlayerSettings` 逻辑，改为 `OptionalComponentManager` 按工程隔离保存在 `EditorPrefs` 的运行时开关，覆盖工具自动发现、扩展注册、MCP Bridge/HTTP 端点、后台索引服务与 VCS 状态监控；`Tools & Extensions` 页提供显式手动按钮与确认弹窗用于清理历史残留旧宏
+- **零侵入目录规范**：权限规则（`PermissionRulesStore`）、MCP Server 配置（`McpServerConfig`）、Workspace 配置（`WorkspaceConfigStorage`）、引导文档（`BootstrapLoader`）、代码索引（`IndexStoreFactory` -> `Library/AgentCore/Index/{hash}`）、模型注册缓存（`ModelRegistry`）与相机工具默认输出（`ManageCameraTool` -> `Library/AgentCore/Captures/`）统一落盘至 `UserSettings/AgentCore/` 或 `Library/AgentCore/`；已存在的旧项目文件仅作为只读回退来源，永不自动创建或改写
+- **测试覆盖升级**：去宏后全面覆盖 VCS、Indexing、MCP、Config、Extensions 全模块 EditMode 测试（Unity 2022.3.50f1 实跑 917 项：900 通过、0 失败、17 项预期跳过）
+
+### Removed
+- 移除 `Editor/Extensions/OptionalComponentDefaultsBootstrap.cs`（不再启动时写入 `ProjectSettings/ProjectSettings.asset` 脚本定义宏）
+- 清理 `Editor/L10n/Resources/` 中不再使用的 `chat.model.personalTooltip` 键，并更新 `tools/verify-tarball` 防回归守卫指向 `OptionalComponentManager.cs.meta`
+
+### Fixed
+- 修复 `UnityRootResolver` 在其他插件修改工作目录后可能误将 `WorkspaceConfig` / 索引写入父级 VCS 根目录的问题（增加主线程预热缓存 `GetCachedOrResolve()`）
+- 修复 `IndexService` 禁用后立即重启可能因旧 `Task.Run(ReleaseBackend)` 晚到误关新后端的竞态（增加 `_componentGeneration` 代次校验）
+- 修复 `VcsRemoteStatusMonitor` 在 `CreateAdapterAsync()` 等待期间被禁用仍继续执行远端拉取的问题
+- 修复 `McpHttpEndpoint` 与 `UtilityProfileId` 在域重载及并发启停下的竞态与短路径边界
+- 修复 `ProviderProfilesStorage` 从 `.bak` 恢复后下次保存可能把损坏主文件覆盖进 `.bak` 的问题
+
 ## [1.20.2] - 2026-11-16
 
 ### Fixed

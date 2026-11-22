@@ -37,6 +37,7 @@ namespace AgentCore.Editor.UI
             _hubPanelStateSnapshot = CaptureHubPanelState();
             AgentCoreSettings.OnSettingsChanged += OnSettingsChangedRebuildHub;
             HubNavBadgeBus.BadgeChanged += OnHubNavBadgeChanged;
+            OptionalComponentManager.ComponentStateChanged += OnOptionalComponentStateChanged;
         }
 
         /// <summary>
@@ -46,6 +47,19 @@ namespace AgentCore.Editor.UI
         {
             AgentCoreSettings.OnSettingsChanged -= OnSettingsChangedRebuildHub;
             HubNavBadgeBus.BadgeChanged -= OnHubNavBadgeChanged;
+            OptionalComponentManager.ComponentStateChanged -= OnOptionalComponentStateChanged;
+        }
+
+        /// <summary>
+        /// 可选组件启用/禁用回调：扩展注册表已刷新，重建 Hub 面板与工具栏状态项以即时显隐。
+        /// </summary>
+        private void OnOptionalComponentStateChanged(string componentId, bool enabled)
+        {
+            if (rootVisualElement == null)
+                return;
+
+            RebuildHubModules();
+            MountToolbarStatusContributions();
         }
 
         /// <summary>
@@ -137,8 +151,11 @@ namespace AgentCore.Editor.UI
             // 3. 重建面板
             InitializeHubPanels();
 
+            // 之前的模块已不存在（如所属可选组件被禁用）时回退到 Chat
+            var targetModule = _hubPanels.ContainsKey(previousModuleId) ? previousModuleId : ChatModuleId;
+
             // 4. 重建 Hub Rail
-            _hubRail = new HubRail(CreateHubModuleDefinitions(), previousModuleId);
+            _hubRail = new HubRail(CreateHubModuleDefinitions(), targetModule);
             var mainBody = rootVisualElement.Q<VisualElement>("main-body");
             mainBody?.Insert(0, _hubRail);
             _hubRail.OnModuleChanged += OnHubModuleChanged;
@@ -146,8 +163,7 @@ namespace AgentCore.Editor.UI
             // 4.5 同步导航角标状态（重建后按钮外观与各模块最新状态对齐）
             SyncHubNavBadges();
 
-            // 5. 切换到之前的模块（如果仍存在），否则回退到 Chat
-            var targetModule = _hubPanels.ContainsKey(previousModuleId) ? previousModuleId : ChatModuleId;
+            // 5. 切换到目标模块
             SwitchToModule(targetModule);
         }
 

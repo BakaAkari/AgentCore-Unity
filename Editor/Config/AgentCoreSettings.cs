@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using AgentCore.Editor.Core;
-using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
 using UnityEditor;
 using UnityEngine;
@@ -30,15 +29,6 @@ namespace AgentCore.Editor.Config
                 var settings = instance;
                 if (settings != null)
                     settings.MigrateSettings();
-
-                try
-                {
-                    OptionalComponentManager.EnsureVcsDefaultForCurrentProject();
-                }
-                catch (Exception ex)
-                {
-                    AgentCoreLog.Warning($"[AgentCore] Fallback EnsureVcsDefaultForCurrentProject failed: {ex.Message}");
-                }
             };
         }
 
@@ -290,15 +280,7 @@ namespace AgentCore.Editor.Config
             if (settingsVersion < 9 && reserveResponseTokens == 8000) reserveResponseTokens = 32000;
             if (settingsVersion < 9 && toolResultCompressionThreshold == 1000) toolResultCompressionThreshold = 2000;
             if (settingsVersion < 9 && toolResultTargetTokens == 200) toolResultTargetTokens = 500;
-            if (settingsVersion < 13)
-            {
-                EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(this, retry: true);
-            }
             if (settingsVersion < 14 && maxToolCallRounds <= 50) maxToolCallRounds = 200;
-            if (settingsVersion < 16)
-            {
-                EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(this, retry: true);
-            }
 
             // v17: Phase 9 Self-Challenge 骨架字段(已在 v18 中整合)
             // v18: ADR-17 极简即开即用 — 清理已删除字段的孤儿数据
@@ -356,33 +338,6 @@ namespace AgentCore.Editor.Config
             {
                 SafeSave(true);
             };
-        }
-
-        /// <summary>
-        /// 应用 VCS 默认启用。
-        /// </summary>
-        private static void ApplyVcsDefaultEnablement(AgentCoreSettings settings, bool retry)
-        {
-            if (settings == null) return;
-
-            try
-            {
-                if (!OptionalComponentManager.IsVcsEnabled())
-                {
-                    // 迁移路径属于自动默认启用：不触发 AssetDatabase.SaveAssets()（见 OptionalComponentManager.EnableVcsByDefault）。
-                    OptionalComponentManager.EnableVcsByDefault();
-                    AgentCoreLog.Info("[AgentCore] VCS enabled by default; Code Indexing remains disabled (experimental)");
-                }
-                settings.SafeSave(true);
-            }
-            catch (Exception ex)
-            {
-                AgentCoreLog.Warning($"[AgentCore] Failed to apply VCS default enablement: {ex.Message}");
-                if (retry)
-                {
-                    EditorApplication.delayCall += () => ApplyVcsDefaultEnablement(settings, retry: false);
-                }
-            }
         }
 
         /// <summary>

@@ -39,7 +39,7 @@ namespace AgentCore.Editor.LLM
     /// <summary>
     /// 单个模型（按名称前缀匹配）的能力与价格档案（v1.17.0）。
     /// <para>
-    /// 字段全部可在 <c>ProjectSettings/AgentCoreModelRegistry.json</c> 中覆盖/新增——新模型上线不必改代码。
+    /// 字段全部可在 <c>UserSettings/AgentCore/ModelRegistry.json</c> 中覆盖/新增——新模型上线不必改代码。
     /// 价格单位为美元 / 百万 token；0 表示未知（成本面板显示 "—"，不猜）。
     /// </para>
     /// </summary>
@@ -130,14 +130,17 @@ namespace AgentCore.Editor.LLM
     /// 家族标识，价格留空，由用户在覆盖文件中按自己的合同价填写。
     /// </para>
     /// <para>
-    /// 覆盖文件：<c>ProjectSettings/AgentCoreModelRegistry.json</c>（数组，字段同 <see cref="ModelProfile"/>），
-    /// 用户条目优先于内置条目。文件修改后调用 <see cref="Reload"/> 或重启 Editor 生效。
+    /// 覆盖文件：<c>UserSettings/AgentCore/ModelRegistry.json</c>（数组，字段同 <see cref="ModelProfile"/>；
+    /// 不存在时只读回退遗留的 <c>ProjectSettings/AgentCoreModelRegistry.json</c>），用户条目优先于内置条目。文件修改后调用 <see cref="Reload"/> 或重启 Editor 生效。
     /// </para>
     /// </summary>
     public static class ModelRegistry
     {
-        /// <summary>覆盖文件路径（相对项目根目录）。</summary>
-        public const string OverrideFilePath = "ProjectSettings/AgentCoreModelRegistry.json";
+        /// <summary>覆盖文件路径（相对项目根目录，个人本地）。</summary>
+        public const string OverrideFilePath = "UserSettings/AgentCore/ModelRegistry.json";
+
+        /// <summary>遗留覆盖文件路径：仅在主路径不存在时只读回退，永不创建或写入。</summary>
+        public const string LegacyOverrideFilePath = "ProjectSettings/AgentCoreModelRegistry.json";
 
         private static List<ModelProfile> _overrides;
         private static readonly object Lock = new();
@@ -272,18 +275,19 @@ namespace AgentCore.Editor.LLM
             {
                 if (_overrides != null) return _overrides;
                 _overrides = new List<ModelProfile>();
+                var path = File.Exists(OverrideFilePath)
+                    ? OverrideFilePath
+                    : File.Exists(LegacyOverrideFilePath) ? LegacyOverrideFilePath : null;
+                if (path == null) return _overrides;
                 try
                 {
-                    if (File.Exists(OverrideFilePath))
-                    {
-                        var json = File.ReadAllText(OverrideFilePath);
-                        var parsed = JsonConvert.DeserializeObject<List<ModelProfile>>(json);
-                        if (parsed != null) _overrides = parsed.Where(p => p != null && !string.IsNullOrEmpty(p.Prefix)).ToList();
-                    }
+                    var json = File.ReadAllText(path);
+                    var parsed = JsonConvert.DeserializeObject<List<ModelProfile>>(json);
+                    if (parsed != null) _overrides = parsed.Where(p => p != null && !string.IsNullOrEmpty(p.Prefix)).ToList();
                 }
                 catch (Exception ex)
                 {
-                    AgentCoreLog.Warning($"[AgentCore] Failed to load {OverrideFilePath}: {ex.Message}");
+                    AgentCoreLog.Warning($"[AgentCore] Failed to load {path}: {ex.Message}");
                 }
                 return _overrides;
             }

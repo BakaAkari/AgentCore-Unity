@@ -1,4 +1,3 @@
-#if AGENTCORE_VCS
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -78,4 +77,3 @@ namespace AgentCore.Tests.Editor.VCS
         }
     }
 }
-#endif

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.Indexing.Config;
 using AgentCore.Editor.Components.Indexing.Models;
+using AgentCore.Editor.Extensions;
 using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Utils;
@@ -64,6 +65,8 @@ namespace AgentCore.Editor.Components.Indexing.Core
         private static int _runTotalHint;
         private static double _lastProgressPublishAt;
 
+        private const string ComponentDisabledReason = "Code Indexing component is disabled.";
+
         // v1.4.0 — burst backoff (set by IndexingDirtyTracker when a large batch arrives)
         private static double _burstBackoffUntil;
         private static string _burstReason;
@@ -76,8 +79,27 @@ namespace AgentCore.Editor.Components.Indexing.Core
             AssemblyReloadEvents.beforeAssemblyReload += CancelCurrentRun;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             EditorApplication.update += OnEditorUpdate;
+            OptionalComponentManager.ComponentStateChanged += OnComponentStateChanged;
             _startupReconcileAt = EditorApplication.timeSinceStartup + StartupReconcileDelaySeconds;
             OnDirtyChanged();
+        }
+
+        private static void OnComponentStateChanged(string componentId, bool enabled)
+        {
+            if (componentId != OptionalComponentManager.IndexingComponentId)
+                return;
+
+            if (!enabled)
+            {
+                CancelCurrentRun();
+                PublishDisabled(IndexingDirtyTracker.Count, ComponentDisabledReason);
+                return;
+            }
+
+            // Edits made while disabled were not tracked: reconcile the whole project after the startup delay.
+            _startupReconcilePending = true;
+            _startupReconcileAt = EditorApplication.timeSinceStartup + StartupReconcileDelaySeconds;
+            RequestRun();
         }
 
         /// <summary>
@@ -163,6 +185,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// <summary>Dirty set changed: schedule after the quiet delay (does not reset failure backoff).</summary>
         private static void OnDirtyChanged()
         {
+            if (!OptionalComponentManager.IsIndexingEnabled())
+            {
+                PublishDisabled(IndexingDirtyTracker.Count, ComponentDisabledReason);
+                return;
+            }
+
             var settings = GetSettings();
             if (!settings.AutoIndexEnabled || _sessionPaused)
             {
@@ -206,7 +234,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
                 return;
             }
 
-            if (!HasPendingWork)
+            if (!HasPendingWork || !OptionalComponentManager.IsIndexingEnabled())
             {
                 return;
             }
@@ -283,7 +311,7 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         private static async Task RunOnceAsync(IndexingAutoSettings settings)
         {
-            if (_running)
+            if (_running || !OptionalComponentManager.IsIndexingEnabled())
             {
                 return;
             }
@@ -488,7 +516,15 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
             catch (OperationCanceledException)
             {
-                PublishPending(IndexingDirtyTracker.Count);
+                if (OptionalComponentManager.IsIndexingEnabled())
+                    PublishPending(IndexingDirtyTracker.Count);
+                else
+                    PublishDisabled(IndexingDirtyTracker.Count, ComponentDisabledReason);
+            }
+            catch (Exception) when (!OptionalComponentManager.IsIndexingEnabled())
+            {
+                // Disabling releases the index store mid-run; the resulting errors are not indexing failures.
+                PublishDisabled(IndexingDirtyTracker.Count, ComponentDisabledReason);
             }
             catch (Exception ex)
             {

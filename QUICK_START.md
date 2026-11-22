@@ -76,7 +76,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 - 改动前确保有版本控制或备份点。
 - 高风险操作核对确认面板再放行；不确定就用 Trust Low/Med，别直接 YOLO。
 - 相似任务一次性交给它批量跑，别一条条发。
-- Unity 工程根目录放一份 `PROJECT.md` 写项目约定，Agent 会自动读取；根目录没有该文件时才查找 `AgentCore/PROJECT.md`。`SOUL.ext.md` 按相同路径规则追加行为约定。当前不会自动把 `AGENTS.md` / `CLAUDE.md` 作为项目说明加载。
+- 在 `UserSettings/AgentCore/PROJECT.md` 写项目约定（个人本地，不进版本库），Agent 会自动读取；该文件不存在时才只读回退旧位置（工程根目录 `PROJECT.md`、`AgentCore/PROJECT.md`），AgentCore 不会改写旧位置。`SOUL.ext.md` 按相同路径规则追加行为约定。当前不会自动把 `AGENTS.md` / `CLAUDE.md` 作为项目说明加载。
 
 ---
 
@@ -84,7 +84,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 默认使用企业内网本地模型，**以下内容仅在需要切换到其他供应商/模型时才需要看**。
 
-打开 `Edit > Project Settings > AgentCore`，进 **Model & Agent** 分页。配置单位是 **Provider Profile**：一个 profile 保存一套完整连接参数，可建多个在不同供应商间切换，当前生效的叫 Active Profile。
+打开 `Edit > Preferences > AgentCore`（macOS：`Unity > Settings > AgentCore`），进 **Model & Agent** 分页。配置单位是 **Provider Profile**：一个 profile 保存一套完整连接参数，可建多个在不同供应商间切换，当前生效的叫 Active Profile。
 
 | 字段 | 说明 |
 |------|------|
@@ -105,7 +105,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 让终端里的 Claude Code 或 Codex 直接调用 AgentCore 的 Unity 工具（场景、预制体、脚本、SVN 等），不需要另装任何东西。
 
-1. 打开 `Edit > Project Settings > AgentCore > Tools & Extensions`，启用 **MCP Server**（会触发一次脚本编译）。
+1. 打开 `Edit > Preferences > AgentCore > Tools & Extensions`，启用 **MCP Server**（即时运行时生效，不修改 `ProjectSettings/` 或脚本定义宏）。
 2. 卡片状态显示 **Ready** 后：
    - **Claude Code**：点 **Copy Claude Code command**，在终端里粘贴执行一次。
    - **Codex**：点 **Copy Codex config**，粘贴到 `~/.codex/config.toml`（已有 `[mcp_servers.agentcore]` 时替换它）。
@@ -129,7 +129,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 让 AgentCore 自己的 Chat 调用外部 MCP 服务器（Jira、Figma、内部文档检索等）的工具。
 
-1. `Project Settings > AgentCore > Tools & Extensions` 的 **External MCP servers** 卡片里点 **Open personal config**（只给自己）或 **Open project config**（随工程进版本库，团队共享）。
+1. `Preferences > AgentCore > Tools & Extensions` 的 **External MCP servers** 卡片里点 **Open personal config**。
 2. 按 Claude Desktop / Claude Code 相同的格式填写，可以直接粘贴：
 
    ```json
@@ -143,7 +143,7 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 
 3. 点 **Reload**，卡片显示每个服务器的连接状态和工具数。
 
-需要自行安装服务器运行环境（示例中的 `npx` 需要 Node.js/npm）。个人配置位于 `UserSettings/AgentCore/McpServers.json`，团队配置位于 `ProjectSettings/AgentCore/McpServers.json`；令牌放个人配置。当前接入范围是工具，不支持外部服务器的 OAuth 登录、resources 或 prompts。
+需要自行安装服务器运行环境（示例中的 `npx` 需要 Node.js/npm）。配置位于 `UserSettings/AgentCore/McpServers.json`（个人本地，不进版本库）；工程中已存在的旧 `ProjectSettings/AgentCore/McpServers.json` 仅只读合并（同名以个人配置为准），AgentCore 不会创建或修改它。当前接入范围是工具，不支持外部服务器的 OAuth 登录、resources 或 prompts。
 
 服务器的工具以 `mcp__<服务器>__<工具>` 出现在 Chat 中（按需激活，分类 `MCP: <服务器>`），和 AgentCore 自带工具走同一套审查与权限规则；服务器标为只读的工具默认按 ReadOnly 处理，其余按 High 处理；最终是否确认仍取决于权限规则和当前审查级别。脚本重载后会自动重连。
 
@@ -156,6 +156,6 @@ macOS 用 `Cmd` 代替 `Ctrl`。
 | Chat 窗口无响应 | 检查 Provider Profile 的 Endpoint 和 API Key，点 Test Connection 复核 |
 | 工具调用报错 | 查看 Unity Console 错误日志 |
 | 编译后会话丢失 | 通常自动恢复，未恢复可重新打开 AgentCore 窗口 |
-| VCS / Indexing 工具不可见 | 确认在 Project Settings 的 Tools & Extensions 分页启用了对应组件 |
+| VCS / Indexing 工具不可见 | 确认在 Preferences > AgentCore 的 Tools & Extensions 分页启用了对应组件 |
 | Claude Code / Codex 提示 Unity 编辑器未运行 | 先在 Unity 中打开该工程，并确认 MCP Server 组件已启用、卡片状态为 Ready |
 | 客户端提示令牌无效或需要重新复制配置 | 在 MCP Server 卡片重新复制配置并替换客户端里的旧配置 |

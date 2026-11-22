@@ -1,6 +1,6 @@
 # AgentCore 计划文档导航
 
-> **最后核对**: 2026-11-14 | **当前版本**: 见 [`package.json`](../package.json)（1.20.2） | **当前主线**: 团队试用与 SVN 验收 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
+> **最后核对**: 2026-11-22 | **当前版本**: 见 [`package.json`](../package.json)（1.21.0） | **当前主线**: 团队试用与 SVN 验收 | **关键规则**: SVN 工作副本根 = AgentCore WorkspaceRoot
 
 本目录包含 AgentCore Unity 插件的规划、设计和架构文档。
 
@@ -31,6 +31,7 @@
 
 | 版本 | 发布日期 | 主要变更 | 文档 |
 |------|---------|---------|------|
+| **v1.21.0** | 2026-11-22 | 全面本地化与零团队侵入架构重构（Preferences、去宏门控、UserSettings/Library 存储） | [CHANGELOG.md](../CHANGELOG.md) |
 | **v1.20.2** | 2026-11-16 | 修复 JObject.ContainsKey 不可用时的编译错误 | [CHANGELOG.md](../CHANGELOG.md) |
 | **v1.20.1** | 2026-11-14 | 安全只读工具有界并发、写操作顺序屏障、取消后跨批次等待 | [CHANGELOG.md](../CHANGELOG.md) |
 | **v1.20.0** | 2026-11-14 | MCP M2/M3、Resources/Prompts、Tasks、HTTP、外部 MCP 客户端 | [CHANGELOG.md](../CHANGELOG.md) |

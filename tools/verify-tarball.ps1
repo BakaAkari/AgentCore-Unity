@@ -65,7 +65,7 @@ $requiredPaths = @(
     @{ Path = 'package/Editor/Core/AgentLoop';           MinCount = 5; Desc = 'AgentLoop partials' },
     @{ Path = 'package/Editor/Core/SelfChallenge/';      MinCount = 3; Desc = 'Self-Challenge scaffolding (Phase 9)' },
     @{ Path = 'package/Editor/Extensions/';              MinCount = 5; Desc = 'Extension host' },
-    @{ Path = 'package/Editor/Extensions/OptionalComponentDefaultsBootstrap.cs.meta'; MinCount = 1; Desc = 'Bootstrap meta (v1.4.6 regression guard)' },
+    @{ Path = 'package/Editor/Extensions/OptionalComponentManager.cs.meta';             MinCount = 1; Desc = 'Optional component gate meta (v1.4.6 regression guard)' },
     @{ Path = 'package/Editor/LLM/';                     MinCount = 3; Desc = 'LLM clients' },
     @{ Path = 'package/Editor/Session/';                 MinCount = 3; Desc = 'Session subsystem' },
     @{ Path = 'package/Editor/Tools/IAgentTool.cs';      MinCount = 1; Desc = 'Tool interface' },

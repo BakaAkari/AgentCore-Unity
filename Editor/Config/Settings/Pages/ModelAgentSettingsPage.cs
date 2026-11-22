@@ -213,51 +213,9 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     _pendingOps.Add(() => store.SetUtility(utilId));
                 }
 
-                DrawTeamDefaultRow(store, names, ids);
-
                 // v1.17.0: 会话用量 / 缓存命中 / 估算费用（来自供应商返回的 usage）
                 EditorGUILayout.LabelField(Loc.Tr("settings.model.usage", "会话用量"), AgentCore.Editor.LLM.UsageLedger.FormatSessionSummary(), EditorStyles.wordWrappedMiniLabel);
             });
-        }
-
-        /// <summary>
-        /// 上面两个下拉是个人选择（存 UserSettings，不进版本库）。与团队默认不同时显示团队默认，
-        /// 并提供明确的"设为团队默认"按钮——只有这里会改共享文件中的团队默认 active / 辅助模型。
-        /// </summary>
-        private void DrawTeamDefaultRow(AgentCoreProviderProfiles store, List<string> names, List<string> ids)
-        {
-            string NameOf(string id, string empty)
-            {
-                if (string.IsNullOrEmpty(id)) return empty;
-                int i = ids.IndexOf(id);
-                return i >= 0 ? names[i] : Loc.Tr("settings.model.missing", "（已缺失）");
-            }
-
-            if (!store.HasPersonalSelection)
-            {
-                EditorGUILayout.LabelField(" ",
-                    Loc.Tr("settings.model.followingTeam", "跟随团队默认。在此切换只影响你自己（保存在 UserSettings，不进版本库）。"),
-                    EditorStyles.wordWrappedMiniLabel);
-                return;
-            }
-
-            var team = NameOf(store.TeamDefaultProfileId, Loc.Tr("settings.model.none", "（无）"))
-                       + " / " + Loc.Tr("settings.model.utility", "辅助任务模型") + ": "
-                       + NameOf(store.TeamDefaultUtilityProfileId, "(same as active)");
-            EditorGUILayout.LabelField(Loc.Tr("settings.model.teamDefault", "团队默认"), team, EditorStyles.wordWrappedMiniLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button(new GUIContent(
-                    Loc.Tr("settings.model.setTeamDefault", "设为团队默认（影响全组）"),
-                    Loc.Tr("settings.model.setTeamDefaultHint", "把你当前的模型配置与辅助任务模型写入 ProjectSettings/AgentCoreProviderProfiles.asset，提交后全组生效。")),
-                    GUILayout.Width(200)))
-            {
-                var activeId = store.ActiveProfileId;
-                var utilityId = store.UtilityProfileId;
-                _pendingOps.Add(() => store.SetTeamDefaults(activeId, utilityId));
-            }
-            EditorGUILayout.EndHorizontal();
         }
 
         // ── 中部：Profile 列表 ──
@@ -300,9 +258,8 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
         private void DrawProfileBody(AgentCoreSettingsContext context, AgentCoreProviderProfiles store, ProviderProfile profile, bool isActive)
         {
-            // 除"模型"一栏（个人选择）外，这里的字段都是团队共享的 profile 定义
             EditorGUILayout.LabelField(" ",
-                Loc.Tr("settings.model.sharedHint", "以下连接与参数为团队共享配置，保存在 ProjectSettings/AgentCoreProviderProfiles.asset，提交后影响全组；“模型”选择只影响你自己。"),
+                Loc.Tr("settings.model.localHint", "All connection configs and model selections are stored locally in UserSettings/AgentCore/ProviderProfiles.json and will not modify ProjectSettings."),
                 EditorStyles.wordWrappedMiniLabel);
 
             // --- Display Name ---
@@ -604,8 +561,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
         // ── Model Selector（per-profile 缓存）──
 
         /// <summary>
-        /// 模型选择是个人选择（<see cref="AgentCoreProviderProfiles.SetUserModel"/>，存 UserSettings），与 chat 面板的
-        /// 模型下拉同语义；团队默认模型（共享 modelName）只经下方"设为团队默认"按钮修改。
+        /// 模型选择经 <see cref="AgentCoreProviderProfiles.SetUserModel"/> 保存到本地文件，与 chat 面板的模型下拉同语义。
         /// 只在用户实际改动时写入：服务端列表里没有当前模型时把它列在首位，而不是自动改成列表第一项。
         /// </summary>
         private void DrawModelSelector(AgentCoreSettingsContext context, AgentCoreProviderProfiles store, ProviderProfile profile)
@@ -614,7 +570,7 @@ namespace AgentCore.Editor.Config.Settings.Pages
             var effective = store.GetEffectiveModelName(profile) ?? "";
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel(new GUIContent(Loc.Tr("settings.model.model", "模型"), Loc.Tr("settings.model.modelHint", "模型名称，点击刷新可从服务端获取。只影响你自己；团队默认模型见下方。")));
+            EditorGUILayout.PrefixLabel(new GUIContent(Loc.Tr("settings.model.model", "模型"), Loc.Tr("settings.model.modelHint", "模型名称，点击刷新可从服务端获取。")));
 
             if (models.Count > 0)
             {
@@ -651,32 +607,6 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
             EditorGUILayout.EndHorizontal();
 
-            DrawTeamDefaultModelRow(store, profile, effective);
-        }
-
-        /// <summary>
-        /// 显示团队默认模型。个人选择与之不同（或团队默认为空）时提供"设为团队默认"——唯一修改共享 modelName 的入口
-        /// （新 profile 首次自动填充模型名除外）。
-        /// </summary>
-        private void DrawTeamDefaultModelRow(AgentCoreProviderProfiles store, ProviderProfile profile, string effective)
-        {
-            var teamModel = profile.modelName ?? "";
-            if (string.Equals(teamModel, effective, StringComparison.Ordinal))
-                return;
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(Loc.Tr("settings.model.teamDefaultModel", "团队默认模型"),
-                string.IsNullOrEmpty(teamModel) ? Loc.Tr("settings.model.none", "（无）") : teamModel);
-            if (!string.IsNullOrEmpty(effective)
-                && GUILayout.Button(new GUIContent(
-                    Loc.Tr("settings.model.setTeamDefaultModel", "设为团队默认（影响全组）"),
-                    Loc.Tr("settings.model.setTeamDefaultModelHint", "把你选择的模型写入 ProjectSettings/AgentCoreProviderProfiles.asset，提交后全组生效。")),
-                    GUILayout.Width(200)))
-            {
-                var pid = profile.id;
-                _pendingOps.Add(() => store.SetTeamDefaultModel(pid, effective));
-            }
-            EditorGUILayout.EndHorizontal();
         }
 
         // ── Connection Actions ──

@@ -1,4 +1,3 @@
-#if AGENTCORE_MCP
 using System;
 using System.IO;
 using System.Linq;
@@ -64,16 +63,16 @@ namespace AgentCore.Tests.Editor.MCP
         }
 
         [Test]
-        public void Read_UnknownUri_IsInvalidParams()
+        public async Task Read_UnknownUri_IsInvalidParams()
         {
-            var ex = Assert.ThrowsAsync<McpRequestException>(() => McpResourceCatalog.ReadAsync("unity://nope", "test", CancellationToken.None));
+            var ex = await AsyncAssert.ThrowsAsync<McpRequestException>(() => McpResourceCatalog.ReadAsync("unity://nope", "test", CancellationToken.None));
             Assert.AreEqual(-32602, ex.Code);
         }
 
         [Test]
-        public void Read_MissingFile_IsInvalidParams()
+        public async Task Read_MissingFile_IsInvalidParams()
         {
-            var ex = Assert.ThrowsAsync<McpRequestException>(() =>
+            var ex = await AsyncAssert.ThrowsAsync<McpRequestException>(() =>
                 McpResourceCatalog.ReadAsync(McpResourceCatalog.AssetUriPrefix + _dirName + "/missing.txt", "test", CancellationToken.None));
             Assert.AreEqual(-32602, ex.Code);
         }
@@ -95,4 +94,3 @@ namespace AgentCore.Tests.Editor.MCP
         }
     }
 }
-#endif

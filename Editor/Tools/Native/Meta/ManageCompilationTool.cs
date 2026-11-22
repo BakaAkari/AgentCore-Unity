@@ -266,7 +266,7 @@ namespace AgentCore.Editor.Tools.Native.Meta
         {
             // Do NOT wait — return immediately so the agent can poll get_status.
             // 不在这里 SaveAssets()：那会把用户所有未保存的资产改动静默落盘，超出"请求编译"的语义。
-            // 需要先刷 PlayerSettings 的调用方（OptionalComponentManager）自己负责保存。
+            // 需要落盘 ProjectSettings 的调用方应自行显式保存。
             CompilationPipeline.RequestScriptCompilation();
 
             var data = new JObject

@@ -26,7 +26,7 @@ namespace AgentCore.Editor.Bootstrap
         public string Soul { get; set; }
 
         /// <summary>
-        /// SOUL.ext.md — 用户行为规则扩展（可选，追加到 SOUL 之后）
+        /// SOUL.ext.md — 用户行为规则扩展（可选，个人本地 UserSettings/AgentCore/，追加到 SOUL 之后）
         /// </summary>
         public string SoulExtension { get; set; }
 
@@ -46,7 +46,7 @@ namespace AgentCore.Editor.Bootstrap
         public string Project { get; set; }
 
         /// <summary>
-        /// Workspace — PROJECT.md 用户内容（用户可编辑，延迟注入）
+        /// Workspace — PROJECT.md 用户内容（用户可编辑，个人本地 UserSettings/AgentCore/，延迟注入）
         /// 包含项目约定（Project Conventions）和个人偏好（Personal Preferences）
         /// </summary>
         public string Workspace { get; set; }

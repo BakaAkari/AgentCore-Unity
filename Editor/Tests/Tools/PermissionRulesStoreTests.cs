@@ -6,7 +6,7 @@ using NUnit.Framework;
 namespace AgentCore.Tests.Editor.Tools
 {
     /// <summary>
-    /// 权限规则文件存储（用户 / 项目分层、本地停用、只在显式修改时写盘）的单元测试。
+    /// 权限规则文件存储（仅写用户文件、遗留项目文件只读、本地停用、只在显式修改时写盘）的单元测试。
     /// 全部使用临时目录，不触碰真实项目。
     /// </summary>
     [TestFixture]
@@ -51,51 +51,92 @@ namespace AgentCore.Tests.Editor.Tools
             Assert.IsFalse(Directory.Exists(Path.Combine(_root, "UserSettings")));
         }
 
+        private void WriteLegacyProjectFile(string json)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ProjectFile));
+            File.WriteAllText(ProjectFile, json);
+        }
+
+        private const string LegacyProjectJson =
+            "{ \"version\": 1, \"rules\": [ { \"id\": \"p1\", \"effect\": \"ask\", \"tool\": \"manage_script.*\" } ] }";
+
         [Test]
-        public void AddRule_WritesToScopeFile_AndRoundTrips()
+        public void AddRule_WritesUserFileOnly_AndRoundTrips()
         {
             var store = new PermissionRulesStore(_root);
             var user = store.AddRule(PermissionRuleScope.User, Rule("deny", "manage_asset.delete", "Assets/Plugins/**"));
-            var project = store.AddRule(PermissionRuleScope.Project, Rule("ask", "manage_script.*"));
 
             Assert.IsFalse(string.IsNullOrEmpty(user.id));
             Assert.IsTrue(File.Exists(UserFile));
-            Assert.IsTrue(File.Exists(ProjectFile));
+            Assert.IsFalse(Directory.Exists(Path.Combine(_root, "ProjectSettings")));
+            Assert.IsFalse(store.ProjectFileExists);
             StringAssert.Contains("\"deny\"", File.ReadAllText(UserFile));
-            StringAssert.DoesNotContain("manage_script", File.ReadAllText(UserFile));
-            StringAssert.Contains("manage_script.*", File.ReadAllText(ProjectFile));
             StringAssert.DoesNotContain("\r\n", File.ReadAllText(UserFile));
 
-            var reloaded = new PermissionRulesStore(_root);
-            var active = reloaded.GetActiveRules();
-            Assert.AreEqual(2, active.Count);
+            var active = new PermissionRulesStore(_root).GetActiveRules();
+            Assert.AreEqual(1, active.Count);
             Assert.AreEqual(PermissionRuleScope.User, active[0].Scope);
             Assert.AreEqual(user.id, active[0].Rule.id);
             Assert.AreEqual("Assets/Plugins/**", active[0].Rule.path);
-            Assert.AreEqual(PermissionRuleScope.Project, active[1].Scope);
-            Assert.AreEqual(project.id, active[1].Rule.id);
+        }
+
+        [Test]
+        public void ProjectScopeWrites_Throw_AndNeverCreateProjectSettings()
+        {
+            var store = new PermissionRulesStore(_root);
+            var user = store.AddRule(PermissionRuleScope.User, Rule("ask", "manage_file"));
+
+            Assert.Throws<InvalidOperationException>(() => store.AddRule(PermissionRuleScope.Project, Rule("deny", "*")));
+            Assert.Throws<InvalidOperationException>(() => store.UpdateRule(PermissionRuleScope.Project, user));
+            Assert.Throws<InvalidOperationException>(() => store.RemoveRule(PermissionRuleScope.Project, user.id));
+
+            Assert.IsFalse(Directory.Exists(Path.Combine(_root, "ProjectSettings")));
+            Assert.AreEqual(1, store.GetRules(PermissionRuleScope.User).Count);
+        }
+
+        [Test]
+        public void LegacyProjectFile_ReadOnlyLoaded_AndNeverModified()
+        {
+            WriteLegacyProjectFile(LegacyProjectJson);
+            var projectBytes = File.ReadAllBytes(ProjectFile);
+
+            var store = new PermissionRulesStore(_root);
+            Assert.IsTrue(store.ProjectFileExists);
+            var user = store.AddRule(PermissionRuleScope.User, Rule("deny", "execute_code"));
+            store.SetProjectRuleDisabledLocally("p1", true);
+            store.SetProjectRuleDisabledLocally("p1", false);
+            user.effect = "ask";
+            store.UpdateRule(PermissionRuleScope.User, user);
+            store.RemoveRule(PermissionRuleScope.User, user.id);
+            Assert.Throws<InvalidOperationException>(() => store.RemoveRule(PermissionRuleScope.Project, "p1"));
+
+            CollectionAssert.AreEqual(projectBytes, File.ReadAllBytes(ProjectFile));
+            var active = store.GetActiveRules();
+            Assert.AreEqual(1, active.Count);
+            Assert.AreEqual(PermissionRuleScope.Project, active[0].Scope);
+            Assert.AreEqual("p1", active[0].Rule.id);
         }
 
         [Test]
         public void DisableProjectRuleLocally_OnlyTouchesUserFile()
         {
-            var store = new PermissionRulesStore(_root);
-            var project = store.AddRule(PermissionRuleScope.Project, Rule("deny", "execute_code"));
+            WriteLegacyProjectFile(LegacyProjectJson);
             var projectBytes = File.ReadAllBytes(ProjectFile);
+            var store = new PermissionRulesStore(_root);
 
-            store.SetProjectRuleDisabledLocally(project.id, true);
+            store.SetProjectRuleDisabledLocally("p1", true);
 
             Assert.AreEqual(0, store.GetActiveRules().Count);
-            Assert.IsTrue(store.IsProjectRuleDisabledLocally(project.id));
+            Assert.IsTrue(store.IsProjectRuleDisabledLocally("p1"));
             CollectionAssert.AreEqual(projectBytes, File.ReadAllBytes(ProjectFile));
-            StringAssert.Contains(project.id, File.ReadAllText(UserFile));
+            StringAssert.Contains("p1", File.ReadAllText(UserFile));
 
             // 全新实例（模拟重启）同样生效
             var reloaded = new PermissionRulesStore(_root);
             Assert.AreEqual(0, reloaded.GetActiveRules().Count);
             Assert.AreEqual(1, reloaded.GetRules(PermissionRuleScope.Project).Count);
 
-            reloaded.SetProjectRuleDisabledLocally(project.id, false);
+            reloaded.SetProjectRuleDisabledLocally("p1", false);
             Assert.AreEqual(1, reloaded.GetActiveRules().Count);
         }
 
@@ -111,32 +152,18 @@ namespace AgentCore.Tests.Editor.Tools
         }
 
         [Test]
-        public void UpdateRule_InPlace_And_MoveBetweenScopes()
+        public void UpdateAndRemoveRule_InPlace()
         {
             var store = new PermissionRulesStore(_root);
             var added = store.AddRule(PermissionRuleScope.User, Rule("ask", "manage_file"));
 
             added.effect = "allow";
             Assert.IsTrue(store.UpdateRule(PermissionRuleScope.User, added));
-            Assert.AreEqual("allow", store.GetRules(PermissionRuleScope.User)[0].effect);
+            Assert.AreEqual("allow", new PermissionRulesStore(_root).GetRules(PermissionRuleScope.User)[0].effect);
 
-            Assert.IsTrue(store.UpdateRule(PermissionRuleScope.User, added, PermissionRuleScope.Project));
-            Assert.AreEqual(0, store.GetRules(PermissionRuleScope.User).Count);
-            Assert.AreEqual(1, store.GetRules(PermissionRuleScope.Project).Count);
-            Assert.AreEqual(1, new PermissionRulesStore(_root).GetRules(PermissionRuleScope.Project).Count);
-        }
-
-        [Test]
-        public void RemoveProjectRule_AlsoClearsLocalDisable()
-        {
-            var store = new PermissionRulesStore(_root);
-            var project = store.AddRule(PermissionRuleScope.Project, Rule("deny", "*"));
-            store.SetProjectRuleDisabledLocally(project.id, true);
-
-            Assert.IsTrue(store.RemoveRule(PermissionRuleScope.Project, project.id));
-            Assert.AreEqual(0, store.GetRules(PermissionRuleScope.Project).Count);
-            Assert.IsFalse(store.IsProjectRuleDisabledLocally(project.id));
-            StringAssert.DoesNotContain(project.id, File.ReadAllText(UserFile));
+            Assert.IsTrue(store.RemoveRule(PermissionRuleScope.User, added.id));
+            Assert.AreEqual(0, new PermissionRulesStore(_root).GetRules(PermissionRuleScope.User).Count);
+            Assert.IsFalse(Directory.Exists(Path.Combine(_root, "ProjectSettings")));
         }
 
         [Test]

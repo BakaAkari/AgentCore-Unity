@@ -5,9 +5,11 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.MCP.Config;
 using AgentCore.Editor.Components.MCP.Relay;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
 using Newtonsoft.Json.Linq;
 
@@ -20,6 +22,8 @@ namespace AgentCore.Editor.Components.MCP.Bridge
     /// </summary>
     public static class McpHttpEndpoint
     {
+        private static int _applyGeneration;
+
         private static string StateFile => Path.Combine(McpPaths.McpDirectory, "http.json");
 
         public static string TokenFile => Path.Combine(McpPaths.McpDirectory, "http-token");
@@ -63,7 +67,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         /// <summary>按设置启动或停止（主线程调用；启动在后台进行）。</summary>
         public static void Apply()
         {
-            if (!McpSettings.HttpEnabled)
+            if (!OptionalComponentManager.IsMcpEnabled() || !McpSettings.HttpEnabled)
             {
                 Stop();
                 return;
@@ -77,9 +81,12 @@ namespace AgentCore.Editor.Components.MCP.Bridge
             var token = Token;
             var editorPid = Process.GetCurrentProcess().Id;
             var project = McpPaths.ProjectRoot;
+            var generation = Interlocked.Increment(ref _applyGeneration);
 
             McpRelayBuilder.EnsureBuiltAsync().ContinueWith(build =>
             {
+                if (generation != Volatile.Read(ref _applyGeneration))
+                    return;
                 if (build.Status != TaskStatus.RanToCompletion || !build.Result.Success)
                 {
                     LastError = "The relay is not available: " + (build.Result?.Error ?? build.Exception?.GetBaseException().Message);
@@ -87,14 +94,16 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                 }
                 if (token == null)
                     return;
-                Launch(build.Result, project, port, editorPid);
+                Launch(build.Result, project, port, editorPid, generation);
             });
         }
 
-        private static void Launch(McpRelayBuilder.BuildResult build, string project, int port, int editorPid)
+        private static void Launch(McpRelayBuilder.BuildResult build, string project, int port, int editorPid, int generation)
         {
             try
             {
+                if (generation != Volatile.Read(ref _applyGeneration))
+                    return;
                 if (!IsPortFree(port))
                 {
                     LastError = $"Port {port} is in use by another program. Turn the HTTP endpoint off and on to pick a new port (client configs must be copied again).";
@@ -118,12 +127,23 @@ namespace AgentCore.Editor.Components.MCP.Bridge
                     LastError = "Could not start the HTTP relay.";
                     return;
                 }
+                if (generation != Volatile.Read(ref _applyGeneration))
+                {
+                    try { process.Kill(); } catch (Exception) { }
+                    return;
+                }
 
                 McpPaths.WriteAtomic(StateFile, new JObject { ["pid"] = process.Id, ["port"] = port }.ToString());
 
                 // 等它开始监听
                 for (var i = 0; i < 50; i++)
                 {
+                    if (generation != Volatile.Read(ref _applyGeneration))
+                    {
+                        try { process.Kill(); } catch (Exception) { }
+                        try { if (ReadState(out var pid, out _) && pid == process.Id && File.Exists(StateFile)) File.Delete(StateFile); } catch (Exception) { }
+                        return;
+                    }
                     if (process.HasExited)
                     {
                         LastError = $"The HTTP relay exited immediately (code {process.ExitCode}).";
@@ -147,6 +167,7 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
         public static void Stop()
         {
+            Interlocked.Increment(ref _applyGeneration);
             if (ReadState(out var pid, out _) && ProcessAlive(pid))
             {
                 try

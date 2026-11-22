@@ -19,9 +19,7 @@
         "System.Runtime.CompilerServices.Unsafe.dll"
     ],
     "autoReferenced": true,
-    "defineConstraints": [
-        "AGENTCORE_INDEXING"
-    ],
+    "defineConstraints": [],
     "versionDefines": [],
     "noEngineReferences": false
 }

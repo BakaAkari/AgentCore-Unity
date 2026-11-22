@@ -77,7 +77,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 ""background_color"": { ""description"": ""Color object {r,g,b,a} or HTML string such as #223344FF"" },
                 ""culling_mask"": { ""description"": ""Integer layer mask or comma-separated layer names"" },
                 ""asset_path"": { ""type"": ""string"", ""description"": ""Assets path for RenderTexture asset"" },
-                ""output_path"": { ""type"": ""string"", ""description"": ""Assets path for PNG output"" },
+                ""output_path"": { ""type"": ""string"", ""description"": ""Optional Assets path for PNG output (default Library/AgentCore/Screenshots/<camera>_<timestamp>.png, outside Assets and VCS)"" },
                 ""width"": { ""type"": ""integer"" },
                 ""height"": { ""type"": ""integer"" },
                 ""format"": { ""type"": ""string"", ""description"": ""RenderTextureFormat name"" },
@@ -569,16 +569,24 @@ namespace AgentCore.Editor.Tools.Native.Specialized
             }
 
             var outputPathRaw = ToolHelpers.GetOptionalString(parameters, "output_path");
-            if (string.IsNullOrEmpty(outputPathRaw))
+            string outputPath;
+            string writePath;
+            bool isAssetOutput = !string.IsNullOrEmpty(outputPathRaw);
+            if (isAssetOutput)
             {
-                // Default: Assets/AgentCore/Screenshots/<CameraName>_<timestamp>.png
-                var safeName = System.Text.RegularExpressions.Regex.Replace(camera.gameObject.name, @"[^A-Za-z0-9_]", "_");
-                outputPathRaw = $"Assets/AgentCore/Screenshots/{safeName}_{System.DateTime.Now:yyyyMMdd_HHmmss}.png";
+                outputPath = ToolHelpers.NormalizeAssetPath(outputPathRaw);
+                writePath = outputPath;
             }
-            var outputPath = ToolHelpers.NormalizeAssetPath(outputPathRaw);
+            else
+            {
+                // 默认存 Library（与 VisionCaptureService 一致）：不进 VCS，不触发 AssetDatabase 导入
+                var safeName = System.Text.RegularExpressions.Regex.Replace(camera.gameObject.name, @"[^A-Za-z0-9_]", "_");
+                outputPath = $"{AgentCore.Editor.Tools.Vision.VisionCaptureService.DefaultOutputDir}/{safeName}_{System.DateTime.Now:yyyyMMdd_HHmmss}.png";
+                writePath = Path.GetFullPath(Path.Combine(SafePath.ProjectRoot, outputPath));
+            }
             var width = ToolHelpers.GetOptionalInt(parameters, "width", 1024);
             var height = ToolHelpers.GetOptionalInt(parameters, "height", 1024);
-            ToolHelpers.EnsureDirectoryExists(outputPath);
+            ToolHelpers.EnsureDirectoryExists(writePath);
 
             var oldTarget = camera.targetTexture;
             var oldActive = RenderTexture.active;
@@ -592,7 +600,7 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
                 tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
                 tex.Apply();
-                File.WriteAllBytes(outputPath, tex.EncodeToPNG());
+                File.WriteAllBytes(writePath, tex.EncodeToPNG());
                 UnityEngine.Object.DestroyImmediate(tex);
             }
             finally
@@ -602,7 +610,8 @@ namespace AgentCore.Editor.Tools.Native.Specialized
                 RenderTexture.ReleaseTemporary(rt);
             }
 
-            AssetDatabase.Refresh();
+            if (isAssetOutput)
+                AssetDatabase.Refresh();
             return ToolResponse.OkWithData(new { outputPath, width, height, camera = camera.gameObject.name }, $"Rendered Camera '{camera.gameObject.name}' to '{outputPath}'.");
         }
 

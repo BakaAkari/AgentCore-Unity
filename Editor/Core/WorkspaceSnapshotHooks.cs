@@ -25,7 +25,7 @@ namespace AgentCore.Editor.Core
     {
         /// <summary>
         /// Provider callback for the "Index Status" block. Registered by the Indexing
-        /// component (when <c>AGENTCORE_INDEXING</c> is defined); otherwise null.
+        /// component (when the Indexing component is enabled); otherwise null.
         /// </summary>
         public static Func<string> IndexStatusBlockProvider { get; set; }
     }

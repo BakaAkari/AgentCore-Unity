@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Components.VCS.Tools;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
 using AgentCore.Editor.Workspace.Resolution;
 
@@ -57,6 +58,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             EditorApplication.update += OnEditorUpdate;
             VcsDetector.DetectionChanged += RequestStatusRefresh;
             VcsRemoteStatusMonitor.StatusChanged += OnRemoteStatusChanged;
+            OptionalComponentManager.ComponentStateChanged += OnComponentStateChanged;
 
             // 远端锁快照随 VcsRemoteStatusMonitor 存在 SessionState 里，域重载后直接可用（他人锁定角标不会消失）
             _remoteLockStatus = VcsRemoteStatusMonitor.LastStatus;
@@ -69,9 +71,28 @@ namespace AgentCore.Editor.Components.VCS.UI
         /// </summary>
         public static void RequestStatusRefresh()
         {
-            if (!_overlaysEnabled)
+            if (!_overlaysEnabled || !OptionalComponentManager.IsVcsEnabled())
                 return;
             _refreshDueTime = EditorApplication.timeSinceStartup + DebounceSeconds;
+        }
+
+        private static void OnComponentStateChanged(string componentId, bool enabled)
+        {
+            if (componentId != OptionalComponentManager.VcsComponentId)
+                return;
+
+            if (enabled)
+            {
+                _remoteLockStatus = VcsRemoteStatusMonitor.LastStatus;
+                _lastRefreshFinishedTime = -1000;
+                RequestStatusRefresh();
+            }
+            else
+            {
+                // 进行中的后台刷新完成时由 StartRefresh 的回调丢弃结果
+                _refreshDueTime = -1;
+                ClearOverlays();
+            }
         }
 
         private static void OnFocusChanged(bool focused)
@@ -100,7 +121,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private static void OnEditorUpdate()
         {
             // 每帧只比较时间戳
-            if (_refreshDueTime < 0 || _refreshRunning)
+            if (_refreshDueTime < 0 || _refreshRunning || !OptionalComponentManager.IsVcsEnabled())
                 return;
             var now = EditorApplication.timeSinceStartup;
             if (now < _refreshDueTime || now - _lastRefreshFinishedTime < MinIntervalSeconds)
@@ -150,7 +171,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                         _lastReportedError = null;
                     }
 
-                    _snapshot = _overlaysEnabled ? snapshot : null;
+                    _snapshot = _overlaysEnabled && OptionalComponentManager.IsVcsEnabled() ? snapshot : null;
                     EditorApplication.RepaintProjectWindow();
                 });
             }, TaskScheduler.Default);
@@ -249,7 +270,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         private static void OnProjectWindowItemGUI(string guid, Rect rect)
         {
             var snapshot = _snapshot;
-            if (snapshot == null || snapshot.IsEmpty || Event.current.type != EventType.Repaint)
+            if (snapshot == null || snapshot.IsEmpty || Event.current.type != EventType.Repaint
+                || !OptionalComponentManager.IsVcsEnabled())
                 return;
 
             var assetPath = AssetDatabase.GUIDToAssetPath(guid);
@@ -372,6 +394,9 @@ namespace AgentCore.Editor.Components.VCS.UI
         [MenuItem(OverlayMenuPath, false, MenuPriority + 20)]
         private static void ToggleOverlays()
         {
+            if (!OptionalComponentManager.IsVcsEnabled())
+                return;
+
             _overlaysEnabled = !_overlaysEnabled;
             EditorPrefs.SetBool(OverlayPrefKey, _overlaysEnabled);
             if (_overlaysEnabled)
@@ -389,7 +414,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         private static bool ValidateToggleOverlays()
         {
             Menu.SetChecked(OverlayMenuPath, _overlaysEnabled);
-            return true;
+            return OptionalComponentManager.IsVcsEnabled();
         }
 
         [MenuItem(MenuRoot + "Commit", true, MenuPriority)]
@@ -398,12 +423,14 @@ namespace AgentCore.Editor.Components.VCS.UI
         [MenuItem(MenuRoot + "Show Diff", true, MenuPriority + 3)]
         [MenuItem(MenuRoot + "Revert Changes", true, MenuPriority + 4)]
         [MenuItem(MenuRoot + "Cleanup", true, MenuPriority + 5)]
-        private static bool ValidateSelection() => HasSelection() && VcsDetector.DetectVcs() != VcsType.None;
+        private static bool ValidateSelection() =>
+            OptionalComponentManager.IsVcsEnabled() && HasSelection() && VcsDetector.DetectVcs() != VcsType.None;
 
         [MenuItem(MenuRoot + "Add", true, MenuPriority + 6)]
         [MenuItem(MenuRoot + "Get Lock", true, MenuPriority + 7)]
         [MenuItem(MenuRoot + "Release Lock", true, MenuPriority + 8)]
-        private static bool ValidateSvnSelection() => HasSelection() && VcsDetector.DetectVcs() == VcsType.Svn;
+        private static bool ValidateSvnSelection() =>
+            OptionalComponentManager.IsVcsEnabled() && HasSelection() && VcsDetector.DetectVcs() == VcsType.Svn;
 
         [MenuItem(MenuRoot + "Commit", false, MenuPriority)]
         private static void CommitSelected() => LaunchExternal("commit", "Commit", PathScope.MultipleWithMeta, refresh: true);

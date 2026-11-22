@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AgentCore.Editor.Components.MCP.Relay;
 using AgentCore.Editor.Core;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -15,7 +16,8 @@ using UnityEngine;
 namespace AgentCore.Editor.Components.MCP.Bridge
 {
     /// <summary>
-    /// McpBridge 的生命周期：组件启用后随编辑器启动，在 127.0.0.1 上监听 relay，写发现文件，
+    /// McpBridge 的生命周期：组件启用（<see cref="OptionalComponentManager.IsMcpEnabled"/>）时随编辑器启动、
+    /// 运行中启用 / 禁用时即时启停，在 127.0.0.1 上监听 relay，写发现文件，
     /// 把 relay 的请求交给 <see cref="McpToolCatalog"/> / <see cref="McpToolExecutor"/>。
     /// <para>
     /// 端口与令牌存 <see cref="SessionState"/>：Domain Reload 前后不变，编辑器重启重新生成。批处理模式不启动。
@@ -65,13 +67,31 @@ namespace AgentCore.Editor.Components.MCP.Bridge
 
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             EditorApplication.quitting += OnQuitting;
+            OptionalComponentManager.ComponentStateChanged += OnComponentStateChanged;
             // MainThread.Post 会唤醒空闲 / 失焦的编辑器（delayCall 在编辑器空闲时可能一直不执行）
             MainThread.Post(Start);
         }
 
+        private static void OnComponentStateChanged(string componentId, bool enabled)
+        {
+            if (componentId != OptionalComponentManager.McpComponentId)
+                return;
+
+            if (enabled)
+            {
+                Start();
+                return;
+            }
+
+            StopAndRemoveEndpoint();
+            // 本机 HTTP relay 是独立进程，组件禁用时一并结束
+            McpHttpEndpoint.Stop();
+            AgentCoreLog.Info("[AgentCore][MCP] Bridge stopped (component disabled).");
+        }
+
         private static void Start()
         {
-            if (_server != null)
+            if (_server != null || _reloading || !OptionalComponentManager.IsMcpEnabled())
                 return;
             try
             {
@@ -122,6 +142,12 @@ namespace AgentCore.Editor.Components.MCP.Bridge
         }
 
         private static void OnQuitting()
+        {
+            StopAndRemoveEndpoint();
+        }
+
+        /// <summary>停止 bridge 并删除发现文件（编辑器退出 / 组件禁用）。</summary>
+        private static void StopAndRemoveEndpoint()
         {
             McpResourceEvents.Stop();
             _server?.Dispose();

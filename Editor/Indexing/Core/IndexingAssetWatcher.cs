@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AgentCore.Editor.Extensions;
 using UnityEditor;
 
 namespace AgentCore.Editor.Components.Indexing.Core
@@ -34,6 +35,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
             string[] movedAssets,
             string[] movedFromAssetPaths)
         {
+            if (!OptionalComponentManager.IsIndexingEnabled())
+            {
+                return;
+            }
+
             var changed = CollectIndexablePaths(importedAssets)
                 .Concat(CollectIndexablePaths(movedAssets))
                 .ToList();

@@ -19,6 +19,7 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
                       "Actions: read_file (read config content), write_file (create/overwrite config), get_config_paths (list all config file paths). " +
                       "Config files: PROJECT.md (project conventions, coding preferences, architecture notes), " +
                       "SOUL.ext.md (append-only Agent behavior rule extensions — never replaces SOUL.md). " +
+                      "Both are personal local files written to UserSettings/AgentCore/ (not version-controlled); legacy copies in the project root or AgentCore/ are read-only fallbacks and are never modified. " +
                       "USE FOR: recording user preferences, updating project conventions, adding custom Agent behavior rules. " +
                       "NOT FOR: reading source code files (use manage_file), modifying SOUL.md directly (immutable). " +
                       "IMPORTANT: Changes take effect in the NEXT conversation — Bootstrap loads configs only at conversation start.",
@@ -54,6 +55,7 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
             description: "Read and write workspace configuration files that are injected into the System Prompt. " +
                          "PROJECT.md stores project conventions and personal preferences. " +
                          "SOUL.ext.md stores append-only Agent behavior rule extensions. " +
+                         "Writes always go to the personal local UserSettings/AgentCore/ directory; legacy copies elsewhere are read-only fallbacks. " +
                          "Use this tool when the user wants to update project conventions, record preferences, or modify Agent behavior rules. " +
                          "Changes take effect in the NEXT conversation (Bootstrap loads at conversation start).",
             category: "Bootstrap",
@@ -132,17 +134,25 @@ namespace AgentCore.Editor.Tools.Native.Bootstrap
 
             var content = File.ReadAllText(filePath);
             var lineCount = content.Split('\n').Length;
+            var writePath = BootstrapLoader.GetDefaultUserFilePath(fileName);
+            bool legacy = writePath != null && !string.Equals(
+                Path.GetFullPath(filePath), Path.GetFullPath(writePath), StringComparison.OrdinalIgnoreCase);
 
             var data = new JObject
             {
                 ["file_name"] = fileName,
                 ["exists"] = true,
                 ["path"] = PathUtils.ToUnityPath(filePath),
+                ["legacy_read_only"] = legacy,
+                ["write_path"] = PathUtils.ToUnityPath(writePath),
                 ["line_count"] = lineCount,
                 ["content"] = content
             };
 
-            return ToolResponse.OkWithData(data, $"Read {fileName} ({lineCount} lines) from: {filePath}");
+            var note = legacy
+                ? $" This is a legacy read-only copy; writes go to {PathUtils.ToUnityPath(writePath)} and take precedence."
+                : string.Empty;
+            return ToolResponse.OkWithData(data, $"Read {fileName} ({lineCount} lines) from: {filePath}.{note}");
         }
 
         /// <summary>

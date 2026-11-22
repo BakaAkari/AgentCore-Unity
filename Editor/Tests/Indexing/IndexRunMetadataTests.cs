@@ -1,4 +1,3 @@
-#if AGENTCORE_INDEXING
 using System;
 using System.IO;
 using AgentCore.Editor.Components.Indexing.Core;
@@ -151,4 +150,3 @@ namespace AgentCore.Tests.Editor.Indexing
         }
     }
 }
-#endif

@@ -63,10 +63,9 @@ namespace AgentCore.Editor.Config
         // === v1.17.0 多协议字段（旧资产反序列化为空字符串 = auto，行为与旧版一致）===
 
         // v1.17.0: Successful generation probe; invalidated when connection settings change.
-        // v1.18: 以下运行时字段（含 lastUsedAtUnixMs）只在内存中挂在 profile 上，持久化到每用户的
-        // UserSettings/AgentCore/ProviderProfilesState.json，不写入共享的 ProjectSettings 文件
-        // （verifiedCredential 是 API Key 的哈希）。见 ProviderProfileRuntimeState / ProviderProfilesStorage。
-        // 字段保持 Unity 可序列化，是为了能读出旧版共享文件里的值并迁移。
+        // 以下运行时字段（含 lastUsedAtUnixMs）与其余配置一起保存在本地
+        // UserSettings/AgentCore/ProviderProfiles.json（verifiedCredential 是 API Key 的哈希，不进版本库）。
+        // 字段保持 Unity 可序列化，是为了能读出旧版 ProjectSettings 文件里的值并迁移。
         public string verifiedConnection;
         public string verifiedFormat;
         public string verifiedAuth;
@@ -102,7 +101,7 @@ namespace AgentCore.Editor.Config
         /// <summary>创建时间（Unix 毫秒）。</summary>
         public long createdAtUnixMs;
 
-        /// <summary>最近一次被设为 active 的时间（Unix 毫秒）。v1.18: 每用户数据，不写入共享文件。</summary>
+        /// <summary>最近一次被设为 active 的时间（Unix 毫秒）。</summary>
         public long lastUsedAtUnixMs;
 
         /// <summary>

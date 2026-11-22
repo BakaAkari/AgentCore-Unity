@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using AgentCore.Editor.Components.Indexing.Config;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Utils;
 using Newtonsoft.Json;
 using UnityEditor;
@@ -274,6 +275,12 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         private static void Add(IEnumerable<string> paths, bool deleted)
         {
+            // Disabled component: changes are not tracked; enabling schedules a whole-project reconcile instead.
+            if (!OptionalComponentManager.IsIndexingEnabled())
+            {
+                return;
+            }
+
             EnsureLoaded();
             var normalizedPaths = NormalizePaths(paths);
             var marked = 0;

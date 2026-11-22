@@ -394,7 +394,7 @@ namespace AgentCore.Editor.UI.Components
 
         private static void OnOpenSettingsClicked()
         {
-            SettingsService.OpenProjectSettings("Project/AgentCore");
+            SettingsService.OpenUserPreferences("Preferences/AgentCore");
         }
 
         // ─────────────────────────────────────────────

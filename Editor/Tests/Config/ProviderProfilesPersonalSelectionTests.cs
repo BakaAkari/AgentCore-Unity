@@ -5,25 +5,24 @@ using NUnit.Framework;
 namespace AgentCore.Tests.Editor.Config
 {
     /// <summary>
-    /// 设置页 / chat 面板的个人选择（active profile、模型、辅助任务 profile）只写每用户状态文件，
-    /// 不改团队共享的 <c>ProjectSettings/AgentCoreProviderProfiles.asset</c>；明确的"设为团队默认"操作才写共享文件。
+    /// <see cref="AgentCoreProviderProfiles"/> 的所有修改（增删改、切换 active / 辅助任务 profile、切换模型）
+    /// 只写本地 <c>UserSettings/AgentCore/ProviderProfiles.json</c>，不创建或修改 <c>ProjectSettings/AgentCoreProviderProfiles.asset</c>。
     /// <para>
-    /// 这些用例操作真实的 <see cref="AgentCoreProviderProfiles"/> 单例：<see cref="SetUp"/> 记录团队默认与个人选择，
-    /// <see cref="TearDown"/> 还原并删除临时 profile，最后把共享文件与用户状态文件恢复为测试前的字节，
-    /// 保证测试运行后工程配置与版本库状态不变。
+    /// 用例操作真实单例，但 <see cref="SetUp"/> 把 <see cref="AgentCoreProviderProfiles.LocalPath"/> 指向临时文件并重新加载，
+    /// <see cref="TearDown"/> 还原路径并从真实文件重新加载，工程配置不受影响。
     /// </para>
     /// </summary>
     [TestFixture]
     public class ProviderProfilesPersonalSelectionTests
     {
-        private const string SharedPath = "ProjectSettings/AgentCoreProviderProfiles.asset";
+        private const string LegacySharedPath = ProviderProfilesStorage.LegacySharedPath;
 
-        private byte[] _sharedBefore;
-        private byte[] _userStateBefore;
-        private string _teamActive;
-        private string _teamUtility;
-        private string _personalActive;
-        private string _personalUtility;
+        private string _originalLocalPath;
+        private string _dir;
+        private string _local;
+        private bool _legacyExisted;
+        private byte[] _legacyBytes;
+        private System.DateTime _legacyTime;
         private ProviderProfile _a;
         private ProviderProfile _b;
 
@@ -32,110 +31,121 @@ namespace AgentCore.Tests.Editor.Config
         [SetUp]
         public void SetUp()
         {
-            _sharedBefore = File.Exists(SharedPath) ? File.ReadAllBytes(SharedPath) : null;
-            _userStateBefore = File.Exists(ProviderProfilesStorage.UserStatePath)
-                ? File.ReadAllBytes(ProviderProfilesStorage.UserStatePath)
-                : null;
-            _teamActive = Store.TeamDefaultProfileId;
-            _teamUtility = Store.TeamDefaultUtilityProfileId;
-            _personalActive = Store.ActiveProfileId;
-            _personalUtility = Store.UtilityProfileId;
+            _legacyExisted = File.Exists(LegacySharedPath);
+            if (_legacyExisted)
+            {
+                _legacyBytes = File.ReadAllBytes(LegacySharedPath);
+                _legacyTime = File.GetLastWriteTimeUtc(LegacySharedPath);
+            }
 
-            _a = ProviderProfile.Create("__test_personal_a__");
+            _originalLocalPath = AgentCoreProviderProfiles.LocalPath;
+            _dir = Path.Combine(Path.GetTempPath(), "AgentCoreProfilesLocalTests_" + System.Guid.NewGuid().ToString("N"));
+            _local = Path.Combine(_dir, "ProviderProfiles.json");
+            // 预先写空文件：不触发旧版迁移，断言不依赖工程原有配置
+            ProviderProfilesStorage.Save(_local, new ProviderProfilesLocalData());
+            AgentCoreProviderProfiles.LocalPath = _local;
+            Store.ReloadFromDisk();
+
+            _a = ProviderProfile.Create("__test_local_a__");
             _a.endpoint = "http://test.local:9998/v1";
-            _a.modelName = "team-model";
+            _a.modelName = "model-a";
             Store.AddProfile(_a);
-            _b = ProviderProfile.Create("__test_personal_b__");
+            _b = ProviderProfile.Create("__test_local_b__");
             _b.endpoint = "http://test.local:9997/v1";
-            _b.modelName = "team-model-b";
+            _b.modelName = "model-b";
             Store.AddProfile(_b);
-
-            // 团队默认 = A、辅助任务跟随 active，个人选择清空：之后的断言不依赖工程原有配置
-            Store.SetTeamDefaults(_a.id, "");
         }
 
         [TearDown]
         public void TearDown()
         {
-            Store.SetTeamDefaults(_teamActive, _teamUtility);
-            Store.SetActive(_personalActive);
-            Store.SetUtility(_personalUtility);
-            if (_a != null) Store.RemoveProfile(_a.id);
-            if (_b != null) Store.RemoveProfile(_b.id);
-
-            Restore(SharedPath, _sharedBefore);
-            Restore(ProviderProfilesStorage.UserStatePath, _userStateBefore);
+            AgentCoreProviderProfiles.LocalPath = _originalLocalPath;
+            Store.ReloadFromDisk();
+            if (Directory.Exists(_dir))
+                Directory.Delete(_dir, true);
         }
 
         [Test]
-        public void PersonalChoices_OnlyWriteUserState_SharedFileUnchanged()
+        public void AllMutations_WriteLocalFile_AndNeverTouchProjectSettings()
         {
-            var shared = File.ReadAllBytes(SharedPath);
-
             Store.SetActive(_b.id);
             Store.SetUtility(_a.id);
-            Store.SetUserModel(_a.id, "personal-model");
+            Store.SetUserModel(_a.id, "picked-model");
+            Store.UpdateProfile(_b.id, p => p.displayName = "renamed");
 
-            CollectionAssert.AreEqual(shared, File.ReadAllBytes(SharedPath), "个人选择不得改写共享文件");
-            Assert.AreEqual(_a.id, Store.TeamDefaultProfileId);
-            Assert.AreEqual("", Store.TeamDefaultUtilityProfileId);
-            Assert.AreEqual("team-model", _a.modelName, "共享 modelName 不变");
+            var json = File.ReadAllText(_local);
+            StringAssert.Contains("picked-model", json);
+            StringAssert.Contains("renamed", json);
+            StringAssert.Contains("\"activeProfileId\": \"" + _b.id + "\"", json);
+            StringAssert.Contains("\"utilityProfileId\": \"" + _a.id + "\"", json);
 
-            var userState = File.ReadAllText(ProviderProfilesStorage.UserStatePath);
-            StringAssert.Contains("personal-model", userState);
-            StringAssert.Contains("\"utilityProfileId\": \"" + _a.id + "\"", userState);
-            StringAssert.Contains("\"activeProfileId\": \"" + _b.id + "\"", userState);
+            Store.RemoveProfile(_b.id);
+            _b = null;
+            StringAssert.DoesNotContain("__test_local_b__", File.ReadAllText(_local));
+
+            AssertLegacySharedUntouched();
         }
 
         [Test]
-        public void PersonalOverlay_WinsOverTeamDefault_AndSelectingTeamDefaultFollowsItAgain()
+        public void SetActiveAndUtility_ApplyDirectly_AndSurviveReload()
         {
             Store.SetActive(_b.id);
-            Store.SetUtility(_b.id);
-            Store.SetUserModel(_a.id, "personal-model");
+            Store.SetUtility(_a.id);
+            Store.SetUserModel(_a.id, "picked-model");
+
+            Store.ReloadFromDisk();
 
             Assert.AreEqual(_b.id, Store.ActiveProfileId);
-            Assert.AreEqual(_b.id, Store.UtilityProfileId);
-            Assert.AreEqual("personal-model", Store.GetEffectiveModelName(_a));
-            Assert.IsTrue(Store.HasPersonalSelection);
-
-            Store.SetActive(_a.id);
-            Store.SetUtility("");
-            Store.SetUserModel(_a.id, "team-model");
-
-            Assert.AreEqual(_a.id, Store.ActiveProfileId);
-            Assert.AreEqual("", Store.UtilityProfileId);
-            Assert.AreEqual("team-model", Store.GetEffectiveModelName(_a));
-            Assert.IsFalse(Store.HasPersonalSelection);
+            Assert.AreEqual(_a.id, Store.UtilityProfileId);
+            var a = Store.FindById(_a.id);
+            Assert.AreEqual("picked-model", a.modelName, "模型选择直接写入 modelName");
+            Assert.AreEqual("picked-model", Store.GetEffectiveModelName(a));
+            AssertLegacySharedUntouched();
         }
 
         [Test]
-        public void ExplicitTeamDefaultActions_WriteSharedFile_AndClearPersonalChoice()
+        public void SetUserModel_BlankOrUnknownProfile_IsNoOp()
         {
-            Store.SetUserModel(_a.id, "new-team-model");
-            Store.SetTeamDefaultModel(_a.id, "new-team-model");
+            var before = File.ReadAllText(_local);
 
-            Assert.AreEqual("new-team-model", _a.modelName);
-            StringAssert.Contains("new-team-model", File.ReadAllText(SharedPath));
+            Store.SetUserModel(_a.id, "  ");
+            Store.SetUserModel("missing-id", "x");
+            Store.SetUserModel(_a.id, "model-a");
 
-            Store.SetActive(_b.id);
-            Store.SetUtility(_a.id);
-            Store.SetTeamDefaults(Store.ActiveProfileId, Store.UtilityProfileId);
-
-            Assert.AreEqual(_b.id, Store.TeamDefaultProfileId);
-            Assert.AreEqual(_a.id, Store.TeamDefaultUtilityProfileId);
-            Assert.IsFalse(Store.HasPersonalSelection);
-            var shared = File.ReadAllText(SharedPath);
-            StringAssert.Contains("activeProfileId: " + _b.id, shared);
-            StringAssert.Contains("utilityProfileId: " + _a.id, shared);
+            Assert.AreEqual("model-a", _a.modelName);
+            Assert.AreEqual(before, File.ReadAllText(_local), "无变化不写盘");
         }
 
-        private static void Restore(string path, byte[] bytes)
+        [Test]
+        public void RemovingActiveAndUtilityProfile_ClearsSelection()
         {
-            if (bytes != null)
-                File.WriteAllBytes(path, bytes);
-            else if (File.Exists(path))
-                File.Delete(path);
+            Store.SetActive(_a.id);
+            Store.SetUtility(_a.id);
+
+            Store.RemoveProfile(_a.id);
+            _a = null;
+
+            Assert.AreEqual("", Store.ActiveProfileId);
+            Assert.AreEqual("", Store.UtilityProfileId);
+            Assert.IsNull(Store.GetUtility());
+        }
+
+        [Test]
+        public void SetUtility_UnknownId_FollowsActive()
+        {
+            Store.SetUtility("missing-id");
+
+            Assert.AreEqual("", Store.UtilityProfileId);
+        }
+
+        private void AssertLegacySharedUntouched()
+        {
+            Assert.AreEqual(_legacyExisted, File.Exists(LegacySharedPath), "不得创建或删除 ProjectSettings 文件");
+            if (_legacyExisted)
+            {
+                CollectionAssert.AreEqual(_legacyBytes, File.ReadAllBytes(LegacySharedPath), "不得修改 ProjectSettings 文件");
+                Assert.AreEqual(_legacyTime, File.GetLastWriteTimeUtc(LegacySharedPath));
+            }
         }
     }
 }

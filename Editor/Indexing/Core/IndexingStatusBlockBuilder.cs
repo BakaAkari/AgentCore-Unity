@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using AgentCore.Editor.Components.Indexing.Models;
 using AgentCore.Editor.Core;
+using AgentCore.Editor.Extensions;
 using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Utils;
@@ -13,10 +14,10 @@ namespace AgentCore.Editor.Components.Indexing.Core
     /// v1.4.0 — Builds the "Index Status" block that decorates the first-turn workspace snapshot.
     /// <para>
     /// Registered as <see cref="WorkspaceSnapshotHooks.IndexStatusBlockProvider"/> at editor
-    /// startup via <see cref="RegisterHook"/>. When the Indexing component is not compiled
-    /// (<c>AGENTCORE_INDEXING</c> undefined), the hook remains unregistered and the snapshot
-    /// contains no Index Status block — this preserves the AGENTS.md §3.4 decoupling
-    /// (main assembly does not reverse-reference component assemblies).
+    /// startup via <see cref="RegisterHook"/>. While the Indexing component is disabled
+    /// (<see cref="OptionalComponentManager.IsIndexingEnabled"/>), <see cref="Build"/> returns null
+    /// and the snapshot contains no Index Status block — the main assembly still never
+    /// reverse-references component assemblies (AGENTS.md §3.4).
     /// </para>
     /// <para>
     /// Design constraint: this builder runs synchronously on the Unity main thread during
@@ -56,6 +57,11 @@ namespace AgentCore.Editor.Components.Indexing.Core
         /// </summary>
         public static string Build()
         {
+            if (!OptionalComponentManager.IsIndexingEnabled())
+            {
+                return null;
+            }
+
             try
             {
                 var snapshot = IndexingStatusBus.Current;

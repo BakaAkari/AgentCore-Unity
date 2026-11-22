@@ -27,7 +27,7 @@ namespace AgentCore.Editor.Tools.Safety
         /// <summary>每用户规则：<c>UserSettings/AgentCore/PermissionRules.json</c>（不进版本库）。</summary>
         User = 0,
 
-        /// <summary>项目共享规则：<c>ProjectSettings/AgentCore/PermissionRules.json</c>（团队默认，进版本库）。</summary>
+        /// <summary>遗留项目规则：<c>ProjectSettings/AgentCore/PermissionRules.json</c>（仅在已存在时只读加载，可本地停用，不可写）。</summary>
         Project = 1
     }
 

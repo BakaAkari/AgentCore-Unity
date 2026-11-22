@@ -1,4 +1,5 @@
 using System.IO;
+using UnityEditor;
 using UnityEngine;
 using AgentCore.Editor.Utils;
 
@@ -11,6 +12,30 @@ namespace AgentCore.Editor.Workspace.Resolution
     /// </summary>
     public static class UnityRootResolver
     {
+        private static volatile string _cachedUnityRoot;
+
+        [InitializeOnLoadMethod]
+        private static void CacheUnityRootOnDomainLoad()
+        {
+            _cachedUnityRoot = Resolve();
+        }
+
+        /// <summary>
+        /// 线程安全地获取当前 Unity 工程根目录：优先返回主线程预热缓存；
+        /// 若尚未缓存且当前在主线程，则即时解析并缓存。
+        /// </summary>
+        public static string GetCachedOrResolve()
+        {
+            var cached = _cachedUnityRoot;
+            if (!string.IsNullOrEmpty(cached))
+                return cached;
+
+            var resolved = Resolve();
+            if (!string.IsNullOrEmpty(resolved))
+                _cachedUnityRoot = resolved;
+            return resolved;
+        }
+
         /// <summary>
         /// 解析当前 Unity 工程根目录。
         /// </summary>

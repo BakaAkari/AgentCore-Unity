@@ -3,7 +3,7 @@ namespace AgentCore.Editor.Components.Indexing.Config
     /// <summary>
     /// Provides static metadata for the optional Code Indexing component.
     /// This descriptor lives inside the <c>AgentCore.Indexing.Editor</c> assembly
-    /// (gated by <c>AGENTCORE_INDEXING</c>) and is referenced by
+    /// (runtime-gated by <see cref="AgentCore.Editor.Extensions.OptionalComponentManager.IsIndexingEnabled"/>) and is referenced by
     /// <see cref="AgentCore.Editor.Extensions.OptionalComponentManager"/> to expose
     /// the component in the Extensions settings page.
     /// </summary>

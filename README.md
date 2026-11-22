@@ -10,7 +10,7 @@
 
 AgentCore Unity is an **Editor-only UPM package**, not a generic coding-agent wrapper. It's a native execution layer purpose-built for Unity projects: model reasoning, live Editor state, 50+ native tools, project knowledge, version control, code indexing, and verification feedback — wired into one governed loop.
 
-- **Package**: `com.agentcore.unity` · **Version**: `1.20.2` · **Unity**: `2021.3+`
+- **Package**: `com.agentcore.unity` · **Version**: `1.21.0` · **Unity**: `2021.3+`
 - Editor-only assembly — zero runtime footprint, never ships in your build
 - Built-in tools covering scenes, GameObjects, components, prefabs, assets, materials, shaders, UI, physics, audio, cameras, Timeline, Cinemachine, ProBuilder, builds, tests, and more
 
@@ -50,7 +50,7 @@ The default connection targets an enterprise intranet model. Outside that networ
 
 ## Configuration
 
-Model connection is managed via **Provider Profiles** — `Edit > Project Settings > AgentCore` → **Model & Agent**. Each profile stores one full connection (endpoint, key, model, sampling params); switch the *Active Profile* to hot-swap providers.
+Model connection is managed via **Provider Profiles** — `Edit > Preferences > AgentCore` (macOS: `Unity > Settings > AgentCore`) → **Model & Agent**. Each profile stores one full connection (endpoint, key, model, sampling params); switch the *Active Profile* to hot-swap providers.
 
 | Field | Purpose |
 |---|---|
@@ -76,11 +76,11 @@ macOS: use `Cmd` in place of `Ctrl`.
 
 ## Optional Components
 
-Enable these in **Project Settings > AgentCore > Tools & Extensions**. Their scripting define symbols control compilation:
+Enable these in **Preferences > AgentCore > Tools & Extensions**. Component toggles take effect at runtime per local EditorPrefs without modifying `ProjectSettings/` or scripting define symbols:
 
-- **Version Control** (`AGENTCORE_VCS`) — Git / SVN / Perforce status, diff, log, commit workflows
-- **Code Indexing** (`AGENTCORE_INDEXING`) — Roslyn-based symbol search, background incremental indexing
-- **MCP Server** (`AGENTCORE_MCP`) — lets Claude Code, Codex and other MCP clients use AgentCore's Unity tools, resources (project context, scene, console, VCS status, files) and skills as prompts, with the same permission rules and review level as the chat. Supports MCP 2026-07-28 and the 2025 revisions, confirmation in the client (elicitation), the Tasks extension, and an optional local HTTP endpoint; survives script reloads. See `QUICK_START.md` §7
+- **Version Control** — Git / SVN / Perforce status, diff, log, commit workflows
+- **Code Indexing** — Roslyn-based symbol search, background incremental indexing
+- **MCP Server** — lets Claude Code, Codex and other MCP clients use AgentCore's Unity tools, resources (project context, scene, console, VCS status, files) and skills as prompts, with the same permission rules and review level as the chat. Supports MCP 2026-07-28 and the 2025 revisions, confirmation in the client (elicitation), the Tasks extension, and an optional local HTTP endpoint; survives script reloads. See `QUICK_START.md` §7
 
 The AgentCore chat can also use tools from external MCP servers (stdio or HTTP, same `mcpServers` config format as Claude Desktop). See `QUICK_START.md` §8.
 
@@ -92,7 +92,7 @@ The AgentCore chat can also use tools from external MCP servers (stdio or HTTP, 
 
 ## Verification and tool inventory
 
-Unity EditMode tests live in `Editor/Tests/`, including MCP relay process integration tests. The recorded 1.20.1 acceptance run on Unity 2022.3.50f1 had **916 tests: 915 passed, 0 failed, 1 platform-specific skip**. This is a dated release result, not a guarantee for every Unity version; see [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and manual checks.
+Unity EditMode tests live in `Editor/Tests/`, including MCP relay process integration tests. The recorded 1.21.0 acceptance run on Unity 2022.3.50f1 had **917 tests: 900 passed, 0 failed, 17 expected `[Ignore]` skips** (16 ProBuilder tests when ProBuilder is not installed + 1 non-Windows test). This is a dated release result, not a guarantee for every Unity version; see [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and manual checks.
 
 At 1.20.0, source declares **60 built-in tools** (52 under `Editor/Tools/Native`, plus file, cloud, VCS and indexing tools). Runtime availability depends on enabled components, disabled tools and Chat tool scope; external MCP tools are additional. Use the runtime tool list as the authority, rather than treating the source count as the number exposed to every client. MCP excludes Chat-only helpers and external MCP proxies.
 

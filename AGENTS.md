@@ -489,7 +489,7 @@ bool flag = JsonHelper.GetBool(jobj, "key", false);
 
 ### 6.2 Bootstrap 系统修改规则
 
-Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自动) → PROJECT.md(用户)`。用户文件优先取 Unity 工程根目录，其次 `AgentCore/` 子目录；当前不会自动加载 `AGENTS.md` / `CLAUDE.md` 作为项目说明。
+Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自动) → PROJECT.md(用户)`。用户文件优先取 `UserSettings/AgentCore/`（唯一写入位置），其次只读回退旧位置 Unity 工程根目录、`AgentCore/` 子目录；当前不会自动加载 `AGENTS.md` / `CLAUDE.md` 作为项目说明。
 
 > 修改前先阅读 `Editor/Bootstrap/BootstrapLoader.cs` 了解完整加载逻辑。
 
@@ -498,16 +498,17 @@ Bootstrap 加载顺序是固定的：`SOUL(+SOUL.ext) → TOOLS → PROJECT(自�
 | 层 | 文件 | 来源 | 可变性 | 说明 |
 |----|------|------|--------|------|
 | 1 | `SOUL.md` | 包内嵌入 | **不可变** | AI 核心行为约束，§1-§10 永远不被用户覆盖 |
-| 1+ | `SOUL.ext.md` | 用户创建（可选） | 用户可编辑 | 追加模式，不替换 SOUL.md；建议 VCS 提交 |
+| 1+ | `SOUL.ext.md` | 用户创建（可选） | 用户可编辑 | 追加模式，不替换 SOUL.md；个人本地 `UserSettings/AgentCore/` |
 | 2 | `TOOLS.md` | 自动生成 | 自动 | 从 TOOLS.md.template + ToolRegistry 生成 |
 | 3 | `PROJECT.md` | 自动收集 | 自动 | ProjectContextCollector 收集，不含敏感信息 |
-| 3+ | `PROJECT.md`（用户） | 用户创建 | 用户可编辑 | 项目约定 + 个人偏好，建议 VCS 提交 |
+| 3+ | `PROJECT.md`（用户） | 用户创建 | 用户可编辑 | 项目约定 + 个人偏好，个人本地 `UserSettings/AgentCore/` |
 
 **关键规则**：
 - **SOUL.md 不可变** — 禁止在代码中修改 SOUL.md 的加载逻辑使其可被用户替换；用户扩展只能通过 SOUL.ext.md 追加
 - **MEMORY.md / USER.md 已废弃** — 这两个文件已被 PROJECT.md（用户层）取代，代码中不得再引用或加载这两个文件名
 - **TOOLS.md.template** — 工具使用指南，新增工具后应更新此文件
 - **ProjectContextCollector** — 自动收集项目信息，不要收集敏感信息（API Key、用户路径等）
+- **本地存储边界** — AgentCore 的设置与产物只写 `UserSettings/AgentCore/`（个人配置）和 `Library/AgentCore/`（索引、截图、备份等派生数据）；不得在 `ProjectSettings/`、工程根目录、`AgentCore/`、`Assets/AgentCore/` 或 workspaceRoot 的 `.agentcore/` 下新建或写入文件。已存在的旧文件只读回退
 
 > 详细设计见 `plans/_archive/refactoring/bootstrap-refactor-plan.md`。
 
@@ -873,7 +874,7 @@ public async Task<ToolResult> ExecuteAsync(JObject parameters, CancellationToken
 
 ### 10.1 Settings 页面开发规则
 
-AgentCore Project Settings 采用 **shell + top-tab pages + cards** 架构（自 v1.0.0 起）。修改设置页时必须遵守：
+AgentCore 设置页（`Preferences/AgentCore`，`SettingsScope.User`）采用 **shell + top-tab pages + cards** 架构（自 v1.0.0 起）。修改设置页时必须遵守：
 
 **核心架构**：
 - `AgentCoreSettingsProvider` 是外壳（约 230 行），维护有序 `IAgentCoreSettingsPage[]`，绘制顶部 Tab 导航并分发到当前 page。

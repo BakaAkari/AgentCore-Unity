@@ -2,6 +2,7 @@
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Tools.Safety;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -55,6 +56,10 @@ namespace AgentCore.Editor.Tools.Infrastructure
                         assemblyName.StartsWith("Unity.") ||
                         assemblyName.StartsWith("UnityEngine.") ||
                         assemblyName.StartsWith("UnityEditor."))
+                        continue;
+
+                    // 可选组件程序集始终编译；禁用时在运行时跳过其工具
+                    if (!OptionalComponentManager.IsAssemblyEnabled(assembly))
                         continue;
 
                     try

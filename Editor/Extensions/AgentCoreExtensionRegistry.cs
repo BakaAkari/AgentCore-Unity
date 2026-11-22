@@ -80,6 +80,10 @@ namespace AgentCore.Editor.Extensions
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
+                // Optional component assemblies always compile; skip their contributions while disabled.
+                if (!OptionalComponentManager.IsAssemblyEnabled(assembly))
+                    continue;
+
                 foreach (var type in GetLoadableTypes(assembly))
                 {
                     TryRegisterType(type);

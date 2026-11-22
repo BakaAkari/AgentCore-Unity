@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentCore.Editor.Extensions;
 using AgentCore.Editor.Workspace;
 using AgentCore.Editor.Workspace.Resolution;
 using UnityEditor;
@@ -80,6 +81,10 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// <returns>检测到的 VCS 类型。</returns>
         public static VcsType DetectVcs()
         {
+            // 组件禁用时不检测（DetectCore 可能触发 svn 等子进程），也不污染缓存
+            if (!OptionalComponentManager.IsVcsEnabled())
+                return VcsType.None;
+
             lock (_lock)
             {
                 if (_cachedType.HasValue)
@@ -202,7 +207,7 @@ namespace AgentCore.Editor.Components.VCS.Tools
         /// <param name="recheckIfUnavailable">缓存为"不可用"时是否重新探测（显式刷新场景使用）。</param>
         public static Task<bool> EnsureCommandAvailableAsync(VcsType vcsType, bool recheckIfUnavailable = false)
         {
-            if (vcsType == VcsType.None)
+            if (vcsType == VcsType.None || !OptionalComponentManager.IsVcsEnabled())
                 return Task.FromResult(false);
 
             lock (_lock)

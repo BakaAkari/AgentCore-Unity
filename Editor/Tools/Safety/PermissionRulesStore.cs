@@ -9,12 +9,11 @@ namespace AgentCore.Editor.Tools.Safety
     /// <summary>
     /// 权限规则的文件存储（P2）。
     /// <list type="bullet">
-    ///   <item><description><see cref="UserRelativePath"/>：每用户规则 + 本地停用的项目规则 id（不进版本库）。</description></item>
-    ///   <item><description><see cref="ProjectRelativePath"/>：团队共享默认规则（进版本库）。</description></item>
+    ///   <item><description><see cref="UserRelativePath"/>：每用户规则 + 本地停用的项目规则 id（不进版本库），唯一可写文件。</description></item>
+    ///   <item><description><see cref="ProjectRelativePath"/>：遗留项目规则，仅在文件已存在时只读加载，本类绝不创建或写入。</description></item>
     /// </list>
     /// <para>
-    /// 与 Provider Profile 分层存储一致：ProjectSettings 放团队配置，UserSettings 放个人配置；
-    /// 只在显式修改时经 <see cref="AtomicFile"/> 写盘，被替换的旧内容备份到 <c>Library/AgentCore</c>。
+    /// 只在显式修改时经 <see cref="AtomicFile"/> 写用户文件，被替换的旧内容备份到 <c>Library/AgentCore</c>。
     /// 读取按文件时间戳 / 大小缓存，外部手改文件后下一次工具调用即生效。
     /// 文件缺失 / 损坏一律视为"无规则"——绝不因配置问题拦截工具调用。
     /// </para>
@@ -24,11 +23,10 @@ namespace AgentCore.Editor.Tools.Safety
         /// <summary>每用户规则文件（相对项目根目录）。</summary>
         public const string UserRelativePath = "UserSettings/AgentCore/PermissionRules.json";
 
-        /// <summary>项目共享规则文件（相对项目根目录）。</summary>
+        /// <summary>遗留项目规则文件（相对项目根目录，只读）。</summary>
         public const string ProjectRelativePath = "ProjectSettings/AgentCore/PermissionRules.json";
 
         private const string UserBackupRelativePath = "Library/AgentCore/PermissionRules.user.json.bak";
-        private const string ProjectBackupRelativePath = "Library/AgentCore/PermissionRules.project.json.bak";
 
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
 
@@ -54,7 +52,6 @@ namespace AgentCore.Editor.Tools.Safety
         private readonly string _userPath;
         private readonly string _projectPath;
         private readonly string _userBackupPath;
-        private readonly string _projectBackupPath;
 
         private PermissionRulesDocument _user = new PermissionRulesDocument();
         private PermissionRulesDocument _project = new PermissionRulesDocument();
@@ -71,8 +68,11 @@ namespace AgentCore.Editor.Tools.Safety
         /// <summary>用户规则文件绝对路径。</summary>
         public string UserFilePath => _userPath;
 
-        /// <summary>项目规则文件绝对路径。</summary>
+        /// <summary>遗留项目规则文件绝对路径（只读）。</summary>
         public string ProjectFilePath => _projectPath;
+
+        /// <summary>遗留项目规则文件是否存在于磁盘上。</summary>
+        public bool ProjectFileExists => File.Exists(_projectPath);
 
         /// <param name="projectRoot">项目根目录（测试可传临时目录）。</param>
         public PermissionRulesStore(string projectRoot)
@@ -82,7 +82,6 @@ namespace AgentCore.Editor.Tools.Safety
             _userPath = Path.GetFullPath(Path.Combine(projectRoot, UserRelativePath));
             _projectPath = Path.GetFullPath(Path.Combine(projectRoot, ProjectRelativePath));
             _userBackupPath = Path.GetFullPath(Path.Combine(projectRoot, UserBackupRelativePath));
-            _projectBackupPath = Path.GetFullPath(Path.Combine(projectRoot, ProjectBackupRelativePath));
         }
 
         // ------------------------------------------------------------------
@@ -151,75 +150,65 @@ namespace AgentCore.Editor.Tools.Safety
         }
 
         // ------------------------------------------------------------------
-        // 写入（仅显式修改时）
+        // 写入（仅显式修改时，仅用户文件）
         // ------------------------------------------------------------------
 
-        /// <summary>新增规则（自动补 id）并保存对应文件。</summary>
+        /// <summary>新增规则（自动补 id）并保存用户文件。</summary>
+        /// <exception cref="InvalidOperationException"><paramref name="scope"/> 为 Project（只读）。</exception>
         public PermissionRule AddRule(PermissionRuleScope scope, PermissionRule rule)
         {
             if (rule == null) throw new ArgumentNullException(nameof(rule));
+            EnsureWritable(scope);
             var copy = rule.Clone();
             if (string.IsNullOrEmpty(copy.id))
                 copy.id = PermissionRule.NewId();
             lock (_lock)
             {
                 RefreshIfStale();
-                Doc(scope).rules.Add(copy);
-                Save(scope);
+                _user.rules.Add(copy);
+                Save();
             }
             RaiseChanged();
             return copy.Clone();
         }
 
-        /// <summary>按 id 替换规则（可跨 scope 移动：<paramref name="newScope"/> 与原 scope 不同则移动）。</summary>
+        /// <summary>按 id 替换用户规则。</summary>
         /// <returns>是否找到并更新。</returns>
-        public bool UpdateRule(PermissionRuleScope scope, PermissionRule rule, PermissionRuleScope? newScope = null)
+        /// <exception cref="InvalidOperationException"><paramref name="scope"/> 为 Project（只读）。</exception>
+        public bool UpdateRule(PermissionRuleScope scope, PermissionRule rule)
         {
+            EnsureWritable(scope);
             if (rule == null || string.IsNullOrEmpty(rule.id)) return false;
-            var target = newScope ?? scope;
             lock (_lock)
             {
                 RefreshIfStale();
-                var list = Doc(scope).rules;
-                int index = list.FindIndex(r => r.id == rule.id);
+                int index = _user.rules.FindIndex(r => r.id == rule.id);
                 if (index < 0) return false;
-
-                if (target == scope)
-                {
-                    list[index] = rule.Clone();
-                    Save(scope);
-                }
-                else
-                {
-                    list.RemoveAt(index);
-                    Doc(target).rules.Add(rule.Clone());
-                    Save(scope);
-                    Save(target);
-                }
+                _user.rules[index] = rule.Clone();
+                Save();
             }
             RaiseChanged();
             return true;
         }
 
-        /// <summary>按 id 删除规则。</summary>
+        /// <summary>按 id 删除用户规则。</summary>
+        /// <exception cref="InvalidOperationException"><paramref name="scope"/> 为 Project（只读）。</exception>
         public bool RemoveRule(PermissionRuleScope scope, string ruleId)
         {
+            EnsureWritable(scope);
             if (string.IsNullOrEmpty(ruleId)) return false;
             lock (_lock)
             {
                 RefreshIfStale();
-                int removed = Doc(scope).rules.RemoveAll(r => r.id == ruleId);
+                int removed = _user.rules.RemoveAll(r => r.id == ruleId);
                 if (removed == 0) return false;
-                bool unDisabled = scope == PermissionRuleScope.Project && _user.disabledProjectRules.Remove(ruleId);
-                Save(scope);
-                if (unDisabled)
-                    Save(PermissionRuleScope.User);
+                Save();
             }
             RaiseChanged();
             return true;
         }
 
-        /// <summary>本地停用 / 恢复某条项目规则（只写用户文件，不改团队文件）。</summary>
+        /// <summary>本地停用 / 恢复某条遗留项目规则（只写用户文件）。</summary>
         public void SetProjectRuleDisabledLocally(string ruleId, bool disabled)
         {
             if (string.IsNullOrEmpty(ruleId)) return;
@@ -231,7 +220,7 @@ namespace AgentCore.Editor.Tools.Safety
                 if (disabled == has) return;
                 if (disabled) list.Add(ruleId);
                 else list.Remove(ruleId);
-                Save(PermissionRuleScope.User);
+                Save();
             }
             RaiseChanged();
         }
@@ -240,21 +229,21 @@ namespace AgentCore.Editor.Tools.Safety
         // 内部
         // ------------------------------------------------------------------
 
-        private PermissionRulesDocument Doc(PermissionRuleScope scope)
-            => scope == PermissionRuleScope.User ? _user : _project;
-
-        private void Save(PermissionRuleScope scope)
+        private static void EnsureWritable(PermissionRuleScope scope)
         {
-            bool user = scope == PermissionRuleScope.User;
-            var path = user ? _userPath : _projectPath;
-            var doc = Doc(scope);
-            var json = doc.ToJson();
-            var bytes = Utf8NoBom.GetBytes(json);
-            if (File.Exists(path))
+            if (scope != PermissionRuleScope.User)
+                throw new InvalidOperationException(
+                    $"Project permission rules ({ProjectRelativePath}) are read-only; write rules to {UserRelativePath}.");
+        }
+
+        private void Save()
+        {
+            var bytes = Utf8NoBom.GetBytes(_user.ToJson());
+            if (File.Exists(_userPath))
             {
                 try
                 {
-                    if (BytesEqual(File.ReadAllBytes(path), bytes))
+                    if (BytesEqual(File.ReadAllBytes(_userPath), bytes))
                         return;
                 }
                 catch
@@ -264,26 +253,17 @@ namespace AgentCore.Editor.Tools.Safety
             }
 
             string backupPath = null;
-            if (File.Exists(path))
+            if (File.Exists(_userPath))
             {
-                backupPath = user ? _userBackupPath : _projectBackupPath;
+                backupPath = _userBackupPath;
                 var backupDir = Path.GetDirectoryName(backupPath);
                 if (!string.IsNullOrEmpty(backupDir))
                     Directory.CreateDirectory(backupDir);
             }
 
-            AtomicFile.WriteAllBytes(path, bytes, backupPath);
-            var stamp = FileStamp.Of(path);
-            if (user)
-            {
-                _userStamp = stamp;
-                UserLoadError = null;
-            }
-            else
-            {
-                _projectStamp = stamp;
-                ProjectLoadError = null;
-            }
+            AtomicFile.WriteAllBytes(_userPath, bytes, backupPath);
+            _userStamp = FileStamp.Of(_userPath);
+            UserLoadError = null;
         }
 
         private void RefreshIfStale()
@@ -318,7 +298,7 @@ namespace AgentCore.Editor.Tools.Safety
             }
             catch (Exception ex)
             {
-                // 损坏 / 无法读取：视为无规则（不拦截任何调用），保存时旧内容会被备份到 Library/AgentCore。
+                // 损坏 / 无法读取：视为无规则（不拦截任何调用）；用户文件保存时旧内容会被备份到 Library/AgentCore。
                 error = ex.Message;
                 AgentCoreLog.Warning($"[AgentCore] Failed to load permission rules from '{path}': {ex.Message}. Rules in this file are ignored.");
                 return new PermissionRulesDocument();

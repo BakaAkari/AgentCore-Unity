@@ -88,7 +88,7 @@ const REQUIRED_PATHS = [
     { path: 'package/Editor/Core/AgentLoop',                                         minCount: 5,  desc: 'AgentLoop partials' },
     { path: 'package/Editor/Core/SelfChallenge/',                                    minCount: 3,  desc: 'Self-Challenge scaffolding (Phase 9)' },
     { path: 'package/Editor/Extensions/',                                            minCount: 5,  desc: 'Extension host' },
-    { path: 'package/Editor/Extensions/OptionalComponentDefaultsBootstrap.cs.meta',  minCount: 1,  desc: 'Bootstrap meta (v1.4.6 regression guard)' },
+    { path: 'package/Editor/Extensions/OptionalComponentManager.cs.meta',             minCount: 1,  desc: 'Optional component gate meta (v1.4.6 regression guard)' },
     { path: 'package/Editor/LLM/',                                                   minCount: 3,  desc: 'LLM clients' },
     { path: 'package/Editor/Session/',                                               minCount: 3,  desc: 'Session subsystem' },
     { path: 'package/Editor/Tools/IAgentTool.cs',                                    minCount: 1,  desc: 'Tool interface' },
