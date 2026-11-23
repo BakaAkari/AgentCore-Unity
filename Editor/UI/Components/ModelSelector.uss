@@ -29,6 +29,25 @@
     border-color: #4a86c8;
 }
 
+/* 思考强度因模型/运行时约束自动降档时的胶囊提示态 */
+.agentcore-model-selector.is-clamped {
+    background-color: #302b21;
+    border-color: #8a6f35;
+}
+
+.agentcore-model-selector.is-clamped:hover {
+    background-color: #3a3326;
+    border-color: #b08d42;
+}
+
+.agentcore-model-selector.is-clamped .agentcore-model-selector__label {
+    color: #e0b860;
+}
+
+.agentcore-model-selector.is-clamped:hover .agentcore-model-selector__label {
+    color: #f0cf80;
+}
+
 .agentcore-model-selector__dot {
     width: 6px;
     height: 6px;
@@ -283,6 +302,26 @@
     opacity: 0.5;
 }
 
+/* 禁用条目：置灰文字且 hover 不高亮背景 */
+.agentcore-model-popup__row.is-disabled {
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.agentcore-model-popup__row.is-disabled:hover,
+.agentcore-model-popup__row.is-disabled.is-highlighted {
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.agentcore-model-popup__row.is-current.is-disabled {
+    background-color: #262930;
+    border-left-color: #556478;
+}
+
+.agentcore-model-popup__row.is-current.is-disabled:hover,
+.agentcore-model-popup__row.is-current.is-disabled.is-highlighted {
+    background-color: #262930;
+}
+
 .agentcore-model-popup__check {
     width: 16px;
     flex-shrink: 0;
@@ -292,6 +331,10 @@
     font-size: 11px;
     -unity-font-style: bold;
     -unity-text-align: middle-center;
+}
+
+.agentcore-model-popup__row.is-disabled .agentcore-model-popup__check {
+    color: #5e748c;
 }
 
 .agentcore-model-popup__vendor {
@@ -321,6 +364,11 @@
     -unity-font-style: bold;
 }
 
+.agentcore-model-popup__row.is-disabled .agentcore-model-popup__row-text,
+.agentcore-model-popup__row.is-current.is-disabled .agentcore-model-popup__row-text {
+    color: #666666;
+}
+
 .agentcore-model-popup__row-meta {
     flex-shrink: 1;
     max-width: 50%;
@@ -332,6 +380,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.agentcore-model-popup__row.is-disabled .agentcore-model-popup__row-meta {
+    color: #555555;
 }
 
 .agentcore-model-popup__profile-dot {

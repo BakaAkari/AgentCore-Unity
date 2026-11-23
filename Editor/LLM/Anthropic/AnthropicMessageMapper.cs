@@ -40,6 +40,12 @@ namespace AgentCore.Editor.LLM.Anthropic
         /// <summary>模型档案（为 null 时按 <see cref="Model"/> 查注册表）。</summary>
         public ModelProfile Profile;
 
+        /// <summary>当前 endpoint（用于查询运行时学习到的档位约束；null = 不查询）。</summary>
+        public string Endpoint;
+
+        /// <summary>当前方言（保留字段，供统一解析使用；null = 默认）。</summary>
+        public string Dialect;
+
         /// <summary>
         /// 使用会话中途工具变更（延迟工具带 <c>defer_loading</c> 声明，ToolChange 渲染为 <c>tool_addition</c>）。
         /// false 时只发送 <see cref="LLM.ToolChanges.EffectiveTools"/>。
@@ -155,19 +161,18 @@ namespace AgentCore.Editor.LLM.Anthropic
             effort = null;
             budget = 0;
 
-            bool on;
-            string wantedEffort;
-            switch (o.Level)
-            {
-                case ReasoningParamMapper.ReasoningLevel.Off: on = false; wantedEffort = null; break;
-                case ReasoningParamMapper.ReasoningLevel.Low: on = true; wantedEffort = "low"; break;
-                case ReasoningParamMapper.ReasoningLevel.Medium: on = true; wantedEffort = "medium"; break;
-                case ReasoningParamMapper.ReasoningLevel.High: on = true; wantedEffort = "high"; break;
-                default:
-                    on = o.DefaultReasoningEnabled;
-                    wantedEffort = NormalizeEffort(o.DefaultEffort);
-                    break;
-            }
+            // v1.22.0: 与 OpenAI 兼容路径共用同一套档位解析（模型能力 + 运行时学习约束）。
+            var plan = ReasoningParamMapper.ResolveEffectivePlan(
+                o.Level, o.DefaultEffort, o.DefaultReasoningEnabled, o.Endpoint, o.Model, p, o.Dialect);
+            var level = plan.EffectiveLevel;
+            bool offRequested = plan.RequestedLevel == ReasoningParamMapper.ReasoningLevel.Off;
+            bool on = level != ReasoningParamMapper.ReasoningLevel.Off;
+
+            string wantedEffort = null;
+            if (level == ReasoningParamMapper.ReasoningLevel.Auto)
+                wantedEffort = NormalizeEffort(o.DefaultEffort);
+            else if (on)
+                wantedEffort = ReasoningParamMapper.ToEffortString(level);
 
             switch (p.Thinking)
             {
@@ -176,19 +181,15 @@ namespace AgentCore.Editor.LLM.Anthropic
 
                 case ThinkingMode.BudgetTokens:
                     if (!on) return null;
-                    budget = wantedEffort switch
-                    {
-                        "low" => 2048,
-                        "medium" => 8192,
-                        "high" => 24576,
-                        "xhigh" or "max" => 32768,
-                        _ => o.DefaultBudgetTokens >= 1024 ? o.DefaultBudgetTokens : 4096
-                    };
+                    budget = level == ReasoningParamMapper.ReasoningLevel.Auto
+                        ? (o.DefaultBudgetTokens >= 1024 ? o.DefaultBudgetTokens : 4096)
+                        : ReasoningParamMapper.GetBudgetTokens(level);
+                    if (budget < 1024) budget = 1024;
                     if (p.SupportsEffort && wantedEffort != null) effort = ClampEffort(wantedEffort, p);
                     return new JObject { ["type"] = "enabled", ["budget_tokens"] = budget };
 
                 case ThinkingMode.AlwaysOn:
-                    if (!on)
+                    if (offRequested)
                     {
                         if (p.ThinkingOff == "between_tools")
                             return new JObject { ["type"] = "between_tools" };
@@ -199,7 +200,7 @@ namespace AgentCore.Editor.LLM.Anthropic
                     return Adaptive();
 
                 default: // AdaptiveExplicit / AdaptiveDefaultOn
-                    if (!on)
+                    if (!on || offRequested)
                     {
                         return p.ThinkingOff == "disabled" ? new JObject { ["type"] = "disabled" } : null;
                     }
@@ -213,7 +214,7 @@ namespace AgentCore.Editor.LLM.Anthropic
         private static string NormalizeEffort(string effort)
         {
             var e = effort?.Trim().ToLowerInvariant();
-            return e is "low" or "medium" or "high" or "xhigh" or "max" ? e : null;
+            return e is "minimal" or "low" or "medium" or "high" or "xhigh" or "max" ? e : null;
         }
 
         private static string ClampEffort(string effort, ModelProfile p)

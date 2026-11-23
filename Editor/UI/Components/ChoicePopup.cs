@@ -8,7 +8,7 @@ namespace AgentCore.Editor.UI.Components
 {
     /// <summary>
     /// v1.17.0: 通用单选弹出面板（与 <see cref="ModelSelectorPopup"/> 同一套样式：ModelSelector.uss 的 agentcore-model-popup__*）。
-    /// 标题 + 副标题、每项"名称 + 右侧说明"、当前项 ✓ 高亮；↑/↓ 移动、Enter 选中、Esc 关闭。
+    /// 标题 + 副标题、每项"名称 + 右侧说明"、当前项 ✓ 高亮；↑/↓ 移动（自动跳过禁用项）、Enter 选中、Esc 关闭。
     /// </summary>
     internal sealed class ChoicePopup : PopupWindowContent
     {
@@ -17,6 +17,7 @@ namespace AgentCore.Editor.UI.Components
             public string Label;
             public string Hint;
             public bool Selected;
+            public bool Disabled;
         }
 
         private const float RowHeight = 24f;
@@ -34,7 +35,7 @@ namespace AgentCore.Editor.UI.Components
         {
             _title = title;
             _subtitle = subtitle;
-            _items = items;
+            _items = items ?? Array.Empty<Item>();
             _onPick = onPick;
             _width = width;
             _onClosed = onClosed;
@@ -81,7 +82,11 @@ namespace AgentCore.Editor.UI.Components
                 if (item.Selected)
                 {
                     row.AddToClassList("is-current");
-                    _highlight = i;
+                    if (!item.Disabled) _highlight = i;
+                }
+                if (item.Disabled)
+                {
+                    row.AddToClassList("is-disabled");
                 }
 
                 var check = new Label(item.Selected ? "✓" : string.Empty);
@@ -99,8 +104,12 @@ namespace AgentCore.Editor.UI.Components
                     row.Add(hint);
                 }
 
-                int index = i;
-                row.AddManipulator(new Clickable(() => Pick(index)));
+                if (!item.Disabled)
+                {
+                    int index = i;
+                    row.AddManipulator(new Clickable(() => Pick(index)));
+                }
+
                 list.Add(row);
                 _rows.Add(row);
             }
@@ -108,11 +117,57 @@ namespace AgentCore.Editor.UI.Components
             root.schedule.Execute(() => root.Focus());
         }
 
-        private void Pick(int index)
+        /// <summary>校验某索引对应的条目是否可选（未越界且未禁用）。</summary>
+        internal static bool CanPick(IReadOnlyList<Item> items, int index)
         {
-            editorWindow.Close();
-            _onPick?.Invoke(index);
+            return items != null
+                && index >= 0
+                && index < items.Count
+                && items[index] != null
+                && !items[index].Disabled;
         }
+
+        /// <summary>
+        /// 按键盘方向查找下一个非禁用条目索引；全部禁用或空列表时返回 -1。
+        /// </summary>
+        /// <param name="items">条目列表。</param>
+        /// <param name="currentIndex">当前高亮索引（-1 表示尚未高亮）。</param>
+        /// <param name="direction">移动方向：&gt;=0 向下，&lt;0 向上。</param>
+        internal static int FindNextEnabledIndex(IReadOnlyList<Item> items, int currentIndex, int direction)
+        {
+            if (items == null || items.Count == 0) return -1;
+
+            int count = items.Count;
+            int step = direction >= 0 ? 1 : -1;
+            int start;
+            if (currentIndex < 0 || currentIndex >= count)
+            {
+                start = step > 0 ? 0 : count - 1;
+            }
+            else
+            {
+                start = (currentIndex + step + count) % count;
+            }
+
+            for (int tried = 0; tried < count; tried++)
+            {
+                int idx = (start + tried * step + count * 2) % count;
+                if (CanPick(items, idx)) return idx;
+            }
+
+            return -1;
+        }
+
+        /// <summary>尝试选中指定索引；越界或禁用时拦截并返回 false（不关闭弹窗，不触发回调）。</summary>
+        internal bool TryPick(int index)
+        {
+            if (!CanPick(_items, index)) return false;
+            editorWindow?.Close();
+            _onPick?.Invoke(index);
+            return true;
+        }
+
+        private void Pick(int index) => TryPick(index);
 
         private void OnKeyDown(KeyDownEvent evt)
         {
@@ -122,14 +177,14 @@ namespace AgentCore.Editor.UI.Components
                     editorWindow.Close();
                     break;
                 case KeyCode.DownArrow:
-                    SetHighlight(_rows.Count == 0 ? -1 : (_highlight + 1) % _rows.Count);
+                    SetHighlight(FindNextEnabledIndex(_items, _highlight, +1));
                     break;
                 case KeyCode.UpArrow:
-                    SetHighlight(_rows.Count == 0 ? -1 : (_highlight <= 0 ? _rows.Count : _highlight) - 1);
+                    SetHighlight(FindNextEnabledIndex(_items, _highlight, -1));
                     break;
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
-                    if (_highlight >= 0 && _highlight < _rows.Count) Pick(_highlight);
+                    if (CanPick(_items, _highlight)) Pick(_highlight);
                     break;
                 default:
                     return;
@@ -141,8 +196,8 @@ namespace AgentCore.Editor.UI.Components
         private void SetHighlight(int index)
         {
             foreach (var r in _rows) r.RemoveFromClassList("is-highlighted");
-            _highlight = index;
-            if (index >= 0 && index < _rows.Count) _rows[index].AddToClassList("is-highlighted");
+            _highlight = CanPick(_items, index) ? index : -1;
+            if (_highlight >= 0 && _highlight < _rows.Count) _rows[_highlight].AddToClassList("is-highlighted");
         }
     }
 }

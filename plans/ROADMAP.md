@@ -1,12 +1,13 @@
 # AgentCore Unity 路线图
 
-> **版本**：以 `package.json` 为准（当前 1.21.0） | **更新**：2026-11-22
+> **版本**：以 `package.json` 为准（当前 1.22.0） | **更新**：2026-11-23
 > 本文只写三件事：现状、主线、搁置项。完成的工作记在 `CHANGELOG.md`；1.18.0 之前的完整路线图（Phase 1~10 历程、ADR-1~19、风险评估）已归档到 [`_archive/roadmap/ROADMAP-v1.18.0-full.md`](_archive/roadmap/ROADMAP-v1.18.0-full.md)。
 
 ## 现状
 
 - **定位**：Unity 编辑器内嵌的 agent。目标工程是企业级 Unity 2022.3 项目，版本控制以 SVN 为主（Git / Perforce 同样支持）；SVN 工作副本根是 WorkspaceRoot，Unity 工程是其下的子根。
 - **已有能力**：60 个内置工具声明（其中 Native 目录 52 个；运行时数量随组件与配置变化）；多供应商 LLM（OpenAI 兼容 / 原生 Anthropic、prompt 缓存、备用 profile）；风险策略 + allow / ask / deny 权限规则 + 按消息检查点回退；SVN 全流程（`.meta` 跟随、锁、移动、Project 窗口角标）；代码符号索引 + ripgrep 文本搜索；会话、记忆、Skills；MCP Server（Claude Code / Codex 经 MCP 使用已启用工具（排除 Chat 专用辅助工具与外部 MCP 代理）、资源与 Skills prompt；2026-07-28 与 2025 系列协议、客户端内确认、Tasks、本机 HTTP 端点；跨 Domain Reload 不丢调用）；MCP 客户端（Chat 使用外部 MCP 服务器的工具）。
+- **多级思考强度（1.22.0）**：支持完整 8 档思考强度阶梯（`Auto / Off / Minimal / Low / Medium / High / XHigh / Max`，兼容 `ultra` 别名），结合 `ModelRegistry` 声明式档位边界与 `RequestPruningRegistry` HTTP 400 运行时自学习降档，在 `ReasoningParamMapper` / `RequestEnrichment` / `AnthropicMessageMapper` 统一路由并按模型能力非破坏性吸附；Chat 面板 `ReasoningLevelSelector` 实时灰显不支持档位并在降档时展示胶囊反馈，Settings 页 `ModelAgentSettingsPage` 同步支持全 8 档与夹断提示。已在 Unity 2022.3.50f1（`test-framework@1.3.9`）独立工作树宿主完成 EditMode 实测：非 MCP 用例 964/964 通过（含 126 个推理/LLM/UI 相关用例，0 新增编译警告；17 个预期 `[Ignore]` 跳过；47 个依赖未入库 `Editor/MCP/Relay~` 的 MCP 用例将在合入主仓后复验）。
 - **兼容修复**：1.20.2 将工具参数包装检测改用 `JObject.Property`，避免依赖宿主 Newtonsoft.Json 的 `ContainsKey` API；用户报错工程仍需安装后重新编译确认。
 - **只读并发**：1.20.1 为同轮相邻的 `manage_file` 读取、目录枚举、文件信息与内容搜索启用最多 4 个并发；写入和其他工具为顺序屏障。索引 / VCS / 外部 MCP 查询尚未声明后台并发安全，保持串行。
 - **零团队侵入（1.21.0）**：设置迁至 `Preferences/AgentCore`，可选组件改为运行时门控并彻底移除 `AGENTCORE_*` 自动写宏，Provider Profiles / 权限规则 / MCP Server / Workspace / 引导文档 / 索引 / 相机截图统一落至 `UserSettings/AgentCore/` 或 `Library/AgentCore/`，旧项目文件仅保留只读回退。

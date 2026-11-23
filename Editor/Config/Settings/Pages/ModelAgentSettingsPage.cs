@@ -481,6 +481,74 @@ namespace AgentCore.Editor.Config.Settings.Pages
 
         // ── Overrides Section ──
 
+        /// <summary>
+        /// Profile 级 Reasoning Effort 存储值（<c>""</c> = 跟随全局默认；其余与
+        /// <see cref="ReasoningParamMapper.ToEffortString"/> 保持同一 7 档规范小写名）。
+        /// </summary>
+        internal static readonly string[] ProfileEffortValues =
+        {
+            "", "off", "minimal", "low", "medium", "high", "xhigh", "max"
+        };
+
+        /// <summary>Profile 级 Reasoning Effort 下拉的本地化展示标签，与 <see cref="ProfileEffortValues"/> 一一对应。</summary>
+        internal static string[] GetProfileEffortLabels() => new[]
+        {
+            Loc.Tr("settings.model.reasoningEffort.auto", "Auto (Global Default)"),
+            Loc.Tr("settings.model.reasoningEffort.off", "Off"),
+            Loc.Tr("settings.model.reasoningEffort.minimal", "Minimal"),
+            Loc.Tr("settings.model.reasoningEffort.low", "Low"),
+            Loc.Tr("settings.model.reasoningEffort.medium", "Medium"),
+            Loc.Tr("settings.model.reasoningEffort.high", "High"),
+            Loc.Tr("settings.model.reasoningEffort.xhigh", "XHigh"),
+            Loc.Tr("settings.model.reasoningEffort.max", "Max")
+        };
+
+        /// <summary>
+        /// 把 profile 存储的 effort 字符串映射到 <see cref="ProfileEffortValues"/> 索引。
+        /// 支持大小写与别名（如 <c>"ultra"</c> → <c>"max"</c>）；空或未知值回退到 0（Auto）。
+        /// </summary>
+        internal static int ResolveProfileEffortIndex(string rawValue)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue)) return 0;
+            var level = ReasoningParamMapper.ParseLevel(rawValue);
+            if (level == ReasoningParamMapper.ReasoningLevel.Auto) return 0;
+            int idx = Array.IndexOf(ProfileEffortValues, ReasoningParamMapper.ToEffortString(level));
+            return idx < 0 ? 0 : idx;
+        }
+
+        /// <summary>
+        /// 当 profile 已填模型且所选 effort 会在发请求时被 <see cref="ReasoningParamMapper.ResolveEffectivePlan"/>
+        /// 吸附/夹断时，返回一条提示文本；无需提示时返回 null。
+        /// </summary>
+        internal static string GetProfileEffortClampHint(
+            string endpoint,
+            string modelName,
+            string effortVal,
+            bool enableReasoningOutput,
+            string dialect = null)
+        {
+            if (string.IsNullOrWhiteSpace(modelName) || string.IsNullOrWhiteSpace(effortVal))
+                return null;
+
+            var plan = ReasoningParamMapper.ResolveEffectivePlan(
+                ReasoningParamMapper.ReasoningLevel.Auto,
+                effortVal,
+                enableReasoningOutput,
+                endpoint,
+                modelName,
+                null,
+                dialect);
+
+            if (!plan.WasClamped) return null;
+
+            return Loc.Tr(
+                "settings.model.reasoningEffort.clampedHint",
+                "Current model '{0}' does not support '{1}'; requests will automatically adapt to '{2}'.",
+                modelName,
+                ReasoningParamMapper.ToEffortString(plan.RequestedLevel),
+                ReasoningParamMapper.ToEffortString(plan.EffectiveLevel));
+        }
+
         private void DrawOverridesSection(AgentCoreProviderProfiles store, ProviderProfile profile)
         {
             EditorGUI.indentLevel++;
@@ -531,11 +599,28 @@ namespace AgentCore.Editor.Config.Settings.Pages
             bool enableReasoningOut = profile.enableReasoningOutput;
             if (overrideReason)
             {
-                var effortOptions = new[] { "", "low", "medium", "high" };
-                int effortIdx = Array.IndexOf(effortOptions, effortVal);
-                if (effortIdx < 0) effortIdx = 0;
-                effortIdx = EditorGUILayout.Popup(Loc.Tr("settings.model.reasoningEffort", "Reasoning Effort"), effortIdx, effortOptions);
-                effortVal = effortOptions[effortIdx];
+                int currentEffortIdx = ResolveProfileEffortIndex(effortVal);
+                int newEffortIdx = EditorGUILayout.Popup(
+                    Loc.Tr("settings.model.reasoningEffort", "Reasoning Effort"),
+                    currentEffortIdx,
+                    GetProfileEffortLabels());
+                if (newEffortIdx != currentEffortIdx)
+                {
+                    effortVal = ProfileEffortValues[newEffortIdx];
+                }
+
+                string effectiveModel = store.GetEffectiveModelName(profile);
+                string clampHint = GetProfileEffortClampHint(
+                    profile.endpoint,
+                    effectiveModel,
+                    effortVal,
+                    enableReasoningOut,
+                    ActiveModelConfig.ResolveDialect(profile));
+                if (!string.IsNullOrEmpty(clampHint))
+                {
+                    EditorGUILayout.HelpBox(clampHint, MessageType.Info);
+                }
+
                 reasonMaxVal = EditorGUILayout.IntField(Loc.Tr("settings.model.reasoningMaxTokens", "Reasoning MaxTokens"), reasonMaxVal);
                 enableReasoningOut = EditorGUILayout.Toggle(Loc.Tr("settings.model.enableReasoningOutput", "Enable Reasoning Output"), enableReasoningOut);
             }

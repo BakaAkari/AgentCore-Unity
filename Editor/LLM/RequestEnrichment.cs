@@ -32,6 +32,32 @@ namespace AgentCore.Editor.LLM
         /// <returns>增强后的 JSON 字符串，可直接作为 HTTP body 发送</returns>
         public static string BuildEnrichedJson(ChatCompletionRequest request, string reasoningLevelOverride = null)
         {
+            return BuildEnrichedJson(
+                request,
+                reasoningLevelOverride,
+                ActiveModelConfig.Endpoint,
+                ActiveModelConfig.ModelName,
+                ActiveModelConfig.EnableReasoningOutput,
+                ActiveModelConfig.ReasoningEffort,
+                ActiveModelConfig.ReasoningMaxTokens,
+                ActiveModelConfig.Dialect,
+                ActiveModelConfig.ExtraRequestBody);
+        }
+
+        /// <summary>
+        /// 可注入配置的纯函数重载（测试 / 非 ActiveModelConfig 场景）：不读取任何静态状态。
+        /// </summary>
+        internal static string BuildEnrichedJson(
+            ChatCompletionRequest request,
+            string reasoningLevelOverride,
+            string endpoint,
+            string modelName,
+            bool enableReasoningOutput,
+            string reasoningEffort,
+            int reasoningMaxTokens,
+            string dialect = null,
+            string extraRequestBody = null)
+        {
             // Step 1: 序列化为 JObject（保留 null 移除语义由 JsonHelper 控制）
             var baseJson = JsonHelper.Serialize(request);
             var body = JObject.Parse(baseJson);
@@ -43,23 +69,32 @@ namespace AgentCore.Editor.LLM
             }
 
             // Step 3: 注入 reasoning 参数。
-            // v1.14.10: 会话覆盖优先于全局设置——ParseLevel 对 null/空/"auto" 统一返回 Auto，
-            // Auto 时 ReasoningParamMapper.ApplyLevel 直接 no-op，退回到下面的全局默认路径，
-            // 保证"没有设置覆盖"时行为与修改前完全一致。
+            // v1.22.0: Auto 也走统一解析（模型能力 + 运行时学习约束吸附），不再直接绕过到原始
+            // OpenRouter 注入；只有"空 effort + 开启 reasoning"保留旧的 reasoning:{} 兼容形状。
             var overrideLevel = ReasoningParamMapper.ParseLevel(reasoningLevelOverride);
-            if (overrideLevel != ReasoningParamMapper.ReasoningLevel.Auto)
+            var plan = ReasoningParamMapper.ResolveEffectivePlan(
+                overrideLevel, reasoningEffort, enableReasoningOutput, endpoint, modelName, null, dialect);
+
+            if (overrideLevel == ReasoningParamMapper.ReasoningLevel.Auto && !enableReasoningOutput)
             {
-                ReasoningParamMapper.ApplyLevel(body, overrideLevel, ActiveModelConfig.Endpoint, ActiveModelConfig.ModelName);
+                // 显式关闭且用户没有覆盖：与旧行为一致，不发送任何 reasoning 字段。
             }
-            else if (ActiveModelConfig.EnableReasoningOutput)
+            else if (plan.RequestedLevel == ReasoningParamMapper.ReasoningLevel.Auto)
             {
-                InjectReasoning(body, ActiveModelConfig.ReasoningEffort, ActiveModelConfig.ReasoningMaxTokens);
+                // 空 effort + 开启：保留 OpenRouter/vLLM 的"最低触发"形状（reasoning:{} + thinking=true）。
+                InjectReasoning(body, string.Empty, reasoningMaxTokens);
+            }
+            else
+            {
+                ReasoningParamMapper.ApplyLevel(
+                    body, plan.EffectiveLevel, endpoint, modelName,
+                    maxTierCapOverride: null, reasoningMaxTokens: reasoningMaxTokens);
             }
 
             // Step 4: 深度合并用户自定义 extra body
-            if (!string.IsNullOrWhiteSpace(ActiveModelConfig.ExtraRequestBody))
+            if (!string.IsNullOrWhiteSpace(extraRequestBody))
             {
-                MergeExtraBody(body, ActiveModelConfig.ExtraRequestBody);
+                MergeExtraBody(body, extraRequestBody);
             }
 
             // Step 5: 清除所有值为 null 的属性（防止某些 API 对 null 敏感）

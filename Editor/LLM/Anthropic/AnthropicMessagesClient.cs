@@ -123,20 +123,32 @@ namespace AgentCore.Editor.LLM.Anthropic
                     headers = BuildRequestHeaders(options, tools);
                     retryJson = BuildJson(options, messages, tools);
                 }
-                else if (IsThinkingRelatedError(errorBody))
-                {
-                    AgentCoreLog.Info("[AgentCore] Anthropic 400 on thinking replay; retrying once without thinking blocks.");
-                    options.DropReasoning = true;
-                    options.Level = ReasoningParamMapper.ReasoningLevel.Off;
-                    retryJson = BuildJson(options, messages, tools);
-                }
                 else
                 {
-                    var learned = RequestPruningRegistry.LearnFromErrorResponse(endpoint, model, errorBody);
-                    if (learned.Count > 0)
+                    // v1.22.0: 先尝试学习 reasoning 档位（如 "Invalid value: 'xhigh'"）；
+                    // 学到后按新约束重建请求再重试一次。
+                    var reasoning = RequestPruningRegistry.LearnReasoningFromErrorResponse(
+                        endpoint, model, ResolveAttemptedEffort(options), errorBody);
+                    if (reasoning.Learned)
                     {
-                        AgentCoreLog.Info($"[AgentCore] Anthropic request auto-retry after learning banned field(s): [{string.Join(", ", learned)}]");
-                        retryJson = json;
+                        AgentCoreLog.Info($"[AgentCore] Anthropic request auto-retry after learning reasoning constraint (next={reasoning.NextSuggestedEffort ?? "?"}).");
+                        retryJson = BuildJson(options, messages, tools);
+                    }
+                    else if (IsThinkingRelatedError(errorBody))
+                    {
+                        AgentCoreLog.Info("[AgentCore] Anthropic 400 on thinking replay; retrying once without thinking blocks.");
+                        options.DropReasoning = true;
+                        options.Level = ReasoningParamMapper.ReasoningLevel.Off;
+                        retryJson = BuildJson(options, messages, tools);
+                    }
+                    else
+                    {
+                        var learned = RequestPruningRegistry.LearnFromErrorResponse(endpoint, model, errorBody);
+                        if (learned.Count > 0)
+                        {
+                            AgentCoreLog.Info($"[AgentCore] Anthropic request auto-retry after learning banned field(s): [{string.Join(", ", learned)}]");
+                            retryJson = json;
+                        }
                     }
                 }
 
@@ -169,8 +181,22 @@ namespace AgentCore.Editor.LLM.Anthropic
                 Temperature = ActiveModelConfig.Temperature,
                 CacheTtl1h = ActiveModelConfig.CacheTtl1h,
                 Profile = profile,
+                Endpoint = ActiveModelConfig.Endpoint,
+                Dialect = ActiveModelConfig.Dialect,
                 ToolChanges = profile.SupportsToolChanges
             };
+        }
+
+        /// <summary>本次请求实际发送的 effort 规范名（Auto / Off 时 null）。</summary>
+        private static string ResolveAttemptedEffort(AnthropicRequestOptions options)
+        {
+            var plan = ReasoningParamMapper.ResolveEffectivePlan(
+                options.Level, options.DefaultEffort, options.DefaultReasoningEnabled,
+                options.Endpoint, options.Model, options.Profile, options.Dialect);
+            if (plan.RequestedLevel == ReasoningParamMapper.ReasoningLevel.Auto
+                || plan.EffectiveLevel == ReasoningParamMapper.ReasoningLevel.Off)
+                return null;
+            return ReasoningParamMapper.ToEffortString(plan.EffectiveLevel);
         }
 
         private static string BuildJson(AnthropicRequestOptions options, List<ChatMessage> messages, List<ToolDefinition> tools)

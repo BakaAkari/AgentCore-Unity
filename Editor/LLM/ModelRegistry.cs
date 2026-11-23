@@ -7,6 +7,25 @@ using Newtonsoft.Json;
 
 namespace AgentCore.Editor.LLM
 {
+    /// <summary>
+    /// <see cref="ModelProfile.ReasoningProtocol"/> 的规范值：声明该模型期望的 reasoning 协议形态，
+    /// 驱动 <see cref="ReasoningParamMapper"/> 选择请求字段（留空 = 按模型前缀/家族自动推断）。
+    /// </summary>
+    public static class ReasoningProtocols
+    {
+        /// <summary>OpenAI 原生 <c>reasoning_effort</c>。</summary>
+        public const string OpenAIEffort = "openai_effort";
+
+        /// <summary>Anthropic 原生 <c>thinking.budget_tokens</c>。</summary>
+        public const string AnthropicThinking = "anthropic_thinking";
+
+        /// <summary>vLLM：<c>chat_template_kwargs.thinking</c> + <c>reasoning.effort</c>。</summary>
+        public const string VllmReasoning = "vllm_reasoning";
+
+        /// <summary>OpenRouter / OpenAI 兼容代理：<c>reasoning.effort</c>。</summary>
+        public const string OpenRouterReasoning = "openrouter_reasoning";
+    }
+
     /// <summary>模型家族（决定协议细节与缓存策略的大类）。</summary>
     public enum ModelFamily
     {
@@ -76,6 +95,29 @@ namespace AgentCore.Editor.LLM
 
         /// <summary>是否接受 <c>xhigh</c> effort 档（Opus 4.7 起）。</summary>
         [JsonProperty("supports_xhigh")] public bool SupportsXHigh;
+
+        /// <summary>
+        /// 模型支持的最低主动档（<c>minimal</c>/<c>low</c>/...）；空 = 允许关闭（Off）。
+        /// 请求低于此档时向上吸附，不会掉进 Off。
+        /// </summary>
+        [JsonProperty("min_effort")] public string MinEffort;
+
+        /// <summary>
+        /// 模型支持的最高档（<c>low</c>/<c>high</c>/<c>xhigh</c>/<c>max</c>）；空 = 按
+        /// <see cref="SupportsXHigh"/> / 家族推断（Unknown 家族乐观放行到 Max）。
+        /// </summary>
+        [JsonProperty("max_effort")] public string MaxEffort;
+
+        /// <summary>是否支持 <c>minimal</c> 档（null = 未声明，由 <see cref="MinEffort"/> 决定）。</summary>
+        [JsonProperty("supports_minimal")] public bool? SupportsMinimal;
+
+        /// <summary>是否支持显式关闭（<c>none</c>/Off）；null = 未声明。</summary>
+        [JsonProperty("supports_none")] public bool? SupportsNone;
+
+        /// <summary>
+        /// reasoning 协议形态（<see cref="ReasoningProtocols"/> 之一）；空 = 按模型前缀/家族自动推断。
+        /// </summary>
+        [JsonProperty("reasoning_protocol")] public string ReasoningProtocol;
 
         /// <summary>
         /// "关闭思考"时使用的形态：<c>disabled</c>（显式 disabled）、<c>omit</c>（省略 thinking 参数）、
@@ -177,15 +219,23 @@ namespace AgentCore.Editor.LLM
             Claude("claude-3-7", 0, 0, 0, ThinkingMode.BudgetTokens, "omit", temp: true, xhigh: false, effort: false, ctx: 200_000, maxOut: 64_000),
             Claude("claude-", 0, 0, 0, ThinkingMode.None, "omit", temp: true, xhigh: false, effort: false, ctx: 200_000, maxOut: 8_192),
 
-            // ── 其他家族：只记录家族（协议差异），价格/窗口留空 ──
-            new() { Prefix = "deepseek", Family = ModelFamily.DeepSeek, EchoReasoningContent = true },
+            // ── OpenAI 原生 reasoning 家族（价格/窗口留空，只声明协议与档位边界）──
+            new() { Prefix = "gpt-5.4", Family = ModelFamily.OpenAI, MinEffort = "minimal", MaxEffort = "xhigh", SupportsMinimal = true, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+            new() { Prefix = "gpt-5.3", Family = ModelFamily.OpenAI, MinEffort = "minimal", MaxEffort = "xhigh", SupportsMinimal = true, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+            new() { Prefix = "gpt-5.2", Family = ModelFamily.OpenAI, MinEffort = "minimal", MaxEffort = "xhigh", SupportsMinimal = true, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+            new() { Prefix = "gpt-5.1", Family = ModelFamily.OpenAI, MinEffort = "minimal", MaxEffort = "xhigh", SupportsMinimal = true, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+            new() { Prefix = "gpt-5", Family = ModelFamily.OpenAI, MinEffort = "minimal", MaxEffort = "high", SupportsMinimal = true, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+            // 非 reasoning 的 gpt 系列：不声明协议，保持旧兜底（reasoning.effort 由网关决定）
             new() { Prefix = "gpt-", Family = ModelFamily.OpenAI },
-            new() { Prefix = "o1", Family = ModelFamily.OpenAI },
-            new() { Prefix = "o3", Family = ModelFamily.OpenAI },
-            new() { Prefix = "o4", Family = ModelFamily.OpenAI },
-            new() { Prefix = "gemini", Family = ModelFamily.Gemini },
-            new() { Prefix = "qwen", Family = ModelFamily.Qwen },
-            new() { Prefix = "glm", Family = ModelFamily.Glm },
+            new() { Prefix = "o1", Family = ModelFamily.OpenAI, MinEffort = "low", MaxEffort = "high", SupportsMinimal = false, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+            new() { Prefix = "o3", Family = ModelFamily.OpenAI, MinEffort = "low", MaxEffort = "high", SupportsMinimal = false, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+            new() { Prefix = "o4", Family = ModelFamily.OpenAI, MinEffort = "low", MaxEffort = "high", SupportsMinimal = false, SupportsNone = false, ReasoningProtocol = ReasoningProtocols.OpenAIEffort },
+
+            // ── 其他家族：记录家族（协议差异）+ 档位边界，价格/窗口留空 ──
+            new() { Prefix = "gemini", Family = ModelFamily.Gemini, MinEffort = "minimal", MaxEffort = "high", SupportsMinimal = true },
+            new() { Prefix = "deepseek", Family = ModelFamily.DeepSeek, EchoReasoningContent = true, MinEffort = "low", MaxEffort = "high", SupportsMinimal = false },
+            new() { Prefix = "qwen", Family = ModelFamily.Qwen, MinEffort = "low", MaxEffort = "high", SupportsMinimal = false },
+            new() { Prefix = "glm", Family = ModelFamily.Glm, MinEffort = "low", MaxEffort = "high", SupportsMinimal = false },
         };
 
         private static ModelProfile Claude(

@@ -44,15 +44,20 @@ namespace AgentCore.Editor.LLM
             var body = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
             var (response, responseBody) = await SendPostAsync(url, apiKey, body, ct);
 
-            // 400 → 尝试从错误消息学习禁字段，学到则重试一次（每次调用最多重试 1 次，不递归）
+            // 400 → 尝试从错误消息学习禁字段 / reasoning 档位约束，学到则重建请求重试一次（最多 1 次，不递归）
             if (!response.IsSuccessStatusCode && (int)response.StatusCode == 400)
             {
                 var learned = RequestPruningRegistry.LearnFromErrorResponse(endpoint, model, responseBody);
+                var reasoning = RequestPruningRegistry.LearnReasoningFromErrorResponse(
+                    endpoint, model, ResolveAttemptedEffort(reasoningLevelOverride), responseBody);
                 response.Dispose();
-                if (learned.Count > 0)
+                if (learned.Count > 0 || reasoning.Learned)
                 {
-                    AgentCoreLog.Info($"[AgentCore] LLM request auto-retry after learning {learned.Count} banned field(s): [{string.Join(", ", learned)}]");
-                    var retryBody = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
+                    AgentCoreLog.Info(
+                        $"[AgentCore] LLM request auto-retry after learning {learned.Count} banned field(s) / reasoning={reasoning.Learned} (next={reasoning.NextSuggestedEffort ?? "?"})");
+                    // 重建（而非复用旧 body）：档位约束只在 enrichment 阶段生效。
+                    var retryEnriched = BuildRequestJson(messages, tools, false, contentMaxTokens, reasoningLevelOverride);
+                    var retryBody = RequestPruningRegistry.ApplyPruning(endpoint, model, retryEnriched);
                     (response, responseBody) = await SendPostAsync(url, apiKey, retryBody, ct);
                 }
             }
@@ -104,6 +109,21 @@ namespace AgentCore.Editor.LLM
             var response = await OpenAIChatTransporter.SendJsonAsync(
                 url, OpenAIChatTransporter.BuildAuthHeaders(apiKey, useXApiKey: true), body, stream: false, ct);
             return (response, await response.Content.ReadAsStringAsync());
+        }
+
+        /// <summary>本次请求实际发送的 effort 规范名（Auto / Off 时 null）。</summary>
+        private static string ResolveAttemptedEffort(string reasoningLevelOverride)
+        {
+            var plan = ReasoningParamMapper.ResolveEffectivePlan(
+                ReasoningParamMapper.ParseLevel(reasoningLevelOverride),
+                ActiveModelConfig.ReasoningEffort,
+                ActiveModelConfig.EnableReasoningOutput,
+                ActiveModelConfig.Endpoint,
+                ActiveModelConfig.ModelName);
+            if (plan.RequestedLevel == ReasoningParamMapper.ReasoningLevel.Auto
+                || plan.EffectiveLevel == ReasoningParamMapper.ReasoningLevel.Off)
+                return null;
+            return ReasoningParamMapper.ToEffortString(plan.EffectiveLevel);
         }
 
         /// <summary>
@@ -176,23 +196,29 @@ namespace AgentCore.Editor.LLM
             var body = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
             var response = await SendPostForStreamAsync(url, apiKey, body, ct);
 
-            // Header 阶段 400 → 学习 → 重试一次（此时流未开始，重试安全）
+            // Header 阶段 400 → 学习禁字段 / reasoning 档位 → 重试一次（此时流未开始，重试安全）
             if (!response.IsSuccessStatusCode && (int)response.StatusCode == 400)
             {
                 var errorBody = await response.Content.ReadAsStringAsync();
                 var learned = RequestPruningRegistry.LearnFromErrorResponse(endpoint, model, errorBody);
+                var reasoning = RequestPruningRegistry.LearnReasoningFromErrorResponse(
+                    endpoint, model, ResolveAttemptedEffort(reasoningLevelOverride), errorBody);
+                var failure = LlmHttpException.FromResponse(response, errorBody);
                 response.Dispose();
 
-                if (learned.Count > 0)
+                if (learned.Count > 0 || reasoning.Learned)
                 {
-                    AgentCoreLog.Info($"[AgentCore] LLM stream request auto-retry after learning {learned.Count} banned field(s): [{string.Join(", ", learned)}]");
-                    var retryBody = RequestPruningRegistry.ApplyPruning(endpoint, model, enrichedJson);
+                    AgentCoreLog.Info(
+                        $"[AgentCore] LLM stream request auto-retry after learning {learned.Count} banned field(s) / reasoning={reasoning.Learned} (next={reasoning.NextSuggestedEffort ?? "?"})");
+                    // 重建（而非复用旧 body）：档位约束只在 enrichment 阶段生效。
+                    var retryEnriched = BuildRequestJson(messages, tools, true, contentMaxTokens, reasoningLevelOverride);
+                    var retryBody = RequestPruningRegistry.ApplyPruning(endpoint, model, retryEnriched);
                     response = await SendPostForStreamAsync(url, apiKey, retryBody, ct);
                 }
                 else
                 {
                     // 未匹配到任何学习模式的 400 直接抛出（真错误 - 消息格式错、apiKey 错等）
-                    throw LlmHttpException.FromResponse(response, errorBody);
+                    throw failure;
                 }
             }
 

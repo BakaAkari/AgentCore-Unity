@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-11-23
+
+多级思考强度体系：统一 8 档思考阶梯、模型能力元数据感知、跨协议请求路由、HTTP 400 运行时自学习降档，以及 Chat 胶囊选择器与 Settings 配置同步升级。
+
+### Added
+- **完整 8 档思考强度阶梯**：`ReasoningParamMapper.ReasoningLevel` 扩展为 `Auto` / `Off` / `Minimal` / `Low` / `Medium` / `High` / `XHigh` / `Max`（兼容历史 `ultra` 别名映射到 `Max`），并新增统一求解入口 `ResolveEffectivePlan` 与 `ReasoningResolution`（含 `IsTierSupported`、`WasClamped`、`ClampReason`）
+- **模型能力元数据与协议声明**：`ModelRegistry`（`ModelProfile`）补充 `MinEffort`、`MaxEffort`、`SupportsMinimal`、`SupportsNone`、`ReasoningProtocol` 等能力字段，覆盖 OpenAI（GPT-5 系列 / o 系列）、Anthropic（含 `AlwaysOn` 与 `SupportsXHigh`）、DeepSeek 等主流模型家族；未知自定义模型按乐观策略全档放行
+- **HTTP 400 运行时自学习降档**：`RequestPruningRegistry` 新增端到端思考强度约束学习，`OpenAICompatibleClient` 与 `AnthropicMessagesClient` 在遇到上游 400 参数拒绝时自动记录支持上限/禁用档并无缝重试，后续请求按运行期约束自动吸附
+- **Chat 胶囊能力感知与弹窗禁用态**：`ChoicePopup` 支持 `Disabled` 行样式、点击/回车拦截与键盘上下导航跳过禁用项；`ReasoningLevelSelector` 升级为 8 档并订阅配置与语言变更，灰显当前模型不支持的档位、保留原选中勾号而不破坏会话覆盖意图，并在发生夹断时在胶囊展示轻量降档提示（如 `Max → High`）与详细 tooltip
+- **Profile 设置页与 L10n 全量覆盖**：`ModelAgentSettingsPage` Profile 级思考强度下拉扩展为完整 8 档本地化选项（兼容 `ultra` 与大小写，保留非阻断夹断提示）；`en-US.json` 与 `zh-CN.json` 同步补齐所有档位短名、提示、tooltip 与设置项键
+- **离线 EditMode 单元测试**：新增 `Editor/Tests/LLM/ReasoningTierTests.cs` 与 `Editor/Tests/UI/ReasoningUiAndSettingsTests.cs`，覆盖 8 档解析、模型能力吸附、多协议请求构建、400 自学习、UI/弹窗交互、设置页映射与中英 L10n 键对称性
+
+### Changed
+- **统一思考参数路由**：`RequestEnrichment` 与 `AnthropicMessageMapper` 统一消费 `ReasoningParamMapper.ResolveEffectivePlan` 输出，消除不同模型协议间的参数分支漂移
+
 ## [1.21.0] - 2026-11-22
 
 全面本地化与零团队侵入重构：个人配置、运行时状态、索引、权限与临时产物均不再写入受版本控制的团队项目文件。
