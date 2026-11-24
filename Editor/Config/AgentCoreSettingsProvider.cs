@@ -41,24 +41,52 @@ namespace AgentCore.Editor.Config
         // when Unity focuses an already-open Preferences window.
         private static string _pendingSectionId;
 
+        private readonly bool _persistState;
+        private readonly string _selectedSectionPrefKey;
+        private readonly string _foldoutsSessionKey;
+        private readonly string _statusesSessionKey;
         private AgentCoreSettingsContext _settingsContext;
         private IAgentCoreSettingsPage[] _pages;
 
         private AgentCoreSettingsProvider(string path, SettingsScope scope)
             : base(path, scope)
         {
+            _persistState = true;
+            _selectedSectionPrefKey = AgentCoreSettingsState.DefaultSelectedSectionPrefKey;
+            _foldoutsSessionKey = AgentCoreSettingsState.DefaultFoldoutsSessionKey;
+            _statusesSessionKey = AgentCoreSettingsState.DefaultStatusesSessionKey;
             _pages = BuildPageList();
         }
 
         /// <summary>
-        /// Test-only constructor that injects the page list so lifecycle transitions can be observed.
+        /// Test-only constructor that injects the page list so lifecycle transitions can be observed
+        /// without reading or mutating real user EditorPrefs/SessionState.
         /// </summary>
         /// <param name="path">Settings path.</param>
         /// <param name="scope">Settings scope.</param>
         /// <param name="pages">Pages to use; when null the built-in list is used.</param>
         internal AgentCoreSettingsProvider(string path, SettingsScope scope, IAgentCoreSettingsPage[] pages)
+            : this(path, scope, pages, persistState: false, null, null, null)
+        {
+        }
+
+        /// <summary>
+        /// Test-only constructor allowing opt-in persistence with isolated storage keys.
+        /// </summary>
+        internal AgentCoreSettingsProvider(
+            string path,
+            SettingsScope scope,
+            IAgentCoreSettingsPage[] pages,
+            bool persistState,
+            string selectedSectionPrefKey = null,
+            string foldoutsSessionKey = null,
+            string statusesSessionKey = null)
             : base(path, scope)
         {
+            _persistState = persistState;
+            _selectedSectionPrefKey = selectedSectionPrefKey ?? AgentCoreSettingsState.DefaultSelectedSectionPrefKey;
+            _foldoutsSessionKey = foldoutsSessionKey ?? AgentCoreSettingsState.DefaultFoldoutsSessionKey;
+            _statusesSessionKey = statusesSessionKey ?? AgentCoreSettingsState.DefaultStatusesSessionKey;
             _pages = pages ?? BuildPageList();
         }
 
@@ -142,6 +170,9 @@ namespace AgentCore.Editor.Config
         /// <summary>Gets the currently selected section id. Intended for tests.</summary>
         internal string SelectedSectionId => _settingsContext?.State?.SelectedSectionId;
 
+        /// <summary>Gets the active settings state. Intended for tests.</summary>
+        internal AgentCoreSettingsState State => _settingsContext?.State;
+
         /// <summary>
         /// Builds the ordered page list by merging built-in pages with dynamically discovered
         /// optional component pages from <see cref="AgentCoreExtensionRegistry.Pages"/>.
@@ -212,7 +243,13 @@ namespace AgentCore.Editor.Config
 
         private void InitializeSettingsShell()
         {
-            _settingsContext = AgentCoreSettingsContext.Create();
+            var state = _persistState
+                ? AgentCoreSettingsState.CreatePersistent(_selectedSectionPrefKey, _foldoutsSessionKey, _statusesSessionKey)
+                : new AgentCoreSettingsState();
+            _settingsContext = new AgentCoreSettingsContext(
+                AgentCoreSettings.instance,
+                state,
+                new AgentCoreSettingsUi());
 
             var targetId = ResolveTargetSectionId(ConsumePendingSectionId());
             var firstPage = _pages.FirstOrDefault(p => p.Id == targetId) ?? _pages[0];

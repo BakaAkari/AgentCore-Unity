@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -216,9 +217,58 @@ namespace AgentCore.Editor.Config.Settings.Pages
                     _pendingOps.Add(() => store.SetUtility(utilId));
                 }
 
-                // v1.17.0: 会话用量 / 缓存命中 / 估算费用（来自供应商返回的 usage）
-                EditorGUILayout.LabelField(Loc.Tr("settings.model.usage", "Session Usage"), AgentCore.Editor.LLM.UsageLedger.FormatSessionSummary(), EditorStyles.wordWrappedMiniLabel);
+                // v1.17.0 / v1.23.0: 会话用量 + 多周期持久化用量摘要 + 仅清零当前会话按钮
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField(
+                    Loc.Tr("settings.model.usage", "Session Usage"),
+                    AgentCore.Editor.LLM.UsageLedger.FormatSessionSummary(),
+                    EditorStyles.wordWrappedMiniLabel);
+                if (GUILayout.Button(
+                    new GUIContent(
+                        Loc.Tr("settings.model.resetSessionUsage", "Reset Session"),
+                        Loc.Tr("settings.model.resetSessionUsageTooltip", "Resets only the current session counters while preserving 1d–90d persistent history.")),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(104)))
+                {
+                    AgentCore.Editor.LLM.UsageLedger.ResetSession();
+                }
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.LabelField(
+                    Loc.Tr("settings.model.usageHistory", "History (1d / 7d / 30d / 90d)"),
+                    FormatMultiWindowUsageSummary(),
+                    EditorStyles.wordWrappedMiniLabel);
+                context.Ui.DrawHelpText(Loc.Tr(
+                    "settings.model.usageHistoryHint",
+                    "Reset Session clears only current session counters; persistent 90-day history is preserved and can be managed on the Dashboard page."));
             });
+        }
+
+        internal static string FormatMultiWindowUsageSummary()
+        {
+            return string.Join(" · ",
+                FormatCompactWindow(Loc.Tr("settings.dashboard.usage.tab1d", "1d"), UsageLedger.GetWindowSummary(UsageWindow.Today)),
+                FormatCompactWindow(Loc.Tr("settings.dashboard.usage.tab7d", "7d"), UsageLedger.GetWindowSummary(UsageWindow.Days7)),
+                FormatCompactWindow(Loc.Tr("settings.dashboard.usage.tab30d", "30d"), UsageLedger.GetWindowSummary(UsageWindow.Days30)),
+                FormatCompactWindow(Loc.Tr("settings.dashboard.usage.tab90d", "90d"), UsageLedger.GetWindowSummary(UsageWindow.Days90)));
+        }
+
+        private static string FormatCompactWindow(string label, UsagePeriodSummary summary)
+        {
+            if (summary == null || summary.CallCount == 0)
+                return $"{label}: 0";
+
+            var tokens = UsageLedger.FormatTokens(summary.TotalTokens);
+            if (summary.CostUsd > 0)
+            {
+                var cost = summary.CostUsd >= 1.0
+                    ? summary.CostUsd.ToString("F2", CultureInfo.InvariantCulture)
+                    : summary.CostUsd.ToString("F4", CultureInfo.InvariantCulture);
+                var partial = summary.CostPartial ? "+" : string.Empty;
+                return $"{label}: {summary.CallCount} ({tokens}, ${cost}{partial})";
+            }
+
+            return $"{label}: {summary.CallCount} ({tokens})";
         }
 
         // ── 中部：Profile 列表 ──

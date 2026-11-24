@@ -345,7 +345,8 @@ namespace AgentCore.Editor.UI
             ApplyLocalizedStaticLabels();
 
             // 3.7 创建 Hub Rail 并插入到 main-body 首位
-            _hubRail = new HubRail(CreateHubModuleDefinitions(), ChatModuleId);
+            var initialModuleId = ResolveInitialModuleId(_hubPanels.Keys);
+            _hubRail = new HubRail(CreateHubModuleDefinitions(), initialModuleId);
             var mainBody = rootVisualElement.Q<VisualElement>("main-body");
             mainBody?.Insert(0, _hubRail);
 

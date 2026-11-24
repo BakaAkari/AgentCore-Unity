@@ -73,15 +73,60 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
         static BackgroundIndexService()
         {
+            RestoreStateFromStatusBus();
+
             // 批处理模式（命令行测试、CI 构建）不做后台自动索引：进程随时退出，只会留下被中断的全量；手动 index_full 等不受影响
             if (Application.isBatchMode) return;
             IndexingDirtyTracker.DirtyChanged += OnDirtyChanged;
-            AssemblyReloadEvents.beforeAssemblyReload += CancelCurrentRun;
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             EditorApplication.update += OnEditorUpdate;
             OptionalComponentManager.ComponentStateChanged += OnComponentStateChanged;
             _startupReconcileAt = EditorApplication.timeSinceStartup + StartupReconcileDelaySeconds;
             OnDirtyChanged();
+        }
+
+        /// <summary>
+        /// Hydrates persisted last-success / last-error / failure-count state from <see cref="IndexingStatusBus"/>
+        /// after Domain Reload so subsequent status publishes do not wipe prior metrics.
+        /// </summary>
+        public static void RestoreStateFromStatusBus()
+        {
+            var restored = IndexingStatusBus.Current;
+            if (restored == null)
+                return;
+
+            _lastSuccessAt = restored.LastSuccessAt;
+            _lastError = restored.LastError;
+            _consecutiveFailures = Math.Max(0, restored.ConsecutiveFailures);
+        }
+
+        /// <summary>
+        /// Records a successful manual indexing completion so status bus and durable last-success time stay in sync.
+        /// </summary>
+        public static void RecordManualIndexSuccess(DateTime? completedAtUtc = null)
+        {
+            var utc = (completedAtUtc ?? DateTime.UtcNow).ToUniversalTime();
+            _lastSuccessAt = utc;
+            _lastError = null;
+            _consecutiveFailures = 0;
+            IndexingStatusBus.SaveDurableLastSuccessUtc(utc);
+        }
+
+        private static void OnBeforeAssemblyReload()
+        {
+            var wasRunning = _running;
+            CancelCurrentRun();
+            if (!wasRunning)
+                return;
+
+            _running = false;
+            if (!OptionalComponentManager.IsIndexingEnabled())
+                PublishDisabled(IndexingDirtyTracker.Count, ComponentDisabledReason);
+            else if (IndexingDirtyTracker.HasDirtyPaths)
+                PublishPending(IndexingDirtyTracker.Count);
+            else
+                PublishIdle();
         }
 
         private static void OnComponentStateChanged(string componentId, bool enabled)

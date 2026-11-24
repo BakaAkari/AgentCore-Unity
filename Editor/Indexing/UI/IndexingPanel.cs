@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using AgentCore.Editor.Components.Indexing.Config;
 using AgentCore.Editor.Components.Indexing.Core;
@@ -34,10 +35,16 @@ namespace AgentCore.Editor.Components.Indexing.UI
         private const string StatusErrorClass = "indexing-status-error";
         private const string HelpTextClass    = "indexing-help-text";
 
+        // ── Persistence keys ─────────────────────────────────────────────────────
+        public const string PanelCacheSessionKey = "AgentCore.Indexing.Panel.Cache";
+        private const string DurableStatsPrefKeyPrefix = "AgentCore.Indexing.Panel.LastStats.";
+
         // ── State ────────────────────────────────────────────────────────────────
         private bool _isIndexing;
         private CancellationTokenSource _indexCts;
         private string _lastIndexResult;
+        private bool _lastIndexResultIsError;
+        private DateTime? _lastIndexResultAtUtc;
         private IndexingStats _cachedStats;
         private bool _statsDirty = true;
 #pragma warning disable CS0414 // _isPanelActive tracks lifecycle state; read access reserved for future conditional refresh
@@ -64,7 +71,9 @@ namespace AgentCore.Editor.Components.Indexing.UI
         public IndexingPanel()
         {
             AddToClassList(RootClass);
+            RestoreFromCache();
             BuildUI();
+            ApplyRestoredStatusMessage();
             IndexingStatusBus.StatusChanged += OnBackgroundStatusChanged;
             ApplyBackgroundStatus(IndexingStatusBus.Current);
         }
@@ -625,6 +634,11 @@ namespace AgentCore.Editor.Components.Indexing.UI
 
         private void ShowStatus(string message, bool isError)
         {
+            _lastIndexResult = message;
+            _lastIndexResultIsError = isError;
+            _lastIndexResultAtUtc = DateTime.UtcNow;
+            SaveToSessionCache();
+
             if (_statusLabel == null)
                 return;
 
@@ -642,6 +656,18 @@ namespace AgentCore.Editor.Components.Indexing.UI
                         _statusLabel.style.display = DisplayStyle.None;
                 }).ExecuteLater(6000);
             }
+        }
+
+        private void ApplyRestoredStatusMessage()
+        {
+            if (_statusLabel == null || string.IsNullOrEmpty(_lastIndexResult))
+                return;
+
+            _statusLabel.text = _lastIndexResult;
+            _statusLabel.style.display = DisplayStyle.Flex;
+            _statusLabel.RemoveFromClassList(StatusOkClass);
+            _statusLabel.RemoveFromClassList(StatusErrorClass);
+            _statusLabel.AddToClassList(_lastIndexResultIsError ? StatusErrorClass : StatusOkClass);
         }
 
         private void RunIndexAsync(bool incremental)
@@ -694,6 +720,7 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 else if (result.IsCompleted && result.IsSuccess)
                 {
                     var ms = result.ElapsedSeconds * 1000.0;
+                    BackgroundIndexService.RecordManualIndexSuccess();
                     BackgroundIndexService.RequestRun();
                     ShowStatus($"Done — {result.ProcessedFiles} files, {result.ExtractedSymbols} symbols ({ms:F0} ms)", false);
                 }
@@ -750,9 +777,10 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 var workspaceId = await store.UpsertWorkspaceAsync(workspace, CancellationToken.None);
                 await store.ClearWorkspaceIndexAsync(workspaceId, CancellationToken.None);
 
-                ShowStatus("Index cleared.", false);
                 _cachedStats = null;
                 _statsDirty  = false;
+                SaveDurableStats(null);
+                ShowStatus("Index cleared.", false);
                 RenderStats();
             }
             catch (Exception ex)
@@ -794,19 +822,235 @@ namespace AgentCore.Editor.Components.Indexing.UI
                 if (ws == null)
                 {
                     _cachedStats = null;
+                    SaveToSessionCache();
+                    SaveDurableStats(null);
                     RenderStats();
                     return;
                 }
 
                 var stats = await store.GetStatsAsync(ws.Id, CancellationToken.None);
                 _cachedStats = (stats != null && stats.TotalFiles > 0) ? stats : null;
+                SaveToSessionCache();
+                SaveDurableStats(_cachedStats);
                 RenderStats();
             }
             catch
             {
-                _cachedStats = null;
-                RenderStats();
+                if (_cachedStats == null)
+                    RenderStats();
             }
+        }
+
+        // ── Reload persistence cache ─────────────────────────────────────────────
+
+        [Serializable]
+        public sealed class IndexingPanelCacheDto
+        {
+            public int SchemaVersion;
+            public bool HasStats;
+            public string StoreBackend;
+            public int TotalFiles;
+            public int TotalSymbols;
+            public int EnabledRootCount;
+            public int ErrorFileCount;
+            public long LastFullIndexAtTicks;
+            public long LastIncrementalIndexAtTicks;
+            public long LastScopeIndexAtTicks;
+            public string LastManualResult;
+            public bool LastManualResultIsError;
+            public long LastManualResultAtTicks;
+        }
+
+        public static string GetDurableStatsPrefKey(string projectPath = null)
+        {
+            string source;
+            try
+            {
+                source = string.IsNullOrWhiteSpace(projectPath) ? Application.dataPath : projectPath;
+            }
+            catch
+            {
+                source = projectPath ?? "default";
+            }
+
+            var normalized = (source ?? string.Empty).Replace('\\', '/').TrimEnd('/').ToLowerInvariant();
+            ulong hash = 14695981039346656037UL;
+            for (int i = 0; i < normalized.Length; i++)
+            {
+                hash ^= normalized[i];
+                hash *= 1099511628211UL;
+            }
+            return DurableStatsPrefKeyPrefix + hash.ToString("x16", CultureInfo.InvariantCulture);
+        }
+
+        public static IndexingPanelCacheDto BuildCacheDto(
+            IndexingStats stats,
+            string lastManualResult,
+            bool lastManualResultIsError,
+            DateTime? lastManualResultAtUtc = null)
+        {
+            var hasStats = stats != null && stats.TotalFiles > 0;
+            return new IndexingPanelCacheDto
+            {
+                SchemaVersion = 1,
+                HasStats = hasStats,
+                StoreBackend = hasStats ? stats.StoreBackend : null,
+                TotalFiles = hasStats ? Math.Max(0, stats.TotalFiles) : 0,
+                TotalSymbols = hasStats ? Math.Max(0, stats.TotalSymbols) : 0,
+                EnabledRootCount = hasStats ? Math.Max(0, stats.EnabledRootCount) : 0,
+                ErrorFileCount = hasStats ? Math.Max(0, stats.ErrorFileCount) : 0,
+                LastFullIndexAtTicks = hasStats && stats.LastFullIndexAt.HasValue ? stats.LastFullIndexAt.Value.ToUniversalTime().Ticks : 0L,
+                LastIncrementalIndexAtTicks = hasStats && stats.LastIncrementalIndexAt.HasValue ? stats.LastIncrementalIndexAt.Value.ToUniversalTime().Ticks : 0L,
+                LastScopeIndexAtTicks = hasStats && stats.LastScopeIndexAt.HasValue ? stats.LastScopeIndexAt.Value.ToUniversalTime().Ticks : 0L,
+                LastManualResult = string.IsNullOrEmpty(lastManualResult) ? null : lastManualResult,
+                LastManualResultIsError = !string.IsNullOrEmpty(lastManualResult) && lastManualResultIsError,
+                LastManualResultAtTicks = lastManualResultAtUtc.HasValue ? lastManualResultAtUtc.Value.ToUniversalTime().Ticks : 0L
+            };
+        }
+
+        public static IndexingStats ExtractStats(IndexingPanelCacheDto cache)
+        {
+            if (cache == null || !cache.HasStats || cache.TotalFiles <= 0)
+                return null;
+
+            return new IndexingStats
+            {
+                StoreBackend = string.IsNullOrEmpty(cache.StoreBackend) ? null : cache.StoreBackend,
+                TotalFiles = Math.Max(0, cache.TotalFiles),
+                TotalSymbols = Math.Max(0, cache.TotalSymbols),
+                EnabledRootCount = Math.Max(0, cache.EnabledRootCount),
+                ErrorFileCount = Math.Max(0, cache.ErrorFileCount),
+                LastFullIndexAt = ParseUtcTicks(cache.LastFullIndexAtTicks),
+                LastIncrementalIndexAt = ParseUtcTicks(cache.LastIncrementalIndexAtTicks),
+                LastScopeIndexAt = ParseUtcTicks(cache.LastScopeIndexAtTicks)
+            };
+        }
+
+        public static string SerializeCache(IndexingPanelCacheDto cache)
+        {
+            if (cache == null)
+                return null;
+            cache.SchemaVersion = 1;
+            return JsonUtility.ToJson(cache);
+        }
+
+        public static IndexingPanelCacheDto DeserializeCache(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                var dto = JsonUtility.FromJson<IndexingPanelCacheDto>(json);
+                if (dto == null || dto.SchemaVersion <= 0)
+                    return null;
+
+                dto.StoreBackend = string.IsNullOrEmpty(dto.StoreBackend) ? null : dto.StoreBackend;
+                dto.LastManualResult = string.IsNullOrEmpty(dto.LastManualResult) ? null : dto.LastManualResult;
+                return dto;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public static void SaveCacheToSession(IndexingPanelCacheDto cache, string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return;
+
+            try
+            {
+                var json = SerializeCache(cache);
+                if (string.IsNullOrEmpty(json))
+                    SessionState.EraseString(sessionKey);
+                else
+                    SessionState.SetString(sessionKey, json);
+            }
+            catch
+            {
+                // Ignore SessionState errors.
+            }
+        }
+
+        public static IndexingPanelCacheDto LoadCacheFromSession(string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return null;
+
+            try
+            {
+                return DeserializeCache(SessionState.GetString(sessionKey, string.Empty));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public static void SaveDurableStats(IndexingStats stats, string prefKey = null)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? GetDurableStatsPrefKey() : prefKey;
+            try
+            {
+                if (stats == null || stats.TotalFiles <= 0)
+                {
+                    EditorPrefs.DeleteKey(key);
+                    return;
+                }
+
+                var dto = BuildCacheDto(stats, null, false, null);
+                EditorPrefs.SetString(key, SerializeCache(dto));
+            }
+            catch
+            {
+                // Ignore EditorPrefs errors.
+            }
+        }
+
+        public static IndexingStats LoadDurableStats(string prefKey = null)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? GetDurableStatsPrefKey() : prefKey;
+            try
+            {
+                var dto = DeserializeCache(EditorPrefs.GetString(key, string.Empty));
+                return ExtractStats(dto);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void SaveToSessionCache()
+        {
+            var dto = BuildCacheDto(_cachedStats, _lastIndexResult, _lastIndexResultIsError, _lastIndexResultAtUtc);
+            SaveCacheToSession(dto);
+        }
+
+        private void RestoreFromCache()
+        {
+            var sessionCache = LoadCacheFromSession();
+            if (sessionCache != null)
+            {
+                _cachedStats = ExtractStats(sessionCache);
+                _lastIndexResult = sessionCache.LastManualResult;
+                _lastIndexResultIsError = sessionCache.LastManualResultIsError;
+                _lastIndexResultAtUtc = ParseUtcTicks(sessionCache.LastManualResultAtTicks);
+            }
+
+            if (_cachedStats == null)
+            {
+                _cachedStats = LoadDurableStats();
+            }
+        }
+
+        private static DateTime? ParseUtcTicks(long ticks)
+        {
+            if (ticks <= 0 || ticks > DateTime.MaxValue.Ticks)
+                return null;
+            return new DateTime(ticks, DateTimeKind.Utc);
         }
     }
 }

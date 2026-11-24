@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AgentCore.Editor.Cloud;
 using AgentCore.Editor.Config;
 using UnityEditor;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace AgentCore.Editor.UI.Components
@@ -18,6 +19,15 @@ namespace AgentCore.Editor.UI.Components
         private const int DefaultListLimit = 50;
         private const int DefaultSearchLimit = 20;
         private const int PreviewMaxLength = 80;
+
+        internal const string PanelCacheSessionKey = "AgentCore.Memory.Panel.Cache";
+        internal const int MaxCachedMemories = 200;
+        internal const int MaxCachedContentLength = 2000;
+
+        internal const int ConnectionStateNone = 0;
+        internal const int ConnectionStateOk = 1;
+        internal const int ConnectionStateWarn = 2;
+        internal const int ConnectionStateError = 3;
 
         private Label _statusEnabledLabel;
         private Label _statusEndpointLabel;
@@ -41,6 +51,18 @@ namespace AgentCore.Editor.UI.Components
         private CancellationTokenSource _listCts;
         private CancellationTokenSource _deleteCts;
 
+        private bool _hasCachedConnectionStatus;
+        private string _cachedConnectionText;
+        private int _cachedConnectionState;
+        private bool _cachedShowCreateUserButton;
+        private string _cachedEndpoint;
+        private string _cachedUserId;
+        private bool _hasLoadedMemories;
+        private List<Mem0Memory> _cachedMemories = new List<Mem0Memory>();
+        private string _searchQuery;
+        private string _selectedMemoryId;
+        private bool _suppressCacheSave;
+
         /// <summary>
         /// 创建 MemoryPanel 实例并构建 UI。
         /// </summary>
@@ -48,6 +70,7 @@ namespace AgentCore.Editor.UI.Components
         {
             AddToClassList("memory-panel-content");
             BuildUI();
+            RestoreFromSessionCache();
             RefreshStatus();
         }
 
@@ -102,7 +125,12 @@ namespace AgentCore.Editor.UI.Components
 
             _addMemoryField = new TextField { multiline = true };
             _addMemoryField.AddToClassList("memory-panel__text-field");
-            _addMemoryField.RegisterValueChangedCallback(_ => UpdateActionButtons());
+            _addMemoryField.RegisterValueChangedCallback(_ =>
+            {
+                UpdateActionButtons();
+                if (!_suppressCacheSave)
+                    SaveToSessionCache();
+            });
             addSection.Add(_addMemoryField);
 
             var addHint = new Label(AgentCore.Editor.L10n.Loc.Tr("memory.hint.addMemory", "写入需要长期保存的偏好、约定、架构决策或技术发现。请输入明确、完整的一句话或一段话。"));
@@ -190,19 +218,25 @@ namespace AgentCore.Editor.UI.Components
             if (!enabled)
             {
                 _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.disabled", "连接状态：未启用");
-                _statusConnectionLabel.EnableInClassList("memory-panel__status--warn", true);
-                _statusConnectionLabel.EnableInClassList("memory-panel__status--ok", false);
-                _statusConnectionLabel.EnableInClassList("memory-panel__status--error", false);
+                SetConnectionStatusClass(false, true, false);
+                _createUserButton.style.display = DisplayStyle.None;
+            }
+            else if (_hasCachedConnectionStatus && IsCacheMatchingCurrentSettings(settings))
+            {
+                _statusConnectionLabel.text = _cachedConnectionText;
+                SetConnectionStatusClass(
+                    _cachedConnectionState == ConnectionStateOk,
+                    _cachedConnectionState == ConnectionStateWarn,
+                    _cachedConnectionState == ConnectionStateError);
+                _createUserButton.style.display = _cachedShowCreateUserButton ? DisplayStyle.Flex : DisplayStyle.None;
             }
             else
             {
                 _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.notTested", "连接状态：未测试");
-                _statusConnectionLabel.EnableInClassList("memory-panel__status--warn", false);
-                _statusConnectionLabel.EnableInClassList("memory-panel__status--ok", false);
-                _statusConnectionLabel.EnableInClassList("memory-panel__status--error", false);
+                SetConnectionStatusClass(false, false, false);
+                _createUserButton.style.display = DisplayStyle.None;
             }
 
-            _createUserButton.style.display = DisplayStyle.None;
             UpdateActionButtons();
         }
 
@@ -240,46 +274,59 @@ namespace AgentCore.Editor.UI.Components
                 var client = Mem0Client.FromSettings();
                 if (client == null)
                 {
-                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.mem0Disabled", "连接状态：mem0 未启用");
-                    SetConnectionStatusClass(false, true, false);
+                    ApplyAndCacheConnectionStatus(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.mem0Disabled", "连接状态：mem0 未启用"),
+                        ConnectionStateWarn,
+                        showCreateUser: false);
                     return;
                 }
 
                 var connection = await client.TestConnectionAsync(_statusCts.Token);
                 if (!connection.success)
                 {
-                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.failed", "连接状态：失败 - {0}", connection.message);
-                    SetConnectionStatusClass(false, false, true);
+                    ApplyAndCacheConnectionStatus(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.failed", "连接状态：失败 - {0}", connection.message),
+                        ConnectionStateError,
+                        showCreateUser: false);
                     return;
                 }
 
                 var user = await client.CheckUserExistsAsync(_statusCts.Token);
                 if (user.exists)
                 {
-                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.userExists", "连接状态：已连接，用户存在");
-                    SetConnectionStatusClass(true, false, false);
+                    ApplyAndCacheConnectionStatus(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.userExists", "连接状态：已连接，用户存在"),
+                        ConnectionStateOk,
+                        showCreateUser: false);
                 }
                 else if (user.status == Mem0ConnectionStatus.UserNotFound)
                 {
-                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.userMissing", "连接状态：已连接，但用户不存在");
-                    SetConnectionStatusClass(false, true, false);
-                    _createUserButton.style.display = DisplayStyle.Flex;
+                    ApplyAndCacheConnectionStatus(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.userMissing", "连接状态：已连接，但用户不存在"),
+                        ConnectionStateWarn,
+                        showCreateUser: true);
                 }
                 else
                 {
-                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.result", "连接状态：{0}", user.message);
-                    SetConnectionStatusClass(false, false, true);
+                    ApplyAndCacheConnectionStatus(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.result", "连接状态：{0}", user.message),
+                        ConnectionStateError,
+                        showCreateUser: false);
                 }
             }
             catch (OperationCanceledException)
             {
-                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.canceled", "连接状态：已取消");
-                SetConnectionStatusClass(false, true, false);
+                ApplyAndCacheConnectionStatus(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.canceled", "连接状态：已取消"),
+                    ConnectionStateWarn,
+                    showCreateUser: false);
             }
             catch (Exception ex)
             {
-                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.error", "连接状态：错误 - {0}", ex.Message);
-                SetConnectionStatusClass(false, false, true);
+                ApplyAndCacheConnectionStatus(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.error", "连接状态：错误 - {0}", ex.Message),
+                    ConnectionStateError,
+                    showCreateUser: false);
             }
             finally
             {
@@ -320,26 +367,32 @@ namespace AgentCore.Editor.UI.Components
                 var result = await client.CreateUserAsync(_statusCts.Token);
                 if (result.success)
                 {
-                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.result", "连接状态：{0}", result.message);
-                    SetConnectionStatusClass(true, false, false);
-                    _createUserButton.style.display = DisplayStyle.None;
+                    ApplyAndCacheConnectionStatus(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.result", "连接状态：{0}", result.message),
+                        ConnectionStateOk,
+                        showCreateUser: false);
                 }
                 else
                 {
-                    _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.createUserFailed", "连接状态：创建用户失败 - {0}", result.message);
-                    SetConnectionStatusClass(false, false, true);
-                    _createUserButton.style.display = DisplayStyle.Flex;
+                    ApplyAndCacheConnectionStatus(
+                        AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.createUserFailed", "连接状态：创建用户失败 - {0}", result.message),
+                        ConnectionStateError,
+                        showCreateUser: true);
                 }
             }
             catch (OperationCanceledException)
             {
-                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.canceled", "连接状态：已取消");
-                SetConnectionStatusClass(false, true, false);
+                ApplyAndCacheConnectionStatus(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.canceled", "连接状态：已取消"),
+                    ConnectionStateWarn,
+                    showCreateUser: false);
             }
             catch (Exception ex)
             {
-                _statusConnectionLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.error", "连接状态：错误 - {0}", ex.Message);
-                SetConnectionStatusClass(false, false, true);
+                ApplyAndCacheConnectionStatus(
+                    AgentCore.Editor.L10n.Loc.Tr("memory.status.connection.error", "连接状态：错误 - {0}", ex.Message),
+                    ConnectionStateError,
+                    showCreateUser: false);
             }
             finally
             {
@@ -441,7 +494,8 @@ namespace AgentCore.Editor.UI.Components
             _listCts = new CancellationTokenSource();
 
             _refreshMemoriesButton.SetEnabled(false);
-            RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.loading", "正在加载记忆列表..."), false);
+            if (!_hasLoadedMemories || _cachedMemories.Count == 0)
+                RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.loading", "正在加载记忆列表..."), false);
 
             try
             {
@@ -470,23 +524,34 @@ namespace AgentCore.Editor.UI.Components
             }
         }
 
-        private void RenderMemoryList(List<Mem0Memory> memories)
+        private void RenderMemoryList(List<Mem0Memory> memories, bool persist = true)
         {
+            var list = memories ?? new List<Mem0Memory>();
+            _hasLoadedMemories = true;
+            _cachedMemories = list;
+            if (persist)
+            {
+                var settings = AgentCoreSettings.instance;
+                _cachedEndpoint = settings.mem0Endpoint;
+                _cachedUserId = settings.EffectiveUserId;
+                SaveToSessionCache();
+            }
+
             _memoriesScrollView.Clear();
 
-            if (memories == null || memories.Count == 0)
+            if (list.Count == 0)
             {
                 RenderMessage(AgentCore.Editor.L10n.Loc.Tr("memory.status.empty", "暂无记忆。"), false);
                 _memoriesSummaryLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.summary.total", "记忆总数：0 条。");
                 return;
             }
 
-            foreach (var memory in memories)
+            foreach (var memory in list)
             {
                 _memoriesScrollView.Add(BuildMemoryItem(memory));
             }
 
-            _memoriesSummaryLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.summary.loaded", "已加载 {0} 条记忆。", memories.Count);
+            _memoriesSummaryLabel.text = AgentCore.Editor.L10n.Loc.Tr("memory.summary.loaded", "已加载 {0} 条记忆。", list.Count);
         }
 
         private VisualElement BuildMemoryItem(Mem0Memory memory)
@@ -670,6 +735,8 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         public void OnActivated()
         {
+            if (!_hasLoadedMemories && !_hasCachedConnectionStatus)
+                RestoreFromSessionCache();
             RefreshStatus();
         }
 
@@ -702,6 +769,335 @@ namespace AgentCore.Editor.UI.Components
             _deleteCts?.Cancel();
             _deleteCts?.Dispose();
             _deleteCts = null;
+        }
+
+        // ── Reload persistence cache ─────────────────────────────────────────────
+
+        [Serializable]
+        internal sealed class MemoryPanelCacheDto
+        {
+            public int SchemaVersion;
+            public string Endpoint;
+            public string UserId;
+            public bool HasConnectionStatus;
+            public string ConnectionStatusText;
+            public int ConnectionState;
+            public bool ShowCreateUserButton;
+            public bool HasLoadedMemories;
+            public List<CachedMemoryItem> Memories = new List<CachedMemoryItem>();
+            public string SearchQuery;
+            public string SelectedMemoryId;
+            public string AddMemoryDraft;
+        }
+
+        [Serializable]
+        internal sealed class CachedMemoryItem
+        {
+            public string Id;
+            public string Content;
+            public string UserId;
+            public string CreatedAt;
+            public string UpdatedAt;
+            public string State;
+        }
+
+        internal static MemoryPanelCacheDto BuildCacheDto(
+            string endpoint,
+            string userId,
+            bool hasConnectionStatus,
+            string connectionStatusText,
+            int connectionState,
+            bool showCreateUserButton,
+            bool hasLoadedMemories,
+            IReadOnlyList<Mem0Memory> memories,
+            string searchQuery = null,
+            string selectedMemoryId = null,
+            string addMemoryDraft = null,
+            int maxItems = MaxCachedMemories,
+            int maxContentLength = MaxCachedContentLength)
+        {
+            var limit = Math.Max(1, maxItems);
+            var contentLimit = Math.Max(16, maxContentLength);
+            var dto = new MemoryPanelCacheDto
+            {
+                SchemaVersion = 1,
+                Endpoint = endpoint,
+                UserId = userId,
+                HasConnectionStatus = hasConnectionStatus && !string.IsNullOrEmpty(connectionStatusText),
+                ConnectionStatusText = hasConnectionStatus ? connectionStatusText : null,
+                ConnectionState = NormalizeConnectionState(connectionState),
+                ShowCreateUserButton = showCreateUserButton,
+                HasLoadedMemories = hasLoadedMemories,
+                SearchQuery = searchQuery,
+                SelectedMemoryId = selectedMemoryId,
+                AddMemoryDraft = TruncateCacheText(addMemoryDraft, contentLimit)
+            };
+
+            if (memories != null)
+            {
+                foreach (var m in memories)
+                {
+                    if (m == null)
+                        continue;
+                    if (dto.Memories.Count >= limit)
+                        break;
+
+                    dto.Memories.Add(new CachedMemoryItem
+                    {
+                        Id = m.Id,
+                        Content = TruncateCacheText(m.Content, contentLimit),
+                        UserId = m.UserId,
+                        CreatedAt = m.CreatedAt,
+                        UpdatedAt = m.UpdatedAt,
+                        State = m.State
+                    });
+                }
+            }
+
+            return dto;
+        }
+
+        internal static string SerializeCache(
+            MemoryPanelCacheDto cache,
+            int maxItems = MaxCachedMemories,
+            int maxContentLength = MaxCachedContentLength)
+        {
+            if (cache == null)
+                return null;
+
+            var limit = Math.Max(1, maxItems);
+            var contentLimit = Math.Max(16, maxContentLength);
+            var normalized = new MemoryPanelCacheDto
+            {
+                SchemaVersion = 1,
+                Endpoint = cache.Endpoint,
+                UserId = cache.UserId,
+                HasConnectionStatus = cache.HasConnectionStatus && !string.IsNullOrEmpty(cache.ConnectionStatusText),
+                ConnectionStatusText = cache.HasConnectionStatus ? cache.ConnectionStatusText : null,
+                ConnectionState = NormalizeConnectionState(cache.ConnectionState),
+                ShowCreateUserButton = cache.ShowCreateUserButton,
+                HasLoadedMemories = cache.HasLoadedMemories,
+                SearchQuery = cache.SearchQuery,
+                SelectedMemoryId = cache.SelectedMemoryId,
+                AddMemoryDraft = TruncateCacheText(cache.AddMemoryDraft, contentLimit)
+            };
+
+            if (cache.Memories != null)
+            {
+                foreach (var item in cache.Memories)
+                {
+                    if (item == null)
+                        continue;
+                    if (normalized.Memories.Count >= limit)
+                        break;
+
+                    normalized.Memories.Add(new CachedMemoryItem
+                    {
+                        Id = item.Id,
+                        Content = TruncateCacheText(item.Content, contentLimit),
+                        UserId = item.UserId,
+                        CreatedAt = item.CreatedAt,
+                        UpdatedAt = item.UpdatedAt,
+                        State = item.State
+                    });
+                }
+            }
+
+            return JsonUtility.ToJson(normalized);
+        }
+
+        internal static MemoryPanelCacheDto DeserializeCache(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                var dto = JsonUtility.FromJson<MemoryPanelCacheDto>(json);
+                if (dto == null || dto.SchemaVersion <= 0)
+                    return null;
+
+                dto.Endpoint = NullIfEmpty(dto.Endpoint);
+                dto.UserId = NullIfEmpty(dto.UserId);
+                dto.ConnectionStatusText = NullIfEmpty(dto.ConnectionStatusText);
+                dto.ConnectionState = NormalizeConnectionState(dto.ConnectionState);
+                dto.SearchQuery = NullIfEmpty(dto.SearchQuery);
+                dto.SelectedMemoryId = NullIfEmpty(dto.SelectedMemoryId);
+                dto.AddMemoryDraft = NullIfEmpty(dto.AddMemoryDraft);
+                dto.Memories = dto.Memories ?? new List<CachedMemoryItem>();
+                return dto;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        internal static List<Mem0Memory> ToMem0Memories(MemoryPanelCacheDto cache)
+        {
+            var result = new List<Mem0Memory>();
+            if (cache?.Memories == null)
+                return result;
+
+            foreach (var item in cache.Memories)
+            {
+                if (item == null)
+                    continue;
+                result.Add(new Mem0Memory
+                {
+                    Id = NullIfEmpty(item.Id),
+                    Content = NullIfEmpty(item.Content),
+                    UserId = NullIfEmpty(item.UserId),
+                    CreatedAt = NullIfEmpty(item.CreatedAt),
+                    UpdatedAt = NullIfEmpty(item.UpdatedAt),
+                    State = NullIfEmpty(item.State)
+                });
+            }
+
+            return result;
+        }
+
+        internal static void SaveCacheToSession(MemoryPanelCacheDto cache, string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return;
+
+            try
+            {
+                var json = SerializeCache(cache);
+                if (string.IsNullOrEmpty(json))
+                    SessionState.EraseString(sessionKey);
+                else
+                    SessionState.SetString(sessionKey, json);
+            }
+            catch
+            {
+                // Ignore SessionState errors.
+            }
+        }
+
+        internal static MemoryPanelCacheDto LoadCacheFromSession(string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return null;
+
+            try
+            {
+                return DeserializeCache(SessionState.GetString(sessionKey, string.Empty));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void ApplyAndCacheConnectionStatus(string text, int connectionState, bool showCreateUser)
+        {
+            var settings = AgentCoreSettings.instance;
+            _cachedEndpoint = settings.mem0Endpoint;
+            _cachedUserId = settings.EffectiveUserId;
+            _hasCachedConnectionStatus = true;
+            _cachedConnectionText = text;
+            _cachedConnectionState = NormalizeConnectionState(connectionState);
+            _cachedShowCreateUserButton = showCreateUser;
+
+            _statusConnectionLabel.text = text;
+            SetConnectionStatusClass(
+                _cachedConnectionState == ConnectionStateOk,
+                _cachedConnectionState == ConnectionStateWarn,
+                _cachedConnectionState == ConnectionStateError);
+            _createUserButton.style.display = showCreateUser ? DisplayStyle.Flex : DisplayStyle.None;
+
+            SaveToSessionCache();
+        }
+
+        private bool IsCacheMatchingCurrentSettings(AgentCoreSettings settings)
+        {
+            if (settings == null)
+                return false;
+
+            var endpointMatch = string.IsNullOrEmpty(_cachedEndpoint)
+                || string.Equals(_cachedEndpoint, settings.mem0Endpoint, StringComparison.Ordinal);
+            var userMatch = string.IsNullOrEmpty(_cachedUserId)
+                || string.Equals(_cachedUserId, settings.EffectiveUserId, StringComparison.Ordinal);
+            return endpointMatch && userMatch;
+        }
+
+        private void SaveToSessionCache()
+        {
+            var settings = AgentCoreSettings.instance;
+            var dto = BuildCacheDto(
+                _cachedEndpoint ?? settings.mem0Endpoint,
+                _cachedUserId ?? settings.EffectiveUserId,
+                _hasCachedConnectionStatus,
+                _cachedConnectionText,
+                _cachedConnectionState,
+                _cachedShowCreateUserButton,
+                _hasLoadedMemories,
+                _cachedMemories,
+                _searchQuery,
+                _selectedMemoryId,
+                _addMemoryField?.value);
+            SaveCacheToSession(dto);
+        }
+
+        private void RestoreFromSessionCache()
+        {
+            var dto = LoadCacheFromSession();
+            if (dto == null)
+                return;
+
+            _cachedEndpoint = dto.Endpoint;
+            _cachedUserId = dto.UserId;
+            _searchQuery = dto.SearchQuery;
+            _selectedMemoryId = dto.SelectedMemoryId;
+
+            if (_addMemoryField != null && !string.IsNullOrEmpty(dto.AddMemoryDraft))
+            {
+                _suppressCacheSave = true;
+                try
+                {
+                    _addMemoryField.SetValueWithoutNotify(dto.AddMemoryDraft);
+                }
+                finally
+                {
+                    _suppressCacheSave = false;
+                }
+            }
+
+            var settings = AgentCoreSettings.instance;
+            if (!IsCacheMatchingCurrentSettings(settings))
+                return;
+
+            if (dto.HasConnectionStatus && !string.IsNullOrEmpty(dto.ConnectionStatusText))
+            {
+                _hasCachedConnectionStatus = true;
+                _cachedConnectionText = dto.ConnectionStatusText;
+                _cachedConnectionState = dto.ConnectionState;
+                _cachedShowCreateUserButton = dto.ShowCreateUserButton;
+            }
+
+            if (dto.HasLoadedMemories)
+            {
+                var restoredMemories = ToMem0Memories(dto);
+                RenderMemoryList(restoredMemories, persist: false);
+            }
+        }
+
+        private static int NormalizeConnectionState(int state)
+        {
+            return state >= ConnectionStateNone && state <= ConnectionStateError
+                ? state
+                : ConnectionStateNone;
+        }
+
+        private static string NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
+
+        private static string TruncateCacheText(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+                return value;
+            return value.Substring(0, maxLength);
         }
     }
 }

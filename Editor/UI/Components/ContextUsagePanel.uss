@@ -79,6 +79,61 @@
     font-size: 11px;
     color: rgba(255, 255, 255, 0.9);
     -unity-font-style: bold;
+    white-space: normal;
+    flex-shrink: 1;
+    -unity-text-align: middle-right;
+}
+
+/* v1.23.0: 周期选择器行与胶囊按钮（使用字面色值以兼容 Unity USS） */
+.context-usage-panel__period-row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 2px;
+    margin-bottom: 5px;
+}
+
+.context-usage-panel__period-buttons {
+    flex-direction: row;
+    align-items: center;
+}
+
+.context-usage-panel__period-btn {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.14);
+    border-radius: 3px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    padding-left: 6px;
+    padding-right: 6px;
+    margin-left: 3px;
+    margin-right: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    height: 18px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.72);
+    cursor: link;
+}
+
+.context-usage-panel__period-btn:hover {
+    background-color: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.context-usage-panel__period-btn--active {
+    background-color: rgba(70, 130, 220, 0.42);
+    border-color: rgba(110, 175, 255, 0.8);
+    color: #ffffff;
+    -unity-font-style: bold;
+}
+
+.context-usage-panel__period-btn--active:hover {
+    background-color: rgba(85, 145, 235, 0.52);
+    border-color: rgba(130, 190, 255, 0.9);
+    color: #ffffff;
 }
 
 .context-usage-panel__compression-badge {

@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using AgentCore.Editor.L10n;
 using AgentCore.Editor.LLM;
 using UnityEditor;
@@ -8,14 +12,30 @@ namespace AgentCore.Editor.UI.Components
 {
     /// <summary>
     /// Context usage visualization panel.
-    /// Displays token usage, compression statistics, and budget allocation.
+    /// Displays token usage, compression statistics, budget allocation, and persistent LLM usage across time windows.
     /// </summary>
     /// <remarks>
     /// v1.9.0+: 所有可见文本走 L10n. 订阅 <see cref="LanguageManager.LanguageChanged"/>,
     /// 语言切换时用最近一次的 budget 重绘 (标签 + 数值一起刷新).
+    /// v1.23.0+: 支持 Session / 1d / 7d / 30d / 90d 周期切换与折叠状态持久化（EditorPrefs），
+    /// 并订阅 <see cref="UsageLedger.OnChanged"/> 在清空历史、重置会话、切换会话与重载后实时刷新。
     /// </remarks>
     public class ContextUsagePanel : VisualElement
     {
+        #region EditorPrefs Keys
+        internal const string SelectedWindowPrefKey = "AgentCore.ContextUsage.SelectedWindow";
+        internal const string CollapsedPrefKey = "AgentCore.ContextUsage.Collapsed";
+
+        private static readonly UsageWindow[] PeriodWindows =
+        {
+            UsageWindow.Session,
+            UsageWindow.Today,
+            UsageWindow.Days7,
+            UsageWindow.Days30,
+            UsageWindow.Days90,
+        };
+        #endregion
+
         #region USS Class Names
         private const string UssClassName = "context-usage-panel";
         private const string HeaderClassName = "context-usage-panel__header";
@@ -27,6 +47,10 @@ namespace AgentCore.Editor.UI.Components
         private const string StatValueClassName = "context-usage-panel__stat-value";
         private const string CompressionBadgeClassName = "context-usage-panel__compression-badge";
         private const string CollapsedClassName = "context-usage-panel--collapsed";
+        private const string PeriodRowClassName = "context-usage-panel__period-row";
+        private const string PeriodButtonsClassName = "context-usage-panel__period-buttons";
+        private const string PeriodButtonClassName = "context-usage-panel__period-btn";
+        private const string PeriodButtonActiveClassName = "context-usage-panel__period-btn--active";
         #endregion
 
         #region UI Elements
@@ -44,6 +68,8 @@ namespace AgentCore.Editor.UI.Components
         private readonly Label _compressionBadgeLabel;
         private readonly VisualElement _compressionBadge;
         private readonly Label _headerUsageLabel;     // v1.17.0: 折叠时也可见的缓存命中 / 费用摘要
+        private readonly Label _periodRowLabel;
+        private readonly Dictionary<UsageWindow, Button> _periodButtons = new Dictionary<UsageWindow, Button>();
         private readonly Label _llmUsageRowLabel;
         private readonly Label _llmUsageValueLabel;
         private readonly Label _lastCallRowLabel;
@@ -52,8 +78,11 @@ namespace AgentCore.Editor.UI.Components
         #endregion
 
         #region State
-        private bool _isCollapsed = false;
+        private bool _isCollapsed = true;
+        private UsageWindow _selectedWindow = UsageWindow.Session;
         private Core.ContextBudgetInfo _currentBudget;
+        private readonly string _selectedWindowPrefKey;
+        private readonly string _collapsedPrefKey;
         #endregion
 
         #region Factory
@@ -67,7 +96,19 @@ namespace AgentCore.Editor.UI.Components
 
         #region Constructor
         public ContextUsagePanel()
+            : this(SelectedWindowPrefKey, CollapsedPrefKey)
         {
+        }
+
+        internal ContextUsagePanel(string selectedWindowPrefKey, string collapsedPrefKey)
+        {
+            _selectedWindowPrefKey = string.IsNullOrEmpty(selectedWindowPrefKey)
+                ? SelectedWindowPrefKey
+                : selectedWindowPrefKey;
+            _collapsedPrefKey = string.IsNullOrEmpty(collapsedPrefKey)
+                ? CollapsedPrefKey
+                : collapsedPrefKey;
+
             AddToClassList(UssClassName);
 
             // Header (整个 header 都可点击展开/收起,cursor + hover 由 USS 定义)
@@ -119,7 +160,30 @@ namespace AgentCore.Editor.UI.Components
             var compressionRow = CreateStatsRow(out _compressionRowLabel, out _compressionStatsLabel);
             _content.Add(compressionRow);
 
-            // v1.17.0: LLM 实际用量（来自供应商 usage 字段：缓存命中 / 写入 / 输出 / 估算费用）
+            // v1.23.0: 周期选择器（Session | 1d | 7d | 30d | 90d）
+            var periodRow = new VisualElement();
+            periodRow.AddToClassList(PeriodRowClassName);
+
+            _periodRowLabel = new Label();
+            _periodRowLabel.AddToClassList(StatLabelClassName);
+            periodRow.Add(_periodRowLabel);
+
+            var periodButtonsContainer = new VisualElement();
+            periodButtonsContainer.AddToClassList(PeriodButtonsClassName);
+            for (var i = 0; i < PeriodWindows.Length; i++)
+            {
+                var window = PeriodWindows[i];
+                var captured = window;
+                var button = new Button(() => SetSelectedWindow(captured));
+                button.AddToClassList(PeriodButtonClassName);
+                button.name = $"context-usage-period-{window}";
+                _periodButtons[window] = button;
+                periodButtonsContainer.Add(button);
+            }
+            periodRow.Add(periodButtonsContainer);
+            _content.Add(periodRow);
+
+            // v1.17.0 / v1.23.0: LLM 实际用量（会话或持久化多周期统计）
             _content.Add(CreateStatsRow(out _llmUsageRowLabel, out _llmUsageValueLabel));
             _content.Add(CreateStatsRow(out _lastCallRowLabel, out _lastCallValueLabel));
 
@@ -133,24 +197,83 @@ namespace AgentCore.Editor.UI.Components
 
             Add(_content);
 
+            // Restore persisted state (default collapsed = true, window = Session)
+            _selectedWindow = LoadSelectedWindow(_selectedWindowPrefKey);
+            UpdatePeriodButtonLabels();
+            UpdatePeriodButtonSelection();
+
             // Initialize with empty data
             UpdateDisplay(new Core.ContextBudgetInfo());
+            RenderUsage();
 
-            // 默认折叠（v1.6.4：占用聊天区空间过大，用户主动展开时再显示详情）
-            SetCollapsed(true);
+            SetCollapsed(LoadCollapsedState(_collapsedPrefKey), persist: false);
 
             // v1.9.0+: 订阅语言事件, 切语言时用最近 budget 重绘
+            // v1.23.0+: 订阅 UsageLedger.OnChanged，重置会话/清空历史/绑定会话/重载磁盘均即时刷新
             RegisterCallback<AttachToPanelEvent>(_ =>
             {
                 LanguageManager.LanguageChanged += OnLanguageChanged;
                 UsageLedger.OnUsageRecorded += OnUsageRecorded;
+                UsageLedger.OnChanged += OnUsageChanged;
                 RenderUsage();
             });
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 LanguageManager.LanguageChanged -= OnLanguageChanged;
                 UsageLedger.OnUsageRecorded -= OnUsageRecorded;
+                UsageLedger.OnChanged -= OnUsageChanged;
             });
+        }
+        #endregion
+
+        #region Properties & Test Accessors
+        /// <summary>Gets the currently selected usage period window.</summary>
+        public UsageWindow SelectedWindow => _selectedWindow;
+
+        /// <summary>Gets whether the panel is currently collapsed.</summary>
+        public bool IsCollapsed => _isCollapsed;
+
+        internal string HeaderUsageText => _headerUsageLabel.text;
+        internal string LlmUsageRowLabelText => _llmUsageRowLabel.text;
+        internal string LlmUsageValueText => _llmUsageValueLabel.text;
+        internal string SecondaryRowLabelText => _lastCallRowLabel.text;
+        internal string SecondaryValueText => _lastCallValueLabel.text;
+        #endregion
+
+        #region Persistence Helpers
+        internal static bool IsValidUsageWindow(int rawValue)
+        {
+            return rawValue == (int)UsageWindow.Session
+                || rawValue == (int)UsageWindow.Today
+                || rawValue == (int)UsageWindow.Days7
+                || rawValue == (int)UsageWindow.Days30
+                || rawValue == (int)UsageWindow.Days90;
+        }
+
+        internal static UsageWindow LoadSelectedWindow(string prefKey = SelectedWindowPrefKey)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? SelectedWindowPrefKey : prefKey;
+            var raw = EditorPrefs.GetInt(key, (int)UsageWindow.Session);
+            return IsValidUsageWindow(raw) ? (UsageWindow)raw : UsageWindow.Session;
+        }
+
+        internal static void SaveSelectedWindow(UsageWindow window, string prefKey = SelectedWindowPrefKey)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? SelectedWindowPrefKey : prefKey;
+            var normalized = IsValidUsageWindow((int)window) ? window : UsageWindow.Session;
+            EditorPrefs.SetInt(key, (int)normalized);
+        }
+
+        internal static bool LoadCollapsedState(string prefKey = CollapsedPrefKey)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? CollapsedPrefKey : prefKey;
+            return EditorPrefs.GetBool(key, true);
+        }
+
+        internal static void SaveCollapsedState(bool collapsed, string prefKey = CollapsedPrefKey)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? CollapsedPrefKey : prefKey;
+            EditorPrefs.SetBool(key, collapsed);
         }
         #endregion
 
@@ -165,11 +288,21 @@ namespace AgentCore.Editor.UI.Components
         }
 
         /// <summary>
-        /// Collapses or expands the panel.
+        /// Collapses or expands the panel and persists the state.
         /// </summary>
         public void SetCollapsed(bool collapsed)
         {
+            SetCollapsed(collapsed, persist: true);
+        }
+
+        internal void SetCollapsed(bool collapsed, bool persist)
+        {
             _isCollapsed = collapsed;
+            if (persist)
+            {
+                SaveCollapsedState(collapsed, _collapsedPrefKey);
+            }
+
             if (_isCollapsed)
             {
                 AddToClassList(CollapsedClassName);
@@ -183,6 +316,33 @@ namespace AgentCore.Editor.UI.Components
                 _content.style.display = DisplayStyle.Flex;
             }
         }
+
+        /// <summary>
+        /// Selects a usage period window and refreshes the usage display.
+        /// </summary>
+        public void SetSelectedWindow(UsageWindow window)
+        {
+            SetSelectedWindow(window, persist: true);
+        }
+
+        internal void SetSelectedWindow(UsageWindow window, bool persist)
+        {
+            var normalized = IsValidUsageWindow((int)window) ? window : UsageWindow.Session;
+            _selectedWindow = normalized;
+            if (persist)
+            {
+                SaveSelectedWindow(normalized, _selectedWindowPrefKey);
+            }
+
+            UpdatePeriodButtonSelection();
+            RenderUsage();
+        }
+
+        /// <summary>Forces an immediate synchronous refresh of usage labels (useful in tests).</summary>
+        internal void RefreshUsageNow()
+        {
+            RenderUsage();
+        }
         #endregion
 
         #region Private Methods
@@ -190,6 +350,7 @@ namespace AgentCore.Editor.UI.Components
         private void OnLanguageChanged(string _)
         {
             _headerLabel.text = Loc.Tr("contextUsage.header", "上下文使用情况");
+            UpdatePeriodButtonLabels();
             RenderCurrent();
             RenderUsage();
         }
@@ -197,7 +358,11 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>
         /// v1.17.0: UsageLedger 事件可能来自后台线程（HTTP 回调），合并后切回主线程刷新。
         /// </summary>
-        private void OnUsageRecorded(LlmUsage _)
+        private void OnUsageRecorded(LlmUsage _) => QueueUsageRefresh();
+
+        private void OnUsageChanged() => QueueUsageRefresh();
+
+        private void QueueUsageRefresh()
         {
             if (_usageRefreshQueued) return;
             _usageRefreshQueued = true;
@@ -208,8 +373,76 @@ namespace AgentCore.Editor.UI.Components
             };
         }
 
-        /// <summary>v1.17.0: 渲染会话累计用量与最近一次调用。</summary>
+        private void UpdatePeriodButtonLabels()
+        {
+            _periodRowLabel.text = Loc.Tr("contextUsage.period.label", "统计周期");
+            foreach (var kvp in _periodButtons)
+            {
+                kvp.Value.text = GetWindowShortLabel(kvp.Key);
+            }
+        }
+
+        private void UpdatePeriodButtonSelection()
+        {
+            foreach (var kvp in _periodButtons)
+            {
+                if (kvp.Key == _selectedWindow)
+                {
+                    kvp.Value.AddToClassList(PeriodButtonActiveClassName);
+                }
+                else
+                {
+                    kvp.Value.RemoveFromClassList(PeriodButtonActiveClassName);
+                }
+            }
+        }
+
+        internal static string GetWindowShortLabel(UsageWindow window)
+        {
+            switch (window)
+            {
+                case UsageWindow.Today:
+                    return Loc.Tr("contextUsage.period.1d", "今日");
+                case UsageWindow.Days7:
+                    return Loc.Tr("contextUsage.period.7d", "7天");
+                case UsageWindow.Days30:
+                    return Loc.Tr("contextUsage.period.30d", "30天");
+                case UsageWindow.Days90:
+                    return Loc.Tr("contextUsage.period.90d", "90天");
+                default:
+                    return Loc.Tr("contextUsage.period.session", "本次会话");
+            }
+        }
+
+        private static string FormatCostUsd(double costUsd, bool partial)
+        {
+            if (costUsd > 0)
+            {
+                var formatted = costUsd >= 1.0
+                    ? costUsd.ToString("F2", CultureInfo.InvariantCulture)
+                    : costUsd.ToString("F4", CultureInfo.InvariantCulture);
+                return $"≈${formatted}{(partial ? "+" : string.Empty)}";
+            }
+
+            return partial
+                ? Loc.Tr("contextUsage.cost.notAvailable", "未知")
+                : "$0";
+        }
+
+        /// <summary>v1.17.0 / v1.23.0: 按当前选中周期渲染 LLM 用量。</summary>
         private void RenderUsage()
+        {
+            if (_selectedWindow == UsageWindow.Session)
+            {
+                RenderSessionUsage();
+            }
+            else
+            {
+                RenderPeriodUsage(_selectedWindow);
+            }
+        }
+
+        private void RenderSessionUsage()
         {
             var session = UsageLedger.Session;
             var last = UsageLedger.Last;
@@ -227,15 +460,28 @@ namespace AgentCore.Editor.UI.Components
                 return;
             }
 
-            string costText = cost > 0 ? $"≈${cost:F2}{(partial ? "+" : "")}" : (partial ? Loc.Tr("contextUsage.cost.notAvailable", "未知") : "$0");
-            _llmUsageValueLabel.text = Loc.Tr(
+            string costText = FormatCostUsd(cost, partial);
+            string cacheStatus = session.CacheStatus == "unknown"
+                ? Loc.Tr("contextUsage.cache.unknown", "未知")
+                : session.CacheStatus;
+            string usageText = Loc.Tr(
                 "contextUsage.llmUsage.cacheStatusValue",
                 "{0} 次 | 输入 {1}（缓存命中 {2}）| 输出 {3} | 费用 {4}",
                 session.Calls,
                 UsageLedger.FormatTokens(session.TotalInput),
-                session.CacheStatus == "unknown" ? Loc.Tr("contextUsage.cache.unknown", "未知") : session.CacheStatus,
+                cacheStatus,
                 UsageLedger.FormatTokens(session.Output),
                 costText);
+
+            if (session.Reasoning > 0)
+            {
+                usageText += " | " + Loc.Tr(
+                    "contextUsage.reasoning.inline",
+                    "推理 {0}",
+                    UsageLedger.FormatTokens(session.Reasoning));
+            }
+
+            _llmUsageValueLabel.text = usageText;
 
             _lastCallValueLabel.text = Loc.Tr("contextUsage.cache.notReported", "缓存未知（服务未上报）");
             if (last != null && !last.IsEmpty && last.CacheMetricsKnown)
@@ -249,7 +495,101 @@ namespace AgentCore.Editor.UI.Components
                     UsageLedger.FormatTokens(last.Output));
             }
 
-            _headerUsageLabel.text = Loc.Tr("contextUsage.cache.header", "缓存 {0} · {1}", session.CacheStatus == "unknown" ? Loc.Tr("contextUsage.cache.unknown", "未知") : session.CacheStatus, costText);
+            _headerUsageLabel.text = Loc.Tr(
+                "contextUsage.cache.header",
+                "缓存 {0} · {1}",
+                cacheStatus,
+                costText);
+        }
+
+        private void RenderPeriodUsage(UsageWindow window)
+        {
+            var windowLabel = GetWindowShortLabel(window);
+            var summary = UsageLedger.GetWindowSummary(window);
+
+            _llmUsageRowLabel.text = Loc.Tr("contextUsage.periodUsage.label", "LLM 用量（{0}）", windowLabel);
+            _lastCallRowLabel.text = Loc.Tr("contextUsage.topModels.label", "常用模型");
+
+            if (summary == null || summary.CallCount == 0)
+            {
+                _llmUsageValueLabel.text = Loc.Tr("contextUsage.llmUsage.none", "暂无调用");
+                _lastCallValueLabel.text = "-";
+                _headerUsageLabel.text = Loc.Tr(
+                    "contextUsage.period.headerEmpty",
+                    "{0} · 暂无调用",
+                    windowLabel);
+                return;
+            }
+
+            var cacheText = summary.CacheMetricsKnown && summary.InputTokens > 0
+                ? string.Format(CultureInfo.InvariantCulture, "{0:F1}%", summary.CacheHitRate * 100.0)
+                : Loc.Tr("contextUsage.cache.unknown", "未知");
+            var costText = FormatCostUsd(summary.CostUsd, summary.CostPartial);
+
+            var sb = new StringBuilder();
+            if (summary.WindowDays > 1)
+            {
+                sb.Append(Loc.Tr(
+                    "contextUsage.periodUsage.multiDayValue",
+                    "{0} 次（{1} 天活跃）| 总计 {2} | 输入 {3}（读缓存 {4}, 命中 {5}）| 输出 {6}",
+                    summary.CallCount,
+                    summary.ActiveDays,
+                    UsageLedger.FormatTokens(summary.TotalTokens),
+                    UsageLedger.FormatTokens(summary.InputTokens),
+                    UsageLedger.FormatTokens(summary.CacheReadTokens),
+                    cacheText,
+                    UsageLedger.FormatTokens(summary.OutputTokens)));
+            }
+            else
+            {
+                sb.Append(Loc.Tr(
+                    "contextUsage.periodUsage.singleDayValue",
+                    "{0} 次 | 总计 {1} | 输入 {2}（读缓存 {3}, 命中 {4}）| 输出 {5}",
+                    summary.CallCount,
+                    UsageLedger.FormatTokens(summary.TotalTokens),
+                    UsageLedger.FormatTokens(summary.InputTokens),
+                    UsageLedger.FormatTokens(summary.CacheReadTokens),
+                    cacheText,
+                    UsageLedger.FormatTokens(summary.OutputTokens)));
+            }
+
+            if (summary.ReasoningTokens > 0)
+            {
+                sb.Append(" | ");
+                sb.Append(Loc.Tr(
+                    "contextUsage.reasoning.inline",
+                    "推理 {0}",
+                    UsageLedger.FormatTokens(summary.ReasoningTokens)));
+            }
+
+            sb.Append(" | ");
+            sb.Append(Loc.Tr("contextUsage.cost.inline", "费用 {0}", costText));
+            _llmUsageValueLabel.text = sb.ToString();
+
+            _lastCallValueLabel.text = FormatTopModels(summary.Models, maxCount: 3);
+            _headerUsageLabel.text = Loc.Tr(
+                "contextUsage.period.header",
+                "{0} · {1}",
+                windowLabel,
+                UsageLedger.FormatWindowSummary(window));
+        }
+
+        private static string FormatTopModels(IReadOnlyList<UsageModelBreakdown> models, int maxCount)
+        {
+            if (models == null || models.Count == 0)
+                return "-";
+
+            var count = Math.Min(models.Count, maxCount);
+            var parts = new List<string>(count);
+            for (var i = 0; i < count; i++)
+            {
+                var m = models[i];
+                if (m == null) continue;
+                var costPart = m.CostUsd > 0 ? $" · {FormatCostUsd(m.CostUsd, m.CostPartial)}" : string.Empty;
+                parts.Add($"{m.Model} ({m.CallCount} · {UsageLedger.FormatTokens(m.TotalTokens)}{costPart})");
+            }
+
+            return parts.Count > 0 ? string.Join(", ", parts) : "-";
         }
 
         /// <summary>

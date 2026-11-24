@@ -20,7 +20,54 @@ namespace AgentCore.Editor.UI
         #region Hub 模块常量
 
         /// <summary>Chat 模块 ID。</summary>
-        private const string ChatModuleId = "chat";
+        internal const string ChatModuleId = "chat";
+
+        /// <summary>EditorPrefs key：上次激活的 Hub 模块 ID（跨 Domain Reload 与 Editor 重启保留）。</summary>
+        internal const string ActiveModulePrefKey = "AgentCore.ChatWindow.ActiveModuleId";
+
+        #endregion
+
+        #region Hub 模块状态持久化
+
+        /// <summary>读取持久化的上次激活 Hub 模块 ID。</summary>
+        internal static string LoadSavedActiveModuleId(string prefKey = ActiveModulePrefKey)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? ActiveModulePrefKey : prefKey;
+            var saved = EditorPrefs.GetString(key, ChatModuleId);
+            return string.IsNullOrWhiteSpace(saved) ? ChatModuleId : saved;
+        }
+
+        /// <summary>持久化当前激活的 Hub 模块 ID。</summary>
+        internal static void SaveActiveModuleId(string moduleId, string prefKey = ActiveModulePrefKey)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? ActiveModulePrefKey : prefKey;
+            var normalized = string.IsNullOrWhiteSpace(moduleId) ? ChatModuleId : moduleId;
+            EditorPrefs.SetString(key, normalized);
+        }
+
+        /// <summary>
+        /// 解析窗口启动或 Domain Reload 后的初始 Hub 模块 ID：
+        /// 若持久化模块 ID 在当前可用模块集合中存在则恢复，否则安全回退到 <see cref="ChatModuleId"/>。
+        /// </summary>
+        internal static string ResolveInitialModuleId(
+            IEnumerable<string> availableModuleIds,
+            string prefKey = ActiveModulePrefKey)
+        {
+            var saved = LoadSavedActiveModuleId(prefKey);
+            if (string.IsNullOrWhiteSpace(saved) || string.Equals(saved, ChatModuleId, StringComparison.Ordinal))
+                return ChatModuleId;
+
+            if (availableModuleIds != null)
+            {
+                foreach (var id in availableModuleIds)
+                {
+                    if (string.Equals(id, saved, StringComparison.Ordinal))
+                        return saved;
+                }
+            }
+
+            return ChatModuleId;
+        }
 
         #endregion
 
@@ -333,14 +380,20 @@ namespace AgentCore.Editor.UI
 
         /// <summary>
         /// 切换到指定的 Hub 模块。
-        /// 控制 Main Content 面板和 Context Sidebar 的显示/隐藏。
+        /// 控制 Main Content 面板和 Context Sidebar 的显示/隐藏，并持久化当前模块 ID。
         /// </summary>
         /// <param name="moduleId">目标模块 ID。</param>
         private void SwitchToModule(string moduleId)
         {
+            var resolvedModuleId = !string.IsNullOrWhiteSpace(moduleId) && _hubPanels.ContainsKey(moduleId)
+                ? moduleId
+                : ChatModuleId;
+
+            SaveActiveModuleId(resolvedModuleId);
+
             foreach (var kvp in _hubPanels)
             {
-                var isActive = kvp.Key == moduleId;
+                var isActive = kvp.Key == resolvedModuleId;
                 kvp.Value.style.display = isActive ? DisplayStyle.Flex : DisplayStyle.None;
 
                 if (_hubPanelContributions.TryGetValue(kvp.Key, out var contribution))
@@ -361,10 +414,10 @@ namespace AgentCore.Editor.UI
 
             // Chat 模块：显示会话列表侧边栏（根据 _sidebarExpanded 状态）
             // 其他模块：暂时隐藏侧边栏（后续 Phase 可扩展各模块的上下文面板）
-            UpdateContextSidebarVisibility(moduleId);
+            UpdateContextSidebarVisibility(resolvedModuleId);
 
             // Chat 模块激活时刷新会话列表
-            if (moduleId == ChatModuleId && _sidebarExpanded)
+            if (resolvedModuleId == ChatModuleId && _sidebarExpanded)
             {
                 RefreshSessionList();
             }

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] - 2026-11-24
+
+跨工程 90 天持久化用量统计与全窗口 Domain Reload 状态恢复：LLM 用量历史与外部 MCP 工具活动统计按 1/7/30/90 天维度持久保存，Chat 窗口、Preferences 设置与 VCS / Indexing / Memory / KnowledgeBase 面板在域重载后无缝衔接。
+
+### Added
+- **跨工程 90 天 LLM 用量持久化**：新增 `UsageHistoryStore` 与 `PreferencesFolderPathHelper`，将当前会话快照与按本地日期聚合的 90 天滚动每日桶（含按模型拆解、缓存命中、推理 token 与估算费用）原子持久化至 `{PreferencesFolder}/AgentCore/UsageHistory.json`（含 `.bak` 恢复与多编辑器并发合并保护）；`UsageLedger` 新增 `UsageWindow`（`Session / Today / Days7 / Days30 / Days90`）、`GetWindowSummary`、`FormatWindowSummary`、`BindSession`、`ClearHistory`、`ReloadFromDisk` 与 `OnChanged` 事件
+- **外部 MCP 工具活动持久化与多周期统计**：`ExternalToolActivity` 首次访问与 Domain Reload 时自动从 `Library/AgentCore/Mcp/audit.1.jsonl` + `audit.jsonl` 水合最近记录并合并去重，新增 `ActivityWindow` / `GetWindowStats`（1d / 7d / 30d / 90d 调用次数、成功率、平均耗时、Top 工具）与 `ReloadFromAuditLog`
+- **多周期用量与活动 UI 升级**：
+  - `ContextUsagePanel` 新增 `Session | 1d | 7d | 30d | 90d` 周期切换胶囊，持久化选中周期与折叠状态到 `EditorPrefs`，订阅 `UsageLedger.OnChanged` 即时刷新
+  - `ExternalActivityWindow` 顶部新增 1d / 7d / 30d / 90d 统计汇总栏（选中周期持久化）与 `Reload` 按钮，支持清空后从审计日志重新加载
+  - `DashboardSettingsPage` 新增 **Usage Statistics (1d / 7d / 30d / 90d)** 卡片，展示多周期 LLM 用量总表、Top 5 模型拆解、外部 MCP 活动摘要、跨工程存储路径打开入口与带二次确认的清空历史操作
+  - `ModelAgentSettingsPage` 增强用量行，展示当前会话摘要、1d / 7d / 30d / 90d 简要历史以及仅重置当前会话计数的 `Reset Session` 按钮
+- **全工作台 Domain Reload 状态恢复**：
+  - `ChatWindow` 持久化当前激活的 Hub 模块 ID（`EditorPrefs`），恢复会话时使用 `UsageLedger.BindSession(..., resetIfChanged: false)` 保留会话用量，切换或新建会话时重置会话计数同时保留 90 天历史
+  - `AgentCoreSettingsState` 与 `AgentCoreSettingsProvider` 持久化选中设置页（`EditorPrefs`）以及折叠状态与非进行中状态提示（`SessionState`）
+  - VCS（`VersionControlPanel` / `VcsProjectWindowIntegration`）、Indexing（`IndexingPanel` / `IndexingStatusBus` / `BackgroundIndexService`）、Memory（`MemoryPanel`）与 KnowledgeBase（`KnowledgeBasePanel`）面板增加 `SessionState` / `EditorPrefs` 缓存水合与损坏回退，消除 Domain Reload 后闪烁与短暂空白
+- **L10n 与离线 EditMode 单元测试**：`en-US.json` 与 `zh-CN.json` 同步补齐所有新增统计、周期与设置文案并保持 100% 键对称；新增 `UsageHistoryTests.cs`、`ExternalActivityPersistenceTests.cs`、`PanelReloadPersistenceTests.cs`、`VcsReloadCacheTests.cs` 与 `UsageAndReloadUiTests.cs`（严格隔离存储与偏好键，不污染用户真实数据）
+
+### Changed
+- **`UsageLedger.ResetSession()` 语义收窄**：仅清零当前会话计数，不再清除跨工程 1d / 7d / 30d / 90d 历史每日桶；彻底清理历史通过设置页 `Clear Usage History`（`UsageLedger.ClearHistory()`）显式执行
+
 ## [1.22.0] - 2026-11-23
 
 多级思考强度体系：统一 8 档思考阶梯、模型能力元数据感知、跨协议请求路由、HTTP 400 运行时自学习降档，以及 Chat 胶囊选择器与 Settings 配置同步升级。

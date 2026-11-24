@@ -40,6 +40,11 @@ namespace AgentCore.Editor.UI.Components
         /// <summary>track_id 轮询最长等待时间（分钟）</summary>
         private const int PollTimeoutMinutes = 5;
 
+        internal const string PanelCacheSessionKey = "AgentCore.KnowledgeBase.Panel.Cache";
+        internal const int MaxCachedDocuments = 200;
+        internal const int MaxCachedSummaryLength = 500;
+        internal const int MaxCachedErrorLength = 500;
+
         // ─────────────────────────────────────────────
         //  UI 元素引用 — 状态区
         // ─────────────────────────────────────────────
@@ -84,8 +89,8 @@ namespace AgentCore.Editor.UI.Components
         //  状态枚举
         // ─────────────────────────────────────────────
 
-        private enum ConnectionStatus { Unknown, Testing, Connected, Failed }
-        private enum IndexStatus { Idle, Uploading, Processing, Success, Failed }
+        internal enum ConnectionStatus { Unknown, Testing, Connected, Failed }
+        internal enum IndexStatus { Idle, Uploading, Processing, Success, Failed }
 
         // ─────────────────────────────────────────────
         //  运行时状态
@@ -97,6 +102,11 @@ namespace AgentCore.Editor.UI.Components
 #pragma warning restore CS0414
         private string _lastIndexedFile = null;
         private string _lastIndexSummary = null;
+        private string _cachedEndpoint = null;
+        private bool _hasLoadedDocuments = false;
+        private List<LightRAGDocument> _cachedDocuments = new List<LightRAGDocument>();
+        private string _searchQuery = null;
+        private string _selectedDocumentId = null;
 
         /// <summary>测试连接操作的取消令牌</summary>
         private CancellationTokenSource _connectionCts;
@@ -127,6 +137,7 @@ namespace AgentCore.Editor.UI.Components
         {
             AddToClassList("knowledge-panel-content");
             BuildUI();
+            RestoreFromSessionCache();
             RefreshStatus();
         }
 
@@ -296,6 +307,13 @@ namespace AgentCore.Editor.UI.Components
                 ? AgentCore.Editor.L10n.Loc.Tr("knowledge.status.endpoint.notConfigured", "Endpoint: (未配置)")
                 : AgentCore.Editor.L10n.Loc.Tr("knowledge.status.endpoint", "Endpoint: {0}", endpoint);
 
+            if (_connectionStatus != ConnectionStatus.Testing
+                && !string.IsNullOrEmpty(_cachedEndpoint)
+                && !string.Equals(_cachedEndpoint, endpoint, StringComparison.Ordinal))
+            {
+                _connectionStatus = ConnectionStatus.Unknown;
+            }
+
             // 连接状态
             UpdateConnectionStatusLabel();
 
@@ -387,8 +405,10 @@ namespace AgentCore.Editor.UI.Components
             }
             finally
             {
+                _cachedEndpoint = AgentCoreSettings.instance.lightragEndpoint;
                 _testConnectionButton.SetEnabled(true);
                 UpdateConnectionStatusLabel();
+                SaveToSessionCache();
             }
         }
 
@@ -540,6 +560,7 @@ namespace AgentCore.Editor.UI.Components
                 _lastResultLabel.AddToClassList("kb-panel__result--failed");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
                 _askAgentButton.style.display = DisplayStyle.None;
+                SaveToSessionCache();
                 return;
             }
 
@@ -558,6 +579,7 @@ namespace AgentCore.Editor.UI.Components
                 _lastResultLabel.AddToClassList("kb-panel__result--success");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
                 _askAgentButton.style.display = DisplayStyle.Flex;
+                SaveToSessionCache();
 
                 // 刷新文档列表
                 _ = RefreshDocumentsAsync();
@@ -617,6 +639,7 @@ namespace AgentCore.Editor.UI.Components
                         _lastResultLabel.AddToClassList("kb-panel__result--success");
                         _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
                         _askAgentButton.style.display = DisplayStyle.Flex;
+                        SaveToSessionCache();
 
                         // 刷新文档列表
                         _ = RefreshDocumentsAsync();
@@ -635,6 +658,7 @@ namespace AgentCore.Editor.UI.Components
                         _lastResultLabel.AddToClassList("kb-panel__result--failed");
                         _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
                         _askAgentButton.style.display = DisplayStyle.None;
+                        SaveToSessionCache();
                         break;
                     }
                     else
@@ -668,6 +692,7 @@ namespace AgentCore.Editor.UI.Components
                 _lastResultLabel.text = _lastIndexSummary;
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--success");
                 _lastResultLabel.RemoveFromClassList("kb-panel__result--failed");
+                SaveToSessionCache();
             }
         }
 
@@ -702,12 +727,15 @@ namespace AgentCore.Editor.UI.Components
             _refreshCts.CancelAfter(TimeSpan.FromSeconds(30));
 
             _refreshDocumentsButton?.SetEnabled(false);
-            _documentsScrollView.Clear();
-
-            var loadingLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loading", "加载中..."));
-            loadingLabel.AddToClassList("kb-panel__hint");
-            _documentsScrollView.Add(loadingLabel);
-            _documentsSummaryLabel.text = "";
+            var preserveCached = _hasLoadedDocuments && _cachedDocuments.Count > 0;
+            if (!preserveCached)
+            {
+                _documentsScrollView.Clear();
+                var loadingLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loading", "加载中..."));
+                loadingLabel.AddToClassList("kb-panel__hint");
+                _documentsScrollView.Add(loadingLabel);
+                _documentsSummaryLabel.text = "";
+            }
 
             List<LightRAGDocument> docs = null;
             string errorMsg = null;
@@ -731,19 +759,31 @@ namespace AgentCore.Editor.UI.Components
                 _refreshDocumentsButton?.SetEnabled(true);
             }
 
-            _documentsScrollView.Clear();
-
             if (errorMsg != null)
             {
-                var errLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loadFailed", "加载失败：{0}", errorMsg));
-                errLabel.AddToClassList("kb-panel__hint");
-                _documentsScrollView.Add(errLabel);
-                _documentsSummaryLabel.text = "";
+                if (preserveCached)
+                {
+                    _documentsSummaryLabel.text = AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loadFailed", "加载失败：{0}", errorMsg);
+                }
+                else
+                {
+                    _documentsScrollView.Clear();
+                    var errLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.loadFailed", "加载失败：{0}", errorMsg));
+                    errLabel.AddToClassList("kb-panel__hint");
+                    _documentsScrollView.Add(errLabel);
+                    _documentsSummaryLabel.text = "";
+                }
                 return;
             }
 
-            if (docs == null || docs.Count == 0)
+            _hasLoadedDocuments = true;
+            _cachedEndpoint = settings.lightragEndpoint;
+            _cachedDocuments = docs ?? new List<LightRAGDocument>();
+            SaveToSessionCache();
+
+            if (_cachedDocuments.Count == 0)
             {
+                _documentsScrollView.Clear();
                 var emptyLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.list.empty", "知识库中暂无文档"));
                 emptyLabel.AddToClassList("kb-panel__hint");
                 _documentsScrollView.Add(emptyLabel);
@@ -752,7 +792,7 @@ namespace AgentCore.Editor.UI.Components
             }
 
             // 渲染文档列表
-            RenderDocumentList(docs);
+            RenderDocumentList(_cachedDocuments);
         }
 
         /// <summary>
@@ -967,6 +1007,8 @@ namespace AgentCore.Editor.UI.Components
         /// </summary>
         public void OnActivated()
         {
+            if (!_hasLoadedDocuments && _connectionStatus == ConnectionStatus.Unknown)
+                RestoreFromSessionCache();
             RefreshStatus();
             // 自动刷新文档列表
             var settings = AgentCoreSettings.instance;
@@ -1007,6 +1049,322 @@ namespace AgentCore.Editor.UI.Components
             _refreshCts?.Cancel();
             _refreshCts?.Dispose();
             _refreshCts = null;
+        }
+
+        // ─────────────────────────────────────────────
+        //  域重载持久化缓存（SessionState）
+        // ─────────────────────────────────────────────
+
+        [Serializable]
+        internal sealed class KnowledgeBasePanelCacheDto
+        {
+            public int SchemaVersion;
+            public string Endpoint;
+            public int ConnectionStatusValue;
+            public int IndexStatusValue;
+            public string LastIndexedFile;
+            public string LastIndexSummary;
+            public bool HasLoadedDocuments;
+            public List<CachedDocumentItem> Documents = new List<CachedDocumentItem>();
+            public string SearchQuery;
+            public string SelectedDocumentId;
+        }
+
+        [Serializable]
+        internal sealed class CachedDocumentItem
+        {
+            public string Id;
+            public string FilePath;
+            public string ContentSummary;
+            public int ContentLength;
+            public string Status;
+            public string CreatedAt;
+            public string UpdatedAt;
+            public string TrackId;
+            public int ChunksCount;
+            public string ErrorMsg;
+        }
+
+        internal static KnowledgeBasePanelCacheDto BuildCacheDto(
+            string endpoint,
+            ConnectionStatus connectionStatus,
+            IndexStatus indexStatus,
+            string lastIndexedFile,
+            string lastIndexSummary,
+            bool hasLoadedDocuments,
+            IReadOnlyList<LightRAGDocument> documents,
+            string searchQuery = null,
+            string selectedDocumentId = null,
+            int maxItems = MaxCachedDocuments)
+        {
+            var limit = Math.Max(1, maxItems);
+            var dto = new KnowledgeBasePanelCacheDto
+            {
+                SchemaVersion = 1,
+                Endpoint = endpoint,
+                ConnectionStatusValue = (int)connectionStatus,
+                IndexStatusValue = (int)indexStatus,
+                LastIndexedFile = lastIndexedFile,
+                LastIndexSummary = TruncateCacheText(lastIndexSummary, MaxCachedSummaryLength),
+                HasLoadedDocuments = hasLoadedDocuments,
+                SearchQuery = searchQuery,
+                SelectedDocumentId = selectedDocumentId
+            };
+
+            if (documents != null)
+            {
+                foreach (var doc in documents)
+                {
+                    if (doc == null)
+                        continue;
+                    if (dto.Documents.Count >= limit)
+                        break;
+
+                    dto.Documents.Add(new CachedDocumentItem
+                    {
+                        Id = doc.Id,
+                        FilePath = doc.FilePath,
+                        ContentSummary = TruncateCacheText(doc.ContentSummary, MaxCachedSummaryLength),
+                        ContentLength = Math.Max(0, doc.ContentLength),
+                        Status = doc.Status,
+                        CreatedAt = doc.CreatedAt,
+                        UpdatedAt = doc.UpdatedAt,
+                        TrackId = doc.TrackId,
+                        ChunksCount = Math.Max(0, doc.ChunksCount),
+                        ErrorMsg = TruncateCacheText(doc.ErrorMsg, MaxCachedErrorLength)
+                    });
+                }
+            }
+
+            return dto;
+        }
+
+        internal static string SerializeCache(KnowledgeBasePanelCacheDto cache, int maxItems = MaxCachedDocuments)
+        {
+            if (cache == null)
+                return null;
+
+            var limit = Math.Max(1, maxItems);
+            var normalized = new KnowledgeBasePanelCacheDto
+            {
+                SchemaVersion = 1,
+                Endpoint = cache.Endpoint,
+                ConnectionStatusValue = cache.ConnectionStatusValue,
+                IndexStatusValue = cache.IndexStatusValue,
+                LastIndexedFile = cache.LastIndexedFile,
+                LastIndexSummary = TruncateCacheText(cache.LastIndexSummary, MaxCachedSummaryLength),
+                HasLoadedDocuments = cache.HasLoadedDocuments,
+                SearchQuery = cache.SearchQuery,
+                SelectedDocumentId = cache.SelectedDocumentId
+            };
+
+            if (cache.Documents != null)
+            {
+                foreach (var doc in cache.Documents)
+                {
+                    if (doc == null)
+                        continue;
+                    if (normalized.Documents.Count >= limit)
+                        break;
+
+                    normalized.Documents.Add(new CachedDocumentItem
+                    {
+                        Id = doc.Id,
+                        FilePath = doc.FilePath,
+                        ContentSummary = TruncateCacheText(doc.ContentSummary, MaxCachedSummaryLength),
+                        ContentLength = Math.Max(0, doc.ContentLength),
+                        Status = doc.Status,
+                        CreatedAt = doc.CreatedAt,
+                        UpdatedAt = doc.UpdatedAt,
+                        TrackId = doc.TrackId,
+                        ChunksCount = Math.Max(0, doc.ChunksCount),
+                        ErrorMsg = TruncateCacheText(doc.ErrorMsg, MaxCachedErrorLength)
+                    });
+                }
+            }
+
+            return JsonUtility.ToJson(normalized);
+        }
+
+        internal static KnowledgeBasePanelCacheDto DeserializeCache(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                var dto = JsonUtility.FromJson<KnowledgeBasePanelCacheDto>(json);
+                if (dto == null || dto.SchemaVersion <= 0)
+                    return null;
+
+                var connStatus = Enum.IsDefined(typeof(ConnectionStatus), dto.ConnectionStatusValue)
+                    ? (ConnectionStatus)dto.ConnectionStatusValue
+                    : ConnectionStatus.Unknown;
+                // 域重载中断的 Testing 状态不应卡死按钮
+                if (connStatus == ConnectionStatus.Testing)
+                    connStatus = ConnectionStatus.Unknown;
+                dto.ConnectionStatusValue = (int)connStatus;
+
+                var idxStatus = Enum.IsDefined(typeof(IndexStatus), dto.IndexStatusValue)
+                    ? (IndexStatus)dto.IndexStatusValue
+                    : IndexStatus.Idle;
+                if (idxStatus == IndexStatus.Uploading || idxStatus == IndexStatus.Processing)
+                    idxStatus = IndexStatus.Idle;
+                dto.IndexStatusValue = (int)idxStatus;
+
+                dto.Endpoint = NullIfEmpty(dto.Endpoint);
+                dto.LastIndexedFile = NullIfEmpty(dto.LastIndexedFile);
+                dto.LastIndexSummary = NullIfEmpty(dto.LastIndexSummary);
+                dto.SearchQuery = NullIfEmpty(dto.SearchQuery);
+                dto.SelectedDocumentId = NullIfEmpty(dto.SelectedDocumentId);
+                dto.Documents = dto.Documents ?? new List<CachedDocumentItem>();
+                return dto;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        internal static List<LightRAGDocument> ToDocuments(KnowledgeBasePanelCacheDto cache)
+        {
+            var result = new List<LightRAGDocument>();
+            if (cache?.Documents == null)
+                return result;
+
+            foreach (var item in cache.Documents)
+            {
+                if (item == null)
+                    continue;
+                result.Add(new LightRAGDocument
+                {
+                    Id = NullIfEmpty(item.Id),
+                    FilePath = NullIfEmpty(item.FilePath),
+                    ContentSummary = NullIfEmpty(item.ContentSummary),
+                    ContentLength = Math.Max(0, item.ContentLength),
+                    Status = NullIfEmpty(item.Status),
+                    CreatedAt = NullIfEmpty(item.CreatedAt),
+                    UpdatedAt = NullIfEmpty(item.UpdatedAt),
+                    TrackId = NullIfEmpty(item.TrackId),
+                    ChunksCount = Math.Max(0, item.ChunksCount),
+                    ErrorMsg = NullIfEmpty(item.ErrorMsg)
+                });
+            }
+
+            return result;
+        }
+
+        internal static void SaveCacheToSession(KnowledgeBasePanelCacheDto cache, string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return;
+
+            try
+            {
+                var json = SerializeCache(cache);
+                if (string.IsNullOrEmpty(json))
+                    SessionState.EraseString(sessionKey);
+                else
+                    SessionState.SetString(sessionKey, json);
+            }
+            catch
+            {
+                // Ignore SessionState errors.
+            }
+        }
+
+        internal static KnowledgeBasePanelCacheDto LoadCacheFromSession(string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return null;
+
+            try
+            {
+                return DeserializeCache(SessionState.GetString(sessionKey, string.Empty));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void SaveToSessionCache()
+        {
+            var settings = AgentCoreSettings.instance;
+            var dto = BuildCacheDto(
+                _cachedEndpoint ?? settings.lightragEndpoint,
+                _connectionStatus,
+                _indexStatus,
+                _lastIndexedFile,
+                _lastIndexSummary,
+                _hasLoadedDocuments,
+                _cachedDocuments,
+                _searchQuery,
+                _selectedDocumentId);
+            SaveCacheToSession(dto);
+        }
+
+        private void RestoreFromSessionCache()
+        {
+            var dto = LoadCacheFromSession();
+            if (dto == null)
+                return;
+
+            var settings = AgentCoreSettings.instance;
+            if (!string.IsNullOrEmpty(dto.Endpoint)
+                && !string.Equals(dto.Endpoint, settings.lightragEndpoint, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _cachedEndpoint = dto.Endpoint;
+            _connectionStatus = (ConnectionStatus)dto.ConnectionStatusValue;
+            _indexStatus = (IndexStatus)dto.IndexStatusValue;
+            _lastIndexedFile = dto.LastIndexedFile;
+            _lastIndexSummary = dto.LastIndexSummary;
+            _searchQuery = dto.SearchQuery;
+            _selectedDocumentId = dto.SelectedDocumentId;
+
+            if (!string.IsNullOrEmpty(_lastIndexSummary) && _lastResultSection != null && _lastResultLabel != null)
+            {
+                _lastResultSection.style.display = DisplayStyle.Flex;
+                _lastResultLabel.text = _lastIndexSummary;
+                _lastResultLabel.EnableInClassList("kb-panel__result--success", _indexStatus == IndexStatus.Success);
+                _lastResultLabel.EnableInClassList("kb-panel__result--failed", _indexStatus == IndexStatus.Failed);
+                if (_askAgentButton != null)
+                {
+                    _askAgentButton.style.display = _indexStatus == IndexStatus.Success && !string.IsNullOrEmpty(_lastIndexedFile)
+                        ? DisplayStyle.Flex
+                        : DisplayStyle.None;
+                }
+            }
+
+            if (dto.HasLoadedDocuments)
+            {
+                _hasLoadedDocuments = true;
+                _cachedDocuments = ToDocuments(dto);
+                if (_cachedDocuments.Count == 0)
+                {
+                    _documentsScrollView.Clear();
+                    var emptyLabel = new Label(AgentCore.Editor.L10n.Loc.Tr("knowledge.docs.list.empty", "知识库中暂无文档"));
+                    emptyLabel.AddToClassList("kb-panel__hint");
+                    _documentsScrollView.Add(emptyLabel);
+                    _documentsSummaryLabel.text = "";
+                }
+                else
+                {
+                    RenderDocumentList(_cachedDocuments);
+                }
+            }
+        }
+
+        private static string NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
+
+        private static string TruncateCacheText(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+                return value;
+            return value.Substring(0, maxLength);
         }
     }
 }

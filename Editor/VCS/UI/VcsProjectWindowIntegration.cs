@@ -30,6 +30,8 @@ namespace AgentCore.Editor.Components.VCS.UI
         private const int MenuPriority = 2000;
         private const string OverlayMenuPath = MenuRoot + "Show Status Overlays";
         private const string OverlayPrefKey = "AgentCore.VCS.ShowProjectOverlays";
+        public const string OverlaySnapshotSessionKey = "AgentCore.VCS.ProjectWindow.OverlaySnapshot";
+        public const int MaxCachedOverlayEntries = 2000;
 
         private const double DebounceSeconds = 1.5;
         private const double MinIntervalSeconds = 5;
@@ -51,6 +53,10 @@ namespace AgentCore.Editor.Components.VCS.UI
             var dataPath = Application.dataPath;
             _unityRoot = Directory.GetParent(dataPath)?.FullName ?? dataPath;
             _overlaysEnabled = EditorPrefs.GetBool(OverlayPrefKey, true);
+
+            // 域重载后先恢复上次角标快照，避免首次绘制 Project 窗口时角标空白闪烁
+            if (_overlaysEnabled && OptionalComponentManager.IsVcsEnabled())
+                _snapshot = LoadOverlaySnapshotFromSession();
 
             EditorApplication.projectWindowItemOnGUI += OnProjectWindowItemGUI;
             EditorApplication.projectChanged += RequestStatusRefresh;
@@ -172,6 +178,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                     }
 
                     _snapshot = _overlaysEnabled && OptionalComponentManager.IsVcsEnabled() ? snapshot : null;
+                    SaveOverlaySnapshotToSession(_snapshot);
                     EditorApplication.RepaintProjectWindow();
                 });
             }, TaskScheduler.Default);
@@ -250,11 +257,178 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private static void ClearOverlays()
         {
+            SaveOverlaySnapshotToSession(null);
             if (_snapshot == null)
                 return;
             _snapshot = null;
             EditorApplication.RepaintProjectWindow();
         }
+
+        // ── SessionState 持久化（域重载缓存） ──
+
+        [Serializable]
+        private sealed class OverlaySnapshotCacheDto
+        {
+            public int SchemaVersion;
+            public bool IsIncomplete;
+            public List<OverlayEntryDto> Entries = new List<OverlayEntryDto>();
+        }
+
+        [Serializable]
+        private sealed class OverlayEntryDto
+        {
+            public string Path;
+            public int Flags;
+            public string LockOwner;
+            public string LockComment;
+        }
+
+        /// <summary>
+        /// 将本地角标快照序列化为 JSON（供 SessionState 缓存与单元测试使用）。
+        /// 超出 <paramref name="maxEntries"/> 时优先保留直接变更/锁条目并标记 <see cref="SvnOverlaySnapshot.IsIncomplete"/>。
+        /// </summary>
+        public static string SerializeOverlaySnapshot(SvnOverlaySnapshot snapshot, int maxEntries = MaxCachedOverlayEntries)
+        {
+            if (snapshot == null || snapshot.IsEmpty)
+                return null;
+
+            var limit = Math.Max(1, maxEntries);
+            var dto = new OverlaySnapshotCacheDto
+            {
+                SchemaVersion = 1,
+                IsIncomplete = snapshot.IsIncomplete,
+                Entries = new List<OverlayEntryDto>(Math.Min(snapshot.Flags.Count, limit))
+            };
+
+            // 先写入非纯 ChildChanged 条目（文件改动 / 锁），剩余额度再写入目录汇总标记
+            void AppendMatching(bool childChangedOnly)
+            {
+                foreach (var kvp in snapshot.Flags)
+                {
+                    if (dto.Entries.Count >= limit)
+                    {
+                        dto.IsIncomplete = true;
+                        return;
+                    }
+
+                    if (string.IsNullOrEmpty(kvp.Key) || kvp.Value == SvnOverlayFlags.None)
+                        continue;
+
+                    var isChildOnly = kvp.Value == SvnOverlayFlags.ChildChanged;
+                    if (isChildOnly != childChangedOnly)
+                        continue;
+
+                    snapshot.LockOwners.TryGetValue(kvp.Key, out var owner);
+                    snapshot.LockComments.TryGetValue(kvp.Key, out var comment);
+
+                    dto.Entries.Add(new OverlayEntryDto
+                    {
+                        Path = kvp.Key,
+                        Flags = (int)kvp.Value,
+                        LockOwner = owner,
+                        LockComment = comment
+                    });
+                }
+            }
+
+            AppendMatching(childChangedOnly: false);
+            if (dto.Entries.Count < limit)
+                AppendMatching(childChangedOnly: true);
+            else if (snapshot.Flags.Count > dto.Entries.Count)
+                dto.IsIncomplete = true;
+
+            if (dto.Entries.Count == 0)
+                return null;
+
+            return JsonUtility.ToJson(dto);
+        }
+
+        /// <summary>
+        /// 从 <see cref="SerializeOverlaySnapshot"/> 生成的 JSON 还原角标快照；JSON 为空或损坏时返回 null，不抛异常。
+        /// </summary>
+        public static SvnOverlaySnapshot DeserializeOverlaySnapshot(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                var dto = JsonUtility.FromJson<OverlaySnapshotCacheDto>(json);
+                if (dto == null || dto.SchemaVersion <= 0 || dto.Entries == null || dto.Entries.Count == 0)
+                    return null;
+
+                var snapshot = new SvnOverlaySnapshot
+                {
+                    IsIncomplete = dto.IsIncomplete
+                };
+
+                foreach (var entry in dto.Entries)
+                {
+                    if (entry == null || string.IsNullOrEmpty(entry.Path) || entry.Flags == 0)
+                        continue;
+
+                    snapshot.Add(entry.Path, (SvnOverlayFlags)entry.Flags);
+                    var owner = string.IsNullOrEmpty(entry.LockOwner) ? null : entry.LockOwner;
+                    var comment = string.IsNullOrEmpty(entry.LockComment) ? null : entry.LockComment;
+                    if (owner != null || comment != null)
+                        snapshot.SetLockInfo(entry.Path, owner, comment);
+                }
+
+                return snapshot.IsEmpty ? null : snapshot;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>将角标快照写入 SessionState；为空时清除缓存键。</summary>
+        public static void SaveOverlaySnapshotToSession(SvnOverlaySnapshot snapshot, string sessionKey = OverlaySnapshotSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return;
+
+            try
+            {
+                var json = SerializeOverlaySnapshot(snapshot);
+                if (string.IsNullOrEmpty(json))
+                    SessionState.EraseString(sessionKey);
+                else
+                    SessionState.SetString(sessionKey, json);
+            }
+            catch
+            {
+                // 忽略 SessionState 写入异常（例如非主线程场景）
+            }
+        }
+
+        /// <summary>从 SessionState 读取并反序列化角标快照；损坏或缺失时返回 null。</summary>
+        public static SvnOverlaySnapshot LoadOverlaySnapshotFromSession(string sessionKey = OverlaySnapshotSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return null;
+
+            try
+            {
+                return DeserializeOverlaySnapshot(SessionState.GetString(sessionKey, string.Empty));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>从 SessionState 恢复内存中的角标快照（供域重载初始化与单元测试使用）。</summary>
+        public static void RestoreOverlaySnapshotFromSession(string sessionKey = OverlaySnapshotSessionKey)
+        {
+            _snapshot = LoadOverlaySnapshotFromSession(sessionKey);
+        }
+
+        /// <summary>获取当前内存中的角标快照引用（仅供单元测试断言）。</summary>
+        public static SvnOverlaySnapshot GetInMemorySnapshotForTests() => _snapshot;
+
+        /// <summary>清空当前内存中的角标快照而不改动 SessionState（供单元测试模拟域重载）。</summary>
+        public static void ClearInMemorySnapshotForTests() => _snapshot = null;
 
         // ── 角标绘制 ──
 

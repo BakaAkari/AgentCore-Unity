@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using AgentCore.Editor.Utils;
 using UnityEditor;
@@ -11,7 +10,8 @@ namespace AgentCore.Editor.Config
 {
     /// <summary>
     /// Ensures the target directory for a Unity <c>ScriptableSingleton</c> stored under
-    /// <see cref="FilePathAttribute.Location.PreferencesFolder"/> exists before saving.
+    /// <see cref="FilePathAttribute.Location.PreferencesFolder"/> exists before saving,
+    /// and exposes thread-safe path accessors for per-user AgentCore files.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -38,10 +38,20 @@ namespace AgentCore.Editor.Config
         /// </summary>
         public const string AgentCoreSubdirectory = "AgentCore";
 
-        private static string _cachedPreferencesFolder;
+        /// <summary>
+        /// Filename of the per-user persistent LLM usage history store under
+        /// <c>{PreferencesFolder}/AgentCore/</c>.
+        /// </summary>
+        public const string UsageHistoryFileName = "UsageHistory.json";
+
+        private static readonly object CacheLock = new object();
+        private static volatile string _cachedPreferencesFolder;
+        private static volatile string _cachedAgentCoreDirectory;
+        private static volatile int _cachedUnityMajorVersion = 5;
 
         static PreferencesFolderPathHelper()
         {
+            _cachedUnityMajorVersion = ReadUnityMajorVersionSafe();
             EnsureAgentCoreDirectory();
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             // Re-ensure after first frame — covers the gap between assembly load
@@ -60,6 +70,37 @@ namespace AgentCore.Editor.Config
         }
 
         /// <summary>
+        /// Returns <c>{PreferencesFolder}/AgentCore</c>, or <c>null</c> if the preferences
+        /// folder cannot be resolved. Thread-safe: the path is resolved and cached on the
+        /// main thread during <c>[InitializeOnLoad]</c> initialization so background threads
+        /// (e.g. HTTP usage callbacks) can call this safely without touching Unity APIs.
+        /// </summary>
+        public static string GetAgentCoreDirectory()
+        {
+            var cached = _cachedAgentCoreDirectory;
+            if (!string.IsNullOrEmpty(cached))
+                return cached;
+
+            var prefRoot = GetPreferencesFolder();
+            if (string.IsNullOrEmpty(prefRoot))
+                return null;
+
+            var target = Path.Combine(prefRoot, AgentCoreSubdirectory);
+            _cachedAgentCoreDirectory = target;
+            return target;
+        }
+
+        /// <summary>
+        /// Returns <c>{PreferencesFolder}/AgentCore/UsageHistory.json</c>, or <c>null</c>
+        /// if the preferences folder cannot be resolved. Thread-safe.
+        /// </summary>
+        public static string GetUsageHistoryFilePath()
+        {
+            var dir = GetAgentCoreDirectory();
+            return string.IsNullOrEmpty(dir) ? null : Path.Combine(dir, UsageHistoryFileName);
+        }
+
+        /// <summary>
         /// Ensures that <c>{PreferencesFolder}/AgentCore/</c> exists on disk.
         /// Safe to call repeatedly. Always checks <see cref="Directory.Exists"/>
         /// — no caching, because the directory can be deleted by Unity's own
@@ -69,14 +110,13 @@ namespace AgentCore.Editor.Config
         {
             try
             {
-                var prefRoot = GetPreferencesFolder();
-                if (string.IsNullOrEmpty(prefRoot))
+                var target = GetAgentCoreDirectory();
+                if (string.IsNullOrEmpty(target))
                 {
                     AgentCoreLog.Warning("[PreferencesFolderPathHelper] Could not resolve preferences folder.");
                     return false;
                 }
 
-                var target = Path.Combine(prefRoot, AgentCoreSubdirectory);
                 if (!Directory.Exists(target))
                 {
                     Directory.CreateDirectory(target);
@@ -102,20 +142,48 @@ namespace AgentCore.Editor.Config
         /// </summary>
         private static string GetPreferencesFolder()
         {
-            if (!string.IsNullOrEmpty(_cachedPreferencesFolder))
-                return _cachedPreferencesFolder;
+            var cached = _cachedPreferencesFolder;
+            if (!string.IsNullOrEmpty(cached))
+                return cached;
 
-            _cachedPreferencesFolder = ResolveByReflection()
-                ?? ResolveByDirectoryScan()
-                ?? ResolveByHardcodedFallback()
-                ?? string.Empty;
-
-            if (string.IsNullOrEmpty(_cachedPreferencesFolder))
+            lock (CacheLock)
             {
-                AgentCoreLog.Warning("[PreferencesFolderPathHelper] All path resolution methods failed.");
-            }
+                cached = _cachedPreferencesFolder;
+                if (!string.IsNullOrEmpty(cached))
+                    return cached;
 
-            return _cachedPreferencesFolder;
+                var resolved = ResolveByReflection()
+                    ?? ResolveByDirectoryScan()
+                    ?? ResolveByHardcodedFallback()
+                    ?? string.Empty;
+
+                if (!string.IsNullOrEmpty(resolved))
+                {
+                    _cachedPreferencesFolder = resolved;
+                    _cachedAgentCoreDirectory = Path.Combine(resolved, AgentCoreSubdirectory);
+                }
+                else
+                {
+                    AgentCoreLog.Warning("[PreferencesFolderPathHelper] All path resolution methods failed.");
+                }
+
+                return resolved;
+            }
+        }
+
+        private static int ReadUnityMajorVersionSafe()
+        {
+            try
+            {
+                var version = Application.unityVersion;
+                if (!string.IsNullOrEmpty(version) && int.TryParse(version.Split('.')[0], out var major))
+                    return major;
+            }
+            catch
+            {
+                // Background thread or non-Unity host: fall back to default major version.
+            }
+            return 5;
         }
 
         /// <summary>
@@ -186,9 +254,7 @@ namespace AgentCore.Editor.Config
 
             // Determine the current Unity version's internal preferences folder number.
             // Unity 5 through 2022 → "5", Unity 6 (6000+) → "6".
-            int major;
-            if (!int.TryParse(Application.unityVersion.Split('.')[0], out major))
-                major = 5;
+            int major = _cachedUnityMajorVersion;
             string expectedEditorDir = major >= 6000 ? "Editor-6.x" : "Editor-5.x";
 
             DirectoryInfo selected = null;
@@ -268,10 +334,7 @@ namespace AgentCore.Editor.Config
             // Unity's internal preferences folder version number:
             //   2022.x and earlier → "5"   (Editor-5.x)
             //   6000.x and later   → "6"   (Editor-6.x)
-            int major;
-            if (!int.TryParse(Application.unityVersion.Split('.')[0], out major))
-                major = 5;  // safe default — covers all versions through 2022
-
+            int major = _cachedUnityMajorVersion;
             string editorVersion = major >= 6000 ? "6" : "5";
             string editorDir = $"Editor-{editorVersion}.x";
 

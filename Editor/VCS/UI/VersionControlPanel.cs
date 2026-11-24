@@ -37,6 +37,11 @@ namespace AgentCore.Editor.Components.VCS.UI
         private const int CommitLoadBatchSize = 20;
         private const int MaxCommitQueryCount = 500;
 
+        public const string PanelCacheSessionKey = "AgentCore.VCS.Panel.Cache";
+        public const int MaxCachedFiles = 500;
+        public const int MaxCachedCommits = 50;
+        public const int MaxCachedCommitMessageLength = 1024;
+
         private Label _vcsTypeLabel;
         private Label _branchLabel;
         private Label _revisionLabel;
@@ -96,6 +101,15 @@ namespace AgentCore.Editor.Components.VCS.UI
         // 最近一次远端检查报告的仓库 HEAD 版本号（svn status -u），变化时刷新提交历史
         private string _lastSeenRemoteRevision;
 
+        // 域重载快照缓存所需的当前面板展示状态
+        private string _currentBranch;
+        private string _currentRevision;
+        private bool _statusTruncated;
+        private string _lastMessage;
+        private bool _lastMessageIsError;
+        private string _commitMessageDraft;
+        private bool _hasRestoredCache;
+
         /// <summary>RefreshAllData 中提交历史的刷新方式。</summary>
         private enum LogRefresh
         {
@@ -122,11 +136,12 @@ namespace AgentCore.Editor.Components.VCS.UI
             RegisterCallback<DetachFromPanelEvent>(_ => Dispose());
             _isPanelActive = true;
             BuildUI();
+            var restoredFromCache = RestoreFromSessionCache();
             if (VcsSettings.AutoRefreshOnOpen)
             {
                 DetectAndInitialize();
             }
-            else
+            else if (!restoredFromCache)
             {
                 _vcsTypeLabel.text = "Auto refresh disabled. Click Refresh to detect repository.";
             }
@@ -334,7 +349,8 @@ namespace AgentCore.Editor.Components.VCS.UI
                 }
                 else
                 {
-                    _vcsTypeLabel.text = $"Type: {_currentVcsType} (checking command...)";
+                    if (!_hasRestoredCache)
+                        _vcsTypeLabel.text = $"Type: {_currentVcsType} (checking command...)";
                     available = await VcsDetector.EnsureCommandAvailableAsync(_currentVcsType);
                 }
             }
@@ -374,6 +390,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _adapter = adapter;
             _vcsTypeLabel.text = $"Type: {_currentVcsType}";
             _cleanupButton.SetEnabled(true);
+            UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
 
             _ = RefreshAllData(LogRefresh.Auto);
         }
@@ -454,7 +471,9 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _cts = new CancellationTokenSource();
                 var ct = _cts.Token;
 
-                _visibleCommitCount = InitialCommitDisplayCount;
+                _visibleCommitCount = logRefresh == LogRefresh.Force
+                    ? InitialCommitDisplayCount
+                    : Mathf.Max(InitialCommitDisplayCount, _visibleCommitCount);
 
                 // 并行获取所有数据
                 var branchTask = _adapter.GetBranchInfoAsync(ct);
@@ -484,23 +503,28 @@ namespace AgentCore.Editor.Components.VCS.UI
                 var branchInfo = await branchTask;
                 if (branchInfo.Success)
                 {
-                    _branchLabel.text = $"Branch: {branchInfo.CurrentBranch ?? "unknown"}";
-                    _branchLabel.tooltip = branchInfo.CurrentBranch ?? "unknown";
-                    _revisionLabel.text = $"Revision: {branchInfo.CurrentRevision ?? "unknown"}";
-                    _revisionLabel.tooltip = branchInfo.CurrentRevision ?? "unknown";
+                    _currentBranch = branchInfo.CurrentBranch ?? "unknown";
+                    _currentRevision = branchInfo.CurrentRevision ?? "unknown";
+                    _branchLabel.text = $"Branch: {_currentBranch}";
+                    _branchLabel.tooltip = _currentBranch;
+                    _revisionLabel.text = $"Revision: {_currentRevision}";
+                    _revisionLabel.tooltip = _currentRevision;
                 }
                 else if (!string.IsNullOrWhiteSpace(branchInfo.ErrorMessage))
                 {
                     errors.Add(branchInfo.ErrorMessage);
                 }
 
-                // 更新状态列表
+                // 更新状态列表（尽量保留域重载/刷新前仍存在的选中文件）
                 var statusResult = await statusTask;
                 if (statusResult.Success)
                 {
+                    var previousSelection = GetSelectedFilePaths();
+                    _statusTruncated = statusResult.Truncated;
                     _currentFiles = statusResult.Files ?? new List<VcsFileStatus>();
                     UpdateStatusList(_currentFiles);
-                    if (statusResult.Truncated)
+                    RestoreSelectedFiles(previousSelection);
+                    if (_statusTruncated)
                         _statusSummaryLabel.text += " (output truncated — list may be incomplete)";
                     // View Diff 走外部图形 diff 工具（目前仅 SVN/TortoiseSVN 支持），
                     // 非 SVN 时禁用按钮，避免点击后只弹"需要外部客户端"的空操作。
@@ -515,6 +539,8 @@ namespace AgentCore.Editor.Components.VCS.UI
 
                 if (errors.Count > 0)
                     ShowMessage(BuildCommandErrorMessage("Working copy status failed", errors), true);
+
+                SaveToSessionCache();
 
                 // 本地部分已完成：先恢复按钮，不让远端 log 占着 Refresh / Cleanup
                 _refreshButton.SetEnabled(true);
@@ -692,6 +718,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             }
 
             RefreshStatusSelectionVisuals();
+            SaveToSessionCache();
         }
 
         /// <summary>
@@ -703,6 +730,29 @@ namespace AgentCore.Editor.Components.VCS.UI
             _selectedFiles.Add(filePath);
             _lastSelectedFileIndex = _displayedFilePaths.FindIndex(p => string.Equals(p, filePath, StringComparison.OrdinalIgnoreCase));
             RefreshStatusSelectionVisuals();
+            SaveToSessionCache();
+        }
+
+        private void RestoreSelectedFiles(IEnumerable<string> filePaths)
+        {
+            if (filePaths == null || _displayedFilePaths.Count == 0)
+                return;
+
+            var valid = new HashSet<string>(_displayedFilePaths, StringComparer.OrdinalIgnoreCase);
+            _selectedFiles.Clear();
+            _lastSelectedFileIndex = -1;
+            foreach (var path in filePaths)
+            {
+                if (string.IsNullOrWhiteSpace(path) || !valid.Contains(path))
+                    continue;
+                _selectedFiles.Add(path);
+                var idx = _displayedFilePaths.FindIndex(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+                if (idx >= 0)
+                    _lastSelectedFileIndex = idx;
+            }
+
+            if (_selectedFiles.Count > 0)
+                RefreshStatusSelectionVisuals();
         }
 
         /// <summary>
@@ -1206,6 +1256,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 if (showMessageOnError)
                     ShowMessage(BuildCommandErrorMessage("Commit history failed", new List<string> { error }), true);
                 RenderCommitList();
+                SaveToSessionCache();
                 return;
             }
 
@@ -1244,6 +1295,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             _visibleCommitCount = Mathf.Clamp(_visibleCommitCount, InitialCommitDisplayCount, Mathf.Max(InitialCommitDisplayCount, _loadedCommits.Count));
             _lastCommitPollUtc = DateTime.UtcNow;
             RenderCommitList();
+            SaveToSessionCache();
         }
 
         private void RenderCommitList()
@@ -1334,6 +1386,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 _visibleCommitCount = Mathf.Min(_visibleCommitCount + CommitLoadBatchSize, _loadedCommits.Count);
                 RenderCommitList();
+                SaveToSessionCache();
                 return;
             }
 
@@ -1368,6 +1421,7 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 _isLoadingMoreCommits = false;
                 RenderCommitList();
+                SaveToSessionCache();
             }
         }
 
@@ -1375,6 +1429,7 @@ namespace AgentCore.Editor.Components.VCS.UI
         {
             _visibleCommitCount = InitialCommitDisplayCount;
             RenderCommitList();
+            SaveToSessionCache();
         }
 
         private int GetCommitQueryCount()
@@ -2065,6 +2120,14 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private void ShowMessage(string message, bool isError)
         {
+            ShowMessageInternal(message, isError, persist: isError);
+        }
+
+        private void ShowMessageInternal(string message, bool isError, bool persist)
+        {
+            _lastMessage = message;
+            _lastMessageIsError = isError;
+
             _messageContainer.Clear();
             _messageContainer.style.display = DisplayStyle.Flex;
 
@@ -2078,6 +2141,9 @@ namespace AgentCore.Editor.Components.VCS.UI
 
             _messageContainer.Add(label);
 
+            if (persist)
+                SaveToSessionCache();
+
             // 自动隐藏成功消息
             if (!isError)
             {
@@ -2087,7 +2153,12 @@ namespace AgentCore.Editor.Components.VCS.UI
 
         private void HideMessage()
         {
+            var hadPersistedError = _lastMessageIsError && !string.IsNullOrEmpty(_lastMessage);
+            _lastMessage = null;
+            _lastMessageIsError = false;
             _messageContainer.style.display = DisplayStyle.None;
+            if (hadPersistedError)
+                SaveToSessionCache();
         }
 
         private void UpdateSyncStatusBanner(VcsSyncStatus status)
@@ -2095,12 +2166,14 @@ namespace AgentCore.Editor.Components.VCS.UI
             if (_syncStatusBanner == null || _syncStatusLabel == null)
                 return;
 
-            // 适配器就绪后横幅始终可见，保证 Check Remote 按钮与 "上次检查时间" 随时可用
-            if (_adapter == null)
+            // 适配器就绪后或已从域重载缓存恢复仓库类型时展示远端状态横幅，避免域重载后空白闪烁
+            var hasAdapter = _adapter != null;
+            if (!hasAdapter && !(_hasRestoredCache && _currentVcsType != VcsType.None))
             {
                 _syncStatusBanner.style.display = DisplayStyle.None;
                 return;
             }
+            _checkRemoteButton?.SetEnabled(hasAdapter);
 
             _syncStatusBanner.style.display = DisplayStyle.Flex;
             _syncStatusBanner.RemoveFromClassList("has-remote-changes");
@@ -2113,13 +2186,13 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _syncStatusLabel.text = VcsRemoteStatusMonitor.LastError is string checkError && !string.IsNullOrEmpty(checkError)
                     ? $"Remote check failed: {DescribeRemoteError(checkError)}"
                     : "Remote status has not been checked yet. Click Check Remote to fetch now.";
-                // 未检查过时不禁用 Update：用户想更新就直接执行
-                _updateRemoteButton?.SetEnabled(true);
+                // 未检查过时不禁用 Update：用户想更新就直接执行（适配器尚未就绪时暂禁用）
+                _updateRemoteButton?.SetEnabled(hasAdapter);
                 return;
             }
 
             // Update 按钮始终可用：远端检查失败（离线 / 认证）或结果过期都不应阻止用户自己打开更新窗口
-            _updateRemoteButton?.SetEnabled(true);
+            _updateRemoteButton?.SetEnabled(hasAdapter);
 
             if (!status.Success)
             {
@@ -2198,6 +2271,9 @@ namespace AgentCore.Editor.Components.VCS.UI
         public void OnActivated()
         {
             _isPanelActive = true;
+
+            if (!_hasRestoredCache && _currentVcsType == VcsType.None && _currentFiles.Count == 0 && _loadedCommits.Count == 0)
+                RestoreFromSessionCache();
 
             if (!VcsSettings.AutoRefreshOnOpen)
                 return;
@@ -2317,6 +2393,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                     {
                         _commitLogError = error;
                         RenderCommitList();
+                        SaveToSessionCache();
                     }
                     return;
                 }
@@ -2339,6 +2416,7 @@ namespace AgentCore.Editor.Components.VCS.UI
                 _loadedCommits = freshCommits;
                 _visibleCommitCount = previousVisibleCount;
                 RenderCommitList();
+                SaveToSessionCache();
             }
             catch (OperationCanceledException)
             {
@@ -2352,6 +2430,432 @@ namespace AgentCore.Editor.Components.VCS.UI
             {
                 _isBackgroundPolling = false;
             }
+        }
+
+        #endregion
+
+        #region Reload Persistence Cache
+
+        [Serializable]
+        public sealed class PanelCacheSnapshot
+        {
+            public int SchemaVersion;
+            public int VcsTypeValue;
+            public string Branch;
+            public string Revision;
+            public bool StatusTruncated;
+            public List<CachedFileStatus> Files = new List<CachedFileStatus>();
+            public List<string> SelectedFiles = new List<string>();
+            public List<CachedCommit> Commits = new List<CachedCommit>();
+            public int VisibleCommitCount = InitialCommitDisplayCount;
+            public string CommitLogError;
+            public string LastMessage;
+            public bool LastMessageIsError;
+            public string CommitMessageDraft;
+        }
+
+        [Serializable]
+        public sealed class CachedFileStatus
+        {
+            public string FilePath;
+            public int StateValue;
+            public string StateDescription;
+            public string OriginalPath;
+            public string StatusCode;
+            public string MovedToPath;
+            public string LockState;
+            public string LockOwner;
+            public string LockComment;
+            public bool NeedsLock;
+            public bool IsSwitched;
+        }
+
+        [Serializable]
+        public sealed class CachedCommit
+        {
+            public string Revision;
+            public string Author;
+            public string Date;
+            public string Message;
+        }
+
+        public static PanelCacheSnapshot BuildCacheSnapshot(
+            VcsType vcsType,
+            string branch,
+            string revision,
+            IReadOnlyList<VcsFileStatus> files,
+            bool statusTruncated,
+            IEnumerable<string> selectedFiles,
+            IReadOnlyList<VcsCommit> commits,
+            int visibleCommitCount,
+            string commitLogError,
+            string lastMessage,
+            bool lastMessageIsError,
+            string commitMessageDraft = null,
+            int maxFiles = MaxCachedFiles,
+            int maxCommits = MaxCachedCommits)
+        {
+            var fileLimit = Math.Max(1, maxFiles);
+            var commitLimit = Math.Max(1, maxCommits);
+            var snapshot = new PanelCacheSnapshot
+            {
+                SchemaVersion = 1,
+                VcsTypeValue = (int)vcsType,
+                Branch = branch,
+                Revision = revision,
+                StatusTruncated = statusTruncated,
+                VisibleCommitCount = Math.Max(InitialCommitDisplayCount, visibleCommitCount),
+                CommitLogError = commitLogError,
+                LastMessage = lastMessage,
+                LastMessageIsError = lastMessageIsError,
+                CommitMessageDraft = TruncateCacheString(commitMessageDraft, MaxCachedCommitMessageLength)
+            };
+
+            if (files != null)
+            {
+                foreach (var f in files)
+                {
+                    if (f == null || string.IsNullOrWhiteSpace(f.FilePath))
+                        continue;
+                    if (snapshot.Files.Count >= fileLimit)
+                    {
+                        snapshot.StatusTruncated = true;
+                        break;
+                    }
+                    snapshot.Files.Add(new CachedFileStatus
+                    {
+                        FilePath = f.FilePath,
+                        StateValue = (int)f.State,
+                        StateDescription = f.StateDescription,
+                        OriginalPath = f.OriginalPath,
+                        StatusCode = f.StatusCode,
+                        MovedToPath = f.MovedToPath,
+                        LockState = f.LockState,
+                        LockOwner = f.LockOwner,
+                        LockComment = f.LockComment,
+                        NeedsLock = f.NeedsLock,
+                        IsSwitched = f.IsSwitched
+                    });
+                }
+            }
+
+            if (selectedFiles != null)
+            {
+                foreach (var path in selectedFiles)
+                {
+                    if (string.IsNullOrWhiteSpace(path))
+                        continue;
+                    if (snapshot.SelectedFiles.Count >= fileLimit)
+                        break;
+                    snapshot.SelectedFiles.Add(path);
+                }
+            }
+
+            if (commits != null)
+            {
+                foreach (var c in commits)
+                {
+                    if (c == null)
+                        continue;
+                    if (snapshot.Commits.Count >= commitLimit)
+                        break;
+                    snapshot.Commits.Add(new CachedCommit
+                    {
+                        Revision = c.Revision,
+                        Author = c.Author,
+                        Date = c.Date,
+                        Message = TruncateCacheString(c.Message, MaxCachedCommitMessageLength)
+                    });
+                }
+            }
+
+            return snapshot;
+        }
+
+        public static string SerializeCache(
+            PanelCacheSnapshot snapshot,
+            int maxFiles = MaxCachedFiles,
+            int maxCommits = MaxCachedCommits)
+        {
+            if (snapshot == null)
+                return null;
+
+            var fileLimit = Math.Max(1, maxFiles);
+            var commitLimit = Math.Max(1, maxCommits);
+            var normalized = new PanelCacheSnapshot
+            {
+                SchemaVersion = 1,
+                VcsTypeValue = snapshot.VcsTypeValue,
+                Branch = snapshot.Branch,
+                Revision = snapshot.Revision,
+                StatusTruncated = snapshot.StatusTruncated,
+                VisibleCommitCount = Math.Max(InitialCommitDisplayCount, snapshot.VisibleCommitCount),
+                CommitLogError = snapshot.CommitLogError,
+                LastMessage = snapshot.LastMessage,
+                LastMessageIsError = snapshot.LastMessageIsError,
+                CommitMessageDraft = TruncateCacheString(snapshot.CommitMessageDraft, MaxCachedCommitMessageLength)
+            };
+
+            if (snapshot.Files != null)
+            {
+                foreach (var f in snapshot.Files)
+                {
+                    if (f == null || string.IsNullOrWhiteSpace(f.FilePath))
+                        continue;
+                    if (normalized.Files.Count >= fileLimit)
+                    {
+                        normalized.StatusTruncated = true;
+                        break;
+                    }
+                    normalized.Files.Add(f);
+                }
+            }
+
+            if (snapshot.SelectedFiles != null)
+            {
+                foreach (var path in snapshot.SelectedFiles)
+                {
+                    if (string.IsNullOrWhiteSpace(path))
+                        continue;
+                    if (normalized.SelectedFiles.Count >= fileLimit)
+                        break;
+                    normalized.SelectedFiles.Add(path);
+                }
+            }
+
+            if (snapshot.Commits != null)
+            {
+                foreach (var c in snapshot.Commits)
+                {
+                    if (c == null)
+                        continue;
+                    if (normalized.Commits.Count >= commitLimit)
+                        break;
+                    normalized.Commits.Add(new CachedCommit
+                    {
+                        Revision = c.Revision,
+                        Author = c.Author,
+                        Date = c.Date,
+                        Message = TruncateCacheString(c.Message, MaxCachedCommitMessageLength)
+                    });
+                }
+            }
+
+            return JsonUtility.ToJson(normalized);
+        }
+
+        public static PanelCacheSnapshot DeserializeCache(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                var dto = JsonUtility.FromJson<PanelCacheSnapshot>(json);
+                if (dto == null || dto.SchemaVersion <= 0)
+                    return null;
+
+                if (!Enum.IsDefined(typeof(VcsType), dto.VcsTypeValue))
+                    dto.VcsTypeValue = (int)VcsType.None;
+
+                dto.Branch = NullIfEmpty(dto.Branch);
+                dto.Revision = NullIfEmpty(dto.Revision);
+                dto.CommitLogError = NullIfEmpty(dto.CommitLogError);
+                dto.LastMessage = NullIfEmpty(dto.LastMessage);
+                dto.CommitMessageDraft = NullIfEmpty(dto.CommitMessageDraft);
+                dto.VisibleCommitCount = Math.Max(InitialCommitDisplayCount, dto.VisibleCommitCount);
+                dto.Files = dto.Files ?? new List<CachedFileStatus>();
+                dto.SelectedFiles = dto.SelectedFiles ?? new List<string>();
+                dto.Commits = dto.Commits ?? new List<CachedCommit>();
+                return dto;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public static List<VcsFileStatus> ExtractFileStatuses(PanelCacheSnapshot snapshot)
+        {
+            var result = new List<VcsFileStatus>();
+            if (snapshot?.Files == null)
+                return result;
+
+            foreach (var entry in snapshot.Files)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.FilePath))
+                    continue;
+                var state = Enum.IsDefined(typeof(VcsFileState), entry.StateValue)
+                    ? (VcsFileState)entry.StateValue
+                    : VcsFileState.Unmodified;
+                result.Add(new VcsFileStatus
+                {
+                    FilePath = entry.FilePath,
+                    State = state,
+                    StateDescription = NullIfEmpty(entry.StateDescription),
+                    OriginalPath = NullIfEmpty(entry.OriginalPath),
+                    StatusCode = NullIfEmpty(entry.StatusCode),
+                    MovedToPath = NullIfEmpty(entry.MovedToPath),
+                    LockState = NullIfEmpty(entry.LockState),
+                    LockOwner = NullIfEmpty(entry.LockOwner),
+                    LockComment = NullIfEmpty(entry.LockComment),
+                    NeedsLock = entry.NeedsLock,
+                    IsSwitched = entry.IsSwitched
+                });
+            }
+            return result;
+        }
+
+        public static List<VcsCommit> ExtractCommits(PanelCacheSnapshot snapshot)
+        {
+            var result = new List<VcsCommit>();
+            if (snapshot?.Commits == null)
+                return result;
+
+            foreach (var entry in snapshot.Commits)
+            {
+                if (entry == null)
+                    continue;
+                result.Add(new VcsCommit
+                {
+                    Revision = NullIfEmpty(entry.Revision),
+                    Author = NullIfEmpty(entry.Author),
+                    Date = NullIfEmpty(entry.Date),
+                    Message = NullIfEmpty(entry.Message)
+                });
+            }
+            return result;
+        }
+
+        public static void SaveCacheToSession(PanelCacheSnapshot snapshot, string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return;
+
+            try
+            {
+                var json = SerializeCache(snapshot);
+                if (string.IsNullOrEmpty(json))
+                    SessionState.EraseString(sessionKey);
+                else
+                    SessionState.SetString(sessionKey, json);
+            }
+            catch
+            {
+                // 忽略 SessionState 写入异常
+            }
+        }
+
+        public static PanelCacheSnapshot LoadCacheFromSession(string sessionKey = PanelCacheSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return null;
+
+            try
+            {
+                return DeserializeCache(SessionState.GetString(sessionKey, string.Empty));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void SaveToSessionCache()
+        {
+            if (_isDisposed)
+                return;
+
+            var persistedMsg = _lastMessageIsError ? _lastMessage : null;
+            var snapshot = BuildCacheSnapshot(
+                _currentVcsType,
+                _currentBranch,
+                _currentRevision,
+                _currentFiles,
+                _statusTruncated,
+                GetSelectedFilePaths(),
+                _loadedCommits,
+                _visibleCommitCount,
+                _commitLogError,
+                persistedMsg,
+                _lastMessageIsError && !string.IsNullOrEmpty(persistedMsg),
+                _commitMessageDraft);
+            SaveCacheToSession(snapshot);
+        }
+
+        private bool RestoreFromSessionCache()
+        {
+            var snapshot = LoadCacheFromSession();
+            if (snapshot == null)
+                return false;
+
+            var vcsType = Enum.IsDefined(typeof(VcsType), snapshot.VcsTypeValue)
+                ? (VcsType)snapshot.VcsTypeValue
+                : VcsType.None;
+
+            var hasContent = vcsType != VcsType.None
+                || !string.IsNullOrEmpty(snapshot.Branch)
+                || !string.IsNullOrEmpty(snapshot.Revision)
+                || snapshot.Files.Count > 0
+                || snapshot.Commits.Count > 0
+                || !string.IsNullOrEmpty(snapshot.CommitLogError)
+                || !string.IsNullOrEmpty(snapshot.LastMessage);
+
+            if (!hasContent)
+                return false;
+
+            _hasRestoredCache = true;
+            _currentVcsType = vcsType;
+            _currentBranch = snapshot.Branch;
+            _currentRevision = snapshot.Revision;
+            _statusTruncated = snapshot.StatusTruncated;
+            _commitLogError = snapshot.CommitLogError;
+            _commitMessageDraft = snapshot.CommitMessageDraft;
+
+            if (_currentVcsType != VcsType.None)
+                _vcsTypeLabel.text = $"Type: {_currentVcsType}";
+
+            if (!string.IsNullOrEmpty(_currentBranch))
+            {
+                _branchLabel.text = $"Branch: {_currentBranch}";
+                _branchLabel.tooltip = _currentBranch;
+            }
+
+            if (!string.IsNullOrEmpty(_currentRevision))
+            {
+                _revisionLabel.text = $"Revision: {_currentRevision}";
+                _revisionLabel.tooltip = _currentRevision;
+            }
+
+            var files = ExtractFileStatuses(snapshot);
+            UpdateStatusList(files);
+            RestoreSelectedFiles(snapshot.SelectedFiles);
+            if (_statusTruncated && _currentFiles.Count > 0)
+                _statusSummaryLabel.text += " (output truncated — list may be incomplete)";
+            _viewDiffButton.SetEnabled(_currentFiles.Count > 0 && SupportsExternalFileTool("diff"));
+
+            _loadedCommits = ExtractCommits(snapshot);
+            _visibleCommitCount = Mathf.Clamp(
+                snapshot.VisibleCommitCount,
+                InitialCommitDisplayCount,
+                Mathf.Max(InitialCommitDisplayCount, _loadedCommits.Count));
+            if (_loadedCommits.Count > 0 || !string.IsNullOrEmpty(_commitLogError))
+                RenderCommitList();
+
+            if (!string.IsNullOrEmpty(snapshot.LastMessage))
+                ShowMessageInternal(snapshot.LastMessage, snapshot.LastMessageIsError, persist: false);
+
+            UpdateSyncStatusBanner(VcsRemoteStatusMonitor.LastStatus);
+            return true;
+        }
+
+        private static string NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
+
+        private static string TruncateCacheString(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+                return value;
+            return value.Substring(0, maxLength);
         }
 
         #endregion

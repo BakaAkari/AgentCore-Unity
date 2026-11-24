@@ -1,4 +1,7 @@
 using System;
+using System.Globalization;
+using UnityEditor;
+using UnityEngine;
 
 namespace AgentCore.Editor.Components.Indexing.Core
 {
@@ -114,13 +117,39 @@ namespace AgentCore.Editor.Components.Indexing.Core
 
     /// <summary>
     /// Process-local event bus for background indexing status updates.
+    /// Persists the latest status snapshot to <see cref="SessionState"/> across Domain Reloads
+    /// and stores the durable last-success timestamp in project-scoped <see cref="EditorPrefs"/>.
     /// </summary>
     public static class IndexingStatusBus
     {
+        public const string StatusSessionKey = "AgentCore.Indexing.StatusBus.Snapshot";
+        private const string DurableLastSuccessPrefKeyPrefix = "AgentCore.Indexing.StatusBus.LastSuccessUtc.";
+
+        [Serializable]
+        private sealed class StatusSnapshotDto
+        {
+            public int SchemaVersion;
+            public int StateValue;
+            public int DirtyFileCount;
+            public int ProcessedFiles;
+            public int TotalFiles;
+            public string CurrentFile;
+            public string LastError;
+            public long LastSuccessAtTicks;
+            public int ConsecutiveFailures;
+            public long NextRunAtTicks;
+            public string ReasonPaused;
+        }
+
         private static IndexingStatusSnapshot _current = new IndexingStatusSnapshot
         {
             State = IndexingBackgroundState.Idle
         };
+
+        static IndexingStatusBus()
+        {
+            RestoreFromStorage();
+        }
 
         /// <summary>
         /// Raised whenever the background indexing status changes.
@@ -144,7 +173,251 @@ namespace AgentCore.Editor.Components.Indexing.Core
             }
 
             _current = snapshot.Clone();
+            PersistToStorage(_current);
             StatusChanged?.Invoke(_current.Clone());
+        }
+
+        /// <summary>
+        /// Computes a deterministic project-scoped EditorPrefs key for durable last-success metadata.
+        /// </summary>
+        public static string GetDurableLastSuccessPrefKey(string projectPath = null)
+        {
+            string source;
+            try
+            {
+                source = string.IsNullOrWhiteSpace(projectPath) ? Application.dataPath : projectPath;
+            }
+            catch
+            {
+                source = projectPath ?? "default";
+            }
+
+            return DurableLastSuccessPrefKeyPrefix + ComputeStableHash(source);
+        }
+
+        /// <summary>
+        /// Serializes a status snapshot to JSON for SessionState persistence.
+        /// </summary>
+        public static string SerializeSnapshot(IndexingStatusSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return null;
+
+            var dto = new StatusSnapshotDto
+            {
+                SchemaVersion = 1,
+                StateValue = (int)snapshot.State,
+                DirtyFileCount = Math.Max(0, snapshot.DirtyFileCount),
+                ProcessedFiles = Math.Max(0, snapshot.ProcessedFiles),
+                TotalFiles = Math.Max(0, snapshot.TotalFiles),
+                CurrentFile = snapshot.CurrentFile,
+                LastError = snapshot.LastError,
+                LastSuccessAtTicks = snapshot.LastSuccessAt.HasValue ? snapshot.LastSuccessAt.Value.ToUniversalTime().Ticks : 0L,
+                ConsecutiveFailures = Math.Max(0, snapshot.ConsecutiveFailures),
+                NextRunAtTicks = snapshot.NextRunAt.HasValue ? snapshot.NextRunAt.Value.ToUniversalTime().Ticks : 0L,
+                ReasonPaused = snapshot.ReasonPaused
+            };
+
+            return JsonUtility.ToJson(dto);
+        }
+
+        /// <summary>
+        /// Deserializes a status snapshot from JSON. Returns null on empty/corrupted JSON.
+        /// When <paramref name="sanitizeReloadState"/> is true, an interrupted <see cref="IndexingBackgroundState.Running"/>
+        /// state is safely downgraded to <see cref="IndexingBackgroundState.Pending"/> or <see cref="IndexingBackgroundState.Idle"/>
+        /// while preserving metrics, last success time, and last error.
+        /// </summary>
+        public static IndexingStatusSnapshot DeserializeSnapshot(string json, bool sanitizeReloadState = true)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                var dto = JsonUtility.FromJson<StatusSnapshotDto>(json);
+                if (dto == null || dto.SchemaVersion <= 0)
+                    return null;
+
+                var state = Enum.IsDefined(typeof(IndexingBackgroundState), dto.StateValue)
+                    ? (IndexingBackgroundState)dto.StateValue
+                    : IndexingBackgroundState.Idle;
+
+                var snapshot = new IndexingStatusSnapshot
+                {
+                    State = state,
+                    DirtyFileCount = Math.Max(0, dto.DirtyFileCount),
+                    ProcessedFiles = Math.Max(0, dto.ProcessedFiles),
+                    TotalFiles = Math.Max(0, dto.TotalFiles),
+                    CurrentFile = NullIfEmpty(dto.CurrentFile),
+                    LastError = NullIfEmpty(dto.LastError),
+                    LastSuccessAt = ParseUtcTicks(dto.LastSuccessAtTicks),
+                    ConsecutiveFailures = Math.Max(0, dto.ConsecutiveFailures),
+                    NextRunAt = ParseUtcTicks(dto.NextRunAtTicks),
+                    ReasonPaused = NullIfEmpty(dto.ReasonPaused)
+                };
+
+                if (sanitizeReloadState)
+                    SanitizeForReload(snapshot);
+
+                return snapshot;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Saves a snapshot into SessionState; erases the key when null.
+        /// </summary>
+        public static void SaveSnapshotToSession(IndexingStatusSnapshot snapshot, string sessionKey = StatusSessionKey)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return;
+
+            try
+            {
+                var json = SerializeSnapshot(snapshot);
+                if (string.IsNullOrEmpty(json))
+                    SessionState.EraseString(sessionKey);
+                else
+                    SessionState.SetString(sessionKey, json);
+            }
+            catch
+            {
+                // Ignore SessionState errors if called outside main thread.
+            }
+        }
+
+        /// <summary>
+        /// Loads and deserializes a snapshot from SessionState.
+        /// </summary>
+        public static IndexingStatusSnapshot LoadSnapshotFromSession(string sessionKey = StatusSessionKey, bool sanitizeReloadState = true)
+        {
+            if (string.IsNullOrEmpty(sessionKey))
+                return null;
+
+            try
+            {
+                return DeserializeSnapshot(SessionState.GetString(sessionKey, string.Empty), sanitizeReloadState);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Persists the durable last-success UTC timestamp into project-scoped EditorPrefs.
+        /// </summary>
+        public static void SaveDurableLastSuccessUtc(DateTime? utcTime, string prefKey = null)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? GetDurableLastSuccessPrefKey() : prefKey;
+            try
+            {
+                if (utcTime.HasValue)
+                    EditorPrefs.SetString(key, utcTime.Value.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture));
+                else
+                    EditorPrefs.DeleteKey(key);
+            }
+            catch
+            {
+                // Ignore EditorPrefs errors outside main thread.
+            }
+        }
+
+        /// <summary>
+        /// Reads the durable last-success UTC timestamp from project-scoped EditorPrefs.
+        /// </summary>
+        public static DateTime? LoadDurableLastSuccessUtc(string prefKey = null)
+        {
+            var key = string.IsNullOrEmpty(prefKey) ? GetDurableLastSuccessPrefKey() : prefKey;
+            try
+            {
+                var raw = EditorPrefs.GetString(key, string.Empty);
+                if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks))
+                    return ParseUtcTicks(ticks);
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Hydrates <see cref="Current"/> from SessionState and durable EditorPrefs (used on Domain Reload and in tests).
+        /// </summary>
+        public static void RestoreFromStorage(string sessionKey = StatusSessionKey, string durablePrefKey = null)
+        {
+            var restored = LoadSnapshotFromSession(sessionKey, sanitizeReloadState: true)
+                           ?? new IndexingStatusSnapshot { State = IndexingBackgroundState.Idle };
+
+            if (!restored.LastSuccessAt.HasValue)
+            {
+                restored.LastSuccessAt = LoadDurableLastSuccessUtc(durablePrefKey);
+            }
+
+            _current = restored;
+        }
+
+        /// <summary>
+        /// Resets in-memory state to default Idle without erasing production storage unless keys are passed.
+        /// </summary>
+        public static void ResetInMemoryForTests()
+        {
+            _current = new IndexingStatusSnapshot { State = IndexingBackgroundState.Idle };
+        }
+
+        private static void PersistToStorage(IndexingStatusSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return;
+
+            SaveSnapshotToSession(snapshot, StatusSessionKey);
+            if (snapshot.LastSuccessAt.HasValue)
+                SaveDurableLastSuccessUtc(snapshot.LastSuccessAt, GetDurableLastSuccessPrefKey());
+        }
+
+        private static void SanitizeForReload(IndexingStatusSnapshot snapshot)
+        {
+            if (snapshot == null)
+                return;
+
+            if (snapshot.State == IndexingBackgroundState.Running)
+            {
+                snapshot.State = snapshot.DirtyFileCount > 0
+                    ? IndexingBackgroundState.Pending
+                    : IndexingBackgroundState.Idle;
+                snapshot.CurrentFile = null;
+            }
+
+            if (snapshot.NextRunAt.HasValue && snapshot.NextRunAt.Value <= DateTime.UtcNow)
+            {
+                snapshot.NextRunAt = null;
+                snapshot.ReasonPaused = null;
+            }
+        }
+
+        private static DateTime? ParseUtcTicks(long ticks)
+        {
+            if (ticks <= 0 || ticks > DateTime.MaxValue.Ticks)
+                return null;
+            return new DateTime(ticks, DateTimeKind.Utc);
+        }
+
+        private static string NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
+
+        private static string ComputeStableHash(string text)
+        {
+            var normalized = (text ?? string.Empty).Replace('\\', '/').TrimEnd('/').ToLowerInvariant();
+            ulong hash = 14695981039346656037UL;
+            for (int i = 0; i < normalized.Length; i++)
+            {
+                hash ^= normalized[i];
+                hash *= 1099511628211UL;
+            }
+            return hash.ToString("x16", CultureInfo.InvariantCulture);
         }
     }
 }

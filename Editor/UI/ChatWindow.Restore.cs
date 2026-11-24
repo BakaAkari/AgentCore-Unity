@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using AgentCore.Editor.Core;
+using AgentCore.Editor.LLM;
 using AgentCore.Editor.Session;
 using UnityEditor;
 using UnityEngine;
@@ -52,6 +53,9 @@ namespace AgentCore.Editor.UI
                     EnsureSessionExists();
                     return;
                 }
+
+                // v1.23.0: 绑定恢复出的会话 ID，且 resetIfChanged=false，确保 Domain Reload / 重启恢复同一会话时不清空持久化的会话用量
+                UsageLedger.BindSession(session.Id, resetIfChanged: false);
 
                 // 重建 UI 消息气泡
                 RebuildMessageBubbles();
@@ -128,6 +132,11 @@ namespace AgentCore.Editor.UI
             {
                 AgentCore.Editor.Utils.AgentCoreLog.Info("[AgentCore] No active session after restore attempt, creating new session.");
                 SessionManager.Instance.CreateNewSession();
+            }
+
+            if (!string.IsNullOrEmpty(SessionManager.Instance.CurrentSessionId))
+            {
+                UsageLedger.BindSession(SessionManager.Instance.CurrentSessionId, resetIfChanged: false);
             }
         }
 

@@ -516,6 +516,9 @@ namespace AgentCore.Editor.UI
                     _fileChangeSummaryPanel?.ClearAndHide();
                 }
 
+                // v1.23.0: 切换到另一段会话时绑定新 sessionId 并重置当前会话计数（保留 1d/7d/30d/90d 持久化历史）
+                UsageLedger.BindSession(sessionId, resetIfChanged: true);
+
                 // 3.6 Phase 6.0.4: 切换会话后更新上下文使用情况面板
                 UpdateContextUsagePanel();
 
@@ -553,7 +556,12 @@ namespace AgentCore.Editor.UI
                 // 1. 重置对话（ResetConversation 内部已包含 ForceSave + TriggerAutoMemory + 创建新会话）
                 ClearMessages();
                 _agentLoop.ResetConversation();
-                AgentCore.Editor.LLM.UsageLedger.ResetSession(); // v1.17.0: 用量/费用按对话会话统计
+                AgentCore.Editor.LLM.UsageLedger.ResetSession(); // v1.17.0 / v1.23.0: 仅清零当前会话计数，保留 1d/7d/30d/90d 历史
+                var newSessionId = SessionManager.Instance.CurrentSessionId;
+                if (!string.IsNullOrEmpty(newSessionId))
+                {
+                    AgentCore.Editor.LLM.UsageLedger.BindSession(newSessionId, resetIfChanged: false);
+                }
 
                 // 1.5 重置会话级工具信任 scope（YOLO / Trust Low-Med）。
                 // 信任生命周期绑定到"对话 session"：新建对话即失效，避免上一段对话开启的
@@ -919,6 +927,12 @@ namespace AgentCore.Editor.UI
                     // 没有其他会话，创建新会话
                     ClearMessages();
                     _agentLoop?.ResetConversation();
+                    AgentCore.Editor.LLM.UsageLedger.ResetSession();
+                    var fallbackSessionId = SessionManager.Instance.CurrentSessionId;
+                    if (!string.IsNullOrEmpty(fallbackSessionId))
+                    {
+                        AgentCore.Editor.LLM.UsageLedger.BindSession(fallbackSessionId, resetIfChanged: false);
+                    }
                 }
             }
 
